@@ -37,12 +37,7 @@ contract UniswapStrategy {
     /// @notice Maximum slippage in basis points (e.g., 100 = 1%)
     uint256 public maxSlippageBps;
 
-    event Swapped(
-        address indexed tokenIn,
-        address indexed tokenOut,
-        uint256 amountIn,
-        uint256 amountOut
-    );
+    event Swapped(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut);
     event MaxSlippageUpdated(uint256 newMaxSlippageBps);
 
     modifier onlyVault() {
@@ -66,13 +61,11 @@ contract UniswapStrategy {
     /// @param amountIn Amount of tokenIn to swap
     /// @param amountOutMinimum Minimum acceptable output (slippage protection)
     /// @param fee Pool fee tier (500, 3000, 10000)
-    function swap(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 amountOutMinimum,
-        uint24 fee
-    ) external onlyVault returns (uint256 amountOut) {
+    function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMinimum, uint24 fee)
+        external
+        onlyVault
+        returns (uint256 amountOut)
+    {
         // Transfer tokens from vault
         IERC20(tokenIn).safeTransferFrom(vault, address(this), amountIn);
 

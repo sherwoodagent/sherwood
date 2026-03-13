@@ -2,24 +2,50 @@
 pragma solidity 0.8.28;
 
 interface ISyndicateVault {
+    // ── Syndicate-Level Caps (hard limits for ALL agents) ──
+    struct SyndicateCaps {
+        uint256 maxPerTx; // Max asset amount per single tx
+        uint256 maxDailyTotal; // Max combined daily spend across all agents
+        uint256 maxBorrowRatio; // Max LTV in basis points (e.g., 7500 = 75%)
+    }
+
+    // ── Per-Agent Config ──
+    struct AgentConfig {
+        address pkpAddress; // Lit PKP wallet address (the executor)
+        address operatorEOA; // Agent's own wallet (the identity)
+        uint256 maxPerTx; // Agent-specific per-tx cap (≤ syndicate cap)
+        uint256 dailyLimit; // Agent-specific daily limit (≤ syndicate cap)
+        uint256 spentToday; // Tracks daily spend
+        uint256 lastResetDay; // Day number for daily reset
+        bool active;
+    }
+
     // ── LP Functions ──
     function ragequit(address receiver) external returns (uint256 assets);
 
-    // ── Agent Functions (Zodiac-scoped) ──
-    function executeStrategy(address strategy, bytes calldata data) external returns (bytes memory);
+    // ── Agent Functions (called by Lit PKP) ──
+    function executeStrategy(address strategy, bytes calldata data, uint256 assetAmount) external returns (bytes memory);
 
     // ── Views ──
-    function getAgentPermissions(address agent) external view returns (uint256 maxPerTx, uint256 dailyLimit, bool active);
+    function getAgentConfig(address pkpAddress) external view returns (AgentConfig memory);
+    function getSyndicateCaps() external view returns (SyndicateCaps memory);
+    function getAgentCount() external view returns (uint256);
+    function getDailySpendTotal() external view returns (uint256);
+    function isAgent(address pkpAddress) external view returns (bool);
 
-    // ── Admin ──
-    function setAgentPermissions(address agent, uint256 maxPerTx, uint256 dailyLimit) external;
-    function removeAgent(address agent) external;
+    // ── Admin (syndicate creator) ──
+    function registerAgent(address pkpAddress, address operatorEOA, uint256 maxPerTx, uint256 dailyLimit) external;
+    function removeAgent(address pkpAddress) external;
+    function updateSyndicateCaps(SyndicateCaps calldata caps) external;
     function pause() external;
     function unpause() external;
 
     // ── Events ──
-    event AgentPermissionsSet(address indexed agent, uint256 maxPerTx, uint256 dailyLimit);
-    event AgentRemoved(address indexed agent);
-    event StrategyExecuted(address indexed agent, address indexed strategy, bytes data);
+    event AgentRegistered(
+        address indexed pkpAddress, address indexed operatorEOA, uint256 maxPerTx, uint256 dailyLimit
+    );
+    event AgentRemoved(address indexed pkpAddress);
+    event StrategyExecuted(address indexed pkpAddress, address indexed strategy, uint256 assetAmount);
     event Ragequit(address indexed lp, uint256 shares, uint256 assets);
+    event SyndicateCapsUpdated(uint256 maxPerTx, uint256 maxDailyTotal, uint256 maxBorrowRatio);
 }

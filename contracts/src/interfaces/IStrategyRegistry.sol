@@ -4,11 +4,11 @@ pragma solidity 0.8.28;
 /// @notice Strategy metadata stored on-chain
 struct StrategyRecord {
     address implementation; // Strategy contract address
-    address creator;        // ERC-8004 identity of the creator
+    address creator; // ERC-8004 identity of the creator
     uint256 strategyTypeId; // Category: 1=lending, 2=trading, 3=sniping, etc.
     bool active;
     string name;
-    string metadataURI;     // IPFS/Arweave link to SKILL.md descriptor
+    string metadataURI; // IPFS/Arweave link to SKILL.md descriptor
 }
 
 interface IStrategyRegistry {
@@ -35,11 +35,7 @@ interface IStrategyRegistry {
 
     // ── Events ──
     event StrategyRegistered(
-        uint256 indexed strategyId,
-        address indexed creator,
-        address implementation,
-        uint256 strategyTypeId,
-        string name
+        uint256 indexed strategyId, address indexed creator, address implementation, uint256 strategyTypeId, string name
     );
     event StrategyDeactivated(uint256 indexed strategyId);
 }
