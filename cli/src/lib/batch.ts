@@ -3,6 +3,8 @@
  */
 
 import type { Address, Hex } from "viem";
+import { encodeFunctionData } from "viem";
+import { BATCH_EXECUTOR_ABI } from "./abis.js";
 
 export interface BatchCall {
   target: Address;
@@ -13,12 +15,20 @@ export interface BatchCall {
 /**
  * Encode a batch of calls for the BatchExecutor contract.
  * Returns the ABI-encoded calldata for executeBatch(Call[]).
+ * This is what gets passed as `data` to vault.executeStrategy().
  */
 export function encodeBatchExecute(calls: BatchCall[]): Hex {
-  // The BatchExecutor.executeBatch takes Call[] where Call = (address, bytes, uint256)
-  // We use viem's encodeFunctionData in the caller; this helper is for the outer call
-  // TODO: Wire up with actual BatchExecutor ABI for the vault.executeStrategy() call
-  throw new Error("Not implemented — wire up with viem client and BatchExecutor ABI");
+  return encodeFunctionData({
+    abi: BATCH_EXECUTOR_ABI,
+    functionName: "executeBatch",
+    args: [
+      calls.map((c) => ({
+        target: c.target,
+        data: c.data,
+        value: c.value,
+      })),
+    ],
+  });
 }
 
 /**

@@ -29,8 +29,8 @@ export const MOONWELL = {
 export const UNISWAP = {
   // Uniswap V3 SwapRouter02 on Base
   SWAP_ROUTER: "0x2626664c2603336E57B271c5C0b26F421741e481" as Address,
-  // TODO: Add Uniswap V4 Universal Router address when integrating
-  // UNIVERSAL_ROUTER: "0x..." as Address,
+  // Uniswap V3 Quoter V2 on Base
+  QUOTER_V2: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a" as Address,
 } as const;
 
 export const INFRA = {

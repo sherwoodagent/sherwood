@@ -4,9 +4,13 @@
  * The agent's autonomous loop:
  * 1. Research: Query Messari for market intelligence (signal, metrics, news)
  * 2. Decide: Analyze data, identify opportunity, pick token + size
- * 3. Execute: Deposit collateral → Borrow → Swap into target token (atomic batch)
+ * 3. Execute: Deposit ETH collateral → Borrow USDC → Swap into target token (atomic batch)
  * 4. Monitor: Continuously check position health + market conditions
  * 5. Unwind: Hit profit target or risk threshold → Sell → Repay → Withdraw
+ *
+ * The agent provides their own WETH as collateral. The borrowed USDC is swapped
+ * into whatever token Messari research recommends. No vault capital at risk —
+ * the vault is the authorization layer only (assetAmount=0).
  *
  * All intelligence lives here. The on-chain BatchExecutor is a dumb pipe.
  */
@@ -15,7 +19,7 @@ import type { Address } from "viem";
 import {
   encodeFunctionData,
   parseUnits,
-  formatUnits,
+  parseEther,
 } from "viem";
 import type { BatchCall } from "../lib/batch.js";
 import { MOONWELL, UNISWAP, TOKENS } from "../lib/addresses.js";
@@ -23,13 +27,13 @@ import { MOONWELL, UNISWAP, TOKENS } from "../lib/addresses.js";
 // ── Strategy Config ──
 
 export interface LeveredSwapConfig {
-  /** Collateral amount in USDC (human-readable, e.g. "10000") */
+  /** WETH collateral amount (human-readable, e.g. "1.0" = 1 WETH) */
   collateralAmount: string;
-  /** Borrow amount in USDC (human-readable) */
+  /** USDC borrow amount (human-readable, e.g. "1000") */
   borrowAmount: string;
-  /** Target token to buy */
+  /** Target token to buy with borrowed USDC */
   targetToken: Address;
-  /** Uniswap pool fee tier */
+  /** Uniswap pool fee tier for USDC → target swap */
   fee: 500 | 3000 | 10000;
   /** Max slippage in basis points (e.g. 100 = 1%) */
   slippageBps: number;
@@ -112,30 +116,41 @@ const SWAP_ROUTER_ABI = [
   },
 ] as const;
 
-// ── Build Entry Batch (Deposit → Borrow → Swap) ──
+// ── Build Entry Batch (Deposit WETH → Borrow USDC → Swap to Target) ──
 
+/**
+ * Build the entry batch. Agent's WETH must already be in the executor.
+ *
+ * Flow:
+ *   1. Approve mWETH to pull WETH from executor
+ *   2. Deposit WETH as collateral on Moonwell
+ *   3. Enable WETH market as collateral
+ *   4. Borrow USDC against WETH collateral
+ *   5. Approve SwapRouter to spend borrowed USDC
+ *   6. Swap USDC → target token (Messari pick)
+ */
 export function buildEntryBatch(
   config: LeveredSwapConfig,
   executorAddress: Address,
   amountOutMinimum: bigint, // Computed by CLI from Uniswap quote
 ): BatchCall[] {
-  const collateral = parseUnits(config.collateralAmount, 6); // USDC = 6 decimals
-  const borrow = parseUnits(config.borrowAmount, 6);
+  const collateral = parseEther(config.collateralAmount); // WETH = 18 decimals
+  const borrow = parseUnits(config.borrowAmount, 6); // USDC = 6 decimals
 
   const calls: BatchCall[] = [
-    // 1. Approve mUSDC to pull USDC from executor
+    // 1. Approve mWETH to pull WETH from executor
     {
-      target: TOKENS.USDC,
+      target: TOKENS.WETH,
       data: encodeFunctionData({
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [MOONWELL.mUSDC, collateral],
+        args: [MOONWELL.mWETH, collateral],
       }),
       value: 0n,
     },
-    // 2. Deposit USDC as collateral (mint mTokens)
+    // 2. Deposit WETH as collateral (mint mWETH tokens)
     {
-      target: MOONWELL.mUSDC,
+      target: MOONWELL.mWETH,
       data: encodeFunctionData({
         abi: MTOKEN_ABI,
         functionName: "mint",
@@ -143,17 +158,17 @@ export function buildEntryBatch(
       }),
       value: 0n,
     },
-    // 3. Enter market (enable as collateral for borrowing)
+    // 3. Enter WETH market (enable as collateral for borrowing)
     {
       target: MOONWELL.COMPTROLLER,
       data: encodeFunctionData({
         abi: COMPTROLLER_ABI,
         functionName: "enterMarkets",
-        args: [[MOONWELL.mUSDC]],
+        args: [[MOONWELL.mWETH]],
       }),
       value: 0n,
     },
-    // 4. Borrow USDC against collateral
+    // 4. Borrow USDC against WETH collateral
     {
       target: MOONWELL.mUSDC,
       data: encodeFunctionData({
@@ -198,16 +213,26 @@ export function buildEntryBatch(
   return calls;
 }
 
-// ── Build Exit Batch (Swap Back → Repay → Withdraw) ──
+// ── Build Exit Batch (Sell Target → Repay USDC → Withdraw WETH) ──
 
+/**
+ * Build the exit batch. Unwinds the position.
+ *
+ * Flow:
+ *   1. Approve SwapRouter to pull target tokens
+ *   2. Swap target token → USDC
+ *   3. Approve mUSDC for repayment
+ *   4. Repay USDC borrow on Moonwell
+ *   5. Withdraw WETH collateral from Moonwell
+ */
 export function buildExitBatch(
   config: LeveredSwapConfig,
   executorAddress: Address,
   tokenBalance: bigint, // How much of the target token to sell
   amountOutMinimum: bigint, // Min USDC from selling the token
-  borrowBalance: bigint, // Current borrow balance to repay
+  borrowBalance: bigint, // Current borrow balance to repay (includes interest)
 ): BatchCall[] {
-  const collateral = parseUnits(config.collateralAmount, 6);
+  const collateral = parseEther(config.collateralAmount); // WETH = 18 decimals
 
   const calls: BatchCall[] = [
     // 1. Approve SwapRouter to pull target tokens
@@ -250,7 +275,7 @@ export function buildExitBatch(
       }),
       value: 0n,
     },
-    // 4. Repay borrow
+    // 4. Repay USDC borrow
     {
       target: MOONWELL.mUSDC,
       data: encodeFunctionData({
@@ -260,9 +285,9 @@ export function buildExitBatch(
       }),
       value: 0n,
     },
-    // 5. Withdraw collateral
+    // 5. Withdraw WETH collateral (stays in executor for agent to retrieve)
     {
-      target: MOONWELL.mUSDC,
+      target: MOONWELL.mWETH,
       data: encodeFunctionData({
         abi: MTOKEN_ABI,
         functionName: "redeemUnderlying",
@@ -280,11 +305,6 @@ export function buildExitBatch(
 // Uses Messari Metrics API for price movement
 // Checks Moonwell getAccountLiquidity for health factor
 // Triggers exit when profit target or stop loss hit
-
-// TODO: getQuote() — use Uniswap SDK to get amountOutMinimum
-// @uniswap/smart-order-router or @uniswap/v3-sdk
-// Returns: amountOut, priceImpact, route path
-// CLI applies slippageBps to amountOut for amountOutMinimum
 
 // TODO: getMessariSignal() — query Messari Signal API for token sentiment
 // POST https://api.messari.io/ai/v2/chat/completions
