@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "skills": {
+    "liquidity-planner": {
+      "source": "Uniswap/uniswap-ai",
+      "sourceType": "github",
+      "computedHash": "42facfb96be928b35effd960093b1b05ee34c9e5254ed3a2086bf25b4d379cae"
+    },
+    "swap-integration": {
+      "source": "Uniswap/uniswap-ai",
+      "sourceType": "github",
+      "computedHash": "0f6f40116870c201415805a73a4ccda8e40d6c9c66ab10c9bdd6812d469527fc"
+    },
+    "swap-planner": {
+      "source": "Uniswap/uniswap-ai",
+      "sourceType": "github",
+      "computedHash": "976029b4d6ffd2406ba2187e9401017535f88ab444d97e52f1f5b001d8d93b23"
+    },
+    "viem-integration": {
+      "source": "Uniswap/uniswap-ai",
+      "sourceType": "github",
+      "computedHash": "d4ed32df4663a883755039b76f64a85a9a1e4aab0e827ab477ae566c556b4bb6"
+    }
+  }
+}

@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
+import {BatchExecutorLib} from "./BatchExecutorLib.sol";
 import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
@@ -16,15 +17,17 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
  * @title SyndicateVault
  * @notice ERC-4626 vault for agent-managed investment syndicates.
  *
- *   Two-layer permission model:
- *     Layer 1 (on-chain): Syndicate-level caps enforced in this contract.
- *       No agent can exceed these regardless of their off-chain policies.
- *     Layer 2 (off-chain): Agent-level Lit Action policies enforce tighter
- *       per-agent limits. The Lit PKP won't sign if policy fails.
+ *   The vault is the onchain identity — it holds all positions (mTokens, borrows,
+ *   swapped tokens) via delegatecall to a shared BatchExecutorLib. Deploy one
+ *   executor lib, share it across all syndicates.
  *
- *   Agents interact via Lit PKP wallets. The agent's EOA is their identity;
- *   the PKP is the executor. Human operator registers agent PKPs and sets
- *   both syndicate caps and per-agent limits.
+ *   Two-layer permission model:
+ *     Layer 1 (onchain): Syndicate caps + target allowlist enforced here.
+ *     Layer 2 (offchain): Agent-level Lit Action policies.
+ *
+ *   Agents call executeBatch() with an array of protocol calls. The vault checks
+ *   caps and allowlist, then delegatecalls the executor lib which makes the calls
+ *   as the vault.
  *
  *   LPs can ragequit at any time for their pro-rata share.
  */
@@ -40,6 +43,7 @@ contract SyndicateVault is
     using EnumerableSet for EnumerableSet.AddressSet;
 
     // ==================== STORAGE ====================
+    // WARNING: Never reorder existing slots. Append-only for UUPS safety.
 
     /// @notice Syndicate-level hard caps
     SyndicateCaps private _syndicateCaps;
@@ -54,6 +58,14 @@ contract SyndicateVault is
     uint256 private _dailySpendTotal;
     uint256 private _dailySpendResetDay;
 
+    // ── New storage (appended after existing slots) ──
+
+    /// @notice Shared executor lib (stateless, called via delegatecall)
+    address private _executorImpl;
+
+    /// @notice Approved protocol targets for batch execution
+    EnumerableSet.AddressSet private _allowedTargets;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -64,12 +76,15 @@ contract SyndicateVault is
         string memory name_,
         string memory symbol_,
         address owner_,
-        SyndicateCaps memory caps_
+        SyndicateCaps memory caps_,
+        address executorImpl_,
+        address[] memory initialTargets_
     ) external initializer {
         require(owner_ != address(0), "Invalid owner");
         require(caps_.maxPerTx > 0, "Invalid maxPerTx");
         require(caps_.maxDailyTotal > 0, "Invalid maxDailyTotal");
         require(caps_.maxBorrowRatio <= 10000, "Borrow ratio > 100%");
+        require(executorImpl_ != address(0), "Invalid executor impl");
 
         __ERC4626_init(asset_);
         __ERC20_init(name_, symbol_);
@@ -78,6 +93,12 @@ contract SyndicateVault is
 
         _syndicateCaps = caps_;
         _dailySpendResetDay = block.timestamp / 1 days;
+        _executorImpl = executorImpl_;
+
+        for (uint256 i = 0; i < initialTargets_.length; i++) {
+            require(initialTargets_[i] != address(0), "Invalid target");
+            _allowedTargets.add(initialTargets_[i]);
+        }
     }
 
     // ==================== LP FUNCTIONS ====================
@@ -92,14 +113,10 @@ contract SyndicateVault is
         emit Ragequit(msg.sender, shares, assets);
     }
 
-    // ==================== AGENT FUNCTIONS ====================
+    // ==================== BATCH EXECUTION ====================
 
     /// @inheritdoc ISyndicateVault
-    function executeStrategy(address strategy, bytes calldata data, uint256 assetAmount)
-        external
-        whenNotPaused
-        returns (bytes memory)
-    {
+    function executeBatch(BatchExecutorLib.Call[] calldata calls, uint256 assetAmount) external whenNotPaused {
         AgentConfig storage agent = _agents[msg.sender];
         require(agent.active, "Not an active agent");
 
@@ -132,20 +149,75 @@ contract SyndicateVault is
         agent.spentToday += assetAmount;
         _dailySpendTotal += assetAmount;
 
-        // Approve strategy to pull assets from vault
-        IERC20 asset_ = IERC20(asset());
-        asset_.approve(strategy, assetAmount);
+        // --- Allowlist check ---
+        for (uint256 i = 0; i < calls.length; i++) {
+            require(_allowedTargets.contains(calls[i].target), "Target not allowed");
+        }
 
-        // Execute the strategy call
-        (bool success, bytes memory result) = strategy.call(data);
-        require(success, "Strategy execution failed");
+        // --- Delegatecall to shared executor lib ---
+        (bool success, bytes memory returnData) =
+            _executorImpl.delegatecall(abi.encodeCall(BatchExecutorLib.executeBatch, (calls)));
+        if (!success) {
+            assembly {
+                revert(add(returnData, 32), mload(returnData))
+            }
+        }
 
-        // Revoke any remaining approval
-        asset_.approve(strategy, 0);
+        emit BatchExecuted(msg.sender, calls.length, assetAmount);
+    }
 
-        emit StrategyExecuted(msg.sender, strategy, assetAmount);
+    /// @inheritdoc ISyndicateVault
+    function simulateBatch(BatchExecutorLib.Call[] calldata calls)
+        external
+        returns (BatchExecutorLib.CallResult[] memory)
+    {
+        // Allowlist check (return error result instead of reverting)
+        for (uint256 i = 0; i < calls.length; i++) {
+            if (!_allowedTargets.contains(calls[i].target)) {
+                BatchExecutorLib.CallResult[] memory results = new BatchExecutorLib.CallResult[](calls.length);
+                results[i] = BatchExecutorLib.CallResult({success: false, returnData: bytes("Target not allowed")});
+                return results;
+            }
+        }
 
-        return result;
+        (bool success, bytes memory returnData) =
+            _executorImpl.delegatecall(abi.encodeCall(BatchExecutorLib.simulateBatch, (calls)));
+        require(success, "Simulation delegatecall failed");
+        return abi.decode(returnData, (BatchExecutorLib.CallResult[]));
+    }
+
+    // ==================== TARGET MANAGEMENT ====================
+
+    /// @inheritdoc ISyndicateVault
+    function addTarget(address target) external onlyOwner {
+        require(target != address(0), "Invalid target");
+        require(_allowedTargets.add(target), "Already allowed");
+        emit TargetAdded(target);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function removeTarget(address target) external onlyOwner {
+        require(_allowedTargets.remove(target), "Not in allowlist");
+        emit TargetRemoved(target);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function addTargets(address[] calldata targets) external onlyOwner {
+        for (uint256 i = 0; i < targets.length; i++) {
+            require(targets[i] != address(0), "Invalid target");
+            _allowedTargets.add(targets[i]);
+            emit TargetAdded(targets[i]);
+        }
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function isAllowedTarget(address target) external view returns (bool) {
+        return _allowedTargets.contains(target);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function getAllowedTargets() external view returns (address[] memory) {
+        return _allowedTargets.values();
     }
 
     // ==================== VIEWS ====================
@@ -177,6 +249,11 @@ contract SyndicateVault is
     /// @inheritdoc ISyndicateVault
     function isAgent(address pkpAddress) external view returns (bool) {
         return _agents[pkpAddress].active;
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function getExecutorImpl() external view returns (address) {
+        return _executorImpl;
     }
 
     // ==================== ADMIN ====================
@@ -262,4 +339,9 @@ contract SyndicateVault is
     // ==================== UUPS ====================
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    // ==================== RECEIVE ====================
+
+    /// @notice Accept ETH (needed for WETH unwrapping and protocol interactions)
+    receive() external payable {}
 }
