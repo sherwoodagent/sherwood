@@ -82,12 +82,13 @@ contract Deploy is Script {
         console.log("Allowlisted 9 targets");
 
         // 5. Register deployer as agent (dev mode — PKP and EOA are both deployer)
-        SyndicateVault(vaultProxy).registerAgent(
-            deployer, // pkpAddress (in dev, deployer acts as agent)
-            deployer, // operatorEOA
-            10_000e6, // maxPerTx: 10k USDC
-            50_000e6 // dailyLimit: 50k USDC
-        );
+        SyndicateVault(vaultProxy)
+            .registerAgent(
+                deployer, // pkpAddress (in dev, deployer acts as agent)
+                deployer, // operatorEOA
+                10_000e6, // maxPerTx: 10k USDC
+                50_000e6 // dailyLimit: 50k USDC
+            );
         console.log("Registered deployer as agent");
 
         vm.stopBroadcast();

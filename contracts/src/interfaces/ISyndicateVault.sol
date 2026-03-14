@@ -24,9 +24,7 @@ interface ISyndicateVault {
     function ragequit(address receiver) external returns (uint256 assets);
 
     // ── Agent Functions (called by Lit PKP) ──
-    function executeStrategy(address strategy, bytes calldata data, uint256 assetAmount)
-        external
-        returns (bytes memory);
+    function executeStrategy(address strategy, bytes calldata data, uint256 assetAmount) external returns (bytes memory);
 
     // ── Views ──
     function getAgentConfig(address pkpAddress) external view returns (AgentConfig memory);

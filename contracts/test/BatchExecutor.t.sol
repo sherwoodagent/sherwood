@@ -89,9 +89,7 @@ contract BatchExecutorTest is Test {
         // Approve mToken to pull USDC from executor
         BatchExecutor.Call[] memory calls = new BatchExecutor.Call[](1);
         calls[0] = BatchExecutor.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
         });
 
         vm.prank(vault);
@@ -106,25 +104,19 @@ contract BatchExecutorTest is Test {
 
         // 1. Approve mToken to pull USDC
         calls[0] = BatchExecutor.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
         });
 
         // 2. Mint mTokens (deposit collateral)
         calls[1] = BatchExecutor.Call({
-            target: address(mUSDC),
-            data: abi.encodeWithSignature("mint(uint256)", 10_000e6),
-            value: 0
+            target: address(mUSDC), data: abi.encodeWithSignature("mint(uint256)", 10_000e6), value: 0
         });
 
         // 3. Enter market as collateral
         address[] memory markets = new address[](1);
         markets[0] = address(mUSDC);
         calls[2] = BatchExecutor.Call({
-            target: address(comptroller),
-            data: abi.encodeCall(comptroller.enterMarkets, (markets)),
-            value: 0
+            target: address(comptroller), data: abi.encodeCall(comptroller.enterMarkets, (markets)), value: 0
         });
 
         vm.prank(vault);
@@ -143,32 +135,24 @@ contract BatchExecutorTest is Test {
 
         // 1. Approve mToken to pull USDC
         calls[0] = BatchExecutor.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
         });
 
         // 2. Deposit collateral
         calls[1] = BatchExecutor.Call({
-            target: address(mUSDC),
-            data: abi.encodeWithSignature("mint(uint256)", 10_000e6),
-            value: 0
+            target: address(mUSDC), data: abi.encodeWithSignature("mint(uint256)", 10_000e6), value: 0
         });
 
         // 3. Enter market
         address[] memory markets = new address[](1);
         markets[0] = address(mUSDC);
         calls[2] = BatchExecutor.Call({
-            target: address(comptroller),
-            data: abi.encodeCall(comptroller.enterMarkets, (markets)),
-            value: 0
+            target: address(comptroller), data: abi.encodeCall(comptroller.enterMarkets, (markets)), value: 0
         });
 
         // 4. Borrow USDC (goes to executor since executor is msg.sender)
         calls[3] = BatchExecutor.Call({
-            target: address(mUSDC),
-            data: abi.encodeWithSignature("borrow(uint256)", 5_000e6),
-            value: 0
+            target: address(mUSDC), data: abi.encodeWithSignature("borrow(uint256)", 5_000e6), value: 0
         });
 
         vm.prank(vault);
@@ -205,9 +189,7 @@ contract BatchExecutorTest is Test {
 
         // 1. Approve (succeeds)
         calls[0] = BatchExecutor.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
         });
 
         // 2. Call disallowed target (reverts entire batch)
@@ -226,9 +208,7 @@ contract BatchExecutorTest is Test {
     function test_simulateBatch_success() public {
         BatchExecutor.Call[] memory calls = new BatchExecutor.Call[](1);
         calls[0] = BatchExecutor.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
         });
 
         vm.prank(vault);

@@ -39,9 +39,7 @@ contract SyndicateVaultTest is Test {
                 "shUSDC",
                 owner,
                 ISyndicateVault.SyndicateCaps({
-                    maxPerTx: MAX_PER_TX,
-                    maxDailyTotal: MAX_DAILY,
-                    maxBorrowRatio: MAX_BORROW
+                    maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
                 })
             )
         );
