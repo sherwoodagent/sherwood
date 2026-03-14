@@ -123,9 +123,7 @@ contract SyndicateFactoryTest is Test {
         // Agent executes batch (simple approve call)
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (makeAddr("protocol"), 1_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (makeAddr("protocol"), 1_000e6)), value: 0
         });
 
         vm.prank(agent);

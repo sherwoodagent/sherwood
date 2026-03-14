@@ -63,9 +63,7 @@ contract SyndicateVaultTest is Test {
                 "shUSDC",
                 owner,
                 ISyndicateVault.SyndicateCaps({
-                    maxPerTx: MAX_PER_TX,
-                    maxDailyTotal: MAX_DAILY,
-                    maxBorrowRatio: MAX_BORROW
+                    maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
                 }),
                 address(executorLib),
                 targets,
@@ -247,9 +245,7 @@ contract SyndicateVaultTest is Test {
         // Agent approves mToken to pull USDC from vault
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
         });
 
         vm.prank(agentPKP);
@@ -268,25 +264,19 @@ contract SyndicateVaultTest is Test {
 
         // 1. Approve mToken to pull USDC
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
         });
 
         // 2. Mint mTokens (deposit collateral)
         calls[1] = BatchExecutorLib.Call({
-            target: address(mUSDC),
-            data: abi.encodeWithSignature("mint(uint256)", 10_000e6),
-            value: 0
+            target: address(mUSDC), data: abi.encodeWithSignature("mint(uint256)", 10_000e6), value: 0
         });
 
         // 3. Enter market as collateral
         address[] memory markets = new address[](1);
         markets[0] = address(mUSDC);
         calls[2] = BatchExecutorLib.Call({
-            target: address(comptroller),
-            data: abi.encodeCall(comptroller.enterMarkets, (markets)),
-            value: 0
+            target: address(comptroller), data: abi.encodeCall(comptroller.enterMarkets, (markets)), value: 0
         });
 
         vm.prank(agentPKP);
@@ -305,32 +295,24 @@ contract SyndicateVaultTest is Test {
 
         // 1. Approve mToken to pull USDC
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
         });
 
         // 2. Deposit collateral
         calls[1] = BatchExecutorLib.Call({
-            target: address(mUSDC),
-            data: abi.encodeWithSignature("mint(uint256)", 10_000e6),
-            value: 0
+            target: address(mUSDC), data: abi.encodeWithSignature("mint(uint256)", 10_000e6), value: 0
         });
 
         // 3. Enter market
         address[] memory markets = new address[](1);
         markets[0] = address(mUSDC);
         calls[2] = BatchExecutorLib.Call({
-            target: address(comptroller),
-            data: abi.encodeCall(comptroller.enterMarkets, (markets)),
-            value: 0
+            target: address(comptroller), data: abi.encodeCall(comptroller.enterMarkets, (markets)), value: 0
         });
 
         // 4. Borrow USDC (goes to vault since vault is msg.sender via delegatecall)
         calls[3] = BatchExecutorLib.Call({
-            target: address(mUSDC),
-            data: abi.encodeWithSignature("borrow(uint256)", 5_000e6),
-            value: 0
+            target: address(mUSDC), data: abi.encodeWithSignature("borrow(uint256)", 5_000e6), value: 0
         });
 
         vm.prank(agentPKP);
@@ -367,9 +349,7 @@ contract SyndicateVaultTest is Test {
 
         // 1. Approve (would succeed)
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
         });
 
         // 2. Call disallowed target (allowlist check catches this before delegatecall)
@@ -481,9 +461,7 @@ contract SyndicateVaultTest is Test {
     function test_simulateBatch_success() public {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
         });
 
         // Anyone can simulate (no agent check)
@@ -619,9 +597,7 @@ contract SyndicateVaultTest is Test {
                 "cVault",
                 owner,
                 ISyndicateVault.SyndicateCaps({
-                    maxPerTx: MAX_PER_TX,
-                    maxDailyTotal: MAX_DAILY,
-                    maxBorrowRatio: MAX_BORROW
+                    maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
                 }),
                 address(executorLib),
                 targets,
@@ -653,9 +629,7 @@ contract SyndicateVaultTest is Test {
                 "cVault",
                 owner,
                 ISyndicateVault.SyndicateCaps({
-                    maxPerTx: MAX_PER_TX,
-                    maxDailyTotal: MAX_DAILY,
-                    maxBorrowRatio: MAX_BORROW
+                    maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
                 }),
                 address(executorLib),
                 targets,
@@ -692,9 +666,7 @@ contract SyndicateVaultTest is Test {
                 "cVault",
                 owner,
                 ISyndicateVault.SyndicateCaps({
-                    maxPerTx: MAX_PER_TX,
-                    maxDailyTotal: MAX_DAILY,
-                    maxBorrowRatio: MAX_BORROW
+                    maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
                 }),
                 address(executorLib),
                 targets,
