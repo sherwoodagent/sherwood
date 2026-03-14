@@ -66,6 +66,12 @@ contract SyndicateVault is
     /// @notice Approved protocol targets for batch execution
     EnumerableSet.AddressSet private _allowedTargets;
 
+    /// @notice Approved depositor addresses (whitelist for deposits)
+    EnumerableSet.AddressSet private _approvedDepositors;
+
+    /// @notice If true, anyone can deposit (skip whitelist check)
+    bool private _openDeposits;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -78,7 +84,8 @@ contract SyndicateVault is
         address owner_,
         SyndicateCaps memory caps_,
         address executorImpl_,
-        address[] memory initialTargets_
+        address[] memory initialTargets_,
+        bool openDeposits_
     ) external initializer {
         require(owner_ != address(0), "Invalid owner");
         require(caps_.maxPerTx > 0, "Invalid maxPerTx");
@@ -94,6 +101,7 @@ contract SyndicateVault is
         _syndicateCaps = caps_;
         _dailySpendResetDay = block.timestamp / 1 days;
         _executorImpl = executorImpl_;
+        _openDeposits = openDeposits_;
 
         for (uint256 i = 0; i < initialTargets_.length; i++) {
             require(initialTargets_[i] != address(0), "Invalid target");
@@ -220,6 +228,51 @@ contract SyndicateVault is
         return _allowedTargets.values();
     }
 
+    // ==================== DEPOSITOR WHITELIST ====================
+
+    /// @inheritdoc ISyndicateVault
+    function approveDepositor(address depositor) external onlyOwner {
+        require(depositor != address(0), "Invalid depositor");
+        require(_approvedDepositors.add(depositor), "Already approved");
+        emit DepositorApproved(depositor);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function removeDepositor(address depositor) external onlyOwner {
+        require(_approvedDepositors.remove(depositor), "Not approved");
+        emit DepositorRemoved(depositor);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function approveDepositors(address[] calldata depositors) external onlyOwner {
+        for (uint256 i = 0; i < depositors.length; i++) {
+            require(depositors[i] != address(0), "Invalid depositor");
+            _approvedDepositors.add(depositors[i]);
+            emit DepositorApproved(depositors[i]);
+        }
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function isApprovedDepositor(address depositor) external view returns (bool) {
+        return _approvedDepositors.contains(depositor);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function getApprovedDepositors() external view returns (address[] memory) {
+        return _approvedDepositors.values();
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function setOpenDeposits(bool open) external onlyOwner {
+        _openDeposits = open;
+        emit OpenDepositsUpdated(open);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function openDeposits() external view returns (bool) {
+        return _openDeposits;
+    }
+
     // ==================== VIEWS ====================
 
     /// @inheritdoc ISyndicateVault
@@ -319,12 +372,13 @@ contract SyndicateVault is
 
     // ==================== OVERRIDES ====================
 
-    /// @dev Block deposits and withdrawals when paused
+    /// @dev Block deposits when paused or depositor not approved
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares)
         internal
         override
         whenNotPaused
     {
+        require(_openDeposits || _approvedDepositors.contains(receiver), "Not approved depositor");
         super._deposit(caller, receiver, assets, shares);
     }
 

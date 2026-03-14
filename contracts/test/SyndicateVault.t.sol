@@ -63,10 +63,13 @@ contract SyndicateVaultTest is Test {
                 "shUSDC",
                 owner,
                 ISyndicateVault.SyndicateCaps({
-                    maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
+                    maxPerTx: MAX_PER_TX,
+                    maxDailyTotal: MAX_DAILY,
+                    maxBorrowRatio: MAX_BORROW
                 }),
                 address(executorLib),
-                targets
+                targets,
+                true // openDeposits = true for test convenience
             )
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
@@ -244,7 +247,9 @@ contract SyndicateVaultTest is Test {
         // Agent approves mToken to pull USDC from vault
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
+            target: address(usdc),
+            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
+            value: 0
         });
 
         vm.prank(agentPKP);
@@ -263,19 +268,25 @@ contract SyndicateVaultTest is Test {
 
         // 1. Approve mToken to pull USDC
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
+            target: address(usdc),
+            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
+            value: 0
         });
 
         // 2. Mint mTokens (deposit collateral)
         calls[1] = BatchExecutorLib.Call({
-            target: address(mUSDC), data: abi.encodeWithSignature("mint(uint256)", 10_000e6), value: 0
+            target: address(mUSDC),
+            data: abi.encodeWithSignature("mint(uint256)", 10_000e6),
+            value: 0
         });
 
         // 3. Enter market as collateral
         address[] memory markets = new address[](1);
         markets[0] = address(mUSDC);
         calls[2] = BatchExecutorLib.Call({
-            target: address(comptroller), data: abi.encodeCall(comptroller.enterMarkets, (markets)), value: 0
+            target: address(comptroller),
+            data: abi.encodeCall(comptroller.enterMarkets, (markets)),
+            value: 0
         });
 
         vm.prank(agentPKP);
@@ -294,24 +305,32 @@ contract SyndicateVaultTest is Test {
 
         // 1. Approve mToken to pull USDC
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
+            target: address(usdc),
+            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
+            value: 0
         });
 
         // 2. Deposit collateral
         calls[1] = BatchExecutorLib.Call({
-            target: address(mUSDC), data: abi.encodeWithSignature("mint(uint256)", 10_000e6), value: 0
+            target: address(mUSDC),
+            data: abi.encodeWithSignature("mint(uint256)", 10_000e6),
+            value: 0
         });
 
         // 3. Enter market
         address[] memory markets = new address[](1);
         markets[0] = address(mUSDC);
         calls[2] = BatchExecutorLib.Call({
-            target: address(comptroller), data: abi.encodeCall(comptroller.enterMarkets, (markets)), value: 0
+            target: address(comptroller),
+            data: abi.encodeCall(comptroller.enterMarkets, (markets)),
+            value: 0
         });
 
         // 4. Borrow USDC (goes to vault since vault is msg.sender via delegatecall)
         calls[3] = BatchExecutorLib.Call({
-            target: address(mUSDC), data: abi.encodeWithSignature("borrow(uint256)", 5_000e6), value: 0
+            target: address(mUSDC),
+            data: abi.encodeWithSignature("borrow(uint256)", 5_000e6),
+            value: 0
         });
 
         vm.prank(agentPKP);
@@ -348,7 +367,9 @@ contract SyndicateVaultTest is Test {
 
         // 1. Approve (would succeed)
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
+            target: address(usdc),
+            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
+            value: 0
         });
 
         // 2. Call disallowed target (allowlist check catches this before delegatecall)
@@ -460,7 +481,9 @@ contract SyndicateVaultTest is Test {
     function test_simulateBatch_success() public {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
+            target: address(usdc),
+            data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)),
+            value: 0
         });
 
         // Anyone can simulate (no agent check)
@@ -535,5 +558,169 @@ contract SyndicateVaultTest is Test {
         (bool success,) = address(vault).call{value: 1 ether}("");
         assertTrue(success);
         assertEq(address(vault).balance, 1 ether);
+    }
+
+    // ==================== DEPOSITOR WHITELIST ====================
+
+    function test_approveDepositor() public {
+        address depositor = makeAddr("depositor");
+
+        vm.prank(owner);
+        vault.approveDepositor(depositor);
+
+        assertTrue(vault.isApprovedDepositor(depositor));
+
+        address[] memory depositors = vault.getApprovedDepositors();
+        assertEq(depositors.length, 1);
+        assertEq(depositors[0], depositor);
+    }
+
+    function test_approveDepositor_notOwner_reverts() public {
+        vm.prank(lp1);
+        vm.expectRevert();
+        vault.approveDepositor(makeAddr("depositor"));
+    }
+
+    function test_removeDepositor() public {
+        address depositor = makeAddr("depositor");
+        vm.startPrank(owner);
+        vault.approveDepositor(depositor);
+        vault.removeDepositor(depositor);
+        vm.stopPrank();
+
+        assertFalse(vault.isApprovedDepositor(depositor));
+    }
+
+    function test_approveDepositors_batch() public {
+        address[] memory depositors = new address[](3);
+        depositors[0] = makeAddr("d1");
+        depositors[1] = makeAddr("d2");
+        depositors[2] = makeAddr("d3");
+
+        vm.prank(owner);
+        vault.approveDepositors(depositors);
+
+        assertTrue(vault.isApprovedDepositor(depositors[0]));
+        assertTrue(vault.isApprovedDepositor(depositors[1]));
+        assertTrue(vault.isApprovedDepositor(depositors[2]));
+        assertEq(vault.getApprovedDepositors().length, 3);
+    }
+
+    function test_deposit_closedDeposits_unapproved_reverts() public {
+        // Deploy a vault with openDeposits=false
+        SyndicateVault impl2 = new SyndicateVault();
+        address[] memory targets = new address[](1);
+        targets[0] = address(usdc);
+        bytes memory initData = abi.encodeCall(
+            SyndicateVault.initialize,
+            (
+                usdc,
+                "Closed Vault",
+                "cVault",
+                owner,
+                ISyndicateVault.SyndicateCaps({
+                    maxPerTx: MAX_PER_TX,
+                    maxDailyTotal: MAX_DAILY,
+                    maxBorrowRatio: MAX_BORROW
+                }),
+                address(executorLib),
+                targets,
+                false // openDeposits = false
+            )
+        );
+        ERC1967Proxy proxy2 = new ERC1967Proxy(address(impl2), initData);
+        SyndicateVault closedVault = SyndicateVault(payable(address(proxy2)));
+
+        // Try to deposit without approval — should revert
+        usdc.mint(lp1, 10_000e6);
+        vm.startPrank(lp1);
+        usdc.approve(address(closedVault), 10_000e6);
+        vm.expectRevert("Not approved depositor");
+        closedVault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+    }
+
+    function test_deposit_closedDeposits_approved_succeeds() public {
+        // Deploy a vault with openDeposits=false
+        SyndicateVault impl2 = new SyndicateVault();
+        address[] memory targets = new address[](1);
+        targets[0] = address(usdc);
+        bytes memory initData = abi.encodeCall(
+            SyndicateVault.initialize,
+            (
+                usdc,
+                "Closed Vault",
+                "cVault",
+                owner,
+                ISyndicateVault.SyndicateCaps({
+                    maxPerTx: MAX_PER_TX,
+                    maxDailyTotal: MAX_DAILY,
+                    maxBorrowRatio: MAX_BORROW
+                }),
+                address(executorLib),
+                targets,
+                false
+            )
+        );
+        ERC1967Proxy proxy2 = new ERC1967Proxy(address(impl2), initData);
+        SyndicateVault closedVault = SyndicateVault(payable(address(proxy2)));
+
+        // Approve depositor
+        vm.prank(owner);
+        closedVault.approveDepositor(lp1);
+
+        // Now deposit should succeed
+        usdc.mint(lp1, 10_000e6);
+        vm.startPrank(lp1);
+        usdc.approve(address(closedVault), 10_000e6);
+        uint256 shares = closedVault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        assertGt(shares, 0);
+    }
+
+    function test_setOpenDeposits() public {
+        // Deploy closed vault
+        SyndicateVault impl2 = new SyndicateVault();
+        address[] memory targets = new address[](1);
+        targets[0] = address(usdc);
+        bytes memory initData = abi.encodeCall(
+            SyndicateVault.initialize,
+            (
+                usdc,
+                "Closed Vault",
+                "cVault",
+                owner,
+                ISyndicateVault.SyndicateCaps({
+                    maxPerTx: MAX_PER_TX,
+                    maxDailyTotal: MAX_DAILY,
+                    maxBorrowRatio: MAX_BORROW
+                }),
+                address(executorLib),
+                targets,
+                false
+            )
+        );
+        ERC1967Proxy proxy2 = new ERC1967Proxy(address(impl2), initData);
+        SyndicateVault closedVault = SyndicateVault(payable(address(proxy2)));
+
+        // Toggle to open
+        vm.prank(owner);
+        closedVault.setOpenDeposits(true);
+        assertTrue(closedVault.openDeposits());
+
+        // Now anyone can deposit
+        usdc.mint(lp1, 10_000e6);
+        vm.startPrank(lp1);
+        usdc.approve(address(closedVault), 10_000e6);
+        uint256 shares = closedVault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        assertGt(shares, 0);
+    }
+
+    function test_openDeposits_initialized_true() public view {
+        // The main vault in setUp was created with openDeposits=true
+        assertTrue(vault.openDeposits());
     }
 }

@@ -40,6 +40,15 @@ interface ISyndicateVault {
     function isAllowedTarget(address target) external view returns (bool);
     function getAllowedTargets() external view returns (address[] memory);
 
+    // ── Depositor Whitelist ──
+    function approveDepositor(address depositor) external;
+    function removeDepositor(address depositor) external;
+    function approveDepositors(address[] calldata depositors) external;
+    function isApprovedDepositor(address depositor) external view returns (bool);
+    function getApprovedDepositors() external view returns (address[] memory);
+    function setOpenDeposits(bool open) external;
+    function openDeposits() external view returns (bool);
+
     // ── Views ──
     function getAgentConfig(address pkpAddress) external view returns (AgentConfig memory);
     function getSyndicateCaps() external view returns (SyndicateCaps memory);
@@ -65,4 +74,7 @@ interface ISyndicateVault {
     event SyndicateCapsUpdated(uint256 maxPerTx, uint256 maxDailyTotal, uint256 maxBorrowRatio);
     event TargetAdded(address indexed target);
     event TargetRemoved(address indexed target);
+    event DepositorApproved(address indexed depositor);
+    event DepositorRemoved(address indexed depositor);
+    event OpenDepositsUpdated(bool open);
 }

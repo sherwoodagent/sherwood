@@ -34,7 +34,8 @@ contract SyndicateFactoryTest is Test {
             name: "Test Vault",
             symbol: "tVault",
             caps: ISyndicateVault.SyndicateCaps({maxPerTx: 10_000e6, maxDailyTotal: 50_000e6, maxBorrowRatio: 7500}),
-            initialTargets: targets
+            initialTargets: targets,
+            openDeposits: false
         });
     }
 
@@ -107,8 +108,12 @@ contract SyndicateFactoryTest is Test {
         vm.prank(creator1);
         vault.registerAgent(agent, agent, 5_000e6, 20_000e6);
 
-        // LP deposits
+        // Approve LP as depositor (vault has openDeposits=false)
         address lp = makeAddr("lp");
+        vm.prank(creator1);
+        vault.approveDepositor(lp);
+
+        // LP deposits
         usdc.mint(lp, 50_000e6);
         vm.startPrank(lp);
         usdc.approve(vaultAddr, 50_000e6);
@@ -118,7 +123,9 @@ contract SyndicateFactoryTest is Test {
         // Agent executes batch (simple approve call)
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (makeAddr("protocol"), 1_000e6)), value: 0
+            target: address(usdc),
+            data: abi.encodeCall(usdc.approve, (makeAddr("protocol"), 1_000e6)),
+            value: 0
         });
 
         vm.prank(agent);
