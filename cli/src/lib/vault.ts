@@ -164,6 +164,21 @@ export async function addTarget(target: Address): Promise<Hex> {
 }
 
 /**
+ * Remove a target from the vault's allowlist (owner only).
+ */
+export async function removeTarget(target: Address): Promise<Hex> {
+  const client = getWalletClient();
+  return client.writeContract({
+    account: getAccount(),
+    chain: base,
+    address: getVaultAddress(),
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "removeTarget",
+    args: [target],
+  });
+}
+
+/**
  * Add multiple targets to the vault's allowlist (owner only).
  */
 export async function addTargets(targets: Address[]): Promise<Hex> {
@@ -201,6 +216,112 @@ export async function getAllowedTargets(): Promise<Address[]> {
     abi: SYNDICATE_VAULT_ABI,
     functionName: "getAllowedTargets",
   }) as Promise<Address[]>;
+}
+
+// ── Depositor Management ──
+
+/**
+ * Approve a depositor address (owner only).
+ */
+export async function approveDepositor(depositor: Address): Promise<Hex> {
+  const wallet = getWalletClient();
+  return wallet.writeContract({
+    account: getAccount(),
+    chain: base,
+    address: getVaultAddress(),
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "approveDepositor",
+    args: [depositor],
+  });
+}
+
+/**
+ * Remove a depositor from the whitelist (owner only).
+ */
+export async function removeDepositor(depositor: Address): Promise<Hex> {
+  const wallet = getWalletClient();
+  return wallet.writeContract({
+    account: getAccount(),
+    chain: base,
+    address: getVaultAddress(),
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "removeDepositor",
+    args: [depositor],
+  });
+}
+
+/**
+ * Approve multiple depositors in a batch (owner only).
+ */
+export async function approveDepositors(depositors: Address[]): Promise<Hex> {
+  const wallet = getWalletClient();
+  return wallet.writeContract({
+    account: getAccount(),
+    chain: base,
+    address: getVaultAddress(),
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "approveDepositors",
+    args: [depositors],
+  });
+}
+
+/**
+ * Check if an address is an approved depositor.
+ */
+export async function isApprovedDepositor(depositor: Address): Promise<boolean> {
+  const client = getPublicClient();
+  return client.readContract({
+    address: getVaultAddress(),
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "isApprovedDepositor",
+    args: [depositor],
+  }) as Promise<boolean>;
+}
+
+/**
+ * Get LP share balance and USDC value.
+ */
+export async function getBalance(address?: Address): Promise<{
+  shares: bigint;
+  assetsValue: string;
+  percentOfVault: string;
+}> {
+  const client = getPublicClient();
+  const vaultAddress = getVaultAddress();
+  const account = address || getAccount().address;
+
+  const [shares, totalSupply] = await Promise.all([
+    client.readContract({
+      address: vaultAddress,
+      abi: SYNDICATE_VAULT_ABI,
+      functionName: "balanceOf",
+      args: [account],
+    }) as Promise<bigint>,
+    client.readContract({
+      address: vaultAddress,
+      abi: SYNDICATE_VAULT_ABI,
+      functionName: "totalSupply",
+    }) as Promise<bigint>,
+  ]);
+
+  let assetsValue = 0n;
+  if (shares > 0n) {
+    assetsValue = (await client.readContract({
+      address: vaultAddress,
+      abi: SYNDICATE_VAULT_ABI,
+      functionName: "convertToAssets",
+      args: [shares],
+    })) as bigint;
+  }
+
+  const percent =
+    totalSupply > 0n ? ((Number(shares) / Number(totalSupply)) * 100).toFixed(2) : "0.00";
+
+  return {
+    shares,
+    assetsValue: formatUnits(assetsValue, 6),
+    percentOfVault: `${percent}%`,
+  };
 }
 
 // ── Agent Management ──

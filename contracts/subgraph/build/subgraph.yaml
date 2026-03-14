@@ -1,0 +1,79 @@
+specVersion: 1.0.0
+indexerHints:
+  prune: auto
+schema:
+  file: schema.graphql
+dataSources:
+  - kind: ethereum
+    name: SyndicateFactory
+    network: base
+    source:
+      address: "0x0000000000000000000000000000000000000000"
+      abi: SyndicateFactory
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Syndicate
+      abis:
+        - name: SyndicateFactory
+          file: SyndicateFactory/SyndicateFactory.json
+        - name: SyndicateVault
+          file: SyndicateFactory/SyndicateVault.json
+      eventHandlers:
+        - event: SyndicateCreated(indexed uint256,indexed address,indexed address,string)
+          handler: handleSyndicateCreated
+        - event: MetadataUpdated(indexed uint256,string)
+          handler: handleMetadataUpdated
+        - event: SyndicateDeactivated(indexed uint256)
+          handler: handleSyndicateDeactivated
+      file: SyndicateFactory/SyndicateFactory.wasm
+templates:
+  - kind: ethereum
+    name: SyndicateVault
+    network: base
+    source:
+      abi: SyndicateVault
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Syndicate
+        - Agent
+        - Deposit
+        - Withdrawal
+        - BatchExecution
+        - Depositor
+        - Ragequit
+      abis:
+        - name: SyndicateVault
+          file: SyndicateVault/SyndicateVault.json
+      eventHandlers:
+        - event: AgentRegistered(indexed address,indexed address,uint256,uint256)
+          handler: handleAgentRegistered
+        - event: AgentRemoved(indexed address)
+          handler: handleAgentRemoved
+        - event: BatchExecuted(indexed address,uint256,uint256)
+          handler: handleBatchExecuted
+        - event: Deposit(indexed address,indexed address,uint256,uint256)
+          handler: handleDeposit
+        - event: Withdraw(indexed address,indexed address,indexed address,uint256,uint256)
+          handler: handleWithdraw
+        - event: Ragequit(indexed address,uint256,uint256)
+          handler: handleRagequit
+        - event: DepositorApproved(indexed address)
+          handler: handleDepositorApproved
+        - event: DepositorRemoved(indexed address)
+          handler: handleDepositorRemoved
+        - event: SyndicateCapsUpdated(uint256,uint256,uint256)
+          handler: handleSyndicateCapsUpdated
+        - event: TargetAdded(indexed address)
+          handler: handleTargetAdded
+        - event: TargetRemoved(indexed address)
+          handler: handleTargetRemoved
+        - event: OpenDepositsUpdated(bool)
+          handler: handleOpenDepositsUpdated
+      file: templates/SyndicateVault/SyndicateVault.wasm

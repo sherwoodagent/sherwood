@@ -1,0 +1,112 @@
+"""
+Syndicate — top-level entity created by the factory.
+"""
+type Syndicate @entity(immutable: false) {
+  id: ID! # syndicateId from factory
+  vault: Bytes! # vault proxy address
+  creator: Bytes!
+  metadataURI: String!
+  createdAt: BigInt!
+  active: Boolean!
+
+  # Aggregated stats
+  totalDeposits: BigDecimal!
+  totalWithdrawals: BigDecimal!
+
+  # Relations
+  agents: [Agent!]! @derivedFrom(field: "syndicate")
+  deposits: [Deposit!]! @derivedFrom(field: "syndicate")
+  withdrawals: [Withdrawal!]! @derivedFrom(field: "syndicate")
+  batchExecutions: [BatchExecution!]! @derivedFrom(field: "syndicate")
+  depositors: [Depositor!]! @derivedFrom(field: "syndicate")
+}
+
+"""
+Agent — a registered PKP wallet that can execute strategies.
+"""
+type Agent @entity(immutable: false) {
+  id: ID! # vault-pkpAddress
+  syndicate: Syndicate!
+  pkpAddress: Bytes!
+  operatorEOA: Bytes!
+  maxPerTx: BigInt!
+  dailyLimit: BigInt!
+  active: Boolean!
+  registeredAt: BigInt!
+
+  # Aggregated stats
+  totalBatches: BigInt!
+  totalAssetAmount: BigInt!
+
+  batchExecutions: [BatchExecution!]! @derivedFrom(field: "agent")
+}
+
+"""
+Deposit — LP deposits USDC into a vault.
+"""
+type Deposit @entity(immutable: true) {
+  id: ID! # tx hash - log index
+  syndicate: Syndicate!
+  sender: Bytes!
+  owner: Bytes!
+  assets: BigInt!
+  shares: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  txHash: Bytes!
+}
+
+"""
+Withdrawal — LP withdraws from a vault (including ragequit).
+"""
+type Withdrawal @entity(immutable: true) {
+  id: ID! # tx hash - log index
+  syndicate: Syndicate!
+  sender: Bytes!
+  receiver: Bytes!
+  owner: Bytes!
+  assets: BigInt!
+  shares: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  txHash: Bytes!
+}
+
+"""
+BatchExecution — agent executes a batch of protocol calls.
+"""
+type BatchExecution @entity(immutable: true) {
+  id: ID! # tx hash - log index
+  syndicate: Syndicate!
+  agent: Agent!
+  callCount: BigInt!
+  assetAmount: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  txHash: Bytes!
+}
+
+"""
+Depositor — an address approved to deposit into a vault.
+"""
+type Depositor @entity(immutable: false) {
+  id: ID! # vault-depositorAddress
+  syndicate: Syndicate!
+  address: Bytes!
+  approved: Boolean!
+  approvedAt: BigInt!
+}
+
+"""
+Ragequit — LP exits vault for pro-rata share (subset of withdrawals).
+"""
+type Ragequit @entity(immutable: true) {
+  id: ID! # tx hash - log index
+  syndicate: Syndicate!
+  lp: Bytes!
+  shares: BigInt!
+  assets: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  txHash: Bytes!
+}

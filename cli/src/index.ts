@@ -9,6 +9,9 @@ import { MoonwellProvider } from "./providers/moonwell.js";
 import { UniswapProvider } from "./providers/uniswap.js";
 import { runLeveredSwap } from "./commands/strategy-run.js";
 import * as vaultLib from "./lib/vault.js";
+import * as factoryLib from "./lib/factory.js";
+import * as subgraphLib from "./lib/subgraph.js";
+import { TOKENS } from "./lib/addresses.js";
 
 const program = new Command();
 
@@ -17,18 +20,194 @@ program
   .description("CLI for agent-managed investment syndicates")
   .version("0.1.0");
 
+// ── Syndicate commands ──
+const syndicate = program.command("syndicate");
+
+syndicate
+  .command("create")
+  .description("Create a new syndicate via the factory")
+  .requiredOption("--name <name>", "Vault token name")
+  .requiredOption("--symbol <symbol>", "Vault token symbol")
+  .option("--asset <address>", "Underlying asset address", TOKENS.USDC)
+  .option("--max-per-tx <amount>", "Max USDC per transaction", "10000")
+  .option("--max-daily <amount>", "Max daily combined USDC spend", "50000")
+  .option("--borrow-ratio <bps>", "Max borrow ratio in basis points", "7500")
+  .option("--targets <addresses>", "Comma-separated allowlisted target addresses")
+  .option("--metadata-uri <uri>", "IPFS metadata URI", "")
+  .option("--open-deposits", "Allow anyone to deposit (no whitelist)", false)
+  .action(async (opts) => {
+    const spinner = ora("Creating syndicate...").start();
+    try {
+      const targets: Address[] = opts.targets
+        ? opts.targets.split(",").map((a: string) => a.trim() as Address)
+        : [];
+
+      const hash = await factoryLib.createSyndicate({
+        metadataURI: opts.metadataUri,
+        asset: opts.asset as Address,
+        name: opts.name,
+        symbol: opts.symbol,
+        maxPerTx: parseUnits(opts.maxPerTx, 6),
+        maxDailyTotal: parseUnits(opts.maxDaily, 6),
+        maxBorrowRatio: BigInt(opts.borrowRatio),
+        initialTargets: targets,
+        openDeposits: opts.openDeposits,
+      });
+      spinner.succeed(`Syndicate created: ${hash}`);
+      console.log(chalk.dim(`  https://basescan.org/tx/${hash}`));
+    } catch (err) {
+      spinner.fail("Syndicate creation failed");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+syndicate
+  .command("list")
+  .description("List active syndicates (queries subgraph, falls back to on-chain)")
+  .option("--creator <address>", "Filter by creator address")
+  .action(async (opts) => {
+    const spinner = ora("Loading syndicates...").start();
+    try {
+      // Try subgraph first (fast, indexed), fall back to on-chain
+      let syndicates: { id: string | bigint; vault: string; creator: string; metadataURI: string; createdAt: string | bigint; totalDeposits?: string; totalWithdrawals?: string }[];
+
+      if (process.env.SUBGRAPH_URL) {
+        const result = await subgraphLib.getActiveSyndicates(opts.creator);
+        syndicates = result;
+      } else {
+        const result = await factoryLib.getActiveSyndicates();
+        syndicates = result.map((s) => ({
+          id: s.id.toString(),
+          vault: s.vault,
+          creator: s.creator,
+          metadataURI: s.metadataURI,
+          createdAt: s.createdAt.toString(),
+        }));
+      }
+
+      spinner.stop();
+
+      if (syndicates.length === 0) {
+        console.log(chalk.dim("No active syndicates found."));
+        return;
+      }
+
+      console.log();
+      console.log(chalk.bold(`Active Syndicates (${syndicates.length})`));
+      if (!process.env.SUBGRAPH_URL) {
+        console.log(chalk.dim("  (Set SUBGRAPH_URL for faster indexed queries)"));
+      }
+      console.log(chalk.dim("─".repeat(70)));
+
+      for (const s of syndicates) {
+        const ts = typeof s.createdAt === "string" ? Number(s.createdAt) : Number(s.createdAt);
+        const date = new Date(ts * 1000).toLocaleDateString();
+        console.log(`  #${s.id}  ${chalk.cyan(String(s.vault))}`);
+        console.log(`    Creator: ${s.creator}`);
+        console.log(`    Created: ${date}`);
+        if (s.totalDeposits) {
+          console.log(`    Deposits: ${s.totalDeposits} USDC`);
+        }
+        if (s.metadataURI) {
+          console.log(`    Metadata: ${chalk.dim(s.metadataURI)}`);
+        }
+        console.log();
+      }
+    } catch (err) {
+      spinner.fail("Failed to load syndicates");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+syndicate
+  .command("info")
+  .description("Display syndicate details by ID")
+  .argument("<id>", "Syndicate ID")
+  .action(async (idStr) => {
+    const spinner = ora("Loading syndicate info...").start();
+    try {
+      const id = BigInt(idStr);
+      const info = await factoryLib.getSyndicate(id);
+      spinner.stop();
+
+      if (!info.vault || info.vault === "0x0000000000000000000000000000000000000000") {
+        console.log(chalk.red(`Syndicate #${id} not found.`));
+        process.exit(1);
+      }
+
+      const date = new Date(Number(info.createdAt) * 1000).toLocaleDateString();
+      console.log();
+      console.log(chalk.bold(`Syndicate #${info.id}`));
+      console.log(chalk.dim("─".repeat(40)));
+      console.log(`  Vault:      ${chalk.cyan(info.vault)}`);
+      console.log(`  Creator:    ${info.creator}`);
+      console.log(`  Created:    ${date}`);
+      console.log(`  Active:     ${info.active ? chalk.green("yes") : chalk.red("no")}`);
+      if (info.metadataURI) {
+        console.log(`  Metadata:   ${chalk.dim(info.metadataURI)}`);
+      }
+
+      // Also show vault info
+      process.env.VAULT_ADDRESS = info.vault;
+      const vaultInfo = await vaultLib.getVaultInfo();
+      console.log();
+      console.log(chalk.bold("  Vault Stats"));
+      console.log(`    Total Assets: ${vaultInfo.totalAssets} USDC`);
+      console.log(`    Agent Count:  ${vaultInfo.agentCount}`);
+      console.log(`    Daily Spend:  ${vaultInfo.dailySpendTotal} USDC`);
+      console.log(`    Max Per Tx:   ${vaultInfo.syndicateCaps.maxPerTx} USDC`);
+      console.log(`    Max Daily:    ${vaultInfo.syndicateCaps.maxDailyTotal} USDC`);
+      console.log(`    Max Borrow:   ${vaultInfo.syndicateCaps.maxBorrowRatio}`);
+      console.log();
+    } catch (err) {
+      spinner.fail("Failed to load syndicate info");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+syndicate
+  .command("approve-depositor")
+  .description("Approve an address to deposit (owner only)")
+  .requiredOption("--vault <address>", "Vault address")
+  .requiredOption("--depositor <address>", "Address to approve")
+  .action(async (opts) => {
+    process.env.VAULT_ADDRESS = opts.vault;
+    const spinner = ora("Approving depositor...").start();
+    try {
+      const hash = await vaultLib.approveDepositor(opts.depositor as Address);
+      spinner.succeed(`Depositor approved: ${hash}`);
+      console.log(chalk.dim(`  https://basescan.org/tx/${hash}`));
+    } catch (err) {
+      spinner.fail("Approval failed");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+syndicate
+  .command("remove-depositor")
+  .description("Remove an address from the depositor whitelist (owner only)")
+  .requiredOption("--vault <address>", "Vault address")
+  .requiredOption("--depositor <address>", "Address to remove")
+  .action(async (opts) => {
+    process.env.VAULT_ADDRESS = opts.vault;
+    const spinner = ora("Removing depositor...").start();
+    try {
+      const hash = await vaultLib.removeDepositor(opts.depositor as Address);
+      spinner.succeed(`Depositor removed: ${hash}`);
+      console.log(chalk.dim(`  https://basescan.org/tx/${hash}`));
+    } catch (err) {
+      spinner.fail("Removal failed");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
 // ── Vault commands ──
 const vaultCmd = program.command("vault");
-
-vaultCmd
-  .command("create")
-  .description("Deploy a new syndicate vault")
-  .option("--asset <address>", "Underlying asset (default: USDC on Base)")
-  .option("--name <name>", "Vault name")
-  .action(async (opts) => {
-    console.log("Creating vault...", opts);
-    // TODO: Deploy SyndicateVault via proxy
-  });
 
 vaultCmd
   .command("deposit")
@@ -99,6 +278,31 @@ vaultCmd
   });
 
 vaultCmd
+  .command("balance")
+  .description("Show LP share balance and USDC value")
+  .requiredOption("--vault <address>", "Vault address")
+  .option("--address <address>", "Address to check (default: your wallet)")
+  .action(async (opts) => {
+    process.env.VAULT_ADDRESS = opts.vault;
+    const spinner = ora("Loading balance...").start();
+    try {
+      const balance = await vaultLib.getBalance(opts.address as Address | undefined);
+      spinner.stop();
+      console.log();
+      console.log(chalk.bold("LP Position"));
+      console.log(chalk.dim("─".repeat(40)));
+      console.log(`  Shares:       ${balance.shares.toString()}`);
+      console.log(`  USDC Value:   ${balance.assetsValue} USDC`);
+      console.log(`  % of Vault:   ${balance.percentOfVault}`);
+      console.log();
+    } catch (err) {
+      spinner.fail("Failed to load balance");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+vaultCmd
   .command("register-agent")
   .description("Register an agent (owner only)")
   .requiredOption("--vault <address>", "Vault address")
@@ -126,6 +330,66 @@ vaultCmd
     }
   });
 
+vaultCmd
+  .command("add-target")
+  .description("Add a target to the vault allowlist (owner only)")
+  .requiredOption("--vault <address>", "Vault address")
+  .requiredOption("--target <address>", "Target address to allow")
+  .action(async (opts) => {
+    process.env.VAULT_ADDRESS = opts.vault;
+    const spinner = ora("Adding target...").start();
+    try {
+      const hash = await vaultLib.addTarget(opts.target as Address);
+      spinner.succeed(`Target added: ${hash}`);
+    } catch (err) {
+      spinner.fail("Failed to add target");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+vaultCmd
+  .command("remove-target")
+  .description("Remove a target from the vault allowlist (owner only)")
+  .requiredOption("--vault <address>", "Vault address")
+  .requiredOption("--target <address>", "Target address to remove")
+  .action(async (opts) => {
+    process.env.VAULT_ADDRESS = opts.vault;
+    const spinner = ora("Removing target...").start();
+    try {
+      const hash = await vaultLib.removeTarget(opts.target as Address);
+      spinner.succeed(`Target removed: ${hash}`);
+    } catch (err) {
+      spinner.fail("Failed to remove target");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+vaultCmd
+  .command("targets")
+  .description("List allowed targets for a vault")
+  .requiredOption("--vault <address>", "Vault address")
+  .action(async (opts) => {
+    process.env.VAULT_ADDRESS = opts.vault;
+    const spinner = ora("Loading targets...").start();
+    try {
+      const targets = await vaultLib.getAllowedTargets();
+      spinner.stop();
+      console.log();
+      console.log(chalk.bold(`Allowed Targets (${targets.length})`));
+      console.log(chalk.dim("─".repeat(50)));
+      for (const t of targets) {
+        console.log(`  ${t}`);
+      }
+      console.log();
+    } catch (err) {
+      spinner.fail("Failed to load targets");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
 // ── Strategy commands ──
 const strategy = program.command("strategy");
 
@@ -135,7 +399,7 @@ strategy
   .option("--type <id>", "Filter by strategy type")
   .action(async (opts) => {
     console.log("Listing strategies...", opts);
-    // TODO: Read from StrategyRegistry contract
+    // TODO: Wire with StrategyRegistry contract (Phase 3)
   });
 
 strategy
@@ -147,7 +411,7 @@ strategy
   .option("--metadata <uri>", "Metadata URI (IPFS/Arweave)")
   .action(async (opts) => {
     console.log("Registering strategy...", opts);
-    // TODO: Wire with StrategyRegistry contract
+    // TODO: Wire with StrategyRegistry contract (Phase 3)
   });
 
 strategy

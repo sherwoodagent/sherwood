@@ -229,6 +229,71 @@ export const SYNDICATE_VAULT_ABI = [
     inputs: [],
     outputs: [],
   },
+  // Depositor whitelist
+  {
+    name: "approveDepositor",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "depositor", type: "address" }],
+    outputs: [],
+  },
+  {
+    name: "removeDepositor",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "depositor", type: "address" }],
+    outputs: [],
+  },
+  {
+    name: "approveDepositors",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "depositors", type: "address[]" }],
+    outputs: [],
+  },
+  {
+    name: "isApprovedDepositor",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "depositor", type: "address" }],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "getApprovedDepositors",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address[]" }],
+  },
+  {
+    name: "setOpenDeposits",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "open", type: "bool" }],
+    outputs: [],
+  },
+  {
+    name: "openDeposits",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  // ERC-4626 views for LP balance
+  {
+    name: "convertToAssets",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "shares", type: "uint256" }],
+    outputs: [{ name: "assets", type: "uint256" }],
+  },
+  {
+    name: "totalSupply",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
 ] as const;
 
 // ── Uniswap Quoter V2 ──
@@ -296,5 +361,121 @@ export const ERC20_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "uint8" }],
+  },
+] as const;
+
+// ── SyndicateFactory ──
+
+export const SYNDICATE_FACTORY_ABI = [
+  {
+    name: "createSyndicate",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "config",
+        type: "tuple",
+        components: [
+          { name: "metadataURI", type: "string" },
+          { name: "asset", type: "address" },
+          { name: "name", type: "string" },
+          { name: "symbol", type: "string" },
+          {
+            name: "caps",
+            type: "tuple",
+            components: [
+              { name: "maxPerTx", type: "uint256" },
+              { name: "maxDailyTotal", type: "uint256" },
+              { name: "maxBorrowRatio", type: "uint256" },
+            ],
+          },
+          { name: "initialTargets", type: "address[]" },
+          { name: "openDeposits", type: "bool" },
+        ],
+      },
+    ],
+    outputs: [
+      { name: "syndicateId", type: "uint256" },
+      { name: "vault", type: "address" },
+    ],
+  },
+  {
+    name: "syndicates",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "uint256" }],
+    outputs: [
+      { name: "id", type: "uint256" },
+      { name: "vault", type: "address" },
+      { name: "creator", type: "address" },
+      { name: "metadataURI", type: "string" },
+      { name: "createdAt", type: "uint256" },
+      { name: "active", type: "bool" },
+    ],
+  },
+  {
+    name: "getActiveSyndicates",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "id", type: "uint256" },
+          { name: "vault", type: "address" },
+          { name: "creator", type: "address" },
+          { name: "metadataURI", type: "string" },
+          { name: "createdAt", type: "uint256" },
+          { name: "active", type: "bool" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "syndicateCount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "vaultToSyndicate",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "updateMetadata",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "syndicateId", type: "uint256" },
+      { name: "metadataURI", type: "string" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "deactivate",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "syndicateId", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    name: "executorImpl",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "vaultImpl",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
   },
 ] as const;

@@ -84,7 +84,8 @@ contract Deploy is Script {
                     maxDailyTotal: 50_000e6, // 50k USDC
                     maxBorrowRatio: 7500 // 75% LTV
                 }),
-                initialTargets: targets
+                initialTargets: targets,
+                openDeposits: false // Whitelist-gated deposits
             })
         );
         console.log("Syndicate #%d vault:", syndicateId, vaultProxy);

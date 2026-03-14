@@ -22,6 +22,7 @@ contract SyndicateFactory {
         string symbol; // Vault token symbol
         ISyndicateVault.SyndicateCaps caps; // Syndicate-wide limits
         address[] initialTargets; // Protocol addresses to allowlist
+        bool openDeposits; // If true, anyone can deposit. If false, depositor whitelist enforced.
     }
 
     struct Syndicate {
@@ -74,7 +75,8 @@ contract SyndicateFactory {
                 msg.sender, // owner = creator
                 config.caps,
                 executorImpl,
-                config.initialTargets
+                config.initialTargets,
+                config.openDeposits
             )
         );
 
