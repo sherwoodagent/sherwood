@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
-import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
@@ -29,16 +28,16 @@ contract Deploy is Script {
 
     // Moonwell (Base)
     address constant MOONWELL_COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
-    address constant MOONWELL_mUSDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
+    address constant MOONWELL_MUSDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
 
     // Uniswap V3 SwapRouter02 (Base)
     address constant UNISWAP_SWAP_ROUTER = 0x2626664c2603336E57B271c5C0b26F421741e481;
 
     // Tokens to allowlist (for swaps)
     address constant WETH = 0x4200000000000000000000000000000000000006;
-    address constant cbETH = 0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22;
-    address constant wstETH = 0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452;
-    address constant cbBTC = 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf;
+    address constant CB_ETH = 0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22;
+    address constant WST_ETH = 0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452;
+    address constant CB_BTC = 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf;
     address constant AERO = 0x940181a94A35A4569E4529A3CDfB74e38FD98631;
 
     function run() external {
@@ -64,13 +63,13 @@ contract Deploy is Script {
         // 4. Create first syndicate via factory
         address[] memory targets = new address[](9);
         targets[0] = USDC;
-        targets[1] = MOONWELL_mUSDC;
+        targets[1] = MOONWELL_MUSDC;
         targets[2] = MOONWELL_COMPTROLLER;
         targets[3] = UNISWAP_SWAP_ROUTER;
         targets[4] = WETH;
-        targets[5] = cbETH;
-        targets[6] = wstETH;
-        targets[7] = cbBTC;
+        targets[5] = CB_ETH;
+        targets[6] = WST_ETH;
+        targets[7] = CB_BTC;
         targets[8] = AERO;
 
         (uint256 syndicateId, address vaultProxy) = factory.createSyndicate(

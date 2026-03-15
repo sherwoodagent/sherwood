@@ -146,17 +146,17 @@ export function buildEntryBatch(
   const calls: BatchCall[] = [
     // 1. Approve mWETH to pull WETH from executor
     {
-      target: TOKENS.WETH,
+      target: TOKENS().WETH,
       data: encodeFunctionData({
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [MOONWELL.mWETH, collateral],
+        args: [MOONWELL().mWETH, collateral],
       }),
       value: 0n,
     },
     // 2. Deposit WETH as collateral (mint mWETH tokens)
     {
-      target: MOONWELL.mWETH,
+      target: MOONWELL().mWETH,
       data: encodeFunctionData({
         abi: MTOKEN_ABI,
         functionName: "mint",
@@ -166,17 +166,17 @@ export function buildEntryBatch(
     },
     // 3. Enter WETH market (enable as collateral for borrowing)
     {
-      target: MOONWELL.COMPTROLLER,
+      target: MOONWELL().COMPTROLLER,
       data: encodeFunctionData({
         abi: COMPTROLLER_ABI,
         functionName: "enterMarkets",
-        args: [[MOONWELL.mWETH]],
+        args: [[MOONWELL().mWETH]],
       }),
       value: 0n,
     },
     // 4. Borrow USDC against WETH collateral
     {
-      target: MOONWELL.mUSDC,
+      target: MOONWELL().mUSDC,
       data: encodeFunctionData({
         abi: MTOKEN_ABI,
         functionName: "borrow",
@@ -186,23 +186,23 @@ export function buildEntryBatch(
     },
     // 5. Approve SwapRouter to pull borrowed USDC
     {
-      target: TOKENS.USDC,
+      target: TOKENS().USDC,
       data: encodeFunctionData({
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [UNISWAP.SWAP_ROUTER, borrow],
+        args: [UNISWAP().SWAP_ROUTER, borrow],
       }),
       value: 0n,
     },
     // 6. Swap USDC → target token
     {
-      target: UNISWAP.SWAP_ROUTER,
+      target: UNISWAP().SWAP_ROUTER,
       data: encodeFunctionData({
         abi: SWAP_ROUTER_ABI,
         functionName: "exactInputSingle",
         args: [
           {
-            tokenIn: TOKENS.USDC,
+            tokenIn: TOKENS().USDC,
             tokenOut: config.targetToken,
             fee: config.fee,
             recipient: vaultAddress, // Tokens stay in vault (delegatecall)
@@ -247,20 +247,20 @@ export function buildExitBatch(
       data: encodeFunctionData({
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [UNISWAP.SWAP_ROUTER, tokenBalance],
+        args: [UNISWAP().SWAP_ROUTER, tokenBalance],
       }),
       value: 0n,
     },
     // 2. Swap target token → USDC
     {
-      target: UNISWAP.SWAP_ROUTER,
+      target: UNISWAP().SWAP_ROUTER,
       data: encodeFunctionData({
         abi: SWAP_ROUTER_ABI,
         functionName: "exactInputSingle",
         args: [
           {
             tokenIn: config.targetToken,
-            tokenOut: TOKENS.USDC,
+            tokenOut: TOKENS().USDC,
             fee: config.fee,
             recipient: vaultAddress,
             amountIn: tokenBalance,
@@ -273,17 +273,17 @@ export function buildExitBatch(
     },
     // 3. Approve mUSDC to pull USDC for repayment
     {
-      target: TOKENS.USDC,
+      target: TOKENS().USDC,
       data: encodeFunctionData({
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [MOONWELL.mUSDC, borrowBalance],
+        args: [MOONWELL().mUSDC, borrowBalance],
       }),
       value: 0n,
     },
     // 4. Repay USDC borrow
     {
-      target: MOONWELL.mUSDC,
+      target: MOONWELL().mUSDC,
       data: encodeFunctionData({
         abi: MTOKEN_ABI,
         functionName: "repayBorrow",
@@ -293,7 +293,7 @@ export function buildExitBatch(
     },
     // 5. Withdraw WETH collateral (stays in vault)
     {
-      target: MOONWELL.mWETH,
+      target: MOONWELL().mWETH,
       data: encodeFunctionData({
         abi: MTOKEN_ABI,
         functionName: "redeemUnderlying",

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
@@ -16,17 +16,17 @@ contract SyndicateVaultTest is Test {
     BatchExecutorLib public executorLib;
     ERC20Mock public usdc;
     ERC20Mock public weth;
-    MockMToken public mUSDC;
+    MockMToken public mUsdc;
     MockComptroller public comptroller;
     MockSwapRouter public swapRouter;
 
     address public owner = makeAddr("owner");
     address public lp1 = makeAddr("lp1");
     address public lp2 = makeAddr("lp2");
-    address public agentPKP = makeAddr("agentPKP");
-    address public agentEOA = makeAddr("agentEOA");
-    address public agentPKP2 = makeAddr("agentPKP2");
-    address public agentEOA2 = makeAddr("agentEOA2");
+    address public agentPkp = makeAddr("agentPkp");
+    address public agentEoa = makeAddr("agentEoa");
+    address public agentPkp2 = makeAddr("agentPkp2");
+    address public agentEoa2 = makeAddr("agentEoa2");
 
     uint256 constant MAX_PER_TX = 10_000e6; // 10k USDC (6 decimals)
     uint256 constant MAX_DAILY = 50_000e6; // 50k USDC
@@ -38,7 +38,7 @@ contract SyndicateVaultTest is Test {
         weth = new ERC20Mock("Wrapped Ether", "WETH", 18);
 
         // Deploy DeFi mocks
-        mUSDC = new MockMToken(address(usdc), "Moonwell USDC", "mUSDC");
+        mUsdc = new MockMToken(address(usdc), "Moonwell USDC", "mUsdc");
         comptroller = new MockComptroller();
         swapRouter = new MockSwapRouter();
 
@@ -49,7 +49,7 @@ contract SyndicateVaultTest is Test {
         address[] memory targets = new address[](5);
         targets[0] = address(usdc);
         targets[1] = address(weth);
-        targets[2] = address(mUSDC);
+        targets[2] = address(mUsdc);
         targets[3] = address(comptroller);
         targets[4] = address(swapRouter);
 
@@ -78,14 +78,14 @@ contract SyndicateVaultTest is Test {
         usdc.mint(lp2, 100_000e6);
 
         // Fund mToken with underlying for borrow liquidity
-        usdc.mint(address(mUSDC), 1_000_000e6);
+        usdc.mint(address(mUsdc), 1_000_000e6);
 
         // Fund swap router
         weth.mint(address(swapRouter), 1_000e18);
 
         // Register agent
         vm.prank(owner);
-        vault.registerAgent(agentPKP, agentEOA, 5_000e6, 20_000e6);
+        vault.registerAgent(agentPkp, agentEoa, 5_000e6, 20_000e6);
     }
 
     // ==================== INITIALIZATION ====================
@@ -106,7 +106,7 @@ contract SyndicateVaultTest is Test {
     function test_initialize_withTargets() public view {
         assertTrue(vault.isAllowedTarget(address(usdc)));
         assertTrue(vault.isAllowedTarget(address(weth)));
-        assertTrue(vault.isAllowedTarget(address(mUSDC)));
+        assertTrue(vault.isAllowedTarget(address(mUsdc)));
         assertTrue(vault.isAllowedTarget(address(comptroller)));
         assertTrue(vault.isAllowedTarget(address(swapRouter)));
 
@@ -161,12 +161,12 @@ contract SyndicateVaultTest is Test {
     // ==================== AGENT REGISTRATION ====================
 
     function test_registerAgent() public view {
-        assertTrue(vault.isAgent(agentPKP));
+        assertTrue(vault.isAgent(agentPkp));
         assertEq(vault.getAgentCount(), 1);
 
-        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPKP);
-        assertEq(config.pkpAddress, agentPKP);
-        assertEq(config.operatorEOA, agentEOA);
+        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPkp);
+        assertEq(config.pkpAddress, agentPkp);
+        assertEq(config.operatorEOA, agentEoa);
         assertEq(config.maxPerTx, 5_000e6);
         assertEq(config.dailyLimit, 20_000e6);
         assertTrue(config.active);
@@ -175,20 +175,20 @@ contract SyndicateVaultTest is Test {
     function test_registerAgent_exceedsSyndicateCap_reverts() public {
         vm.prank(owner);
         vm.expectRevert("Agent maxPerTx > syndicate cap");
-        vault.registerAgent(agentPKP2, agentEOA2, MAX_PER_TX + 1, 20_000e6);
+        vault.registerAgent(agentPkp2, agentEoa2, MAX_PER_TX + 1, 20_000e6);
     }
 
     function test_registerAgent_notOwner_reverts() public {
         vm.prank(lp1);
         vm.expectRevert();
-        vault.registerAgent(agentPKP2, agentEOA2, 5_000e6, 20_000e6);
+        vault.registerAgent(agentPkp2, agentEoa2, 5_000e6, 20_000e6);
     }
 
     function test_removeAgent() public {
         vm.prank(owner);
-        vault.removeAgent(agentPKP);
+        vault.removeAgent(agentPkp);
 
-        assertFalse(vault.isAgent(agentPKP));
+        assertFalse(vault.isAgent(agentPkp));
         assertEq(vault.getAgentCount(), 0);
     }
 
@@ -245,14 +245,14 @@ contract SyndicateVaultTest is Test {
         // Agent approves mToken to pull USDC from vault
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUsdc), 10_000e6)), value: 0
         });
 
-        vm.prank(agentPKP);
+        vm.prank(agentPkp);
         vault.executeBatch(calls, 0);
 
         // Allowance is set on the VAULT (delegatecall), not some external executor
-        assertEq(usdc.allowance(address(vault), address(mUSDC)), 10_000e6);
+        assertEq(usdc.allowance(address(vault), address(mUsdc)), 10_000e6);
     }
 
     function test_executeBatch_moonwellDeposit() public {
@@ -264,26 +264,26 @@ contract SyndicateVaultTest is Test {
 
         // 1. Approve mToken to pull USDC
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUsdc), 10_000e6)), value: 0
         });
 
         // 2. Mint mTokens (deposit collateral)
         calls[1] = BatchExecutorLib.Call({
-            target: address(mUSDC), data: abi.encodeWithSignature("mint(uint256)", 10_000e6), value: 0
+            target: address(mUsdc), data: abi.encodeWithSignature("mint(uint256)", 10_000e6), value: 0
         });
 
         // 3. Enter market as collateral
         address[] memory markets = new address[](1);
-        markets[0] = address(mUSDC);
+        markets[0] = address(mUsdc);
         calls[2] = BatchExecutorLib.Call({
             target: address(comptroller), data: abi.encodeCall(comptroller.enterMarkets, (markets)), value: 0
         });
 
-        vm.prank(agentPKP);
+        vm.prank(agentPkp);
         vault.executeBatch(calls, 0);
 
         // VAULT holds the mTokens (not some separate executor)
-        assertEq(mUSDC.balanceOf(address(vault)), 10_000e6);
+        assertEq(mUsdc.balanceOf(address(vault)), 10_000e6);
     }
 
     function test_executeBatch_fullLeveragedLong() public {
@@ -295,31 +295,31 @@ contract SyndicateVaultTest is Test {
 
         // 1. Approve mToken to pull USDC
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUsdc), 10_000e6)), value: 0
         });
 
         // 2. Deposit collateral
         calls[1] = BatchExecutorLib.Call({
-            target: address(mUSDC), data: abi.encodeWithSignature("mint(uint256)", 10_000e6), value: 0
+            target: address(mUsdc), data: abi.encodeWithSignature("mint(uint256)", 10_000e6), value: 0
         });
 
         // 3. Enter market
         address[] memory markets = new address[](1);
-        markets[0] = address(mUSDC);
+        markets[0] = address(mUsdc);
         calls[2] = BatchExecutorLib.Call({
             target: address(comptroller), data: abi.encodeCall(comptroller.enterMarkets, (markets)), value: 0
         });
 
         // 4. Borrow USDC (goes to vault since vault is msg.sender via delegatecall)
         calls[3] = BatchExecutorLib.Call({
-            target: address(mUSDC), data: abi.encodeWithSignature("borrow(uint256)", 5_000e6), value: 0
+            target: address(mUsdc), data: abi.encodeWithSignature("borrow(uint256)", 5_000e6), value: 0
         });
 
-        vm.prank(agentPKP);
+        vm.prank(agentPkp);
         vault.executeBatch(calls, 0);
 
         // Vault holds mTokens
-        assertEq(mUSDC.balanceOf(address(vault)), 10_000e6);
+        assertEq(mUsdc.balanceOf(address(vault)), 10_000e6);
         // Vault got borrow proceeds (100k - 10k deposited + 5k borrowed = 95k)
         assertEq(usdc.balanceOf(address(vault)), 95_000e6);
     }
@@ -330,7 +330,7 @@ contract SyndicateVaultTest is Test {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({target: evil, data: "", value: 0});
 
-        vm.prank(agentPKP);
+        vm.prank(agentPkp);
         vm.expectRevert("Target not allowed");
         vault.executeBatch(calls, 0);
     }
@@ -349,18 +349,18 @@ contract SyndicateVaultTest is Test {
 
         // 1. Approve (would succeed)
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUsdc), 10_000e6)), value: 0
         });
 
         // 2. Call disallowed target (allowlist check catches this before delegatecall)
         calls[1] = BatchExecutorLib.Call({target: makeAddr("notAllowed"), data: "", value: 0});
 
-        vm.prank(agentPKP);
+        vm.prank(agentPkp);
         vm.expectRevert("Target not allowed");
         vault.executeBatch(calls, 0);
 
         // Approve from step 1 should NOT have persisted
-        assertEq(usdc.allowance(address(vault), address(mUSDC)), 0);
+        assertEq(usdc.allowance(address(vault), address(mUsdc)), 0);
     }
 
     function test_executeBatch_whenPaused_reverts() public {
@@ -369,7 +369,7 @@ contract SyndicateVaultTest is Test {
 
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
-        vm.prank(agentPKP);
+        vm.prank(agentPkp);
         vm.expectRevert();
         vault.executeBatch(calls, 0);
     }
@@ -380,7 +380,7 @@ contract SyndicateVaultTest is Test {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
         // Agent cap is 5000e6 — try 6000e6
-        vm.prank(agentPKP);
+        vm.prank(agentPkp);
         vm.expectRevert("Exceeds per-tx cap");
         vault.executeBatch(calls, 6_000e6);
     }
@@ -390,12 +390,12 @@ contract SyndicateVaultTest is Test {
 
         // Agent spends up to daily limit (20k = 4 * 5k)
         for (uint256 i = 0; i < 4; i++) {
-            vm.prank(agentPKP);
+            vm.prank(agentPkp);
             vault.executeBatch(calls, 5_000e6);
         }
 
         // Next tx should fail (20k daily limit, already spent 20k)
-        vm.prank(agentPKP);
+        vm.prank(agentPkp);
         vm.expectRevert("Exceeds agent daily limit");
         vault.executeBatch(calls, 1_000e6);
     }
@@ -405,7 +405,7 @@ contract SyndicateVaultTest is Test {
 
         // Agent spends to daily limit
         for (uint256 i = 0; i < 4; i++) {
-            vm.prank(agentPKP);
+            vm.prank(agentPkp);
             vault.executeBatch(calls, 5_000e6);
         }
 
@@ -413,34 +413,34 @@ contract SyndicateVaultTest is Test {
         vm.warp(block.timestamp + 1 days);
 
         // Should work again
-        vm.prank(agentPKP);
+        vm.prank(agentPkp);
         vault.executeBatch(calls, 5_000e6);
 
-        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPKP);
+        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPkp);
         assertEq(config.spentToday, 5_000e6); // Reset to just this tx
     }
 
     function test_executeBatch_syndicateDailyLimit() public {
         // Register second agent with high limit
         vm.prank(owner);
-        vault.registerAgent(agentPKP2, agentEOA2, MAX_PER_TX, MAX_DAILY);
+        vault.registerAgent(agentPkp2, agentEoa2, MAX_PER_TX, MAX_DAILY);
 
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
         // Agent 1 spends 20k
         for (uint256 i = 0; i < 4; i++) {
-            vm.prank(agentPKP);
+            vm.prank(agentPkp);
             vault.executeBatch(calls, 5_000e6);
         }
 
         // Agent 2 spends 30k (up to 50k syndicate total)
         for (uint256 i = 0; i < 3; i++) {
-            vm.prank(agentPKP2);
+            vm.prank(agentPkp2);
             vault.executeBatch(calls, 10_000e6);
         }
 
         // Agent 2 tries one more — hits syndicate daily limit (50k)
-        vm.prank(agentPKP2);
+        vm.prank(agentPkp2);
         vm.expectRevert("Exceeds syndicate daily limit");
         vault.executeBatch(calls, 1_000e6);
     }
@@ -448,10 +448,10 @@ contract SyndicateVaultTest is Test {
     function test_executeBatch_spendTracking() public {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
-        vm.prank(agentPKP);
+        vm.prank(agentPkp);
         vault.executeBatch(calls, 1_000e6);
 
-        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPKP);
+        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPkp);
         assertEq(config.spentToday, 1_000e6);
         assertEq(vault.getDailySpendTotal(), 1_000e6);
     }
@@ -461,7 +461,7 @@ contract SyndicateVaultTest is Test {
     function test_simulateBatch_success() public {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUSDC), 10_000e6)), value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUsdc), 10_000e6)), value: 0
         });
 
         // Anyone can simulate (no agent check)
@@ -490,14 +490,14 @@ contract SyndicateVaultTest is Test {
 
         if (amount > 5_000e6) {
             // Exceeds agent per-tx cap
-            vm.prank(agentPKP);
+            vm.prank(agentPkp);
             vm.expectRevert("Exceeds per-tx cap");
             vault.executeBatch(calls, amount);
         } else {
-            vm.prank(agentPKP);
+            vm.prank(agentPkp);
             vault.executeBatch(calls, amount);
 
-            ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPKP);
+            ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPkp);
             assertEq(config.spentToday, amount);
         }
     }

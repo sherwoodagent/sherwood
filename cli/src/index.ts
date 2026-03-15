@@ -5,20 +5,31 @@ import { parseUnits } from "viem";
 import type { Address } from "viem";
 import chalk from "chalk";
 import ora from "ora";
+import { setNetwork } from "./lib/network.js";
+import { getExplorerUrl, isTestnet } from "./lib/network.js";
+import { TOKENS } from "./lib/addresses.js";
 import { MoonwellProvider } from "./providers/moonwell.js";
 import { UniswapProvider } from "./providers/uniswap.js";
 import { runLeveredSwap } from "./commands/strategy-run.js";
 import * as vaultLib from "./lib/vault.js";
 import * as factoryLib from "./lib/factory.js";
 import * as subgraphLib from "./lib/subgraph.js";
-import { TOKENS } from "./lib/addresses.js";
+import * as registryLib from "./lib/registry.js";
 
 const program = new Command();
 
 program
   .name("sherwood")
   .description("CLI for agent-managed investment syndicates")
-  .version("0.1.0");
+  .version("0.1.0")
+  .option("--testnet", "Use Base Sepolia testnet instead of Base mainnet", false)
+  .hook("preAction", (thisCommand) => {
+    const opts = thisCommand.optsWithGlobals();
+    setNetwork(opts.testnet ? "base-sepolia" : "base");
+    if (opts.testnet) {
+      console.log(chalk.yellow("[testnet] Base Sepolia"));
+    }
+  });
 
 // ── Syndicate commands ──
 const syndicate = program.command("syndicate");
@@ -28,7 +39,7 @@ syndicate
   .description("Create a new syndicate via the factory")
   .requiredOption("--name <name>", "Vault token name")
   .requiredOption("--symbol <symbol>", "Vault token symbol")
-  .option("--asset <address>", "Underlying asset address", TOKENS.USDC)
+  .option("--asset <address>", "Underlying asset address")
   .option("--max-per-tx <amount>", "Max USDC per transaction", "10000")
   .option("--max-daily <amount>", "Max daily combined USDC spend", "50000")
   .option("--borrow-ratio <bps>", "Max borrow ratio in basis points", "7500")
@@ -42,9 +53,11 @@ syndicate
         ? opts.targets.split(",").map((a: string) => a.trim() as Address)
         : [];
 
+      const asset = (opts.asset || TOKENS().USDC) as Address;
+
       const hash = await factoryLib.createSyndicate({
         metadataURI: opts.metadataUri,
-        asset: opts.asset as Address,
+        asset,
         name: opts.name,
         symbol: opts.symbol,
         maxPerTx: parseUnits(opts.maxPerTx, 6),
@@ -54,7 +67,7 @@ syndicate
         openDeposits: opts.openDeposits,
       });
       spinner.succeed(`Syndicate created: ${hash}`);
-      console.log(chalk.dim(`  https://basescan.org/tx/${hash}`));
+      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Syndicate creation failed");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
@@ -150,7 +163,8 @@ syndicate
       }
 
       // Also show vault info
-      process.env.VAULT_ADDRESS = info.vault;
+      const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+      process.env[envKey] = info.vault;
       const vaultInfo = await vaultLib.getVaultInfo();
       console.log();
       console.log(chalk.bold("  Vault Stats"));
@@ -174,12 +188,13 @@ syndicate
   .requiredOption("--vault <address>", "Vault address")
   .requiredOption("--depositor <address>", "Address to approve")
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     const spinner = ora("Approving depositor...").start();
     try {
       const hash = await vaultLib.approveDepositor(opts.depositor as Address);
       spinner.succeed(`Depositor approved: ${hash}`);
-      console.log(chalk.dim(`  https://basescan.org/tx/${hash}`));
+      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Approval failed");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
@@ -193,12 +208,13 @@ syndicate
   .requiredOption("--vault <address>", "Vault address")
   .requiredOption("--depositor <address>", "Address to remove")
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     const spinner = ora("Removing depositor...").start();
     try {
       const hash = await vaultLib.removeDepositor(opts.depositor as Address);
       spinner.succeed(`Depositor removed: ${hash}`);
-      console.log(chalk.dim(`  https://basescan.org/tx/${hash}`));
+      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Removal failed");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
@@ -215,13 +231,14 @@ vaultCmd
   .requiredOption("--vault <address>", "Vault address")
   .requiredOption("--amount <amount>", "Amount of USDC to deposit")
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     const amount = parseUnits(opts.amount, 6);
     const spinner = ora(`Depositing ${opts.amount} USDC...`).start();
     try {
       const hash = await vaultLib.deposit(amount);
       spinner.succeed(`Deposited: ${hash}`);
-      console.log(chalk.dim(`  https://basescan.org/tx/${hash}`));
+      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Deposit failed");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
@@ -234,12 +251,13 @@ vaultCmd
   .description("Withdraw all shares from a vault")
   .requiredOption("--vault <address>", "Vault address")
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     const spinner = ora("Ragequitting...").start();
     try {
       const hash = await vaultLib.ragequit();
       spinner.succeed(`Ragequit: ${hash}`);
-      console.log(chalk.dim(`  https://basescan.org/tx/${hash}`));
+      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Ragequit failed");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
@@ -252,7 +270,8 @@ vaultCmd
   .description("Display vault state")
   .requiredOption("--vault <address>", "Vault address")
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     const spinner = ora("Loading vault info...").start();
     try {
       const info = await vaultLib.getVaultInfo();
@@ -283,7 +302,8 @@ vaultCmd
   .requiredOption("--vault <address>", "Vault address")
   .option("--address <address>", "Address to check (default: your wallet)")
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     const spinner = ora("Loading balance...").start();
     try {
       const balance = await vaultLib.getBalance(opts.address as Address | undefined);
@@ -311,7 +331,8 @@ vaultCmd
   .requiredOption("--max-per-tx <amount>", "Max USDC per transaction")
   .requiredOption("--daily-limit <amount>", "Daily USDC limit")
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     const maxPerTx = parseUnits(opts.maxPerTx, 6);
     const dailyLimit = parseUnits(opts.dailyLimit, 6);
     const spinner = ora("Registering agent...").start();
@@ -323,6 +344,7 @@ vaultCmd
         dailyLimit,
       );
       spinner.succeed(`Agent registered: ${hash}`);
+      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Registration failed");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
@@ -336,11 +358,13 @@ vaultCmd
   .requiredOption("--vault <address>", "Vault address")
   .requiredOption("--target <address>", "Target address to allow")
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     const spinner = ora("Adding target...").start();
     try {
       const hash = await vaultLib.addTarget(opts.target as Address);
       spinner.succeed(`Target added: ${hash}`);
+      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Failed to add target");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
@@ -354,11 +378,13 @@ vaultCmd
   .requiredOption("--vault <address>", "Vault address")
   .requiredOption("--target <address>", "Target address to remove")
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     const spinner = ora("Removing target...").start();
     try {
       const hash = await vaultLib.removeTarget(opts.target as Address);
       spinner.succeed(`Target removed: ${hash}`);
+      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Failed to remove target");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
@@ -371,7 +397,8 @@ vaultCmd
   .description("List allowed targets for a vault")
   .requiredOption("--vault <address>", "Vault address")
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     const spinner = ora("Loading targets...").start();
     try {
       const targets = await vaultLib.getAllowedTargets();
@@ -398,8 +425,65 @@ strategy
   .description("List registered strategies")
   .option("--type <id>", "Filter by strategy type")
   .action(async (opts) => {
-    console.log("Listing strategies...", opts);
-    // TODO: Wire with StrategyRegistry contract (Phase 3)
+    const spinner = ora("Loading strategies...").start();
+    try {
+      const strategies = await registryLib.listStrategies(
+        opts.type ? BigInt(opts.type) : undefined,
+      );
+      spinner.stop();
+
+      if (strategies.length === 0) {
+        console.log(chalk.dim("No strategies registered."));
+        return;
+      }
+
+      console.log();
+      console.log(chalk.bold(`Strategies (${strategies.length})`));
+      console.log(chalk.dim("─".repeat(70)));
+      for (const s of strategies) {
+        const status = s.active ? chalk.green("active") : chalk.red("inactive");
+        console.log(`  #${s.id}  ${chalk.bold(s.name)}  [type: ${s.strategyTypeId}]  ${status}`);
+        console.log(`    Creator:        ${s.creator}`);
+        console.log(`    Implementation: ${s.implementation}`);
+        if (s.metadataURI) {
+          console.log(`    Metadata:       ${chalk.dim(s.metadataURI)}`);
+        }
+        console.log();
+      }
+    } catch (err) {
+      spinner.fail("Failed to load strategies");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+strategy
+  .command("info")
+  .description("Show strategy details")
+  .argument("<id>", "Strategy ID")
+  .action(async (idStr) => {
+    const spinner = ora("Loading strategy...").start();
+    try {
+      const s = await registryLib.getStrategy(BigInt(idStr));
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.bold(`Strategy #${s.id}`));
+      console.log(chalk.dim("─".repeat(40)));
+      console.log(`  Name:           ${s.name}`);
+      console.log(`  Type:           ${s.strategyTypeId}`);
+      console.log(`  Active:         ${s.active ? chalk.green("yes") : chalk.red("no")}`);
+      console.log(`  Creator:        ${s.creator}`);
+      console.log(`  Implementation: ${s.implementation}`);
+      if (s.metadataURI) {
+        console.log(`  Metadata:       ${chalk.dim(s.metadataURI)}`);
+      }
+      console.log();
+    } catch (err) {
+      spinner.fail("Failed to load strategy");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
   });
 
 strategy
@@ -408,10 +492,23 @@ strategy
   .requiredOption("--implementation <address>", "Strategy contract address")
   .requiredOption("--type <id>", "Strategy type ID")
   .requiredOption("--name <name>", "Strategy name")
-  .option("--metadata <uri>", "Metadata URI (IPFS/Arweave)")
+  .option("--metadata <uri>", "Metadata URI (IPFS/Arweave)", "")
   .action(async (opts) => {
-    console.log("Registering strategy...", opts);
-    // TODO: Wire with StrategyRegistry contract (Phase 3)
+    const spinner = ora("Registering strategy...").start();
+    try {
+      const hash = await registryLib.registerStrategy(
+        opts.implementation as Address,
+        BigInt(opts.type),
+        opts.name,
+        opts.metadata,
+      );
+      spinner.succeed(`Strategy registered: ${hash}`);
+      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
+    } catch (err) {
+      spinner.fail("Registration failed");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
   });
 
 strategy
@@ -425,7 +522,8 @@ strategy
   .option("--slippage <bps>", "Slippage tolerance in bps", "100")
   .option("--execute", "Actually execute on-chain (default: simulate only)", false)
   .action(async (opts) => {
-    process.env.VAULT_ADDRESS = opts.vault;
+    const envKey = isTestnet() ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+    process.env[envKey] = opts.vault;
     await runLeveredSwap(opts);
   });
 

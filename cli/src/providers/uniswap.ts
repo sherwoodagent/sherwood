@@ -1,9 +1,6 @@
 import type { Address } from "viem";
-import { base } from "viem/chains";
+import { base, baseSepolia } from "viem/chains";
 import type { TradingProvider, ProviderInfo, SwapParams, SwapQuoteParams, TxResult, SwapQuote } from "../types.js";
-
-// Uniswap V3 SwapRouter on Base
-const SWAP_ROUTER: Address = "0x2626664c2603336E57B271c5C0b26F421741e481";
 
 export class UniswapProvider implements TradingProvider {
   info(): ProviderInfo {
@@ -14,7 +11,7 @@ export class UniswapProvider implements TradingProvider {
         "swap.exact-input",
         "swap.quote",
       ],
-      supportedChains: [base],
+      supportedChains: [base, baseSepolia],
     };
   }
 

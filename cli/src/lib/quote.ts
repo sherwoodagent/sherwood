@@ -43,7 +43,7 @@ export async function getQuote(params: {
   });
 
   const { data } = await client.call({
-    to: UNISWAP.QUOTER_V2,
+    to: UNISWAP().QUOTER_V2,
     data: calldata,
   });
 

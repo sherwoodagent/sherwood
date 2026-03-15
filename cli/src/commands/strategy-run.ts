@@ -24,6 +24,7 @@ import { executeBatch, simulateBatch } from "../lib/vault.js";
 import { getPublicClient } from "../lib/client.js";
 import { ERC20_ABI } from "../lib/abis.js";
 import { TOKENS } from "../lib/addresses.js";
+import { getExplorerUrl } from "../lib/network.js";
 
 const VALID_FEES = [500, 3000, 10000] as const;
 
@@ -90,7 +91,7 @@ export async function runLeveredSwap(opts: {
   try {
     const borrowAmount = parseUnits(opts.borrow, 6);
     const quote = await getQuote({
-      tokenIn: TOKENS.USDC,
+      tokenIn: TOKENS().USDC,
       tokenOut: targetToken,
       amountIn: borrowAmount,
       fee: feeTier,
@@ -171,7 +172,7 @@ export async function runLeveredSwap(opts: {
   try {
     const txHash = await executeBatch(calls, assetAmount);
     execSpinner.succeed(`Batch executed: ${txHash}`);
-    console.log(chalk.dim(`  https://basescan.org/tx/${txHash}`));
+    console.log(chalk.dim(`  ${getExplorerUrl(txHash)}`));
   } catch (err) {
     execSpinner.fail("Execution failed");
     console.error(chalk.red(err instanceof Error ? err.message : String(err)));

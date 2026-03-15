@@ -7,7 +7,7 @@
 
 import type { Address, Hex } from "viem";
 import { parseUnits, formatUnits } from "viem";
-import { base } from "viem/chains";
+import { getChain, getNetwork } from "./network.js";
 import { getPublicClient, getWalletClient, getAccount } from "./client.js";
 import { SYNDICATE_FACTORY_ABI } from "./abis.js";
 import { TOKENS } from "./addresses.js";
@@ -34,9 +34,10 @@ export interface CreateSyndicateParams {
 }
 
 function getFactoryAddress(): Address {
-  const addr = process.env.FACTORY_ADDRESS;
+  const envKey = getNetwork() === "base-sepolia" ? "FACTORY_ADDRESS_TESTNET" : "FACTORY_ADDRESS";
+  const addr = process.env[envKey];
   if (!addr) {
-    throw new Error("FACTORY_ADDRESS env var is required");
+    throw new Error(`${envKey} env var is required`);
   }
   return addr as Address;
 }
@@ -50,7 +51,7 @@ export async function createSyndicate(params: CreateSyndicateParams): Promise<He
 
   return wallet.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getFactoryAddress(),
     abi: SYNDICATE_FACTORY_ABI,
     functionName: "createSyndicate",
@@ -141,7 +142,7 @@ export async function updateMetadata(syndicateId: bigint, metadataURI: string): 
   const wallet = getWalletClient();
   return wallet.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getFactoryAddress(),
     abi: SYNDICATE_FACTORY_ABI,
     functionName: "updateMetadata",

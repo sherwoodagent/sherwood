@@ -7,7 +7,7 @@
 
 import type { Address, Hex } from "viem";
 import { formatUnits, encodeFunctionData, decodeFunctionResult } from "viem";
-import { base } from "viem/chains";
+import { getChain, getNetwork } from "./network.js";
 import { getPublicClient, getWalletClient, getAccount } from "./client.js";
 import { SYNDICATE_VAULT_ABI, ERC20_ABI } from "./abis.js";
 import { TOKENS } from "./addresses.js";
@@ -19,9 +19,10 @@ export interface SimulationResult {
 }
 
 function getVaultAddress(): Address {
-  const addr = process.env.VAULT_ADDRESS;
+  const envKey = getNetwork() === "base-sepolia" ? "VAULT_ADDRESS_TESTNET" : "VAULT_ADDRESS";
+  const addr = process.env[envKey];
   if (!addr) {
-    throw new Error("VAULT_ADDRESS env var is required");
+    throw new Error(`${envKey} env var is required`);
   }
   return addr as Address;
 }
@@ -39,8 +40,8 @@ export async function deposit(amount: bigint): Promise<Hex> {
   // Approve vault to pull USDC
   await wallet.writeContract({
     account: getAccount(),
-    chain: base,
-    address: TOKENS.USDC,
+    chain: getChain(),
+    address: TOKENS().USDC,
     abi: ERC20_ABI,
     functionName: "approve",
     args: [vaultAddress, amount],
@@ -49,7 +50,7 @@ export async function deposit(amount: bigint): Promise<Hex> {
   // Deposit
   return wallet.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: vaultAddress,
     abi: SYNDICATE_VAULT_ABI,
     functionName: "deposit",
@@ -66,7 +67,7 @@ export async function ragequit(): Promise<Hex> {
 
   return wallet.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getVaultAddress(),
     abi: SYNDICATE_VAULT_ABI,
     functionName: "ragequit",
@@ -89,7 +90,7 @@ export async function executeBatch(
 
   return wallet.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getVaultAddress(),
     abi: SYNDICATE_VAULT_ABI,
     functionName: "executeBatch",
@@ -155,7 +156,7 @@ export async function addTarget(target: Address): Promise<Hex> {
   const client = getWalletClient();
   return client.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getVaultAddress(),
     abi: SYNDICATE_VAULT_ABI,
     functionName: "addTarget",
@@ -170,7 +171,7 @@ export async function removeTarget(target: Address): Promise<Hex> {
   const client = getWalletClient();
   return client.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getVaultAddress(),
     abi: SYNDICATE_VAULT_ABI,
     functionName: "removeTarget",
@@ -185,7 +186,7 @@ export async function addTargets(targets: Address[]): Promise<Hex> {
   const client = getWalletClient();
   return client.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getVaultAddress(),
     abi: SYNDICATE_VAULT_ABI,
     functionName: "addTargets",
@@ -227,7 +228,7 @@ export async function approveDepositor(depositor: Address): Promise<Hex> {
   const wallet = getWalletClient();
   return wallet.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getVaultAddress(),
     abi: SYNDICATE_VAULT_ABI,
     functionName: "approveDepositor",
@@ -242,7 +243,7 @@ export async function removeDepositor(depositor: Address): Promise<Hex> {
   const wallet = getWalletClient();
   return wallet.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getVaultAddress(),
     abi: SYNDICATE_VAULT_ABI,
     functionName: "removeDepositor",
@@ -257,7 +258,7 @@ export async function approveDepositors(depositors: Address[]): Promise<Hex> {
   const wallet = getWalletClient();
   return wallet.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getVaultAddress(),
     abi: SYNDICATE_VAULT_ABI,
     functionName: "approveDepositors",
@@ -339,7 +340,7 @@ export async function registerAgent(
 
   return wallet.writeContract({
     account: getAccount(),
-    chain: base,
+    chain: getChain(),
     address: getVaultAddress(),
     abi: SYNDICATE_VAULT_ABI,
     functionName: "registerAgent",

@@ -479,3 +479,75 @@ export const SYNDICATE_FACTORY_ABI = [
     outputs: [{ name: "", type: "address" }],
   },
 ] as const;
+
+// ── StrategyRegistry ──
+
+export const STRATEGY_REGISTRY_ABI = [
+  {
+    name: "registerStrategy",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "implementation", type: "address" },
+      { name: "strategyTypeId", type: "uint256" },
+      { name: "name", type: "string" },
+      { name: "metadataURI", type: "string" },
+    ],
+    outputs: [{ name: "strategyId", type: "uint256" }],
+  },
+  {
+    name: "getStrategy",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "strategyId", type: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "implementation", type: "address" },
+          { name: "creator", type: "address" },
+          { name: "strategyTypeId", type: "uint256" },
+          { name: "active", type: "bool" },
+          { name: "name", type: "string" },
+          { name: "metadataURI", type: "string" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "getStrategiesByType",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "strategyTypeId", type: "uint256" }],
+    outputs: [{ name: "", type: "uint256[]" }],
+  },
+  {
+    name: "getStrategiesByCreator",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "creator", type: "address" }],
+    outputs: [{ name: "", type: "uint256[]" }],
+  },
+  {
+    name: "strategyCount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "isStrategyActive",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "strategyId", type: "uint256" }],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "deactivateStrategy",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "strategyId", type: "uint256" }],
+    outputs: [],
+  },
+] as const;
