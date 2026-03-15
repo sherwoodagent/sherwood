@@ -218,6 +218,20 @@ export const SYNDICATE_VAULT_ABI = [
     outputs: [{ name: "", type: "address" }],
   },
   {
+    name: "totalDeposited",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "getAgentOperators",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address[]" }],
+  },
+  {
     name: "pause",
     type: "function",
     stateMutability: "nonpayable",
@@ -324,6 +338,44 @@ export const UNISWAP_QUOTER_V2_ABI = [
       { name: "initializedTicksCrossed", type: "uint32" },
       { name: "gasEstimate", type: "uint256" },
     ],
+  },
+  {
+    name: "quoteExactInput",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "path", type: "bytes" },
+      { name: "amountIn", type: "uint256" },
+    ],
+    outputs: [
+      { name: "amountOut", type: "uint256" },
+      { name: "sqrtPriceX96AfterList", type: "uint160[]" },
+      { name: "initializedTicksCrossedList", type: "uint32[]" },
+      { name: "gasEstimate", type: "uint256" },
+    ],
+  },
+] as const;
+
+// ── Uniswap SwapRouter (multi-hop) ──
+
+export const SWAP_ROUTER_ABI = [
+  {
+    name: "exactInput",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "params",
+        type: "tuple",
+        components: [
+          { name: "path", type: "bytes" },
+          { name: "recipient", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "amountOutMinimum", type: "uint256" },
+        ],
+      },
+    ],
+    outputs: [{ name: "amountOut", type: "uint256" }],
   },
 ] as const;
 
@@ -601,6 +653,80 @@ export const STRATEGY_REGISTRY_ABI = [
     type: "function",
     stateMutability: "nonpayable",
     inputs: [{ name: "strategyId", type: "uint256" }],
+    outputs: [],
+  },
+] as const;
+
+// ── Venice Staking (sVVV = staking contract ERC-20) ──
+
+export const VENICE_STAKING_ABI = [
+  {
+    name: "stake",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "recipient", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "initiateUnstake",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "amount", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    name: "finalizeUnstake",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: "mintDiem",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "sVVVAmountToLock", type: "uint256" },
+      { name: "minDiemAmountOut", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "balanceOf",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "pendingRewards",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "_user", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "cooldownDuration",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "getDiemAmountOut",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "sVVVAmountToLock", type: "uint256" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "claim",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [],
     outputs: [],
   },
 ] as const;

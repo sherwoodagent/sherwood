@@ -16,6 +16,7 @@ export interface SherwoodConfig {
   dbEncryptionKey: string; // hex-encoded 32 bytes
   xmtpInboxId?: string;
   groupCache: Record<string, string>; // subdomain → XMTP group ID
+  veniceApiKey?: string; // Venice AI inference API key
 }
 
 export function loadConfig(): SherwoodConfig {
@@ -45,4 +46,14 @@ export function cacheGroupId(subdomain: string, groupId: string): void {
 export function getCachedGroupId(subdomain: string): string | undefined {
   const config = loadConfig();
   return config.groupCache[subdomain];
+}
+
+export function setVeniceApiKey(apiKey: string): void {
+  const config = loadConfig();
+  config.veniceApiKey = apiKey;
+  saveConfig(config);
+}
+
+export function getVeniceApiKey(): string | undefined {
+  return loadConfig().veniceApiKey;
 }

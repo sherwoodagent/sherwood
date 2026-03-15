@@ -18,6 +18,7 @@ import * as factoryLib from "./lib/factory.js";
 import * as subgraphLib from "./lib/subgraph.js";
 import * as registryLib from "./lib/registry.js";
 import { registerChatCommands } from "./commands/chat.js";
+import { registerVeniceCommands } from "./commands/venice.js";
 import { getXmtpClient, createSyndicateGroup, getGroup, addMember, sendEnvelope, removeMember } from "./lib/xmtp.js";
 import { setTextRecord, resolveVaultSyndicate } from "./lib/ens.js";
 import { cacheGroupId } from "./lib/config.js";
@@ -669,5 +670,8 @@ program
 
 // ── Chat commands ──
 registerChatCommands(program);
+
+// ── Venice commands ──
+registerVeniceCommands(program);
 
 program.parse();

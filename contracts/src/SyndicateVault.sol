@@ -75,6 +75,9 @@ contract SyndicateVault is
     /// @notice ERC-8004 agent identity registry (ERC-721)
     IERC721 private _agentRegistry;
 
+    /// @notice Cumulative deposits for profit calculation
+    uint256 private _totalDeposited;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -315,6 +318,21 @@ contract SyndicateVault is
         return _executorImpl;
     }
 
+    /// @inheritdoc ISyndicateVault
+    function totalDeposited() external view returns (uint256) {
+        return _totalDeposited;
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function getAgentOperators() external view returns (address[] memory) {
+        uint256 len = _agentSet.length();
+        address[] memory operators = new address[](len);
+        for (uint256 i = 0; i < len; i++) {
+            operators[i] = _agents[_agentSet.at(i)].operatorEOA;
+        }
+        return operators;
+    }
+
     // ==================== ADMIN ====================
 
     /// @inheritdoc ISyndicateVault
@@ -386,13 +404,14 @@ contract SyndicateVault is
 
     // ==================== OVERRIDES ====================
 
-    /// @dev Block deposits when paused or depositor not approved
+    /// @dev Block deposits when paused or depositor not approved. Track totalDeposited.
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares)
         internal
         override
         whenNotPaused
     {
         if (!_openDeposits && !_approvedDepositors.contains(receiver)) revert NotApprovedDepositor();
+        _totalDeposited += assets;
         super._deposit(caller, receiver, assets, shares);
     }
 
@@ -401,6 +420,11 @@ contract SyndicateVault is
         override
         whenNotPaused
     {
+        if (assets > _totalDeposited) {
+            _totalDeposited = 0;
+        } else {
+            _totalDeposited -= assets;
+        }
         super._withdraw(caller, receiver, _owner, assets, shares);
     }
 

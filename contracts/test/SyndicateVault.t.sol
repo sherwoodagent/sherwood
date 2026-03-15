@@ -699,4 +699,112 @@ contract SyndicateVaultTest is Test {
         // The main vault in setUp was created with openDeposits=true
         assertTrue(vault.openDeposits());
     }
+
+    // ==================== TOTAL DEPOSITED TRACKING ====================
+
+    function test_totalDeposited_increments_on_deposit() public {
+        assertEq(vault.totalDeposited(), 0);
+
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        assertEq(vault.totalDeposited(), 10_000e6);
+
+        vm.startPrank(lp2);
+        usdc.approve(address(vault), 5_000e6);
+        vault.deposit(5_000e6, lp2);
+        vm.stopPrank();
+
+        assertEq(vault.totalDeposited(), 15_000e6);
+    }
+
+    function test_totalDeposited_decrements_on_withdraw() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        vault.deposit(10_000e6, lp1);
+        vault.withdraw(3_000e6, lp1, lp1);
+        vm.stopPrank();
+
+        assertEq(vault.totalDeposited(), 7_000e6);
+    }
+
+    function test_totalDeposited_decrements_on_ragequit() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        assertEq(vault.totalDeposited(), 10_000e6);
+
+        vm.prank(lp1);
+        vault.ragequit(lp1);
+
+        assertEq(vault.totalDeposited(), 0);
+    }
+
+    function test_totalDeposited_multiple_lps() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 50_000e6);
+        vault.deposit(50_000e6, lp1);
+        vm.stopPrank();
+
+        vm.startPrank(lp2);
+        usdc.approve(address(vault), 30_000e6);
+        vault.deposit(30_000e6, lp2);
+        vm.stopPrank();
+
+        assertEq(vault.totalDeposited(), 80_000e6);
+
+        // LP1 ragequits
+        vm.prank(lp1);
+        vault.ragequit(lp1);
+
+        assertEq(vault.totalDeposited(), 30_000e6);
+    }
+
+    // ==================== GET AGENT OPERATORS ====================
+
+    function test_getAgentOperators_single() public view {
+        address[] memory operators = vault.getAgentOperators();
+        assertEq(operators.length, 1);
+        assertEq(operators[0], agentEoa);
+    }
+
+    function test_getAgentOperators_multiple() public {
+        vm.prank(owner);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2, 5_000e6, 20_000e6);
+
+        address[] memory operators = vault.getAgentOperators();
+        assertEq(operators.length, 2);
+        // Order depends on EnumerableSet iteration order
+        bool found1 = false;
+        bool found2 = false;
+        for (uint256 i = 0; i < operators.length; i++) {
+            if (operators[i] == agentEoa) found1 = true;
+            if (operators[i] == agentEoa2) found2 = true;
+        }
+        assertTrue(found1);
+        assertTrue(found2);
+    }
+
+    function test_getAgentOperators_afterRemoval() public {
+        vm.startPrank(owner);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2, 5_000e6, 20_000e6);
+        vault.removeAgent(agentPkp);
+        vm.stopPrank();
+
+        address[] memory operators = vault.getAgentOperators();
+        assertEq(operators.length, 1);
+        assertEq(operators[0], agentEoa2);
+    }
+
+    function test_getAgentOperators_empty() public {
+        vm.prank(owner);
+        vault.removeAgent(agentPkp);
+
+        address[] memory operators = vault.getAgentOperators();
+        assertEq(operators.length, 0);
+    }
 }

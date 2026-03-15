@@ -86,6 +86,8 @@ interface ISyndicateVault {
     function getDailySpendTotal() external view returns (uint256);
     function isAgent(address pkpAddress) external view returns (bool);
     function getExecutorImpl() external view returns (address);
+    function totalDeposited() external view returns (uint256);
+    function getAgentOperators() external view returns (address[] memory);
 
     // ── Admin (syndicate creator) ──
     function registerAgent(

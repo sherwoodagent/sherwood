@@ -99,6 +99,20 @@ const BASE_SEPOLIA_AGENT_REGISTRY = {
   REPUTATION_REGISTRY: "0x8004B663056A597Dffe9eCcC1965A193B7388713" as Address,
 } as const;
 
+// ── Venice (VVV governance + sVVV staking + DIEM compute) ──
+
+const BASE_VENICE = {
+  VVV: "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf" as Address,
+  STAKING: "0x321b7ff75154472b18edb199033ff4d116f340ff" as Address, // also the sVVV ERC-20
+  DIEM: "0xF4d97F2da56e8c3098f3a8D538DB630A2606a024" as Address,
+} as const;
+
+const BASE_SEPOLIA_VENICE = {
+  VVV: "0x0000000000000000000000000000000000000000" as Address,
+  STAKING: "0x0000000000000000000000000000000000000000" as Address,
+  DIEM: "0x0000000000000000000000000000000000000000" as Address,
+} as const;
+
 // ── Exports (functions, resolved at call time) ──
 
 export function TOKENS() {
@@ -123,4 +137,8 @@ export function ENS() {
 
 export function AGENT_REGISTRY() {
   return getNetwork() === "base" ? BASE_AGENT_REGISTRY : BASE_SEPOLIA_AGENT_REGISTRY;
+}
+
+export function VENICE() {
+  return getNetwork() === "base" ? BASE_VENICE : BASE_SEPOLIA_VENICE;
 }
