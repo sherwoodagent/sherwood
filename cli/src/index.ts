@@ -17,12 +17,16 @@ import * as vaultLib from "./lib/vault.js";
 import * as factoryLib from "./lib/factory.js";
 import * as subgraphLib from "./lib/subgraph.js";
 import * as registryLib from "./lib/registry.js";
-import { registerChatCommands } from "./commands/chat.js";
 import { registerVeniceCommands } from "./commands/venice.js";
 import { registerAllowanceCommands } from "./commands/allowance.js";
 import { registerIdentityCommands } from "./commands/identity.js";
-import { getXmtpClient, createSyndicateGroup, getGroup, addMember, sendEnvelope, removeMember } from "./lib/xmtp.js";
 import { setTextRecord, resolveVaultSyndicate } from "./lib/ens.js";
+
+// XMTP has native bindings that crash on import if not installed correctly.
+// Lazy-load to avoid breaking non-chat commands (config, identity, vault, etc.).
+async function loadXmtp() {
+  return import("./lib/xmtp.js");
+}
 import { cacheGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey } from "./lib/config.js";
 
 const program = new Command();
@@ -107,8 +111,9 @@ syndicate
 
       // Create XMTP group for syndicate chat
       try {
-        const xmtpClient = await getXmtpClient();
-        const groupId = await createSyndicateGroup(xmtpClient, opts.subdomain, opts.publicChat);
+        const xmtp = await loadXmtp();
+        const xmtpClient = await xmtp.getXmtpClient();
+        const groupId = await xmtp.createSyndicateGroup(xmtpClient, opts.subdomain, opts.publicChat);
 
         // Store group ID on-chain as ENS text record
         await setTextRecord(opts.subdomain, "xmtpGroupId", groupId);
@@ -324,10 +329,11 @@ syndicate
 
       // Auto-add agent to XMTP chat group
       try {
-        const xmtpClient = await getXmtpClient();
-        const group = await getGroup(xmtpClient, subdomain);
-        await addMember(group, opts.pkp);
-        await sendEnvelope(group, {
+        const xmtp = await loadXmtp();
+        const xmtpClient = await xmtp.getXmtpClient();
+        const group = await xmtp.getGroup(xmtpClient, subdomain);
+        await xmtp.addMember(group, opts.pkp);
+        await xmtp.sendEnvelope(group, {
           type: "AGENT_REGISTERED",
           agent: { erc8004Id: Number(opts.agentId), address: opts.pkp },
           syndicate: subdomain,
@@ -364,14 +370,15 @@ syndicate
 
     const spinner = ora(`${opts.on ? "Enabling" : "Disabling"} spectator mode...`).start();
     try {
-      const xmtpClient = await getXmtpClient();
-      const group = await getGroup(xmtpClient, subdomain);
+      const xmtp = await loadXmtp();
+      const xmtpClient = await xmtp.getXmtpClient();
+      const group = await xmtp.getGroup(xmtpClient, subdomain);
 
       if (opts.on) {
-        await addMember(group, spectatorAddress);
+        await xmtp.addMember(group, spectatorAddress);
         spinner.succeed("Spectator mode enabled");
       } else {
-        await removeMember(group, spectatorAddress);
+        await xmtp.removeMember(group, spectatorAddress);
         spinner.succeed("Spectator mode disabled");
       }
     } catch (err) {
@@ -665,8 +672,20 @@ program
     }
   });
 
-// ── Chat commands ──
-registerChatCommands(program);
+// ── Chat commands (lazy-loaded — XMTP has native bindings that may not be available) ──
+try {
+  const { registerChatCommands } = await import("./commands/chat.js");
+  registerChatCommands(program);
+} catch {
+  program
+    .command("chat")
+    .description("Syndicate chat (XMTP) — requires native bindings")
+    .action(() => {
+      console.error(chalk.red("XMTP native bindings not available."));
+      console.error(chalk.dim("Try: cd cli && rm -rf node_modules package-lock.json && npm i"));
+      process.exit(1);
+    });
+}
 
 // ── Venice commands ──
 registerVeniceCommands(program);
