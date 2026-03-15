@@ -23,6 +23,7 @@ export interface SyndicateInfo {
 }
 
 export interface CreateSyndicateParams {
+  creatorAgentId: bigint;
   metadataURI: string;
   asset: Address;
   name: string;
@@ -58,6 +59,7 @@ export async function createSyndicate(params: CreateSyndicateParams): Promise<He
     abi: SYNDICATE_FACTORY_ABI,
     functionName: "createSyndicate",
     args: [
+      params.creatorAgentId,
       {
         metadataURI: params.metadataURI,
         asset: params.asset,

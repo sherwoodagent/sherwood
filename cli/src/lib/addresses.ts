@@ -87,6 +87,18 @@ const BASE_SEPOLIA_ENS = {
   L2_REGISTRY: "0x06eb7b85b59bc3e50fe4837be776cdd26de602cf" as Address,
 } as const;
 
+// ── ERC-8004 Agent Identity ──
+
+const BASE_AGENT_REGISTRY = {
+  IDENTITY_REGISTRY: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432" as Address,
+  REPUTATION_REGISTRY: "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63" as Address,
+} as const;
+
+const BASE_SEPOLIA_AGENT_REGISTRY = {
+  IDENTITY_REGISTRY: "0x8004A818BFB912233c491871b3d84c89A494BD9e" as Address,
+  REPUTATION_REGISTRY: "0x8004B663056A597Dffe9eCcC1965A193B7388713" as Address,
+} as const;
+
 // ── Exports (functions, resolved at call time) ──
 
 export function TOKENS() {
@@ -107,4 +119,8 @@ export function INFRA() {
 
 export function ENS() {
   return getNetwork() === "base" ? BASE_ENS : BASE_SEPOLIA_ENS;
+}
+
+export function AGENT_REGISTRY() {
+  return getNetwork() === "base" ? BASE_AGENT_REGISTRY : BASE_SEPOLIA_AGENT_REGISTRY;
 }

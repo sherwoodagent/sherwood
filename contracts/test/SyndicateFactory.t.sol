@@ -8,6 +8,7 @@ import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../src/SyndicateFactory.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockL2Registrar} from "./mocks/MockL2Registrar.sol";
+import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
 
 contract SyndicateFactoryTest is Test {
     SyndicateFactory public factory;
@@ -15,16 +16,27 @@ contract SyndicateFactoryTest is Test {
     SyndicateVault public vaultImpl;
     ERC20Mock public usdc;
     MockL2Registrar public ensRegistrar;
+    MockAgentRegistry public agentRegistry;
 
     address public creator1 = makeAddr("creator1");
     address public creator2 = makeAddr("creator2");
+
+    uint256 public creator1AgentId;
+    uint256 public creator2AgentId;
 
     function setUp() public {
         usdc = new ERC20Mock("USD Coin", "USDC", 6);
         executorLib = new BatchExecutorLib();
         vaultImpl = new SyndicateVault();
         ensRegistrar = new MockL2Registrar();
-        factory = new SyndicateFactory(address(executorLib), address(vaultImpl), address(ensRegistrar));
+        agentRegistry = new MockAgentRegistry();
+        factory = new SyndicateFactory(
+            address(executorLib), address(vaultImpl), address(ensRegistrar), address(agentRegistry)
+        );
+
+        // Mint ERC-8004 identity NFTs for creators
+        creator1AgentId = agentRegistry.mint(creator1);
+        creator2AgentId = agentRegistry.mint(creator2);
     }
 
     function _defaultConfig() internal view returns (SyndicateFactory.SyndicateConfig memory) {
@@ -57,7 +69,7 @@ contract SyndicateFactoryTest is Test {
 
     function test_createSyndicate() public {
         vm.prank(creator1);
-        (uint256 id, address vaultAddr) = factory.createSyndicate(_defaultConfig());
+        (uint256 id, address vaultAddr) = factory.createSyndicate(creator1AgentId, _defaultConfig());
 
         assertEq(id, 1);
         assertTrue(vaultAddr != address(0));
@@ -80,9 +92,16 @@ contract SyndicateFactoryTest is Test {
         assertEq(caps.maxBorrowRatio, 7500);
     }
 
+    function test_createSyndicate_notAgentOwner_reverts() public {
+        // creator2 tries to use creator1's agent ID
+        vm.prank(creator2);
+        vm.expectRevert(SyndicateFactory.NotAgentOwner.selector);
+        factory.createSyndicate(creator1AgentId, _defaultConfig());
+    }
+
     function test_createSyndicate_registryTracking() public {
         vm.prank(creator1);
-        (uint256 id1, address vault1) = factory.createSyndicate(_defaultConfig());
+        (uint256 id1, address vault1) = factory.createSyndicate(creator1AgentId, _defaultConfig());
 
         assertEq(factory.syndicateCount(), 1);
         assertEq(factory.vaultToSyndicate(vault1), id1);
@@ -97,10 +116,10 @@ contract SyndicateFactoryTest is Test {
 
     function test_createMultipleSyndicates() public {
         vm.prank(creator1);
-        (uint256 id1, address vault1) = factory.createSyndicate(_configWithSubdomain("syndicate-one"));
+        (uint256 id1, address vault1) = factory.createSyndicate(creator1AgentId, _configWithSubdomain("syndicate-one"));
 
         vm.prank(creator2);
-        (uint256 id2, address vault2) = factory.createSyndicate(_configWithSubdomain("syndicate-two"));
+        (uint256 id2, address vault2) = factory.createSyndicate(creator2AgentId, _configWithSubdomain("syndicate-two"));
 
         assertEq(id1, 1);
         assertEq(id2, 2);
@@ -115,13 +134,14 @@ contract SyndicateFactoryTest is Test {
     function test_syndicateVaultIsFullyFunctional() public {
         // Create syndicate
         vm.prank(creator1);
-        (, address vaultAddr) = factory.createSyndicate(_defaultConfig());
+        (, address vaultAddr) = factory.createSyndicate(creator1AgentId, _defaultConfig());
         SyndicateVault vault = SyndicateVault(payable(vaultAddr));
 
-        // Register agent
+        // Register agent (mint agent NFT for the agent address)
         address agent = makeAddr("agent");
+        uint256 agentNftId = agentRegistry.mint(agent);
         vm.prank(creator1);
-        vault.registerAgent(agent, agent, 5_000e6, 20_000e6);
+        vault.registerAgent(agentNftId, agent, agent, 5_000e6, 20_000e6);
 
         // Approve LP as depositor (vault has openDeposits=false)
         address lp = makeAddr("lp");
@@ -151,21 +171,23 @@ contract SyndicateFactoryTest is Test {
     function test_storageIsolation() public {
         // Create two syndicates
         vm.prank(creator1);
-        (, address vault1Addr) = factory.createSyndicate(_configWithSubdomain("vault-alpha"));
+        (, address vault1Addr) = factory.createSyndicate(creator1AgentId, _configWithSubdomain("vault-alpha"));
         vm.prank(creator2);
-        (, address vault2Addr) = factory.createSyndicate(_configWithSubdomain("vault-beta"));
+        (, address vault2Addr) = factory.createSyndicate(creator2AgentId, _configWithSubdomain("vault-beta"));
 
         SyndicateVault vault1 = SyndicateVault(payable(vault1Addr));
         SyndicateVault vault2 = SyndicateVault(payable(vault2Addr));
 
-        // Register different agents on each
+        // Register different agents on each (mint NFTs for agents)
         address agent1 = makeAddr("agent1");
         address agent2 = makeAddr("agent2");
+        uint256 agent1NftId = agentRegistry.mint(agent1);
+        uint256 agent2NftId = agentRegistry.mint(agent2);
 
         vm.prank(creator1);
-        vault1.registerAgent(agent1, agent1, 5_000e6, 20_000e6);
+        vault1.registerAgent(agent1NftId, agent1, agent1, 5_000e6, 20_000e6);
         vm.prank(creator2);
-        vault2.registerAgent(agent2, agent2, 5_000e6, 20_000e6);
+        vault2.registerAgent(agent2NftId, agent2, agent2, 5_000e6, 20_000e6);
 
         // Agent1 is only on vault1
         assertTrue(vault1.isAgent(agent1));
@@ -180,7 +202,7 @@ contract SyndicateFactoryTest is Test {
 
     function test_createSyndicate_registersENS() public {
         vm.prank(creator1);
-        (, address vaultAddr) = factory.createSyndicate(_configWithSubdomain("alpha-seekers"));
+        (, address vaultAddr) = factory.createSyndicate(creator1AgentId, _configWithSubdomain("alpha-seekers"));
 
         // Verify the registrar received the correct label + vault address
         assertTrue(ensRegistrar.isRegistered("alpha-seekers"));
@@ -189,22 +211,22 @@ contract SyndicateFactoryTest is Test {
 
     function test_createSyndicate_duplicateName_reverts() public {
         vm.prank(creator1);
-        factory.createSyndicate(_configWithSubdomain("taken-name"));
+        factory.createSyndicate(creator1AgentId, _configWithSubdomain("taken-name"));
 
         vm.prank(creator2);
         vm.expectRevert(SyndicateFactory.SubdomainTaken.selector);
-        factory.createSyndicate(_configWithSubdomain("taken-name"));
+        factory.createSyndicate(creator2AgentId, _configWithSubdomain("taken-name"));
     }
 
     function test_createSyndicate_nameTooShort_reverts() public {
         vm.prank(creator1);
         vm.expectRevert(SyndicateFactory.SubdomainTooShort.selector);
-        factory.createSyndicate(_configWithSubdomain("ab"));
+        factory.createSyndicate(creator1AgentId, _configWithSubdomain("ab"));
     }
 
     function test_subdomainToSyndicate() public {
         vm.prank(creator1);
-        (uint256 id,) = factory.createSyndicate(_configWithSubdomain("my-fund"));
+        (uint256 id,) = factory.createSyndicate(creator1AgentId, _configWithSubdomain("my-fund"));
 
         assertEq(factory.subdomainToSyndicate("my-fund"), id);
         assertEq(factory.subdomainToSyndicate("nonexistent"), 0);
@@ -214,7 +236,7 @@ contract SyndicateFactoryTest is Test {
         assertTrue(factory.isSubdomainAvailable("new-fund"));
 
         vm.prank(creator1);
-        factory.createSyndicate(_configWithSubdomain("new-fund"));
+        factory.createSyndicate(creator1AgentId, _configWithSubdomain("new-fund"));
 
         assertFalse(factory.isSubdomainAvailable("new-fund"));
     }
@@ -227,7 +249,7 @@ contract SyndicateFactoryTest is Test {
 
     function test_updateMetadata() public {
         vm.prank(creator1);
-        (uint256 id,) = factory.createSyndicate(_defaultConfig());
+        (uint256 id,) = factory.createSyndicate(creator1AgentId, _defaultConfig());
 
         vm.prank(creator1);
         factory.updateMetadata(id, "ipfs://QmUpdated");
@@ -238,7 +260,7 @@ contract SyndicateFactoryTest is Test {
 
     function test_updateMetadata_notCreator_reverts() public {
         vm.prank(creator1);
-        (uint256 id,) = factory.createSyndicate(_defaultConfig());
+        (uint256 id,) = factory.createSyndicate(creator1AgentId, _defaultConfig());
 
         vm.prank(creator2);
         vm.expectRevert(SyndicateFactory.NotCreator.selector);
@@ -249,7 +271,7 @@ contract SyndicateFactoryTest is Test {
 
     function test_deactivate() public {
         vm.prank(creator1);
-        (uint256 id,) = factory.createSyndicate(_defaultConfig());
+        (uint256 id,) = factory.createSyndicate(creator1AgentId, _defaultConfig());
 
         vm.prank(creator1);
         factory.deactivate(id);
@@ -260,7 +282,7 @@ contract SyndicateFactoryTest is Test {
 
     function test_deactivate_notCreator_reverts() public {
         vm.prank(creator1);
-        (uint256 id,) = factory.createSyndicate(_defaultConfig());
+        (uint256 id,) = factory.createSyndicate(creator1AgentId, _defaultConfig());
 
         vm.prank(creator2);
         vm.expectRevert(SyndicateFactory.NotCreator.selector);
@@ -269,9 +291,9 @@ contract SyndicateFactoryTest is Test {
 
     function test_getActiveSyndicates() public {
         vm.startPrank(creator1);
-        factory.createSyndicate(_configWithSubdomain("fund-aaa"));
-        (uint256 id2,) = factory.createSyndicate(_configWithSubdomain("fund-bbb"));
-        factory.createSyndicate(_configWithSubdomain("fund-ccc"));
+        factory.createSyndicate(creator1AgentId, _configWithSubdomain("fund-aaa"));
+        (uint256 id2,) = factory.createSyndicate(creator1AgentId, _configWithSubdomain("fund-bbb"));
+        factory.createSyndicate(creator1AgentId, _configWithSubdomain("fund-ccc"));
 
         // Deactivate #2
         factory.deactivate(id2);

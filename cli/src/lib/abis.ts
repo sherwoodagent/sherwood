@@ -134,6 +134,7 @@ export const SYNDICATE_VAULT_ABI = [
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
+      { name: "agentId", type: "uint256" },
       { name: "pkpAddress", type: "address" },
       { name: "operatorEOA", type: "address" },
       { name: "maxPerTx", type: "uint256" },
@@ -159,6 +160,7 @@ export const SYNDICATE_VAULT_ABI = [
         name: "",
         type: "tuple",
         components: [
+          { name: "agentId", type: "uint256" },
           { name: "pkpAddress", type: "address" },
           { name: "operatorEOA", type: "address" },
           { name: "maxPerTx", type: "uint256" },
@@ -379,6 +381,7 @@ export const SYNDICATE_FACTORY_ABI = [
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
+      { name: "creatorAgentId", type: "uint256" },
       {
         name: "config",
         type: "tuple",

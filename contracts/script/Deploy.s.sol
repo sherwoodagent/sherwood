@@ -44,6 +44,11 @@ contract Deploy is Script {
     // TODO: set once Durin L2 Registrar is deployed on Base mainnet
     address constant L2_REGISTRAR = address(0);
 
+    // ERC-8004 Agent Identity Registry
+    // Base Mainnet: 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
+    // Base Sepolia: 0x8004A818BFB912233c491871b3d84c89A494BD9e
+    address constant AGENT_REGISTRY = 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432;
+
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerKey);
@@ -61,7 +66,8 @@ contract Deploy is Script {
         console.log("Vault implementation:", address(vaultImpl));
 
         // 3. Deploy SyndicateFactory
-        SyndicateFactory factory = new SyndicateFactory(address(executorLib), address(vaultImpl), L2_REGISTRAR);
+        SyndicateFactory factory =
+            new SyndicateFactory(address(executorLib), address(vaultImpl), L2_REGISTRAR, AGENT_REGISTRY);
         console.log("SyndicateFactory:", address(factory));
 
         // 4. Create first syndicate via factory
@@ -76,12 +82,16 @@ contract Deploy is Script {
         targets[7] = CB_BTC;
         targets[8] = AERO;
 
+        // NOTE: creatorAgentId must be set to the deployer's ERC-8004 agent ID
+        uint256 creatorAgentId = vm.envUint("CREATOR_AGENT_ID");
+
         (uint256 syndicateId, address vaultProxy) = factory.createSyndicate(
+            creatorAgentId,
             SyndicateFactory.SyndicateConfig({
                 metadataURI: "",
                 asset: IERC20(USDC),
                 name: "Sherwood Vault",
-                symbol: "shUSDC",
+                symbol: "swUSDC",
                 caps: ISyndicateVault.SyndicateCaps({
                     maxPerTx: 10_000e6, // 10k USDC
                     maxDailyTotal: 50_000e6, // 50k USDC
@@ -95,8 +105,11 @@ contract Deploy is Script {
         console.log("Syndicate #%d vault:", syndicateId, vaultProxy);
 
         // 5. Register deployer as agent (dev mode — PKP and EOA are both deployer)
+        // NOTE: agentId must be set to the deployer's ERC-8004 agent ID
+        uint256 agentId = creatorAgentId;
         SyndicateVault(payable(vaultProxy))
             .registerAgent(
+                agentId, // ERC-8004 identity
                 deployer, // pkpAddress (in dev, deployer acts as agent)
                 deployer, // operatorEOA
                 10_000e6, // maxPerTx: 10k USDC

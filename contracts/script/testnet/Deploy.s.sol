@@ -37,6 +37,9 @@ contract DeployTestnet is Script {
     // Durin L2 Registrar (ENS subnames for sherwoodagent.eth)
     address constant L2_REGISTRAR = 0x1fCbe9dFC25e3fa3F7C55b26c7992684A4758b47;
 
+    // ERC-8004 Agent Identity Registry (Base Sepolia)
+    address constant AGENT_REGISTRY = 0x8004A818BFB912233c491871b3d84c89A494BD9e;
+
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerKey);
@@ -55,7 +58,8 @@ contract DeployTestnet is Script {
         console.log("Vault implementation:", address(vaultImpl));
 
         // 3. Deploy SyndicateFactory
-        SyndicateFactory factory = new SyndicateFactory(address(executorLib), address(vaultImpl), L2_REGISTRAR);
+        SyndicateFactory factory =
+            new SyndicateFactory(address(executorLib), address(vaultImpl), L2_REGISTRAR, AGENT_REGISTRY);
         console.log("SyndicateFactory:", address(factory));
 
         // 4. Deploy StrategyRegistry (UUPS proxy)
@@ -70,12 +74,16 @@ contract DeployTestnet is Script {
         targets[0] = USDC;
         targets[1] = WETH;
 
+        // NOTE: creatorAgentId must be set to the deployer's ERC-8004 agent ID
+        uint256 creatorAgentId = vm.envUint("CREATOR_AGENT_ID");
+
         (uint256 syndicateId, address vaultProxy) = factory.createSyndicate(
+            creatorAgentId,
             SyndicateFactory.SyndicateConfig({
                 metadataURI: "",
                 asset: IERC20(USDC),
                 name: "Sherwood Testnet Vault",
-                symbol: "shUSDC",
+                symbol: "swUSDC",
                 caps: ISyndicateVault.SyndicateCaps({
                     maxPerTx: 100e6, // 100 USDC
                     maxDailyTotal: 500e6, // 500 USDC
@@ -89,8 +97,10 @@ contract DeployTestnet is Script {
         console.log("Syndicate #%d vault:", syndicateId, vaultProxy);
 
         // 6. Register deployer as agent (dev mode)
+        uint256 agentId = creatorAgentId;
         SyndicateVault(payable(vaultProxy))
             .registerAgent(
+                agentId, // ERC-8004 identity
                 deployer, // pkpAddress (dev: deployer acts as agent)
                 deployer, // operatorEOA
                 100e6, // maxPerTx: 100 USDC

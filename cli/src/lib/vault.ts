@@ -358,9 +358,10 @@ export async function getBalance(address?: Address): Promise<{
 // ── Agent Management ──
 
 /**
- * Register a new agent (owner only).
+ * Register a new agent (owner only). Requires ERC-8004 agent identity.
  */
 export async function registerAgent(
+  agentId: bigint,
   pkpAddress: Address,
   operatorEOA: Address,
   maxPerTx: bigint,
@@ -374,7 +375,7 @@ export async function registerAgent(
     address: getVaultAddress(),
     abi: SYNDICATE_VAULT_ABI,
     functionName: "registerAgent",
-    args: [pkpAddress, operatorEOA, maxPerTx, dailyLimit],
+    args: [agentId, pkpAddress, operatorEOA, maxPerTx, dailyLimit],
   });
 }
 

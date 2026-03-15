@@ -45,6 +45,7 @@ syndicate
   .description("Create a new syndicate via the factory")
   .requiredOption("--subdomain <name>", "ENS subdomain (e.g. alpha-seekers)")
   .requiredOption("--name <name>", "Syndicate name")
+  .requiredOption("--agent-id <id>", "Your ERC-8004 agent identity token ID")
   .option("--asset <address>", "Underlying asset address")
   .option("--max-per-tx <amount>", "Max per transaction (in asset units)", "10000")
   .option("--max-daily <amount>", "Max daily combined spend (in asset units)", "50000")
@@ -82,6 +83,7 @@ syndicate
       const symbol = `sw${assetSymbol}`;
 
       const hash = await factoryLib.createSyndicate({
+        creatorAgentId: BigInt(opts.agentId),
         metadataURI: opts.metadataUri,
         asset,
         name: opts.name,
@@ -281,6 +283,7 @@ syndicate
   .command("add")
   .description("Register an agent on a syndicate vault (creator only)")
   .requiredOption("--vault <address>", "Vault address")
+  .requiredOption("--agent-id <id>", "Agent's ERC-8004 identity token ID")
   .requiredOption("--pkp <address>", "Agent PKP address")
   .requiredOption("--eoa <address>", "Operator EOA address")
   .requiredOption("--max-per-tx <amount>", "Max per transaction (in asset units)")
@@ -304,6 +307,7 @@ syndicate
 
       spinner.text = "Registering agent...";
       const hash = await vaultLib.registerAgent(
+        BigInt(opts.agentId),
         opts.pkp as Address,
         opts.eoa as Address,
         maxPerTx,
@@ -319,7 +323,7 @@ syndicate
         await addMember(group, opts.pkp);
         await sendEnvelope(group, {
           type: "AGENT_REGISTERED",
-          agent: { address: opts.pkp },
+          agent: { erc8004Id: Number(opts.agentId), address: opts.pkp },
           syndicate: subdomain,
           timestamp: Math.floor(Date.now() / 1000),
         });

@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SyndicateVault} from "./SyndicateVault.sol";
 import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
 import {IL2Registrar} from "./interfaces/IL2Registrar.sol";
@@ -23,6 +24,8 @@ contract SyndicateFactory {
     error InvalidExecutorImpl();
     error InvalidVaultImpl();
     error InvalidENSRegistrar();
+    error InvalidAgentRegistry();
+    error NotAgentOwner();
     error SubdomainTooShort();
     error SubdomainTaken();
     error NotCreator();
@@ -57,6 +60,9 @@ contract SyndicateFactory {
     /// @notice Durin L2 Registrar for ENS subnames
     IL2Registrar public immutable ensRegistrar;
 
+    /// @notice ERC-8004 agent identity registry (ERC-721)
+    IERC721 public immutable agentRegistry;
+
     /// @notice All syndicates
     mapping(uint256 => Syndicate) public syndicates;
     uint256 public syndicateCount;
@@ -73,20 +79,29 @@ contract SyndicateFactory {
     event MetadataUpdated(uint256 indexed id, string metadataURI);
     event SyndicateDeactivated(uint256 indexed id);
 
-    constructor(address executorImpl_, address vaultImpl_, address ensRegistrar_) {
+    constructor(address executorImpl_, address vaultImpl_, address ensRegistrar_, address agentRegistry_) {
         if (executorImpl_ == address(0)) revert InvalidExecutorImpl();
         if (vaultImpl_ == address(0)) revert InvalidVaultImpl();
         if (ensRegistrar_ == address(0)) revert InvalidENSRegistrar();
+        if (agentRegistry_ == address(0)) revert InvalidAgentRegistry();
         executorImpl = executorImpl_;
         vaultImpl = vaultImpl_;
         ensRegistrar = IL2Registrar(ensRegistrar_);
+        agentRegistry = IERC721(agentRegistry_);
     }
 
     /// @notice Create a new syndicate — deploys vault proxy, registers ENS subname, stores everything
+    /// @param creatorAgentId ERC-8004 agent ID of the creator (must be owned by msg.sender)
     /// @param config Syndicate configuration
     /// @return syndicateId The new syndicate's ID
     /// @return vault The deployed vault proxy address
-    function createSyndicate(SyndicateConfig calldata config) external returns (uint256 syndicateId, address vault) {
+    function createSyndicate(uint256 creatorAgentId, SyndicateConfig calldata config)
+        external
+        returns (uint256 syndicateId, address vault)
+    {
+        // Verify ERC-8004 identity
+        if (agentRegistry.ownerOf(creatorAgentId) != msg.sender) revert NotAgentOwner();
+
         // Validate subdomain
         if (bytes(config.subdomain).length < 3) revert SubdomainTooShort();
         if (subdomainToSyndicate[config.subdomain] != 0) revert SubdomainTaken();
@@ -104,7 +119,8 @@ contract SyndicateFactory {
                 config.caps,
                 executorImpl,
                 config.initialTargets,
-                config.openDeposits
+                config.openDeposits,
+                address(agentRegistry)
             )
         );
 

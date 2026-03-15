@@ -9,6 +9,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
@@ -71,6 +72,9 @@ contract SyndicateVault is
     /// @notice If true, anyone can deposit (skip whitelist check)
     bool private _openDeposits;
 
+    /// @notice ERC-8004 agent identity registry (ERC-721)
+    IERC721 private _agentRegistry;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -84,13 +88,15 @@ contract SyndicateVault is
         SyndicateCaps memory caps_,
         address executorImpl_,
         address[] memory initialTargets_,
-        bool openDeposits_
+        bool openDeposits_,
+        address agentRegistry_
     ) external initializer {
         if (owner_ == address(0)) revert InvalidOwner();
         if (caps_.maxPerTx == 0) revert InvalidMaxPerTx();
         if (caps_.maxDailyTotal == 0) revert InvalidMaxDailyTotal();
         if (caps_.maxBorrowRatio > 10000) revert BorrowRatioTooHigh();
         if (executorImpl_ == address(0)) revert InvalidExecutorImpl();
+        if (agentRegistry_ == address(0)) revert InvalidAgentRegistry();
 
         __ERC4626_init(asset_);
         __ERC20_init(name_, symbol_);
@@ -101,6 +107,7 @@ contract SyndicateVault is
         _dailySpendResetDay = block.timestamp / 1 days;
         _executorImpl = executorImpl_;
         _openDeposits = openDeposits_;
+        _agentRegistry = IERC721(agentRegistry_);
 
         for (uint256 i = 0; i < initialTargets_.length; i++) {
             if (initialTargets_[i] == address(0)) revert InvalidTarget();
@@ -311,19 +318,27 @@ contract SyndicateVault is
     // ==================== ADMIN ====================
 
     /// @inheritdoc ISyndicateVault
-    function registerAgent(address pkpAddress, address operatorEOA, uint256 maxPerTx, uint256 dailyLimit)
-        external
-        onlyOwner
-    {
+    function registerAgent(
+        uint256 agentId,
+        address pkpAddress,
+        address operatorEOA,
+        uint256 maxPerTx,
+        uint256 dailyLimit
+    ) external onlyOwner {
         if (pkpAddress == address(0)) revert InvalidPKPAddress();
         if (operatorEOA == address(0)) revert InvalidOperatorEOA();
         if (_agents[pkpAddress].active) revert AgentAlreadyRegistered();
+
+        // Verify ERC-8004 identity: NFT must be owned by operatorEOA or vault owner (syndicate creator)
+        address nftOwner = _agentRegistry.ownerOf(agentId);
+        if (nftOwner != operatorEOA && nftOwner != owner()) revert NotAgentOwner();
 
         // Agent limits can't exceed syndicate caps
         if (maxPerTx > _syndicateCaps.maxPerTx) revert AgentMaxPerTxExceedsCap();
         if (dailyLimit > _syndicateCaps.maxDailyTotal) revert AgentDailyLimitExceedsCap();
 
         _agents[pkpAddress] = AgentConfig({
+            agentId: agentId,
             pkpAddress: pkpAddress,
             operatorEOA: operatorEOA,
             maxPerTx: maxPerTx,
@@ -335,7 +350,7 @@ contract SyndicateVault is
 
         _agentSet.add(pkpAddress);
 
-        emit AgentRegistered(pkpAddress, operatorEOA, maxPerTx, dailyLimit);
+        emit AgentRegistered(agentId, pkpAddress, operatorEOA, maxPerTx, dailyLimit);
     }
 
     /// @inheritdoc ISyndicateVault

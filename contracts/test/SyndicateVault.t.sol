@@ -10,6 +10,7 @@ import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockMToken} from "./mocks/MockMToken.sol";
 import {MockComptroller} from "./mocks/MockComptroller.sol";
 import {MockSwapRouter} from "./mocks/MockSwapRouter.sol";
+import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
 
 contract SyndicateVaultTest is Test {
     SyndicateVault public vault;
@@ -19,6 +20,7 @@ contract SyndicateVaultTest is Test {
     MockMToken public mUsdc;
     MockComptroller public comptroller;
     MockSwapRouter public swapRouter;
+    MockAgentRegistry public agentRegistry;
 
     address public owner = makeAddr("owner");
     address public lp1 = makeAddr("lp1");
@@ -27,6 +29,9 @@ contract SyndicateVaultTest is Test {
     address public agentEoa = makeAddr("agentEoa");
     address public agentPkp2 = makeAddr("agentPkp2");
     address public agentEoa2 = makeAddr("agentEoa2");
+
+    uint256 public agent1NftId;
+    uint256 public agent2NftId;
 
     uint256 constant MAX_PER_TX = 10_000e6; // 10k USDC (6 decimals)
     uint256 constant MAX_DAILY = 50_000e6; // 50k USDC
@@ -45,6 +50,15 @@ contract SyndicateVaultTest is Test {
         // Deploy shared executor lib
         executorLib = new BatchExecutorLib();
 
+        // Deploy ERC-8004 agent registry
+        agentRegistry = new MockAgentRegistry();
+
+        // Mint ERC-8004 identity NFTs for agents
+        // Agent 1: NFT owned by agentEoa (operator)
+        agent1NftId = agentRegistry.mint(agentEoa);
+        // Agent 2: NFT owned by agentEoa2 (operator)
+        agent2NftId = agentRegistry.mint(agentEoa2);
+
         // Allowlist targets
         address[] memory targets = new address[](5);
         targets[0] = address(usdc);
@@ -60,14 +74,15 @@ contract SyndicateVaultTest is Test {
             (
                 usdc,
                 "Sherwood Vault",
-                "shUSDC",
+                "swUSDC",
                 owner,
                 ISyndicateVault.SyndicateCaps({
                     maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
                 }),
                 address(executorLib),
                 targets,
-                true // openDeposits = true for test convenience
+                true, // openDeposits = true for test convenience
+                address(agentRegistry)
             )
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
@@ -83,16 +98,16 @@ contract SyndicateVaultTest is Test {
         // Fund swap router
         weth.mint(address(swapRouter), 1_000e18);
 
-        // Register agent
+        // Register agent (NFT owned by agentEoa)
         vm.prank(owner);
-        vault.registerAgent(agentPkp, agentEoa, 5_000e6, 20_000e6);
+        vault.registerAgent(agent1NftId, agentPkp, agentEoa, 5_000e6, 20_000e6);
     }
 
     // ==================== INITIALIZATION ====================
 
     function test_initialize() public view {
         assertEq(vault.name(), "Sherwood Vault");
-        assertEq(vault.symbol(), "shUSDC");
+        assertEq(vault.symbol(), "swUSDC");
         assertEq(vault.owner(), owner);
         assertEq(address(vault.asset()), address(usdc));
         assertEq(vault.getExecutorImpl(), address(executorLib));
@@ -165,6 +180,7 @@ contract SyndicateVaultTest is Test {
         assertEq(vault.getAgentCount(), 1);
 
         ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPkp);
+        assertEq(config.agentId, agent1NftId);
         assertEq(config.pkpAddress, agentPkp);
         assertEq(config.operatorEOA, agentEoa);
         assertEq(config.maxPerTx, 5_000e6);
@@ -172,16 +188,39 @@ contract SyndicateVaultTest is Test {
         assertTrue(config.active);
     }
 
+    function test_registerAgent_ownerOwnsNft() public {
+        // Mint an NFT owned by the vault owner (syndicate creator) — should also be allowed
+        uint256 ownerNftId = agentRegistry.mint(owner);
+
+        vm.prank(owner);
+        vault.registerAgent(ownerNftId, agentPkp2, agentEoa2, 5_000e6, 20_000e6);
+
+        assertTrue(vault.isAgent(agentPkp2));
+        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPkp2);
+        assertEq(config.agentId, ownerNftId);
+    }
+
+    function test_registerAgent_notAgentOwner_reverts() public {
+        // Mint NFT to some random address
+        address random = makeAddr("random");
+        uint256 randomNftId = agentRegistry.mint(random);
+
+        // Try to register with NFT not owned by operatorEOA or vault owner
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateVault.NotAgentOwner.selector);
+        vault.registerAgent(randomNftId, agentPkp2, agentEoa2, 5_000e6, 20_000e6);
+    }
+
     function test_registerAgent_exceedsSyndicateCap_reverts() public {
         vm.prank(owner);
         vm.expectRevert(ISyndicateVault.AgentMaxPerTxExceedsCap.selector);
-        vault.registerAgent(agentPkp2, agentEoa2, MAX_PER_TX + 1, 20_000e6);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2, MAX_PER_TX + 1, 20_000e6);
     }
 
     function test_registerAgent_notOwner_reverts() public {
         vm.prank(lp1);
         vm.expectRevert();
-        vault.registerAgent(agentPkp2, agentEoa2, 5_000e6, 20_000e6);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2, 5_000e6, 20_000e6);
     }
 
     function test_removeAgent() public {
@@ -423,7 +462,7 @@ contract SyndicateVaultTest is Test {
     function test_executeBatch_syndicateDailyLimit() public {
         // Register second agent with high limit
         vm.prank(owner);
-        vault.registerAgent(agentPkp2, agentEoa2, MAX_PER_TX, MAX_DAILY);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2, MAX_PER_TX, MAX_DAILY);
 
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
@@ -584,8 +623,8 @@ contract SyndicateVaultTest is Test {
         assertEq(vault.getApprovedDepositors().length, 3);
     }
 
-    function test_deposit_closedDeposits_unapproved_reverts() public {
-        // Deploy a vault with openDeposits=false
+    /// @dev Helper to deploy a closed-deposits vault for whitelist tests
+    function _deployClosedVault() internal returns (SyndicateVault) {
         SyndicateVault impl2 = new SyndicateVault();
         address[] memory targets = new address[](1);
         targets[0] = address(usdc);
@@ -601,11 +640,16 @@ contract SyndicateVaultTest is Test {
                 }),
                 address(executorLib),
                 targets,
-                false // openDeposits = false
+                false, // openDeposits = false
+                address(agentRegistry)
             )
         );
         ERC1967Proxy proxy2 = new ERC1967Proxy(address(impl2), initData);
-        SyndicateVault closedVault = SyndicateVault(payable(address(proxy2)));
+        return SyndicateVault(payable(address(proxy2)));
+    }
+
+    function test_deposit_closedDeposits_unapproved_reverts() public {
+        SyndicateVault closedVault = _deployClosedVault();
 
         // Try to deposit without approval — should revert
         usdc.mint(lp1, 10_000e6);
@@ -617,27 +661,7 @@ contract SyndicateVaultTest is Test {
     }
 
     function test_deposit_closedDeposits_approved_succeeds() public {
-        // Deploy a vault with openDeposits=false
-        SyndicateVault impl2 = new SyndicateVault();
-        address[] memory targets = new address[](1);
-        targets[0] = address(usdc);
-        bytes memory initData = abi.encodeCall(
-            SyndicateVault.initialize,
-            (
-                usdc,
-                "Closed Vault",
-                "cVault",
-                owner,
-                ISyndicateVault.SyndicateCaps({
-                    maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
-                }),
-                address(executorLib),
-                targets,
-                false
-            )
-        );
-        ERC1967Proxy proxy2 = new ERC1967Proxy(address(impl2), initData);
-        SyndicateVault closedVault = SyndicateVault(payable(address(proxy2)));
+        SyndicateVault closedVault = _deployClosedVault();
 
         // Approve depositor
         vm.prank(owner);
@@ -654,27 +678,7 @@ contract SyndicateVaultTest is Test {
     }
 
     function test_setOpenDeposits() public {
-        // Deploy closed vault
-        SyndicateVault impl2 = new SyndicateVault();
-        address[] memory targets = new address[](1);
-        targets[0] = address(usdc);
-        bytes memory initData = abi.encodeCall(
-            SyndicateVault.initialize,
-            (
-                usdc,
-                "Closed Vault",
-                "cVault",
-                owner,
-                ISyndicateVault.SyndicateCaps({
-                    maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
-                }),
-                address(executorLib),
-                targets,
-                false
-            )
-        );
-        ERC1967Proxy proxy2 = new ERC1967Proxy(address(impl2), initData);
-        SyndicateVault closedVault = SyndicateVault(payable(address(proxy2)));
+        SyndicateVault closedVault = _deployClosedVault();
 
         // Toggle to open
         vm.prank(owner);

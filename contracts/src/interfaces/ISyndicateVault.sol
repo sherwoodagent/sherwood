@@ -30,6 +30,8 @@ interface ISyndicateVault {
     error AgentMaxPerTxExceedsCap();
     error AgentDailyLimitExceedsCap();
     error AgentNotActive();
+    error InvalidAgentRegistry();
+    error NotAgentOwner();
 
     // ── Syndicate-Level Caps (hard limits for ALL agents) ──
     struct SyndicateCaps {
@@ -40,6 +42,7 @@ interface ISyndicateVault {
 
     // ── Per-Agent Config ──
     struct AgentConfig {
+        uint256 agentId; // ERC-8004 identity token ID
         address pkpAddress; // Lit PKP wallet address (the executor)
         address operatorEOA; // Agent's own wallet (the identity)
         uint256 maxPerTx; // Agent-specific per-tx cap (≤ syndicate cap)
@@ -85,7 +88,13 @@ interface ISyndicateVault {
     function getExecutorImpl() external view returns (address);
 
     // ── Admin (syndicate creator) ──
-    function registerAgent(address pkpAddress, address operatorEOA, uint256 maxPerTx, uint256 dailyLimit) external;
+    function registerAgent(
+        uint256 agentId,
+        address pkpAddress,
+        address operatorEOA,
+        uint256 maxPerTx,
+        uint256 dailyLimit
+    ) external;
     function removeAgent(address pkpAddress) external;
     function updateSyndicateCaps(SyndicateCaps calldata caps) external;
     function pause() external;
@@ -93,7 +102,11 @@ interface ISyndicateVault {
 
     // ── Events ──
     event AgentRegistered(
-        address indexed pkpAddress, address indexed operatorEOA, uint256 maxPerTx, uint256 dailyLimit
+        uint256 indexed agentId,
+        address indexed pkpAddress,
+        address indexed operatorEOA,
+        uint256 maxPerTx,
+        uint256 dailyLimit
     );
     event AgentRemoved(address indexed pkpAddress);
     event BatchExecuted(address indexed agent, uint256 callCount, uint256 assetAmount);

@@ -64,6 +64,23 @@ app/         Next.js dashboard
 - `sherwood chat <name> members` — list group members
 - `sherwood chat <name> add <addr>` — add member (creator only)
 
+## Agent Identity (ERC-8004)
+
+- Agents and syndicate creators must have an ERC-8004 identity NFT (standard ERC-721)
+- `SyndicateFactory.createSyndicate()` requires `creatorAgentId` — verifies NFT ownership on-chain
+- `SyndicateVault.registerAgent()` requires `agentId` — NFT must be owned by `operatorEOA` or vault `owner`
+- Verification at registration time only (not per-execution) — keeps gas costs low
+- `AgentConfig` struct stores `agentId` for reference/display
+
+### Deployed Contracts (not ours — ERC-8004 standard)
+| Contract | Base Mainnet | Base Sepolia |
+|----------|-------------|--------------|
+| IdentityRegistry | `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` | `0x8004A818BFB912233c491871b3d84c89A494BD9e` |
+| ReputationRegistry | `0x8004BAa17C55a88189AE136b182e5fdA19dE9b63` | `0x8004B663056A597Dffe9eCcC1965A193B7388713` |
+
+### Agent0 SDK (prerequisite for creating/joining syndicates)
+Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`). This is a prerequisite before calling `syndicate create` or `syndicate add`. The SDK handles IPFS metadata pinning and on-chain registration. See the levered-swap skill for the full flow.
+
 ## Testing
 
 - Contracts: Foundry tests in `contracts/test/`, fork tests for protocol integrations
