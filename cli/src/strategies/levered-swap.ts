@@ -139,9 +139,10 @@ export function buildEntryBatch(
   config: LeveredSwapConfig,
   vaultAddress: Address,
   amountOutMinimum: bigint, // Computed by CLI from Uniswap quote
+  borrowDecimals: number, // Decimals of the borrow token (read on-chain by caller)
 ): BatchCall[] {
   const collateral = parseEther(config.collateralAmount); // WETH = 18 decimals
-  const borrow = parseUnits(config.borrowAmount, 6); // USDC = 6 decimals
+  const borrow = parseUnits(config.borrowAmount, borrowDecimals);
 
   const calls: BatchCall[] = [
     // 1. Approve mWETH to pull WETH from executor

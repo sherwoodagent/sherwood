@@ -55,17 +55,25 @@ export async function runLeveredSwap(opts: {
 
   const slippageBps = Number(opts.slippage);
 
-  // Fetch target token decimals on-chain
+  // Fetch token decimals on-chain
   const client = getPublicClient();
   let targetDecimals: number;
+  let borrowDecimals: number;
   try {
-    targetDecimals = await client.readContract({
-      address: targetToken,
-      abi: ERC20_ABI,
-      functionName: "decimals",
-    }) as number;
+    [targetDecimals, borrowDecimals] = await Promise.all([
+      client.readContract({
+        address: targetToken,
+        abi: ERC20_ABI,
+        functionName: "decimals",
+      }) as Promise<number>,
+      client.readContract({
+        address: TOKENS().USDC,
+        abi: ERC20_ABI,
+        functionName: "decimals",
+      }) as Promise<number>,
+    ]);
   } catch {
-    console.error(chalk.red(`Could not read decimals for ${targetToken} — is it a valid ERC20?`));
+    console.error(chalk.red(`Could not read token decimals — are the addresses valid ERC20s?`));
     process.exit(1);
   }
 
@@ -89,7 +97,7 @@ export async function runLeveredSwap(opts: {
   let minOut: bigint;
 
   try {
-    const borrowAmount = parseUnits(opts.borrow, 6);
+    const borrowAmount = parseUnits(opts.borrow, borrowDecimals);
     const quote = await getQuote({
       tokenIn: TOKENS().USDC,
       tokenOut: targetToken,
@@ -120,7 +128,7 @@ export async function runLeveredSwap(opts: {
     stopLossBps: 1000, // 10% default
   };
 
-  const calls = buildEntryBatch(config, vaultAddress, minOut);
+  const calls = buildEntryBatch(config, vaultAddress, minOut, borrowDecimals);
 
   console.log();
   console.log(chalk.bold("Batch calls (6):"));

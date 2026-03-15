@@ -10,7 +10,6 @@ import { formatUnits, encodeFunctionData, decodeFunctionResult } from "viem";
 import { getChain, getNetwork } from "./network.js";
 import { getPublicClient, getWalletClient, getAccount } from "./client.js";
 import { SYNDICATE_VAULT_ABI, ERC20_ABI } from "./abis.js";
-import { TOKENS } from "./addresses.js";
 import type { BatchCall } from "./batch.js";
 
 export interface SimulationResult {
@@ -27,21 +26,50 @@ function getVaultAddress(): Address {
   return addr as Address;
 }
 
+// ── Asset Helpers ──
+
+/**
+ * Read the vault's underlying ERC-20 asset address.
+ */
+export async function getAssetAddress(): Promise<Address> {
+  const client = getPublicClient();
+  return client.readContract({
+    address: getVaultAddress(),
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "asset",
+  }) as Promise<Address>;
+}
+
+/**
+ * Read decimals from the vault's underlying asset.
+ * Works with any ERC-20 (USDC=6, WETH=18, WBTC=8, etc.).
+ */
+export async function getAssetDecimals(): Promise<number> {
+  const client = getPublicClient();
+  const asset = await getAssetAddress();
+  return client.readContract({
+    address: asset,
+    abi: ERC20_ABI,
+    functionName: "decimals",
+  }) as Promise<number>;
+}
+
 // ── LP Functions ──
 
 /**
- * Deposit USDC into the vault. Handles approval + deposit.
+ * Deposit into the vault. Handles approval + deposit for the vault's asset.
  */
 export async function deposit(amount: bigint): Promise<Hex> {
   const wallet = getWalletClient();
   const vaultAddress = getVaultAddress();
   const account = getAccount();
 
-  // Approve vault to pull USDC
+  // Approve vault to pull the underlying asset
+  const asset = await getAssetAddress();
   await wallet.writeContract({
     account: getAccount(),
     chain: getChain(),
-    address: TOKENS().USDC,
+    address: asset,
     abi: ERC20_ABI,
     functionName: "approve",
     args: [vaultAddress, amount],
@@ -59,7 +87,7 @@ export async function deposit(amount: bigint): Promise<Hex> {
 }
 
 /**
- * Ragequit — withdraw all shares for pro-rata USDC.
+ * Ragequit — withdraw all shares for pro-rata assets.
  */
 export async function ragequit(): Promise<Hex> {
   const wallet = getWalletClient();
@@ -280,7 +308,7 @@ export async function isApprovedDepositor(depositor: Address): Promise<boolean> 
 }
 
 /**
- * Get LP share balance and USDC value.
+ * Get LP share balance and asset value.
  */
 export async function getBalance(address?: Address): Promise<{
   shares: bigint;
@@ -318,9 +346,11 @@ export async function getBalance(address?: Address): Promise<{
   const percent =
     totalSupply > 0n ? ((Number(shares) / Number(totalSupply)) * 100).toFixed(2) : "0.00";
 
+  const decimals = await getAssetDecimals();
+
   return {
     shares,
-    assetsValue: formatUnits(assetsValue, 6),
+    assetsValue: formatUnits(assetsValue, decimals),
     percentOfVault: `${percent}%`,
   };
 }
@@ -369,7 +399,7 @@ export async function getVaultInfo(): Promise<VaultInfo> {
   const client = getPublicClient();
   const vaultAddress = getVaultAddress();
 
-  const [totalAssets, caps, agentCount, dailySpend] = await Promise.all([
+  const [totalAssets, caps, agentCount, dailySpend, decimals] = await Promise.all([
     client.readContract({
       address: vaultAddress,
       abi: SYNDICATE_VAULT_ABI,
@@ -390,17 +420,18 @@ export async function getVaultInfo(): Promise<VaultInfo> {
       abi: SYNDICATE_VAULT_ABI,
       functionName: "getDailySpendTotal",
     }) as Promise<bigint>,
+    getAssetDecimals(),
   ]);
 
   return {
     address: vaultAddress,
-    totalAssets: formatUnits(totalAssets, 6),
+    totalAssets: formatUnits(totalAssets, decimals),
     syndicateCaps: {
-      maxPerTx: formatUnits(caps.maxPerTx, 6),
-      maxDailyTotal: formatUnits(caps.maxDailyTotal, 6),
+      maxPerTx: formatUnits(caps.maxPerTx, decimals),
+      maxDailyTotal: formatUnits(caps.maxDailyTotal, decimals),
       maxBorrowRatio: `${(Number(caps.maxBorrowRatio) / 100).toFixed(1)}%`,
     },
     agentCount,
-    dailySpendTotal: formatUnits(dailySpend, 6),
+    dailySpendTotal: formatUnits(dailySpend, decimals),
   };
 }
