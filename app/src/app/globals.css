@@ -1,1 +1,334 @@
 @import "tailwindcss";
+
+@theme {
+  --color-accent: #2dd42d;
+  --color-accent-dim: rgba(45, 212, 45, 0.2);
+  --color-metal: #1a1a1a;
+  --color-border: rgba(255, 255, 255, 0.15);
+  --color-fg: #d4d5d9;
+}
+
+/* ── Base ───────────────────────────────────────────────── */
+
+::selection {
+  background: var(--color-accent);
+  color: #000;
+}
+
+body {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* ── Three.js Background ───────────────────────────────── */
+
+#canvas-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.15;
+}
+
+/* ── Scanlines Overlay ──────────────────────────────────── */
+
+.scanlines {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0) 50%,
+    rgba(0, 0, 0, 0.2) 50%,
+    rgba(0, 0, 0, 0.2)
+  );
+  background-size: 100% 4px;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.3;
+}
+
+/* ── Layout Grid ────────────────────────────────────────── */
+
+.layout {
+  position: relative;
+  z-index: 10;
+  min-height: 100vh;
+  mix-blend-mode: difference;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+
+.site-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.site-header nav a {
+  color: var(--color-fg);
+  text-decoration: none;
+  margin-left: 2rem;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  transition: color 0s;
+}
+
+.site-header nav a:hover {
+  color: var(--color-accent);
+}
+
+/* ── Hero ───────────────────────────────────────────────── */
+
+.hero-title {
+  font-size: clamp(4rem, 8vw, 8rem);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+  margin: 10vh 0 4vh 0;
+  max-width: 14ch;
+  color: #fff;
+}
+
+/* ── Buttons ────────────────────────────────────────────── */
+
+.btn {
+  background: transparent;
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  padding: 1rem 2rem;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--color-accent);
+  color: #000;
+  box-shadow: 0 0 20px var(--color-accent-dim);
+}
+
+.btn-secondary {
+  border-color: var(--color-border);
+  color: var(--color-fg);
+}
+
+.btn-secondary:hover {
+  background: transparent;
+  border-color: #fff;
+  color: #fff;
+  box-shadow: none;
+}
+
+.btn-lg {
+  font-size: 18px;
+  padding: 1.5rem 3rem;
+}
+
+/* ── Section Headers ────────────────────────────────────── */
+
+.section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 4rem;
+}
+
+/* ── Flow Grid (3 steps) ────────────────────────────────── */
+
+.flow-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2rem;
+  position: relative;
+}
+
+.flow-grid::before {
+  content: "";
+  position: absolute;
+  top: 24px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--color-border);
+  z-index: -1;
+}
+
+.step-marker {
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  margin-bottom: 2rem;
+  background: #000;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.flow-step:hover .step-marker {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* ── Feature Blocks ─────────────────────────────────────── */
+
+.features-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4rem;
+}
+
+.feature-block {
+  border: 1px solid var(--color-border);
+  padding: 3rem;
+  position: relative;
+}
+
+.feature-block::before {
+  content: "+";
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  color: var(--color-accent);
+}
+
+.feature-block-accent {
+  border-color: var(--color-accent);
+}
+
+.feature-list {
+  list-style: none;
+}
+
+.feature-list li {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.feature-list li:last-child {
+  border-bottom: none;
+}
+
+.feature-list li::before {
+  content: ">>";
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 10px;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+/* ── Syndicates Table ───────────────────────────────────── */
+
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+}
+
+.table-wrapper table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.table-wrapper th,
+.table-wrapper td {
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table-wrapper th {
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 11px;
+}
+
+.table-wrapper tbody tr {
+  transition: background 0s;
+}
+
+.table-wrapper tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+}
+
+.table-wrapper tbody tr:hover td:first-child {
+  color: var(--color-accent);
+}
+
+/* Status indicator */
+.status-live {
+  color: var(--color-accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-live::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  background: var(--color-accent);
+  border-radius: 50%;
+}
+
+/* ── Footer ─────────────────────────────────────────────── */
+
+.site-footer {
+  border-top: 1px solid var(--color-border);
+  padding: 2rem 4rem;
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* ── Responsive ─────────────────────────────────────────── */
+
+@media (max-width: 1024px) {
+  main {
+    padding: 0 2rem;
+  }
+
+  .flow-grid,
+  .features-container {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+
+  .flow-grid::before {
+    display: none;
+  }
+
+  .hero-title {
+    font-size: 3.5rem;
+  }
+
+  .site-footer {
+    padding: 2rem;
+  }
+}
