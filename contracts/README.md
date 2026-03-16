@@ -163,15 +163,12 @@ npx graph codegen && npx graph build
 
 ### Updating ABIs
 
-If contracts change, re-extract ABIs from Foundry output:
+The subgraph reads ABIs directly from Foundry output artifacts (`../out/SyndicateFactory.sol/SyndicateFactory.json`). After changing contracts:
 
 ```bash
 forge build
-node -e "const f=require('./out/SyndicateFactory.sol/SyndicateFactory.json'); require('fs').writeFileSync('subgraph/abis/SyndicateFactory.json', JSON.stringify(f.abi, null, 2))"
-node -e "const f=require('./out/SyndicateVault.sol/SyndicateVault.json'); require('fs').writeFileSync('subgraph/abis/SyndicateVault.json', JSON.stringify(f.abi, null, 2))"
+cd subgraph && npx graph codegen && npx graph build
 ```
-
-Then re-run `npx graph codegen && npx graph build`.
 
 ## Storage Layout (UUPS Safety)
 
