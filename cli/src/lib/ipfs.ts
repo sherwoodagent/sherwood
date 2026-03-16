@@ -32,16 +32,18 @@ export interface SyndicateMetadata {
   };
 }
 
+// Bundled Pinata credentials — used by all CLI users for syndicate metadata.
+// Override with PINATA_API_KEY / PINATA_GATEWAY env vars if needed.
+const BUNDLED_PINATA_JWT =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI2NDQ0MGViOC1hYTYyLTQzY2EtOGYwNC04MDZjZmNjY2Y4YTUiLCJlbWFpbCI6ImltdGhhdGNhcmxvc0BnbWFpbC5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwicGluX3BvbGljeSI6eyJyZWdpb25zIjpbeyJkZXNpcmVkUmVwbGljYXRpb25Db3VudCI6MSwiaWQiOiJGUkExIn1dLCJ2ZXJzaW9uIjoxfSwibWZhX2VuYWJsZWQiOmZhbHNlLCJzdGF0dXMiOiJBQ1RJVkUifSwiYXV0aGVudGljYXRpb25UeXBlIjoic2NvcGVkS2V5Iiwic2NvcGVkS2V5S2V5IjoiMWJhZWFmMzQwODM3MGQ0NGZkZWEiLCJzY29wZWRLZXlTZWNyZXQiOiIzNDcxMmU5MTkyYTgxNWFhMGRmNjUyYjYyMDQzODQ1MDJjMmU0YWE0MDhkZTJmOTU2NWYwOTk3YTNlY2U3NGU3IiwiZXhwIjoxODAxMjc2ODExfQ.7OMJiOATpqkSwe7Orrpt2b8H_-czH-W61vBm4AHtqfA";
+const BUNDLED_PINATA_GATEWAY = "https://sherwood.mypinata.cloud";
+
 function getPinataApiKey(): string {
-  const key = process.env.PINATA_API_KEY;
-  if (!key) {
-    throw new Error("PINATA_API_KEY env var is required");
-  }
-  return key;
+  return process.env.PINATA_API_KEY || BUNDLED_PINATA_JWT;
 }
 
 function getPinataGateway(): string {
-  return process.env.PINATA_GATEWAY || "https://gateway.pinata.cloud";
+  return process.env.PINATA_GATEWAY || BUNDLED_PINATA_GATEWAY;
 }
 
 /**

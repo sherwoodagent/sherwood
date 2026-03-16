@@ -5,6 +5,7 @@ import { parseUnits } from "viem";
 import type { Address } from "viem";
 import chalk from "chalk";
 import ora from "ora";
+import { input, confirm, select } from "@inquirer/prompts";
 import { setNetwork } from "./lib/network.js";
 import { getExplorerUrl, getChain } from "./lib/network.js";
 import { TOKENS } from "./lib/addresses.js";
@@ -17,6 +18,8 @@ import * as vaultLib from "./lib/vault.js";
 import * as factoryLib from "./lib/factory.js";
 import * as subgraphLib from "./lib/subgraph.js";
 import * as registryLib from "./lib/registry.js";
+import { uploadMetadata } from "./lib/ipfs.js";
+import type { SyndicateMetadata } from "./lib/ipfs.js";
 import { registerVeniceCommands } from "./commands/venice.js";
 import { registerAllowanceCommands } from "./commands/allowance.js";
 import { registerIdentityCommands } from "./commands/identity.js";
@@ -27,12 +30,20 @@ import { setTextRecord, resolveVaultSyndicate } from "./lib/ens.js";
 async function loadXmtp() {
   return import("./lib/xmtp.js");
 }
-import { cacheGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey } from "./lib/config.js";
+import { cacheGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey, getAgentId } from "./lib/config.js";
+
+// ── Theme ──
+const G = chalk.green;
+const W = chalk.white;
+const DIM = chalk.gray;
+const BOLD = chalk.white.bold;
+const LABEL = chalk.green.bold;
+const SEP = () => console.log(DIM("─".repeat(60)));
 
 /** Set vault address from --vault flag or fall back to config. */
 function resolveVault(opts: { vault?: string }) {
   if (opts.vault) {
-    resolveVault(opts);
+    vaultLib.setVaultAddress(opts.vault as Address);
   }
   // If no --vault flag, getVaultAddress() in vault.ts reads from config
 }
@@ -57,94 +68,191 @@ const syndicate = program.command("syndicate");
 
 syndicate
   .command("create")
-  .description("Create a new syndicate via the factory")
-  .requiredOption("--subdomain <name>", "ENS subdomain (e.g. alpha-seekers)")
-  .requiredOption("--name <name>", "Syndicate name")
-  .requiredOption("--agent-id <id>", "Your ERC-8004 agent identity token ID")
+  .description("Create a new syndicate via the factory (interactive)")
+  .option("--subdomain <name>", "ENS subdomain (skip prompt)")
+  .option("--name <name>", "Syndicate name (skip prompt)")
+  .option("--agent-id <id>", "ERC-8004 agent identity token ID (skip prompt)")
   .option("--asset <address>", "Underlying asset address")
-  .option("--max-per-tx <amount>", "Max per transaction (in asset units)", "10000")
-  .option("--max-daily <amount>", "Max daily combined spend (in asset units)", "50000")
-  .option("--borrow-ratio <bps>", "Max borrow ratio in basis points", "7500")
+  .option("--max-per-tx <amount>", "Max per transaction (in asset units)")
+  .option("--max-daily <amount>", "Max daily combined spend (in asset units)")
+  .option("--borrow-ratio <bps>", "Max borrow ratio in basis points")
   .option("--targets <addresses>", "Comma-separated allowlisted target addresses")
-  .option("--metadata-uri <uri>", "IPFS metadata URI", "")
-  .option("--open-deposits", "Allow anyone to deposit (no whitelist)", false)
-  .option("--public-chat", "Enable dashboard spectator mode (adds read-only observer to chat)", false)
+  .option("--description <text>", "Short description")
+  .option("--metadata-uri <uri>", "Override metadata URI (skip IPFS upload)")
+  .option("--open-deposits", "Allow anyone to deposit (no whitelist)")
+  .option("--public-chat", "Enable dashboard spectator mode", false)
   .action(async (opts) => {
-    const spinner = ora("Creating syndicate...").start();
     try {
+      // ── Header ──
+      console.log();
+      console.log(LABEL("  ◆ Create Syndicate"));
+      SEP();
+
+      const wallet = getAccount();
+      console.log(DIM(`  Wallet:  ${wallet.address}`));
+      console.log(DIM(`  Network: ${getChain().name}`));
+      SEP();
+
+      // ── Gather inputs (prompt if not provided via flags) ──
+
+      const savedAgentId = getAgentId();
+
+      const name = opts.name || await input({
+        message: G("Syndicate name"),
+        validate: (v: string) => v.length > 0 || "Name is required",
+      });
+
+      const subdomain = opts.subdomain || await input({
+        message: G("ENS subdomain"),
+        default: name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, ""),
+        validate: (v: string) => v.length >= 3 || "Must be at least 3 characters",
+      });
+
+      const description = opts.description || await input({
+        message: G("Description"),
+        default: `${name} — a Sherwood syndicate`,
+      });
+
+      const agentIdStr = opts.agentId || (savedAgentId
+        ? await input({ message: G("Agent ID (ERC-8004)"), default: String(savedAgentId) })
+        : await input({ message: G("Agent ID (ERC-8004)"), validate: (v: string) => /^\d+$/.test(v) || "Must be a number" })
+      );
+
+      const openDeposits = opts.openDeposits !== undefined ? opts.openDeposits : await confirm({
+        message: G("Open deposits? (anyone can deposit)"),
+        default: true,
+      });
+
+      const maxPerTx = opts.maxPerTx || await input({
+        message: G("Max per transaction (USDC)"),
+        default: "10000",
+      });
+
+      const maxDaily = opts.maxDaily || await input({
+        message: G("Max daily spend (USDC)"),
+        default: "50000",
+      });
+
+      const borrowRatio = opts.borrowRatio || await input({
+        message: G("Max borrow ratio (bps, 7500 = 75%)"),
+        default: "7500",
+      });
+
+      // ── Resolve asset ──
+      const asset = (opts.asset || TOKENS().USDC) as Address;
+      const publicClient = getPublicClient();
+      const [decimals, assetSymbol] = await Promise.all([
+        publicClient.readContract({ address: asset, abi: ERC20_ABI, functionName: "decimals" }) as Promise<number>,
+        publicClient.readContract({ address: asset, abi: ERC20_ABI, functionName: "symbol" }) as Promise<string>,
+      ]);
+      const symbol = `sw${assetSymbol}`;
+
       const targets: Address[] = opts.targets
         ? opts.targets.split(",").map((a: string) => a.trim() as Address)
         : [];
 
-      const asset = (opts.asset || TOKENS().USDC) as Address;
+      // ── Confirmation ──
+      console.log();
+      console.log(LABEL("  ◆ Review"));
+      SEP();
+      console.log(W(`  Name:         ${BOLD(name)}`));
+      console.log(W(`  ENS:          ${G(`${subdomain}.sherwoodagent.eth`)}`));
+      console.log(W(`  Description:  ${DIM(description)}`));
+      console.log(W(`  Agent ID:     #${agentIdStr}`));
+      console.log(W(`  Asset:        ${assetSymbol} (${asset.slice(0, 10)}...)`));
+      console.log(W(`  Share token:  ${symbol}`));
+      console.log(W(`  Max per tx:   ${maxPerTx} ${assetSymbol}`));
+      console.log(W(`  Max daily:    ${maxDaily} ${assetSymbol}`));
+      console.log(W(`  Borrow ratio: ${(Number(borrowRatio) / 100).toFixed(1)}%`));
+      console.log(W(`  Open deposits: ${openDeposits ? G("yes") : chalk.red("no (whitelist)")}`));
+      if (targets.length > 0) {
+        console.log(W(`  Targets:      ${targets.length} address(es)`));
+      }
+      SEP();
 
-      const publicClient = getPublicClient();
+      const go = await confirm({ message: G("Deploy syndicate?"), default: true });
+      if (!go) {
+        console.log(DIM("  Cancelled."));
+        return;
+      }
 
-      // Read decimals and symbol from the asset ERC-20
-      const [decimals, assetSymbol] = await Promise.all([
-        publicClient.readContract({
-          address: asset,
-          abi: ERC20_ABI,
-          functionName: "decimals",
-        }) as Promise<number>,
-        publicClient.readContract({
-          address: asset,
-          abi: ERC20_ABI,
-          functionName: "symbol",
-        }) as Promise<string>,
-      ]);
+      // ── Upload metadata to IPFS ──
+      let metadataURI = opts.metadataUri || "";
 
-      // Auto-generate vault share symbol: sw + asset symbol (e.g. swWETH, swUSDC)
-      const symbol = `sw${assetSymbol}`;
+      if (!metadataURI) {
+        const spinner = ora({ text: W("Uploading metadata to IPFS..."), color: "green" }).start();
+        try {
+          const metadata: SyndicateMetadata = {
+            schema: "sherwood/syndicate/v1",
+            name,
+            description,
+            chain: getChain().name,
+            strategies: [],
+            terms: {
+              ragequitEnabled: true,
+              feeModel: "none",
+            },
+            links: {},
+          };
+          metadataURI = await uploadMetadata(metadata);
+          spinner.succeed(G(`Metadata pinned: ${DIM(metadataURI)}`));
+        } catch (err) {
+          spinner.warn(chalk.yellow(`IPFS upload failed — using inline metadata`));
+          const json = JSON.stringify({ name, description, subdomain, asset: assetSymbol, openDeposits, createdBy: "sherwood-cli" });
+          metadataURI = `data:application/json;base64,${Buffer.from(json).toString("base64")}`;
+        }
+      }
 
-      spinner.text = "Deploying vault via factory...";
+      // ── Deploy ──
+      const spinner = ora({ text: W("Deploying vault via factory..."), color: "green" }).start();
+
       const result = await factoryLib.createSyndicate({
-        creatorAgentId: BigInt(opts.agentId),
-        metadataURI: opts.metadataUri,
+        creatorAgentId: BigInt(agentIdStr),
+        metadataURI,
         asset,
-        name: opts.name,
+        name,
         symbol,
-        maxPerTx: parseUnits(opts.maxPerTx, decimals),
-        maxDailyTotal: parseUnits(opts.maxDaily, decimals),
-        maxBorrowRatio: BigInt(opts.borrowRatio),
+        maxPerTx: parseUnits(maxPerTx, decimals),
+        maxDailyTotal: parseUnits(maxDaily, decimals),
+        maxBorrowRatio: BigInt(borrowRatio),
         initialTargets: targets,
-        openDeposits: opts.openDeposits,
-        subdomain: opts.subdomain,
+        openDeposits,
+        subdomain,
       });
 
       // Auto-save vault address to config
       setChainContract(getChain().id, "vault", result.vault);
 
-      spinner.text = "Creating XMTP chat group...";
+      spinner.text = W("Setting up chat...");
 
       // Create XMTP group for syndicate chat
       try {
         const xmtp = await loadXmtp();
         const xmtpClient = await xmtp.getXmtpClient();
-        const groupId = await xmtp.createSyndicateGroup(xmtpClient, opts.subdomain, opts.publicChat);
-
-        // Store group ID on-chain as ENS text record
-        await setTextRecord(opts.subdomain, "xmtpGroupId", groupId);
-
-        // Cache locally
-        cacheGroupId(opts.subdomain, groupId);
-      } catch (chatErr) {
-        // Non-fatal — syndicate was created, chat setup failed
-        console.warn(chalk.yellow(`  ⚠ Chat setup failed: ${chatErr instanceof Error ? chatErr.message : String(chatErr)}`));
+        const groupId = await xmtp.createSyndicateGroup(xmtpClient, subdomain, opts.publicChat);
+        await setTextRecord(subdomain, "xmtpGroupId", groupId);
+        cacheGroupId(subdomain, groupId);
+      } catch {
+        // Non-fatal
       }
 
-      spinner.succeed(`Syndicate #${result.syndicateId} created`);
-      console.log(chalk.dim(`  Vault: ${result.vault}`));
-      console.log(chalk.dim(`  ENS: ${opts.subdomain}.sherwoodagent.eth`));
-      console.log(chalk.dim(`  ${getExplorerUrl(result.hash)}`));
-      console.log(chalk.dim(`  Chat: sherwood chat ${opts.subdomain}`));
-      console.log(chalk.dim(`  Vault saved to ~/.sherwood/config.json`));
-      if (opts.publicChat) {
-        console.log(chalk.dim("  Spectator mode: enabled"));
-      }
+      spinner.stop();
+
+      // ── Success ──
+      console.log();
+      console.log(LABEL("  ◆ Syndicate Created"));
+      SEP();
+      console.log(W(`  ID:       ${G(`#${result.syndicateId}`)}`));
+      console.log(W(`  Vault:    ${G(result.vault)}`));
+      console.log(W(`  ENS:      ${G(`${subdomain}.sherwoodagent.eth`)}`));
+      console.log(W(`  Metadata: ${DIM(metadataURI.length > 50 ? metadataURI.slice(0, 50) + "..." : metadataURI)}`));
+      console.log(W(`  Explorer: ${DIM(getExplorerUrl(result.hash))}`));
+      console.log(W(`  Chat:     ${DIM(`sherwood chat ${subdomain}`)}`));
+      SEP();
+      console.log(G("  ✓ Vault saved to ~/.sherwood/config.json"));
+      console.log();
     } catch (err) {
-      spinner.fail("Syndicate creation failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(`\n  ✖ ${err instanceof Error ? err.message : String(err)}`));
       process.exit(1);
     }
   });
@@ -256,6 +364,54 @@ syndicate
       console.log();
     } catch (err) {
       spinner.fail("Failed to load syndicate info");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+syndicate
+  .command("update-metadata")
+  .description("Update syndicate metadata (creator only)")
+  .requiredOption("--id <id>", "Syndicate ID")
+  .option("--name <name>", "Syndicate name")
+  .option("--description <text>", "Short description")
+  .option("--uri <uri>", "Direct metadata URI (skips IPFS upload)")
+  .action(async (opts) => {
+    const spinner = ora({ text: W("Loading syndicate..."), color: "green" }).start();
+    try {
+      const syndicateId = BigInt(opts.id);
+      let metadataURI = opts.uri;
+
+      if (!metadataURI) {
+        const info = await factoryLib.getSyndicate(syndicateId);
+        if (!info.vault || info.vault === "0x0000000000000000000000000000000000000000") {
+          spinner.fail(`Syndicate #${opts.id} not found.`);
+          process.exit(1);
+        }
+
+        const name = opts.name || info.subdomain;
+        const description = opts.description || `${name} — a Sherwood syndicate on ${info.subdomain}.sherwoodagent.eth`;
+
+        spinner.text = W("Uploading metadata to IPFS...");
+        const metadata: SyndicateMetadata = {
+          schema: "sherwood/syndicate/v1",
+          name,
+          description,
+          chain: getChain().name,
+          strategies: [],
+          terms: { ragequitEnabled: true },
+          links: {},
+        };
+        metadataURI = await uploadMetadata(metadata);
+        spinner.text = W("Updating on-chain metadata...");
+      }
+
+      const hash = await factoryLib.updateMetadata(syndicateId, metadataURI);
+      spinner.succeed(G(`Metadata updated`));
+      console.log(DIM(`  IPFS: ${metadataURI}`));
+      console.log(DIM(`  ${getExplorerUrl(hash)}`));
+    } catch (err) {
+      spinner.fail("Metadata update failed");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
       process.exit(1);
     }
