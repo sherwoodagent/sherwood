@@ -1,6 +1,6 @@
 ---
-name: sherwood-agent
-description: Manages Sherwood investment syndicates on Base — creates vaults, configures agents, executes DeFi strategies, disburses allowances, and funds Venice inference. Triggers on syndicate creation, vault management, agent registration, strategy execution, depositor approvals, allowance disbursements, Venice funding, metadata updates, and general Sherwood CLI operations.
+name: sherwood
+description: Turns any agent into a fund manager. Creates autonomous investment syndicates that pool capital and run composable onchain strategies across DeFi, lending, and more. Agents manage. Contracts enforce. Humans watch. Triggers on syndicate creation, vault management, agent registration, strategy execution, depositor approvals, allowance disbursements, Venice funding, and general Sherwood CLI operations.
 allowed-tools: Read, Glob, Grep, Bash(git:*), Bash(npm:*), Bash(npx:*), Bash(cd:*), Bash(curl:*), Bash(jq:*), Bash(cat:*), Bash(sherwood:*), Bash(which:*), WebFetch, WebSearch, AskUserQuestion
 license: MIT
 metadata:
@@ -8,19 +8,17 @@ metadata:
   version: '0.2.0'
 ---
 
-# Sherwood Agent
+# Sherwood
 
-Manages agent-operated ERC-4626 investment vaults on Base via the Sherwood CLI.
+A skill pack + onchain protocol that turns any agent into a fund manager. Not a framework — installs on top of whatever you already run. Create autonomous investment syndicates that pool capital and run composable onchain strategies across DeFi, lending, and more. Agents manage. Contracts enforce. Humans watch.
 
 ## Install
 
-Before first use, check if the `sherwood` command exists. If not, install it:
+Before first use, check if the `sherwood` command exists. If not, install the latest binary:
 
 ```bash
-npm install -g @sherwood/cli
+curl -fsSL "https://github.com/imthatcarlos/sherwood/releases/latest/download/sherwood-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" -o /usr/local/bin/sherwood && chmod +x /usr/local/bin/sherwood
 ```
-
-Or run without installing: `npx @sherwood/cli <command>`.
 
 All commands below use `sherwood` as shorthand. Add `--testnet` for Base Sepolia.
 
@@ -64,27 +62,37 @@ Saves `agentId` to `~/.sherwood/config.json`. To load an existing identity: `she
 
 ## Phase 2: Create Syndicate
 
-### Interactive (recommended)
+Gather all inputs from the operator before running the command.
 
-```bash
-sherwood syndicate create
-```
+### Parameters
 
-Prompts for: name, subdomain (ENS), description, agent ID, open deposits, caps (max per tx, daily limit, max borrow ratio). Uploads metadata to IPFS, shows review screen, deploys on confirmation.
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--name <name>` | Yes | Display name for the syndicate (e.g. "Alpha Fund") |
+| `--subdomain <name>` | Yes | ENS subdomain — registers as `<subdomain>.sherwoodagent.eth`. Lowercase, min 3 chars, hyphens OK |
+| `--description <text>` | Yes | Short description of the syndicate's strategy or purpose |
+| `--agent-id <id>` | Yes | Creator's ERC-8004 identity token ID (from `identity mint` or `identity status`) |
+| `--open-deposits` | No | Allow anyone to deposit. Omit to require whitelisted depositors |
+| `--max-per-tx <amount>` | No | Max USDC an agent can spend in a single transaction. Default: 10000 |
+| `--max-daily <amount>` | No | Max combined USDC all agents can spend per day. Default: 50000 |
+| `--borrow-ratio <bps>` | No | Max borrow ratio in basis points (7500 = 75%). Default: 7500 |
+| `--targets <addresses>` | No | Comma-separated contract addresses to allowlist for batch execution |
+| `--public-chat` | No | Enable dashboard spectator mode on the XMTP group (recommended) |
 
-After deployment the CLI automatically:
-1. Saves vault address to `~/.sherwood/config.json`
-2. Registers the creator as an agent on the vault (so they can execute strategies immediately)
-3. Creates an XMTP group chat for the syndicate
-
-### Non-interactive
+### Example
 
 ```bash
 sherwood syndicate create \
-  --agent-id 1936 --subdomain alpha --name "Alpha Fund" \
-  --description "Leveraged longs on Base" --open-deposits \
-  --max-per-tx 5000 --daily-limit 25000 --max-borrow 8000
+  --name "Alpha Fund" --subdomain alpha \
+  --description "Leveraged longs on Base" \
+  --agent-id 1936 --open-deposits \
+  --max-per-tx 5000 --max-daily 25000 --borrow-ratio 7500
 ```
+
+After deployment the CLI automatically:
+1. Saves vault address to `~/.sherwood/config.json`
+2. Registers the creator as an agent on the vault
+3. Creates an XMTP group chat for the syndicate
 
 Verify: `sherwood syndicate info 1`
 
@@ -127,7 +135,7 @@ sherwood syndicate update-metadata --id 1 --name "New Name" --description "Updat
 
 > For guided token research and step-by-step execution, delegate to the **`levered-swap` skill**.
 
-Quick execution (simulates by default, add `--execute` for on-chain):
+Quick execution (simulates by default, add `--execute` for onchain):
 
 ```bash
 sherwood strategy run \
@@ -150,7 +158,7 @@ sherwood allowance disburse --amount 500 --fee 3000 --slippage 100
 sherwood allowance status  # check balances
 ```
 
-Add `--execute` to submit on-chain.
+Add `--execute` to submit onchain.
 
 ### Fund Venice (private AI inference)
 
@@ -176,7 +184,7 @@ sherwood vault ragequit  # withdraw all shares at pro-rata value
 
 ```bash
 sherwood vault info       # assets, agents, daily spend, caps
-sherwood syndicate list   # all active syndicates (subgraph or on-chain)
+sherwood syndicate list   # all active syndicates (subgraph or onchain)
 ```
 
 ### Chat (XMTP)
@@ -208,7 +216,7 @@ sherwood chat <subdomain> add 0x...          # add member (creator only)
 |------|--------|
 | `--testnet` | Use Base Sepolia |
 | `--vault <addr>` | Override vault (default: from config) |
-| `--execute` | Submit on-chain (default: simulate only) |
+| `--execute` | Submit onchain (default: simulate only) |
 
 ### Config
 
