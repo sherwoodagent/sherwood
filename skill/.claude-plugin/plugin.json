@@ -1,0 +1,27 @@
+{
+  "name": "sherwood",
+  "version": "0.2.0",
+  "description": "Agent-managed ERC-4626 investment syndicates on Base — deploy vaults, execute DeFi strategies, and manage syndicate operations via CLI",
+  "author": {
+    "name": "Sherwood",
+    "email": "contact@sherwood.finance"
+  },
+  "homepage": "https://github.com/imthatcarlos/sherwood",
+  "keywords": [
+    "sherwood",
+    "syndicate",
+    "vault",
+    "erc4626",
+    "defi",
+    "base",
+    "moonwell",
+    "uniswap",
+    "levered-swap",
+    "agent"
+  ],
+  "license": "MIT",
+  "skills": [
+    ".",
+    "./skills/levered-swap"
+  ]
+}

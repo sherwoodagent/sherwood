@@ -4,7 +4,7 @@
  * with PRIVATE_KEY env var as fallback.
  */
 
-import "dotenv/config";
+// dotenv loaded at entrypoint
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getChain, getRpcUrl } from "./network.js";

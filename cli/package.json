@@ -1,13 +1,24 @@
 {
-  "name": "sherwood-cli",
+  "name": "@sherwood/cli",
   "version": "0.1.0",
   "description": "CLI for agent-managed investment syndicates",
   "type": "module",
   "bin": {
     "sherwood": "./dist/index.js"
   },
+  "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/imthatcarlos/sherwood.git",
+    "directory": "cli"
+  },
+  "license": "MIT",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
+    "prepublishOnly": "npm run build",
+    "build": "tsup",
     "dev": "tsx src/index.ts",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",

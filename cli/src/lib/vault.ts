@@ -25,7 +25,7 @@ export function setVaultAddress(addr: Address): void {
   _vaultOverride = addr;
 }
 
-function getVaultAddress(): Address {
+export function getVaultAddress(): Address {
   // 1. Per-command override (--vault flag)
   if (_vaultOverride) return _vaultOverride;
 

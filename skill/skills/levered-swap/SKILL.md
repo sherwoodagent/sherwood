@@ -1,6 +1,6 @@
 ---
 name: levered-swap
-description: Use when the user asks to "run a levered swap", "open a leveraged position", "borrow and swap", "deposit ETH and buy tokens", "execute the levered strategy", "enter a position", "lever up", or mentions leveraged trading, collateral + borrow strategies, or the Sherwood levered swap strategy. Guides the user step-by-step through research, token selection, parameter confirmation, simulation, and on-chain execution.
+description: Executes Sherwood's levered swap strategy on Base — deposits WETH as collateral on Moonwell, borrows USDC, and swaps into a target token via Uniswap V3. Guides step-by-step through token research (DexScreener), risk assessment, parameter selection, simulation, and on-chain execution. Triggers on leveraged trading, collateral + borrow strategies, levered swaps, or entering positions.
 allowed-tools: Read, Glob, Grep, Bash(npx:*), Bash(cd:*), Bash(curl:*), Bash(jq:*), WebFetch, WebSearch, AskUserQuestion
 model: sonnet
 license: MIT

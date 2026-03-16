@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-import "dotenv/config";
+// Load .env if present (dev convenience — production uses ~/.sherwood/config.json)
+import { config as loadDotenv } from "dotenv";
+try { loadDotenv(); } catch {};
 import { Command } from "commander";
 import { parseUnits } from "viem";
 import type { Address } from "viem";
@@ -222,6 +224,23 @@ syndicate
 
       // Auto-save vault address to config
       setChainContract(getChain().id, "vault", result.vault);
+
+      // ── Register creator as agent on the vault ──
+      spinner.text = W("Registering creator as agent...");
+      try {
+        vaultLib.setVaultAddress(result.vault);
+        const creatorAddress = getAccount().address;
+        await vaultLib.registerAgent(
+          BigInt(agentIdStr),
+          creatorAddress,        // pkp = creator EOA (direct execution)
+          creatorAddress,        // operator = creator EOA
+          parseUnits(maxPerTx, decimals),
+          parseUnits(maxDaily, decimals),
+        );
+      } catch (regErr) {
+        // Non-fatal — creator can register later via `syndicate add`
+        console.warn(chalk.yellow("\n  ⚠ Could not auto-register creator as agent — register manually with `syndicate add`"));
+      }
 
       spinner.text = W("Setting up chat...");
 
@@ -467,15 +486,18 @@ syndicate
   .action(async (opts) => {
     const spinner = ora("Verifying creator...").start();
     try {
+      // Resolve vault address from --vault flag or config
+      resolveVault(opts);
+      const vaultAddress = vaultLib.getVaultAddress();
+
       // Verify caller is the syndicate creator
-      const { creator, subdomain } = await resolveVaultSyndicate(opts.vault as Address);
+      const { creator, subdomain } = await resolveVaultSyndicate(vaultAddress);
       const callerAddress = getAccount().address.toLowerCase();
       if (creator.toLowerCase() !== callerAddress) {
         spinner.fail("Only the syndicate creator can add agents");
         process.exit(1);
       }
 
-      resolveVault(opts);
       const decimals = await vaultLib.getAssetDecimals();
       const maxPerTx = parseUnits(opts.maxPerTx, decimals);
       const dailyLimit = parseUnits(opts.dailyLimit, decimals);
