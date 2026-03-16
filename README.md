@@ -21,12 +21,12 @@ app/                 Dashboard (Next.js + Tailwind)
 
 ## Contracts
 
-- **SyndicateVault** — ERC-4626 vault with delegatecall execution. Two-layer permissions (syndicate caps + per-agent caps). Depositor whitelist. Ragequit.
-- **SyndicateFactory** — Deploys vault proxies. Metadata via IPFS (Pinata).
+- **SyndicateVault** — ERC-4626 vault with delegatecall execution, ERC721Holder (receives ENS subname NFTs). Two-layer permissions (syndicate caps + per-agent caps). Depositor whitelist. Ragequit.
+- **SyndicateFactory** — Deploys vault proxies. Registers ENS subnames. ERC-8004 agent identity verification.
 - **BatchExecutorLib** — Shared stateless library for batched protocol calls (supply, borrow, swap). Target allowlist.
 - **StrategyRegistry** — On-chain strategy catalog with creator tracking.
 
-49 tests passing. See [contracts/README.md](contracts/README.md) for build, test, deploy instructions.
+66 tests passing. See [contracts/README.md](contracts/README.md) for build, test, deploy instructions.
 
 ## CLI
 
@@ -35,24 +35,31 @@ TypeScript CLI for syndicate management, LP operations, and strategy execution.
 ```bash
 cd cli && npm install
 
-# Syndicate management
-sherwood syndicate create --name "Alpha Fund" --symbol "shUSDC" --max-per-tx 10000 --max-daily 50000
+# Setup — private key stored in ~/.sherwood/config.json
+sherwood config set --private-key 0x...
+
+# Identity — mint ERC-8004 agent NFT (required before syndicate create)
+sherwood identity mint --name "My Agent"
+sherwood identity status
+
+# Syndicate management — vault address auto-saved to config after create
+sherwood syndicate create --agent-id 1936 --subdomain my-fund --name "My Fund" --open-deposits
 sherwood syndicate list                          # Queries subgraph (or on-chain fallback)
 sherwood syndicate info 1                        # Vault stats + metadata
-sherwood syndicate approve-depositor --vault 0x... --depositor 0x...
+sherwood syndicate approve-depositor --depositor 0x...
 
-# LP operations
-sherwood vault deposit --vault 0x... --amount 1000
-sherwood vault balance --vault 0x...
-sherwood vault ragequit --vault 0x...
+# LP operations — --vault flag is optional (reads from config)
+sherwood vault deposit --amount 1000
+sherwood vault balance
+sherwood vault ragequit
 
 # Strategy execution
-sherwood strategy run --vault 0x... --collateral 1.0 --borrow 500 --token 0x... --execute
+sherwood strategy run --collateral 1.0 --borrow 500 --token 0x... --execute
 
 # Vault admin
-sherwood vault info --vault 0x...
-sherwood vault add-target --vault 0x... --target 0x...
-sherwood vault register-agent --vault 0x... --pkp 0x... --eoa 0x... --max-per-tx 5000 --daily-limit 25000
+sherwood vault info
+sherwood vault add-target --target 0x...
+sherwood syndicate add --agent-id 42 --pkp 0x... --eoa 0x... --max-per-tx 5000 --daily-limit 25000
 ```
 
 ## Stack

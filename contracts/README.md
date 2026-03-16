@@ -6,8 +6,8 @@ Solidity smart contracts for agent-managed investment syndicates on Base. Built 
 
 | Contract | Description |
 |----------|-------------|
-| **SyndicateVault** | ERC-4626 vault with two-layer permission model. Holds all positions via delegatecall. Depositor whitelist, agent management, syndicate-level + per-agent caps, daily spend tracking, ragequit. |
-| **SyndicateFactory** | Deploys vault proxies in one tx. Registers syndicates, stores metadata URIs, tracks active/inactive state. |
+| **SyndicateVault** | ERC-4626 vault with two-layer permission model. Holds all positions via delegatecall. ERC721Holder (receives ENS subname NFTs). Depositor whitelist, agent management, syndicate-level + per-agent caps, daily spend tracking, ragequit. |
+| **SyndicateFactory** | Deploys vault proxies in one tx. Registers ENS subnames. Verifies ERC-8004 agent identity on creation. Tracks active/inactive state. |
 | **BatchExecutorLib** | Shared stateless library. Vault delegatecalls into it to execute batches of protocol calls (supply, borrow, swap, etc). Target allowlist enforced. |
 | **StrategyRegistry** | On-chain registry of strategies. Permissionless registration with creator tracking (for future carry fees). |
 
@@ -53,7 +53,7 @@ forge build
 ### Test
 
 ```bash
-forge test           # Run all tests (49 tests)
+forge test           # Run all tests (66 tests)
 forge test -vvv      # Verbose output with traces
 forge test --match-test test_deposit   # Run specific tests
 ```
@@ -67,29 +67,23 @@ forge fmt --check    # Check formatting without modifying
 
 ### Deploy
 
-Deploy to Base mainnet (or any EVM chain):
+Deploy to Base Sepolia (testnet):
 
 ```bash
-forge script script/Deploy.s.sol:Deploy \
-  --rpc-url $BASE_RPC_URL \
-  --private-key $PRIVATE_KEY \
-  --broadcast \
-  --verify
+forge script script/testnet/Deploy.s.sol:DeployTestnet \
+  --rpc-url base_sepolia \
+  --account sherwood-agent \
+  --broadcast
 ```
 
 The deploy script:
 1. Deploys `BatchExecutorLib` (shared, stateless)
 2. Deploys `SyndicateVault` implementation
-3. Deploys `SyndicateFactory` (registers both)
-4. Creates the first syndicate via the factory
-5. Registers the deployer as an agent (dev mode)
+3. Deploys `SyndicateFactory` (registers executor, vault impl, ENS registrar, agent registry)
+4. Deploys `StrategyRegistry` (UUPS proxy)
 
-Output includes all addresses to copy into `cli/.env`:
-```
-VAULT_ADDRESS=0x...
-FACTORY_ADDRESS=0x...
-EXECUTOR_LIB_ADDRESS=0x...
-```
+Protocol addresses are hardcoded in `cli/src/lib/addresses.ts` (bundled with CLI).
+Deployment records saved in `chains/{chainId}.json`.
 
 ### Gas Snapshots
 
@@ -97,7 +91,18 @@ EXECUTOR_LIB_ADDRESS=0x...
 forge snapshot
 ```
 
-## Key Addresses (Base Mainnet)
+## Deployed Addresses
+
+### Sherwood Contracts (Base Sepolia)
+
+| Contract | Address |
+|----------|---------|
+| SyndicateFactory | `0xc705F04fF2781aF9bB53ba416Cb32A29540c4624` |
+| StrategyRegistry | `0x8A45f769553D10F26a6633d019B04f7805b1368A` |
+| SyndicateVault (impl) | `0x7E1F71A72a88Ce8418cf82CACDE9ce5Bbbcf5772` |
+| BatchExecutorLib | `0x0c63Ea92336eA0324B81eB6D0fD62455eC38091b` |
+
+### External Contracts (Base Mainnet)
 
 | Contract | Address |
 |----------|---------|
@@ -110,26 +115,31 @@ forge snapshot
 
 ## Tests
 
-49 tests across 2 test suites:
+66 tests across 2 test suites:
 
-### SyndicateVault (39 tests)
+### SyndicateVault (49 tests)
 
 - ERC-4626 deposits and withdrawals
-- Agent registration, removal, and cap enforcement
+- Agent registration (with ERC-8004 identity verification), removal, and cap enforcement
 - Batch execution via delegatecall with target allowlist
 - Syndicate-level and per-agent daily spend tracking
 - Ragequit (pro-rata exit)
 - Depositor whitelist (approve, remove, batch approve, open deposits toggle)
+- Total deposited tracking (increments on deposit, decrements on withdraw/ragequit)
 - Pause/unpause
 - Simulation (dry-run via eth_call)
+- Fuzz testing (cap enforcement)
 
-### SyndicateFactory (10 tests)
+### SyndicateFactory (17 tests)
 
-- Syndicate creation with full config
+- Syndicate creation with full config + ENS subname registration
+- ERC-8004 agent identity verification on create
 - Metadata updates
 - Syndicate deactivation
 - Vault functionality through factory-created proxies
 - Depositor gating on factory-created vaults
+- Storage isolation between syndicates
+- Subdomain availability checks
 
 ## Subgraph
 
