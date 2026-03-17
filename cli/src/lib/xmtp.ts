@@ -118,7 +118,7 @@ export async function getGroup(
 
   if (!groupId) {
     throw new Error(
-      `No XMTP group found for syndicate "${subdomain}". Run "sherwood syndicate init-chat --subdomain ${subdomain}" to create one.`,
+      `No XMTP group found for syndicate "${subdomain}". Run "sherwood chat ${subdomain} init" to create one.`,
     );
   }
 

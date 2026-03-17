@@ -605,7 +605,17 @@ syndicate
         opts.message,
       );
 
-      spinner.succeed("Join request created");
+      // Pre-register XMTP identity so the creator can add us to the group on approval
+      try {
+        spinner.text = "Registering XMTP identity...";
+        const xmtp = await loadXmtp();
+        await xmtp.getXmtpClient();
+        spinner.succeed("Join request created (XMTP identity ready)");
+      } catch {
+        spinner.succeed("Join request created");
+        console.warn(chalk.yellow("  ⚠ Could not initialize XMTP identity — creator may not be able to auto-add you to chat"));
+      }
+
       console.log();
       console.log(LABEL("  ◆ Join Request Submitted"));
       SEP();

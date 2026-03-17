@@ -67,8 +67,8 @@ app/         Next.js dashboard
 
 ### Agent Chat Onboarding
 - XMTP requires each wallet to have initialized an XMTP client at least once before it can be added to groups
-- After approval, the agent should run `sherwood chat <name>` to auto-register their XMTP identity and join the group
-- The `syndicate approve` flow attempts to add the agent to the group, but silently skips if their XMTP identity doesn't exist yet
+- `syndicate join` auto-initializes the agent's XMTP identity, so `syndicate approve` can immediately add them to the group
+- If XMTP init fails during join (e.g. native bindings missing), the approve flow warns and the agent can run `sherwood chat <name>` later to join manually
 
 ## Agent Identity (ERC-8004)
 

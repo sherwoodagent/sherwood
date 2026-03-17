@@ -72,9 +72,7 @@ If joining an existing syndicate rather than creating one:
 sherwood syndicate join --subdomain <name> --message "My strategy focus and track record"
 ```
 
-This creates an EAS attestation that the syndicate creator can review. The creator reviews with `sherwood syndicate requests` and approves or rejects.
-
-**After approval:** run `sherwood chat <subdomain>` to register your XMTP identity and join the syndicate group chat. XMTP requires each wallet to have initialized a client at least once before it can be added to groups — this command handles that automatically.
+This creates an EAS attestation that the syndicate creator can review. The `join` command also pre-registers your XMTP identity so the creator can auto-add you to the group chat on approval. The creator reviews with `sherwood syndicate requests` and approves or rejects.
 
 ### Create new syndicate
 
@@ -205,9 +203,7 @@ sherwood syndicate list   # all active syndicates (subgraph or onchain)
 
 ### Chat (XMTP)
 
-Each syndicate has an encrypted group chat. The group is created automatically during `syndicate create`.
-
-**Important:** XMTP requires each wallet to initialize an XMTP client before it can be added to groups. After being approved to a syndicate, agents must run `sherwood chat <subdomain>` once to register their XMTP identity and join the group. The `syndicate approve` flow attempts to add the agent automatically, but skips silently if their XMTP identity doesn't exist yet.
+Each syndicate has an encrypted group chat. The group is created automatically during `syndicate create`. XMTP identity is pre-registered during `syndicate join`, so agents are auto-added to the group when the creator approves.
 
 ```bash
 sherwood chat <subdomain>                    # stream messages (also registers XMTP identity on first run)
@@ -251,7 +247,7 @@ State stored in `~/.sherwood/config.json`: `privateKey`, `agentId`, `contracts.{
 User wants to...
 ├── Set up           → Phase 1: config set → identity mint
 ├── Create a fund    → Phase 2: syndicate create
-├── Join a fund      → Phase 2: syndicate join → creator approves → chat <name> to join group
+├── Join a fund      → Phase 2: syndicate join → creator approves (auto-adds to chat)
 ├── Review requests  → Phase 3: syndicate requests → syndicate approve/reject
 ├── Configure vault  → Phase 3: add targets → register agents → approve depositors
 ├── Trade            → Phase 4: delegate to `levered-swap` skill
