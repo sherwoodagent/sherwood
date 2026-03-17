@@ -256,6 +256,21 @@ async function handleAdd(name: string, address: string): Promise<void> {
   }
 }
 
+async function handleRemove(name: string, address: string): Promise<void> {
+  const spinner = ora("Removing member...").start();
+  try {
+    const xmtp = await loadXmtp();
+    const client = await xmtp.getXmtpClient();
+    const group = await xmtp.getGroup(client, name);
+    await xmtp.removeMember(group, address);
+    spinner.succeed(`Member removed: ${address}`);
+  } catch (err) {
+    spinner.fail("Failed to remove member");
+    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  }
+}
+
 async function handleInit(name: string, force: boolean, publicChat: boolean): Promise<void> {
   const spinner = ora("Initializing chat group...").start();
   try {
@@ -307,7 +322,7 @@ async function handleInit(name: string, force: boolean, publicChat: boolean): Pr
 export function registerChatCommands(program: Command): void {
   program
     .command("chat <name> [action] [actionArgs...]")
-    .description("Syndicate chat — stream, send, log, members, add, init")
+    .description("Syndicate chat — stream, send, log, members, add, remove, init")
     .option("--markdown", "Send as rich markdown (for send)", false)
     .option("--limit <n>", "Number of messages to show (for log)", "20")
     .option("--force", "Recreate group even if one exists (for init)", false)
@@ -349,6 +364,16 @@ export function registerChatCommands(program: Command): void {
             process.exit(1);
           }
           await handleAdd(name, address);
+          break;
+        }
+
+        case "remove": {
+          const removeAddr = actionArgs[0];
+          if (!removeAddr) {
+            console.error(chalk.red("Usage: sherwood chat <name> remove <address>"));
+            process.exit(1);
+          }
+          await handleRemove(name, removeAddr);
           break;
         }
 

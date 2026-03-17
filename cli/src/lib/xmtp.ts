@@ -94,7 +94,7 @@ function syncXmtpEnv(): void {
   const envFile = path.join(xmtpDir, ".env");
   const walletKey = config.privateKey.replace(/^0x/, "");
 
-  // Check if already synced
+  // Only write if wallet key is missing or different — preserve existing DB encryption key
   if (fs.existsSync(envFile)) {
     const existing = fs.readFileSync(envFile, "utf8");
     if (existing.includes(`XMTP_WALLET_KEY=${walletKey}`)) {
@@ -103,14 +103,9 @@ function syncXmtpEnv(): void {
     }
   }
 
-  // Write env file
+  // Write wallet key to env file — omit DB encryption key so XMTP CLI manages its own
   fs.mkdirSync(xmtpDir, { recursive: true });
-  const content = [
-    `XMTP_WALLET_KEY=${walletKey}`,
-    `XMTP_DB_ENCRYPTION_KEY=${config.dbEncryptionKey}`,
-    `XMTP_ENV=${getXmtpEnv()}`,
-  ].join("\n");
-  fs.writeFileSync(envFile, content, { mode: 0o600 });
+  fs.writeFileSync(envFile, `XMTP_WALLET_KEY=${walletKey}\n`, { mode: 0o600 });
 
   _synced = true;
 }
@@ -121,14 +116,10 @@ function getXmtpEnv(): string {
 
 // ── Subprocess runners ──
 
-function getXmtpEnvFile(): string {
-  return path.join(homedir(), ".xmtp", ".env");
-}
-
 function execXmtp(args: string[]): string {
   syncXmtpEnv();
   const bin = getXmtpBinaryPath();
-  const fullArgs = [...args, "--env", getXmtpEnv(), "--env-file", getXmtpEnvFile()];
+  const fullArgs = [...args, "--env", getXmtpEnv()];
 
   // Use node to run the bin/run.js if it's a .js file
   if (bin.endsWith(".js")) {
@@ -322,8 +313,6 @@ export async function streamMessages(
     "off",
     "--env",
     getXmtpEnv(),
-    "--env-file",
-    getXmtpEnvFile(),
   ];
 
   const proc = bin.endsWith(".js")
