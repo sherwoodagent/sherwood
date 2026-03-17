@@ -80,6 +80,14 @@ contract SyndicateVault is
     /// @notice Cumulative deposits for profit calculation
     uint256 private _totalDeposited;
 
+    // ── Governor storage (appended — UUPS safe) ──
+
+    /// @notice Trusted governor contract
+    address private _governor;
+
+    /// @notice True when a strategy is live (redemptions blocked)
+    bool private _redemptionsLocked;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -404,6 +412,58 @@ contract SyndicateVault is
         _unpause();
     }
 
+    // ==================== GOVERNOR ====================
+
+    modifier onlyGovernor() {
+        if (msg.sender != _governor) revert NotGovernor();
+        _;
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function setGovernor(address governor_) external onlyOwner {
+        address old = _governor;
+        _governor = governor_;
+        emit GovernorUpdated(old, governor_);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function lockRedemptions() external onlyGovernor {
+        _redemptionsLocked = true;
+        emit RedemptionsLockedEvent();
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function unlockRedemptions() external onlyGovernor {
+        _redemptionsLocked = false;
+        emit RedemptionsUnlockedEvent();
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function executeGovernorBatch(BatchExecutorLib.Call[] calldata calls) external onlyGovernor {
+        (bool success, bytes memory returnData) =
+            _executorImpl.delegatecall(abi.encodeCall(BatchExecutorLib.executeBatch, (calls)));
+        if (!success) {
+            assembly {
+                revert(add(returnData, 32), mload(returnData))
+            }
+        }
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function transferPerformanceFee(address asset, address to, uint256 amount) external onlyGovernor {
+        IERC20(asset).safeTransfer(to, amount);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function governor() external view returns (address) {
+        return _governor;
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function redemptionsLocked() external view returns (bool) {
+        return _redemptionsLocked;
+    }
+
     // ==================== OVERRIDES ====================
 
     /// @dev Block deposits when paused or depositor not approved. Track totalDeposited.
@@ -422,6 +482,7 @@ contract SyndicateVault is
         override
         whenNotPaused
     {
+        if (_redemptionsLocked) revert RedemptionsLocked();
         if (assets > _totalDeposited) {
             _totalDeposited = 0;
         } else {

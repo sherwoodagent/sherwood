@@ -32,6 +32,9 @@ interface ISyndicateVault {
     error AgentNotActive();
     error InvalidAgentRegistry();
     error NotAgentOwner();
+    error NotGovernor();
+    error RedemptionsLocked();
+    error InvalidGovernor();
 
     // ── Syndicate-Level Caps (hard limits for ALL agents) ──
     struct SyndicateCaps {
@@ -89,6 +92,15 @@ interface ISyndicateVault {
     function totalDeposited() external view returns (uint256);
     function getAgentOperators() external view returns (address[] memory);
 
+    // ── Governor ──
+    function setGovernor(address governor_) external;
+    function lockRedemptions() external;
+    function unlockRedemptions() external;
+    function executeGovernorBatch(BatchExecutorLib.Call[] calldata calls) external;
+    function transferPerformanceFee(address asset, address to, uint256 amount) external;
+    function governor() external view returns (address);
+    function redemptionsLocked() external view returns (bool);
+
     // ── Admin (syndicate creator) ──
     function registerAgent(
         uint256 agentId,
@@ -119,4 +131,7 @@ interface ISyndicateVault {
     event DepositorApproved(address indexed depositor);
     event DepositorRemoved(address indexed depositor);
     event OpenDepositsUpdated(bool open);
+    event GovernorUpdated(address indexed oldGovernor, address indexed newGovernor);
+    event RedemptionsLockedEvent();
+    event RedemptionsUnlockedEvent();
 }
