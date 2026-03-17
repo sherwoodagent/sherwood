@@ -317,17 +317,69 @@ export async function createSyndicateGroup(
 
 // ── Group Lookup ──
 
+/**
+ * Check if a conversation exists in the local XMTP DB.
+ * Returns true if `conversations get <id>` succeeds.
+ */
+function conversationExists(groupId: string): boolean {
+  try {
+    execXmtp(["conversations", "get", groupId]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Search synced conversations for a group matching the syndicate name.
+ * Falls back to this when the cached/ENS group ID is stale.
+ */
+function findGroupByName(subdomain: string): string | null {
+  try {
+    const conversations = execXmtpJson<Array<{ id?: string; name?: string; description?: string }>>(
+      ["conversations", "list", "--type", "group"],
+    );
+    if (!Array.isArray(conversations)) return null;
+
+    const match = conversations.find(
+      (c) => c.name === subdomain || c.description?.includes(`${subdomain}.sherwoodagent.eth`),
+    );
+    return match?.id || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getGroup(
   _client: string,
   subdomain: string,
 ): Promise<string> {
-  // Try local cache first
-  let groupId = getCachedGroupId(subdomain);
+  // Sync first so we have the latest conversations locally
+  syncConversations();
+
+  // Try local cache
+  let groupId: string | undefined = getCachedGroupId(subdomain);
+
+  // Validate cached ID actually exists in the local DB
+  if (groupId && !conversationExists(groupId)) {
+    cacheGroupId(subdomain, ""); // invalidate stale entry
+    groupId = undefined;
+  }
 
   // Fall back to on-chain ENS text record
   if (!groupId) {
-    groupId = await getTextRecord(subdomain, "xmtpGroupId");
-    if (groupId) {
+    const ensId = await getTextRecord(subdomain, "xmtpGroupId");
+    if (ensId && conversationExists(ensId)) {
+      groupId = ensId;
+      cacheGroupId(subdomain, groupId);
+    }
+  }
+
+  // Last resort: search synced conversations by name
+  if (!groupId) {
+    const found = findGroupByName(subdomain);
+    if (found) {
+      groupId = found;
       cacheGroupId(subdomain, groupId);
     }
   }
@@ -383,7 +435,6 @@ export async function sendEnvelope(
   groupId: string,
   envelope: ChatEnvelope,
 ): Promise<void> {
-  syncConversations();
   const text = JSON.stringify(envelope);
   execXmtp(["conversation", "send-text", groupId, text]);
 }
@@ -479,7 +530,6 @@ export async function getRecentMessages(
   groupId: string,
   limit: number = 20,
 ): Promise<XmtpMessage[]> {
-  syncConversations();
   const raw = execXmtpJson<Array<Record<string, unknown>>>([
     "conversation",
     "messages",
@@ -506,7 +556,6 @@ export async function getRecentMessages(
 export async function getMembers(
   groupId: string,
 ): Promise<XmtpMember[]> {
-  syncConversations();
   const raw = execXmtpJson<Array<Record<string, unknown>>>([
     "conversation",
     "members",

@@ -136,8 +136,7 @@ async function handleSend(name: string, message: string, markdown: boolean): Pro
   const spinner = ora("Sending...").start();
   try {
     const xmtp = await loadXmtp();
-    const client = await xmtp.getXmtpClient();
-    const group = await xmtp.getGroup(client, name);
+    const group = await xmtp.getGroup("", name);
 
     if (markdown) {
       await xmtp.sendMarkdown(group, message);
@@ -163,8 +162,7 @@ async function handleReact(name: string, messageId: string, emoji: string): Prom
   const spinner = ora("Reacting...").start();
   try {
     const xmtp = await loadXmtp();
-    const client = await xmtp.getXmtpClient();
-    const group = await xmtp.getGroup(client, name);
+    const group = await xmtp.getGroup("", name);
     await xmtp.sendReaction(group, messageId, emoji);
     spinner.succeed(`Reacted ${emoji}`);
   } catch (err) {
@@ -178,8 +176,7 @@ async function handleLog(name: string, limit: number): Promise<void> {
   const spinner = ora("Loading messages...").start();
   try {
     const xmtp = await loadXmtp();
-    const client = await xmtp.getXmtpClient();
-    const group = await xmtp.getGroup(client, name);
+    const group = await xmtp.getGroup("", name);
     const messages = await xmtp.getRecentMessages(group, limit);
 
     spinner.stop();
@@ -206,8 +203,7 @@ async function handleMembers(name: string): Promise<void> {
   const spinner = ora("Loading members...").start();
   try {
     const xmtp = await loadXmtp();
-    const client = await xmtp.getXmtpClient();
-    const group = await xmtp.getGroup(client, name);
+    const group = await xmtp.getGroup("", name);
     const members = await xmtp.getMembers(group);
 
     spinner.stop();
@@ -237,8 +233,7 @@ async function handleAdd(name: string, address: string): Promise<void> {
   const spinner = ora("Adding member...").start();
   try {
     const xmtp = await loadXmtp();
-    const client = await xmtp.getXmtpClient();
-    const group = await xmtp.getGroup(client, name);
+    const group = await xmtp.getGroup("", name);
     await xmtp.addMember(group, address);
 
     await xmtp.sendEnvelope(group, {
@@ -260,8 +255,7 @@ async function handleRemove(name: string, address: string): Promise<void> {
   const spinner = ora("Removing member...").start();
   try {
     const xmtp = await loadXmtp();
-    const client = await xmtp.getXmtpClient();
-    const group = await xmtp.getGroup(client, name);
+    const group = await xmtp.getGroup("", name);
     await xmtp.removeMember(group, address);
     spinner.succeed(`Member removed: ${address}`);
   } catch (err) {
