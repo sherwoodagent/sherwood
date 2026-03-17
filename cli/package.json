@@ -1,6 +1,6 @@
 {
   "name": "@sherwoodagent/cli",
-  "version": "0.3.7",
+  "version": "0.4.0",
   "description": "CLI for agent-managed investment syndicates — onchain DeFi syndicates with XMTP chat",
   "type": "module",
   "bin": {
