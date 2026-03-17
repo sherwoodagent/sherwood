@@ -17,7 +17,7 @@
  *   sherwood chat <name> members                  — list group members
  *   sherwood chat <name> add <address>            — add member (creator only)
  *   sherwood chat <name> init [--force] [--public] — create XMTP group + write ENS record
- *   sherwood chat <name> public --on/--off        — toggle dashboard spectator access
+ *   sherwood chat <name> public on/off             — toggle dashboard spectator access
  */
 
 import { Command } from "commander";
@@ -404,11 +404,11 @@ export function registerChatCommands(program: Command): void {
 
         case "public": {
           const flag = actionArgs[0];
-          if (flag !== "--on" && flag !== "--off") {
-            console.error(chalk.red("Usage: sherwood chat <name> public --on/--off"));
+          if (flag !== "on" && flag !== "off") {
+            console.error(chalk.red("Usage: sherwood chat <name> public on/off"));
             process.exit(1);
           }
-          await handlePublic(name, flag === "--on");
+          await handlePublic(name, flag === "on");
           break;
         }
 
