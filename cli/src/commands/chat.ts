@@ -1,28 +1,38 @@
 /**
- * Chat commands — sherwood chat <syndicate-name> [subcommand]
+ * Chat commands — sherwood chat <syndicate-name> [action] [args...]
  *
  * Uses XMTP for encrypted group messaging tied to syndicates.
+ *
+ * Commander can't dispatch subcommands when the parent has a positional <name> arg
+ * (it always runs the parent action). So we use manual dispatch: a single .action()
+ * that routes based on the [action] argument.
+ *
+ * Usage:
+ *   sherwood chat <name>                          — stream messages (default)
+ *   sherwood chat <name> send "hello"             — send a text message
+ *   sherwood chat <name> send "hello" --markdown  — send formatted markdown
+ *   sherwood chat <name> react <id> <emoji>       — react to a message
+ *   sherwood chat <name> log [--limit 50]         — show recent messages
+ *   sherwood chat <name> members                  — list group members
+ *   sherwood chat <name> add <address>            — add member (creator only)
+ *   sherwood chat <name> init [--force]           — create XMTP group + write ENS record
  */
 
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
 import { getAccount } from "../lib/client.js";
-import { resolveSyndicate } from "../lib/ens.js";
-import {
-  getXmtpClient,
-  getGroup,
-  addMember,
-  sendEnvelope,
-  sendMarkdown as xmtpSendMarkdown,
-  sendReaction as xmtpSendReaction,
-  streamMessages,
-  getRecentMessages,
-} from "../lib/xmtp.js";
+import { resolveSyndicate, setTextRecord, getTextRecord } from "../lib/ens.js";
+import { cacheGroupId, getCachedGroupId } from "../lib/config.js";
 import type { ChatEnvelope, MessageType } from "../lib/types.js";
 import { isText, isMarkdown, isReaction } from "@xmtp/node-sdk";
 import type { DecodedMessage, Reaction } from "@xmtp/node-sdk";
 import { PermissionLevel } from "@xmtp/node-bindings";
+
+// Lazy-load XMTP to avoid breaking non-chat commands when native bindings are missing
+async function loadXmtp() {
+  return import("../lib/xmtp.js");
+}
 
 // ── Formatting ──
 
@@ -60,18 +70,15 @@ function formatMessage(msg: DecodedMessage): string {
   const time = chalk.dim(`[${formatTimestamp(msg.sentAt)}]`);
   const sender = chalk.dim(truncateAddress(msg.senderInboxId));
 
-  // Handle reactions
   if (isReaction(msg)) {
     const reaction = msg.content as Reaction;
     return `${time} ${sender} reacted ${reaction.content} to ${truncateAddress(reaction.reference)}`;
   }
 
-  // Handle markdown
   if (isMarkdown(msg)) {
     return `${time} ${sender}\n${msg.content as string}`;
   }
 
-  // Handle text messages (may be JSON envelope or plain text)
   if (isText(msg)) {
     const text = msg.content as string;
     try {
@@ -91,211 +98,287 @@ function formatMessage(msg: DecodedMessage): string {
         return `${time} ${color(`[${envelope.type}]`)} ${truncateAddress(envelope.from || "?")} joined`;
       }
 
-      // Generic envelope display
       const summary = envelope.text || envelope.type;
       return `${time} ${color(`[${envelope.type}]`)} ${chalk.dim(from)}: ${summary}`;
     } catch {
-      // Plain text, not JSON
       return `${time} ${sender}: ${text}`;
     }
   }
 
-  // Fallback
   return `${time} ${sender}: ${msg.fallback || "[unsupported content]"}`;
+}
+
+// ── Action handlers ──
+
+async function handleStream(name: string): Promise<void> {
+  const spinner = ora("Connecting to chat...").start();
+  try {
+    await resolveSyndicate(name);
+    const xmtp = await loadXmtp();
+    const client = await xmtp.getXmtpClient();
+    const group = await xmtp.getGroup(client, name);
+    spinner.succeed(`Connected to ${name}.sherwoodagent.eth`);
+    console.log(chalk.dim("Streaming messages... (Ctrl+C to exit)\n"));
+
+    const cleanup = await xmtp.streamMessages(group, (msg) => {
+      console.log(formatMessage(msg));
+    });
+
+    process.on("SIGINT", async () => {
+      console.log(chalk.dim("\nDisconnecting..."));
+      await cleanup();
+      process.exit(0);
+    });
+
+    await new Promise(() => {});
+  } catch (err) {
+    spinner.fail("Failed to connect to chat");
+    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  }
+}
+
+async function handleSend(name: string, message: string, markdown: boolean): Promise<void> {
+  const spinner = ora("Sending...").start();
+  try {
+    const xmtp = await loadXmtp();
+    const client = await xmtp.getXmtpClient();
+    const group = await xmtp.getGroup(client, name);
+
+    if (markdown) {
+      await xmtp.sendMarkdown(group, message);
+    } else {
+      const envelope: ChatEnvelope = {
+        type: "MESSAGE",
+        from: getAccount().address,
+        text: message,
+        timestamp: Math.floor(Date.now() / 1000),
+      };
+      await xmtp.sendEnvelope(group, envelope);
+    }
+
+    spinner.succeed("Message sent");
+  } catch (err) {
+    spinner.fail("Failed to send message");
+    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  }
+}
+
+async function handleReact(name: string, messageId: string, emoji: string): Promise<void> {
+  const spinner = ora("Reacting...").start();
+  try {
+    const xmtp = await loadXmtp();
+    const client = await xmtp.getXmtpClient();
+    const group = await xmtp.getGroup(client, name);
+    await xmtp.sendReaction(group, messageId, emoji);
+    spinner.succeed(`Reacted ${emoji}`);
+  } catch (err) {
+    spinner.fail("Failed to send reaction");
+    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  }
+}
+
+async function handleLog(name: string, limit: number): Promise<void> {
+  const spinner = ora("Loading messages...").start();
+  try {
+    const xmtp = await loadXmtp();
+    const client = await xmtp.getXmtpClient();
+    const group = await xmtp.getGroup(client, name);
+    const messages = await xmtp.getRecentMessages(group, limit);
+
+    spinner.stop();
+    console.log();
+    console.log(chalk.bold(`Chat log: ${name}.sherwoodagent.eth`));
+    console.log(chalk.dim("─".repeat(50)));
+
+    if (messages.length === 0) {
+      console.log(chalk.dim("  No messages yet"));
+    } else {
+      for (const msg of messages.reverse()) {
+        console.log(formatMessage(msg));
+      }
+    }
+    console.log();
+  } catch (err) {
+    spinner.fail("Failed to load messages");
+    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  }
+}
+
+async function handleMembers(name: string): Promise<void> {
+  const spinner = ora("Loading members...").start();
+  try {
+    const xmtp = await loadXmtp();
+    const client = await xmtp.getXmtpClient();
+    const group = await xmtp.getGroup(client, name);
+    const members = await group.members();
+
+    spinner.stop();
+    console.log();
+    console.log(chalk.bold(`Members: ${name}.sherwoodagent.eth`));
+    console.log(chalk.dim("─".repeat(50)));
+
+    for (const member of members) {
+      const role = member.permissionLevel === PermissionLevel.SuperAdmin
+        ? chalk.yellow(" (super admin)")
+        : member.permissionLevel === PermissionLevel.Admin
+          ? chalk.blue(" (admin)")
+          : "";
+      console.log(`  ${member.inboxId}${role}`);
+    }
+
+    console.log(chalk.dim(`\n  Total: ${members.length} members`));
+    console.log();
+  } catch (err) {
+    spinner.fail("Failed to load members");
+    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  }
+}
+
+async function handleAdd(name: string, address: string): Promise<void> {
+  const spinner = ora("Adding member...").start();
+  try {
+    const xmtp = await loadXmtp();
+    const client = await xmtp.getXmtpClient();
+    const group = await xmtp.getGroup(client, name);
+    await xmtp.addMember(group, address);
+
+    await xmtp.sendEnvelope(group, {
+      type: "MEMBER_JOIN",
+      from: address,
+      syndicate: name,
+      timestamp: Math.floor(Date.now() / 1000),
+    });
+
+    spinner.succeed(`Member added: ${address}`);
+  } catch (err) {
+    spinner.fail("Failed to add member");
+    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  }
+}
+
+async function handleInit(name: string, force: boolean, publicChat: boolean): Promise<void> {
+  const spinner = ora("Initializing chat group...").start();
+  try {
+    const syndicate = await resolveSyndicate(name);
+    const callerAddress = getAccount().address.toLowerCase();
+    if (syndicate.creator.toLowerCase() !== callerAddress) {
+      spinner.fail("Only the syndicate creator can initialize the chat group");
+      process.exit(1);
+    }
+
+    // Idempotency check
+    if (!force) {
+      const existingId = getCachedGroupId(name) || await getTextRecord(name, "xmtpGroupId");
+      if (existingId) {
+        try {
+          const xmtp = await loadXmtp();
+          const client = await xmtp.getXmtpClient();
+          await client.conversations.sync();
+          const existing = await client.conversations.getConversationById(existingId);
+          if (existing) {
+            spinner.succeed("XMTP group already exists for this syndicate");
+            console.log(chalk.dim(`  Group ID: ${existingId}`));
+            return;
+          }
+        } catch {
+          // Can't verify — fall through to suggest --force
+        }
+        spinner.warn("Found stale group ID — group is not accessible");
+        console.log(chalk.dim("  Use --force to create a new group"));
+        return;
+      }
+    }
+
+    // Create the group
+    spinner.text = "Creating XMTP group...";
+    const xmtp = await loadXmtp();
+    const client = await xmtp.getXmtpClient();
+    const groupId = await xmtp.createSyndicateGroup(client, name, publicChat);
+
+    cacheGroupId(name, groupId);
+
+    try {
+      spinner.text = "Writing group ID to ENS...";
+      await setTextRecord(name, "xmtpGroupId", groupId, syndicate.vault);
+    } catch (ensErr) {
+      console.warn(chalk.yellow("\n  ⚠ Could not write ENS text record (cached locally only)"));
+      console.warn(chalk.dim(`    ${ensErr instanceof Error ? ensErr.message : String(ensErr)}`));
+    }
+
+    spinner.succeed(`Chat group created for ${name}.sherwoodagent.eth`);
+    console.log(chalk.dim(`  Group ID: ${groupId}`));
+    console.log(chalk.dim(`  Stream:   sherwood chat ${name}`));
+  } catch (err) {
+    spinner.fail("Failed to initialize chat group");
+    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  }
 }
 
 // ── Command Registration ──
 
 export function registerChatCommands(program: Command): void {
-  const chat = program
-    .command("chat <name>")
-    .description("Stream syndicate chat messages in real-time")
-    .action(async (name: string) => {
-      const spinner = ora("Connecting to chat...").start();
-      try {
-        await resolveSyndicate(name); // verify syndicate exists
-        const client = await getXmtpClient();
-        const group = await getGroup(client, name);
-        spinner.succeed(`Connected to ${name}.sherwoodagent.eth`);
-        console.log(chalk.dim("Streaming messages... (Ctrl+C to exit)\n"));
-
-        const cleanup = await streamMessages(group, (msg) => {
-          console.log(formatMessage(msg));
-        });
-
-        // Handle graceful shutdown
-        process.on("SIGINT", async () => {
-          console.log(chalk.dim("\nDisconnecting..."));
-          await cleanup();
-          process.exit(0);
-        });
-
-        // Keep process alive
-        await new Promise(() => {});
-      } catch (err) {
-        spinner.fail("Failed to connect to chat");
-        console.error(
-          chalk.red(err instanceof Error ? err.message : String(err)),
-        );
-        process.exit(1);
-      }
-    });
-
-  chat
-    .command("send <message>")
-    .description("Send a message to the syndicate chat")
-    .option("--markdown", "Send as rich markdown", false)
-    .action(async (message: string, opts: { markdown: boolean }) => {
-      const name = chat.parent?.args[0] as string;
-      const spinner = ora("Sending...").start();
-      try {
-        const client = await getXmtpClient();
-        const group = await getGroup(client, name);
-
-        if (opts.markdown) {
-          await xmtpSendMarkdown(group, message);
-        } else {
-          const envelope: ChatEnvelope = {
-            type: "MESSAGE",
-            from: getAccount().address,
-            text: message,
-            timestamp: Math.floor(Date.now() / 1000),
-          };
-          await sendEnvelope(group, envelope);
-        }
-
-        spinner.succeed("Message sent");
-      } catch (err) {
-        spinner.fail("Failed to send message");
-        console.error(
-          chalk.red(err instanceof Error ? err.message : String(err)),
-        );
-        process.exit(1);
-      }
-    });
-
-  chat
-    .command("react <messageId> <emoji>")
-    .description("React to a message with an emoji")
-    .action(async (messageId: string, emoji: string) => {
-      const name = chat.parent?.args[0] as string;
-      const spinner = ora("Reacting...").start();
-      try {
-        const client = await getXmtpClient();
-        const group = await getGroup(client, name);
-        await xmtpSendReaction(group, messageId, emoji);
-        spinner.succeed(`Reacted ${emoji}`);
-      } catch (err) {
-        spinner.fail("Failed to send reaction");
-        console.error(
-          chalk.red(err instanceof Error ? err.message : String(err)),
-        );
-        process.exit(1);
-      }
-    });
-
-  chat
-    .command("log")
-    .description("Show recent chat messages")
-    .option("--limit <n>", "Number of messages to show", "20")
-    .action(async (opts: { limit: string }) => {
-      const name = chat.parent?.args[0] as string;
-      const spinner = ora("Loading messages...").start();
-      try {
-        const client = await getXmtpClient();
-        const group = await getGroup(client, name);
-        const messages = await getRecentMessages(
-          group,
-          parseInt(opts.limit, 10),
-        );
-
-        spinner.stop();
-        console.log();
-        console.log(
-          chalk.bold(`Chat log: ${name}.sherwoodagent.eth`),
-        );
-        console.log(chalk.dim("─".repeat(50)));
-
-        if (messages.length === 0) {
-          console.log(chalk.dim("  No messages yet"));
-        } else {
-          // Messages come newest-first, reverse for chronological display
-          for (const msg of messages.reverse()) {
-            console.log(formatMessage(msg));
+  program
+    .command("chat <name> [action] [actionArgs...]")
+    .description("Syndicate chat — stream, send, log, members, add, init")
+    .option("--markdown", "Send as rich markdown (for send)", false)
+    .option("--limit <n>", "Number of messages to show (for log)", "20")
+    .option("--force", "Recreate group even if one exists (for init)", false)
+    .option("--public-chat", "Enable dashboard spectator mode (for init)", false)
+    .action(async (name: string, action: string | undefined, actionArgs: string[], opts: { markdown: boolean; limit: string; force: boolean; publicChat: boolean }) => {
+      switch (action) {
+        case "send": {
+          const message = actionArgs[0];
+          if (!message) {
+            console.error(chalk.red("Usage: sherwood chat <name> send <message> [--markdown]"));
+            process.exit(1);
           }
-        }
-        console.log();
-      } catch (err) {
-        spinner.fail("Failed to load messages");
-        console.error(
-          chalk.red(err instanceof Error ? err.message : String(err)),
-        );
-        process.exit(1);
-      }
-    });
-
-  chat
-    .command("members")
-    .description("List chat group members")
-    .action(async () => {
-      const name = chat.parent?.args[0] as string;
-      const spinner = ora("Loading members...").start();
-      try {
-        const client = await getXmtpClient();
-        const group = await getGroup(client, name);
-        const members = await group.members();
-
-        spinner.stop();
-        console.log();
-        console.log(chalk.bold(`Members: ${name}.sherwoodagent.eth`));
-        console.log(chalk.dim("─".repeat(50)));
-
-        for (const member of members) {
-          const role = member.permissionLevel === PermissionLevel.SuperAdmin
-            ? chalk.yellow(" (super admin)")
-            : member.permissionLevel === PermissionLevel.Admin
-              ? chalk.blue(" (admin)")
-              : "";
-          console.log(`  ${member.inboxId}${role}`);
+          await handleSend(name, message, opts.markdown);
+          break;
         }
 
-        console.log(chalk.dim(`\n  Total: ${members.length} members`));
-        console.log();
-      } catch (err) {
-        spinner.fail("Failed to load members");
-        console.error(
-          chalk.red(err instanceof Error ? err.message : String(err)),
-        );
-        process.exit(1);
-      }
-    });
+        case "react": {
+          const [messageId, emoji] = actionArgs;
+          if (!messageId || !emoji) {
+            console.error(chalk.red("Usage: sherwood chat <name> react <messageId> <emoji>"));
+            process.exit(1);
+          }
+          await handleReact(name, messageId, emoji);
+          break;
+        }
 
-  chat
-    .command("add <address>")
-    .description("Add a member to the chat (creator only)")
-    .action(async (address: string) => {
-      const name = chat.parent?.args[0] as string;
-      const spinner = ora("Adding member...").start();
-      try {
-        const client = await getXmtpClient();
-        const group = await getGroup(client, name);
-        await addMember(group, address);
+        case "log":
+          await handleLog(name, parseInt(opts.limit, 10));
+          break;
 
-        // Post lifecycle message
-        await sendEnvelope(group, {
-          type: "MEMBER_JOIN",
-          from: address,
-          syndicate: name,
-          timestamp: Math.floor(Date.now() / 1000),
-        });
+        case "members":
+          await handleMembers(name);
+          break;
 
-        spinner.succeed(`Member added: ${address}`);
-      } catch (err) {
-        spinner.fail("Failed to add member");
-        console.error(
-          chalk.red(err instanceof Error ? err.message : String(err)),
-        );
-        process.exit(1);
+        case "add": {
+          const address = actionArgs[0];
+          if (!address) {
+            console.error(chalk.red("Usage: sherwood chat <name> add <address>"));
+            process.exit(1);
+          }
+          await handleAdd(name, address);
+          break;
+        }
+
+        case "init":
+          await handleInit(name, opts.force, opts.publicChat);
+          break;
+
+        case undefined:
+        default:
+          await handleStream(name);
+          break;
       }
     });
 }

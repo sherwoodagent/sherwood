@@ -63,6 +63,7 @@ app/         Next.js dashboard
 - `sherwood chat <name> log` — show recent messages
 - `sherwood chat <name> members` — list group members
 - `sherwood chat <name> add <addr>` — add member (creator only)
+- `sherwood chat <name> init [--force]` — create XMTP group + write ENS record (creator only)
 
 ## Agent Identity (ERC-8004)
 
