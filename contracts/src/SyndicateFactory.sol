@@ -30,7 +30,6 @@ contract SyndicateFactory {
     error SubdomainTaken();
     error NotCreator();
     error InvalidGovernor();
-    error ManagementFeeTooHigh();
 
     struct SyndicateConfig {
         string metadataURI; // ipfs://Qm... (name, description, strategies)
@@ -68,8 +67,8 @@ contract SyndicateFactory {
     /// @notice Shared governor contract
     address public immutable governor;
 
-    /// @notice Management fee for vault owners (basis points, applied to strategy profits)
-    uint256 public immutable managementFeeBps;
+    /// @notice Management fee for vault owners: 0.5% of strategy profits
+    uint256 public constant MANAGEMENT_FEE_BPS = 50;
 
     /// @notice All syndicates
     mapping(uint256 => Syndicate) public syndicates;
@@ -87,29 +86,23 @@ contract SyndicateFactory {
     event MetadataUpdated(uint256 indexed id, string metadataURI);
     event SyndicateDeactivated(uint256 indexed id);
 
-    /// @notice Max management fee (10%)
-    uint256 public constant MAX_MANAGEMENT_FEE_BPS = 1000;
-
     constructor(
         address executorImpl_,
         address vaultImpl_,
         address ensRegistrar_,
         address agentRegistry_,
-        address governor_,
-        uint256 managementFeeBps_
+        address governor_
     ) {
         if (executorImpl_ == address(0)) revert InvalidExecutorImpl();
         if (vaultImpl_ == address(0)) revert InvalidVaultImpl();
         if (ensRegistrar_ == address(0)) revert InvalidENSRegistrar();
         if (agentRegistry_ == address(0)) revert InvalidAgentRegistry();
         if (governor_ == address(0)) revert InvalidGovernor();
-        if (managementFeeBps_ > MAX_MANAGEMENT_FEE_BPS) revert ManagementFeeTooHigh();
         executorImpl = executorImpl_;
         vaultImpl = vaultImpl_;
         ensRegistrar = IL2Registrar(ensRegistrar_);
         agentRegistry = IERC721(agentRegistry_);
         governor = governor_;
-        managementFeeBps = managementFeeBps_;
     }
 
     /// @notice Create a new syndicate — deploys vault proxy, registers ENS subname, stores everything
@@ -142,7 +135,7 @@ contract SyndicateFactory {
             openDeposits: config.openDeposits,
             agentRegistry: address(agentRegistry),
             governor: governor,
-            managementFeeBps: managementFeeBps
+            managementFeeBps: MANAGEMENT_FEE_BPS
         });
         bytes memory initData = abi.encodeCall(SyndicateVault.initialize, (initParams));
 

@@ -32,7 +32,7 @@ contract SyndicateFactoryTest is Test {
         ensRegistrar = new MockL2Registrar();
         agentRegistry = new MockAgentRegistry();
         factory = new SyndicateFactory(
-            address(executorLib), address(vaultImpl), address(ensRegistrar), address(agentRegistry), governorAddr, 500
+            address(executorLib), address(vaultImpl), address(ensRegistrar), address(agentRegistry), governorAddr
         );
 
         // Mint ERC-8004 identity NFTs for creators

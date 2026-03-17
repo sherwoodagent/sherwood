@@ -71,7 +71,7 @@ contract SyndicateGovernorTest is Test {
                     openDeposits: true,
                     agentRegistry: address(agentRegistry),
                     governor: address(0),
-                    managementFeeBps: 500
+                    managementFeeBps: 50
                 }))
         );
         vault = SyndicateVault(payable(address(new ERC1967Proxy(address(vaultImpl), vaultInit))));
@@ -585,7 +585,7 @@ contract SyndicateGovernorTest is Test {
     }
 
     function test_settlement_withProfit_agentAndManagementFee() public {
-        // Management fee is 500 bps (5%) — set at vault init
+        // Management fee is 50 bps (0.5%) — set at vault init
         uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
 
         // Simulate profit
@@ -599,9 +599,9 @@ contract SyndicateGovernorTest is Test {
         governor.settleByAgent(proposalId, _simpleSettleCalls());
 
         // Agent fee: 15% of 10k = 1,500
-        // Management fee: 5% of 10k = 500
+        // Management fee: 0.5% of 10k = 50
         assertEq(usdc.balanceOf(agent), agentBalBefore + 1_500e6);
-        assertEq(usdc.balanceOf(owner), ownerBalBefore + 500e6);
+        assertEq(usdc.balanceOf(owner), ownerBalBefore + 50e6);
     }
 
     function test_settlement_withLoss_permissionlessPath() public {
