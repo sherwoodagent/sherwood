@@ -1,13 +1,11 @@
 /**
  * Local config management — ~/.sherwood/config.json
  *
- * Stores XMTP DB encryption key, group ID cache, and per-chain contract addresses.
- * The encryption key is auto-generated on first run.
+ * Stores group ID cache, per-chain contract addresses, and wallet config.
  */
 
 import fs from "node:fs";
 import path from "node:path";
-import { getRandomValues } from "node:crypto";
 
 const CONFIG_DIR = path.join(process.env.HOME || "~", ".sherwood");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
@@ -18,7 +16,7 @@ export interface ChainContracts {
 }
 
 export interface SherwoodConfig {
-  dbEncryptionKey: string; // hex-encoded 32 bytes
+  dbEncryptionKey?: string; // legacy — no longer used, XMTP CLI manages its own DB
   privateKey?: string; // wallet private key (0x-prefixed)
   xmtpInboxId?: string;
   groupCache: Record<string, string>; // subdomain → XMTP group ID
@@ -32,9 +30,7 @@ export function loadConfig(): SherwoodConfig {
     return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
   }
 
-  // First run: generate encryption key
-  const key = Buffer.from(getRandomValues(new Uint8Array(32))).toString("hex");
-  const config: SherwoodConfig = { dbEncryptionKey: key, groupCache: {} };
+  const config: SherwoodConfig = { groupCache: {} };
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
   return config;
