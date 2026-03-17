@@ -3,15 +3,30 @@
  *
  * Two responsibilities:
  *   1. Resolve syndicate subdomain → on-chain syndicate data (via factory)
- *   2. Read/write ENS text records (via L2Registry)
+ *   2. Read/write ENS text records (via L2Registry, routed through vault's executeBatch)
+ *
+ * The vault owns the ENS subdomain node (registered in the factory via
+ * `ensRegistrar.register(subdomain, vault)`). Only the vault can write text
+ * records. We route writes through vault.executeBatch → L2Registry.setText,
+ * which executes as the vault via delegatecall to the shared executor lib.
  */
 
+import { encodeFunctionData } from "viem";
 import type { Address, Hex } from "viem";
 import { namehash } from "viem/ens";
 import { getPublicClient, getWalletClient, getAccount } from "./client.js";
 import { getChain, getNetwork } from "./network.js";
 import { SYNDICATE_FACTORY_ABI, L2_REGISTRY_ABI } from "./abis.js";
 import { ENS, SHERWOOD } from "./addresses.js";
+import * as vaultLib from "./vault.js";
+
+/**
+ * Wait for a transaction to be mined before proceeding.
+ */
+async function waitForTx(hash: Hex): Promise<void> {
+  const client = getPublicClient();
+  await client.waitForTransactionReceipt({ hash });
+}
 
 const ENS_DOMAIN = "sherwoodagent.eth";
 
@@ -110,25 +125,50 @@ function getSubdomainNode(subdomain: string): Hex {
 }
 
 /**
- * Write a text record to the L2Registry.
- * Used to store xmtpGroupId on-chain after group creation.
+ * Write a text record to the L2Registry via the vault's executeBatch.
+ *
+ * The vault owns the ENS node, so only the vault can call setText.
+ * We route the call through vault.executeBatch (delegatecall → executor lib → L2Registry),
+ * which means L2Registry sees msg.sender = vault address.
+ *
+ * Requires the caller to be a registered agent on the vault (creator is auto-registered).
  */
 export async function setTextRecord(
   subdomain: string,
   key: string,
   value: string,
+  vaultAddress: Address,
 ): Promise<Hex> {
-  const wallet = getWalletClient();
+  const l2Registry = ENS().L2_REGISTRY;
   const node = getSubdomainNode(subdomain);
 
-  return wallet.writeContract({
-    account: getAccount(),
-    chain: getChain(),
-    address: ENS().L2_REGISTRY,
+  // Ensure the vault has L2Registry in its allowed targets
+  vaultLib.setVaultAddress(vaultAddress);
+  try {
+    const addTargetHash = await vaultLib.addTarget(l2Registry);
+    // Wait for the addTarget tx to be mined before calling executeBatch,
+    // otherwise the node simulates executeBatch against pre-addTarget state
+    await waitForTx(addTargetHash);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // TargetAlreadyAllowed() — already in the allowlist, safe to continue
+    if (!msg.includes("0xff0e53f8") && !msg.includes("TargetAlreadyAllowed")) {
+      throw err;
+    }
+  }
+
+  // Encode the L2Registry.setText call
+  const setTextData = encodeFunctionData({
     abi: L2_REGISTRY_ABI,
     functionName: "setText",
     args: [node, key, value],
   });
+
+  // Route through vault.executeBatch with assetAmount=0 (no spend tracking)
+  return vaultLib.executeBatch(
+    [{ target: l2Registry, data: setTextData, value: 0n }],
+    0n,
+  );
 }
 
 /**

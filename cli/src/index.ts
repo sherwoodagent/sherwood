@@ -25,7 +25,7 @@ import type { SyndicateMetadata } from "./lib/ipfs.js";
 import { registerVeniceCommands } from "./commands/venice.js";
 import { registerAllowanceCommands } from "./commands/allowance.js";
 import { registerIdentityCommands } from "./commands/identity.js";
-import { setTextRecord, resolveVaultSyndicate, resolveSyndicate } from "./lib/ens.js";
+import { setTextRecord, getTextRecord, resolveVaultSyndicate, resolveSyndicate } from "./lib/ens.js";
 import * as easLib from "./lib/eas.js";
 import { EAS_SCHEMAS } from "./lib/addresses.js";
 
@@ -34,7 +34,7 @@ import { EAS_SCHEMAS } from "./lib/addresses.js";
 async function loadXmtp() {
   return import("./lib/xmtp.js");
 }
-import { cacheGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey, getAgentId } from "./lib/config.js";
+import { cacheGroupId, getCachedGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey, getAgentId } from "./lib/config.js";
 
 // ── Theme ──
 const G = chalk.green;
@@ -251,10 +251,11 @@ syndicate
         const xmtp = await loadXmtp();
         const xmtpClient = await xmtp.getXmtpClient();
         const groupId = await xmtp.createSyndicateGroup(xmtpClient, subdomain, opts.publicChat);
-        await setTextRecord(subdomain, "xmtpGroupId", groupId);
+        await setTextRecord(subdomain, "xmtpGroupId", groupId, result.vault as Address);
         cacheGroupId(subdomain, groupId);
       } catch {
-        // Non-fatal
+        console.warn(chalk.yellow("\n  ⚠ Could not create XMTP chat group"));
+        console.warn(chalk.dim(`    Recover later with: sherwood syndicate init-chat --subdomain ${subdomain}`));
       }
 
       spinner.stop();
@@ -530,6 +531,7 @@ syndicate
         console.log(chalk.dim(`  Added to chat: ${subdomain}`));
       } catch {
         console.warn(chalk.yellow("  ⚠ Could not add agent to chat group"));
+        console.warn(chalk.dim(`    If no group exists, run: sherwood syndicate init-chat --subdomain ${subdomain}`));
       }
     } catch (err) {
       spinner.fail("Registration failed");
@@ -779,6 +781,7 @@ syndicate
         console.log(DIM(`  Added to chat: ${subdomain}`));
       } catch {
         console.warn(chalk.yellow("  ⚠ Could not add agent to chat group"));
+        console.warn(chalk.dim(`    If no group exists, run: sherwood syndicate init-chat --subdomain ${subdomain}`));
       }
 
       spinner.succeed("Agent approved and registered");
@@ -813,6 +816,73 @@ syndicate
       console.log(DIM(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Rejection failed");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+syndicate
+  .command("init-chat")
+  .description("Create XMTP group for an existing syndicate (creator only)")
+  .requiredOption("--subdomain <name>", "Syndicate subdomain")
+  .option("--public-chat", "Enable dashboard spectator mode", false)
+  .option("--force", "Recreate group even if one already exists", false)
+  .action(async (opts) => {
+    const spinner = ora("Initializing chat group...").start();
+    try {
+      const syndicate = await resolveSyndicate(opts.subdomain);
+      const callerAddress = getAccount().address.toLowerCase();
+      if (syndicate.creator.toLowerCase() !== callerAddress) {
+        spinner.fail("Only the syndicate creator can initialize the chat group");
+        process.exit(1);
+      }
+
+      // Idempotency check
+      if (!opts.force) {
+        const existingId = getCachedGroupId(opts.subdomain) || await getTextRecord(opts.subdomain, "xmtpGroupId");
+        if (existingId) {
+          try {
+            const xmtp = await loadXmtp();
+            const client = await xmtp.getXmtpClient();
+            await client.conversations.sync();
+            const existing = await client.conversations.getConversationById(existingId);
+            if (existing) {
+              spinner.succeed("XMTP group already exists for this syndicate");
+              console.log(DIM(`  Group ID: ${existingId}`));
+              return;
+            }
+          } catch {
+            // Can't verify — fall through to suggest --force
+          }
+          spinner.warn("Found stale group ID — group is not accessible");
+          console.log(DIM("  Use --force to create a new group"));
+          return;
+        }
+      }
+
+      // Create the group
+      spinner.text = "Creating XMTP group...";
+      const xmtp = await loadXmtp();
+      const client = await xmtp.getXmtpClient();
+      const groupId = await xmtp.createSyndicateGroup(client, opts.subdomain, opts.publicChat);
+
+      // Persist locally
+      cacheGroupId(opts.subdomain, groupId);
+
+      // Persist on-chain via ENS text record
+      try {
+        spinner.text = "Writing group ID to ENS...";
+        await setTextRecord(opts.subdomain, "xmtpGroupId", groupId, syndicate.vault);
+      } catch (ensErr) {
+        console.warn(chalk.yellow("\n  ⚠ Could not write ENS text record (cached locally only)"));
+        console.warn(DIM(`    ${ensErr instanceof Error ? ensErr.message : String(ensErr)}`));
+      }
+
+      spinner.succeed(`Chat group created for ${opts.subdomain}.sherwoodagent.eth`);
+      console.log(DIM(`  Group ID: ${groupId}`));
+      console.log(DIM(`  Stream:   sherwood chat ${opts.subdomain}`));
+    } catch (err) {
+      spinner.fail("Failed to initialize chat group");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
       process.exit(1);
     }

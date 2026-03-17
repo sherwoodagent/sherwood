@@ -51,8 +51,12 @@ export async function getXmtpClient(): Promise<Client> {
   const config = loadConfig();
   const signer = createSigner();
 
+  const keyBytes = new Uint8Array(
+    Buffer.from(config.dbEncryptionKey.replace(/^0x/, ""), "hex"),
+  );
+
   _client = await Client.create(signer, {
-    dbEncryptionKey: config.dbEncryptionKey as `0x${string}`,
+    dbEncryptionKey: keyBytes,
   });
 
   // Cache inbox ID
@@ -114,7 +118,7 @@ export async function getGroup(
 
   if (!groupId) {
     throw new Error(
-      `No XMTP group found for syndicate "${subdomain}". Was it created with chat enabled?`,
+      `No XMTP group found for syndicate "${subdomain}". Run "sherwood syndicate init-chat --subdomain ${subdomain}" to create one.`,
     );
   }
 
