@@ -174,21 +174,53 @@ Two separate clocks:
 
 The `settleBy` timestamp = `executedAt + strategyDuration`. After this, settlement is permissionless.
 
-### Performance Fees
+### P&L Calculation — Per-Proposal Atomic Settlement
 
-1. Settler calls `settleProposal(proposalId)`
-2. Governor calculates profit: `currentValue - capitalDeployed`
-3. If profit > 0: `performanceFee = profit * performanceFeeBps / 10000`
-4. Fee transferred to proposer (agent), remainder stays in vault
-5. If profit ≤ 0: no fee, loss is socialized across shareholders
-6. Proposal state → Settled
+**Problem:** If multiple strategies run simultaneously in the same vault, you can't use the vault's total balance change to attribute P&L to a specific proposal.
 
-**Open question:** How to track "currentValue" for complex multi-step positions (borrow + LP + swap)? Options:
-- Agent self-reports (simple, but trust issue)
-- Oracle-based valuation (complex, needs price feeds per position type)
-- Asset-balance diff (vault's asset balance before vs after settlement tx)
+**Solution:** Track capital out at execution, track capital back in at settlement. Each settlement is atomic — the balance diff within that single tx belongs to that proposal only.
 
-**Recommendation for hackathon:** Asset-balance diff. When agent settles, vault checks its asset balance increase. Simple, accurate for single-asset vaults (USDC).
+```
+Execute:
+  1. Governor snapshots vault asset balance: balanceBefore
+  2. Vault executes proposal calls (borrow, swap, LP, etc.)
+  3. Governor records: capitalDeployed[proposalId] = balanceBefore - balanceAfter
+
+Settle:
+  1. Governor snapshots vault asset balance: balanceBefore
+  2. Vault executes settlement calls (unwind position, repay borrow, swap back)
+  3. assetsReturned = balanceAfter - balanceBefore
+  4. P&L = assetsReturned - capitalDeployed[proposalId]
+  5. If P&L > 0: fee = P&L * performanceFeeBps / 10000, transferred to proposer
+  6. If P&L ≤ 0: no fee, loss is socialized across shareholders
+  7. Proposal state → Settled
+```
+
+**Why this works with multiple simultaneous strategies:**
+- Each settlement is a single atomic tx
+- The balance diff within that tx belongs to that proposal only
+- Other strategies' positions are untouched during the settlement tx
+- No cross-contamination between proposals
+
+**Settlement calls:**
+Unlike execution calls (committed at proposal time), settlement calls are submitted at settlement time by the agent. This is necessary because unwind parameters depend on market conditions at close time (e.g. slippage, repayment amounts, LP token balances).
+
+```solidity
+function settleProposal(uint256 proposalId, BatchExecutorLib.Call[] calldata settlementCalls) external;
+```
+
+The governor validates:
+- Proposal is in Executed state
+- Caller is authorized (proposer anytime, anyone after duration, owner emergency)
+- After executing settlementCalls, vault balance increased (assets returned)
+
+**Edge cases:**
+- If settlement calls fail to return assets → tx reverts, proposal stays Executed
+- If agent never settles → anyone can settle after strategyDuration expires (they submit the unwind calls)
+- If no one settles and position is stuck → owner emergency cancels, manual intervention
+- Partial unwind → allowed, but P&L is calculated on what's returned. Agent can settle multiple times? **Open question: single settlement or allow partial settlements?**
+
+**Recommendation for hackathon:** Single settlement (one atomic tx that unwinds everything). Partial settlements are a v2 feature.
 
 ---
 
@@ -372,17 +404,21 @@ Shareholders govern **what happens with their money** (strategy proposals). The 
 
 **New storage slots** (appended — UUPS safe):
 - `address private _governor` — trusted governor contract
-- `mapping(uint256 => uint256) private _proposalCapitalSnapshot` — vault asset balance before each proposal execution (for P&L calculation)
+- `mapping(uint256 => uint256) private _proposalCapitalDeployed` — assets that left the vault per proposal (for P&L calculation at settlement)
 
 **New functions:**
 - `setGovernor(address governor_)` — onlyOwner, sets trusted governor address
 - `executeProposalBatch(BatchExecutorLib.Call[] calldata calls)` — onlyGovernor
   - Skips the normal agent caps / daily spend / target allowlist checks
   - Governor has already validated everything via the proposal
+  - Snapshots vault asset balance before execution
   - Delegatecalls BatchExecutorLib.executeBatch(calls)
-  - Snapshots vault asset balance before execution (for settlement P&L)
-- `settleProposal(uint256 proposalId, address proposer, uint256 performanceFeeBps)` — onlyGovernor
-  - Calculates P&L: `currentAssetBalance - snapshotBalance`
+  - Records capitalDeployed = balanceBefore - balanceAfter
+- `settleProposal(uint256 proposalId, BatchExecutorLib.Call[] calldata settlementCalls, address proposer, uint256 performanceFeeBps)` — onlyGovernor
+  - Snapshots vault asset balance before executing settlement calls
+  - Executes settlement calls via delegatecall to BatchExecutorLib
+  - Calculates assetsReturned = balanceAfter - balanceBefore
+  - P&L = assetsReturned - capitalDeployed[proposalId]
   - If profit > 0: transfers `profit * performanceFeeBps / 10000` to proposer
   - Remaining profit stays in vault
 
