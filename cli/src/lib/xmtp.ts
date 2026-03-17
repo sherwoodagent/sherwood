@@ -3,6 +3,11 @@
  *
  * Shells out to the @xmtp/cli binary instead of using @xmtp/node-sdk directly.
  * This avoids native binding (GLIBC) issues on Linux.
+ *
+ * Credentials: the sherwood private key is passed to each subprocess via the
+ * XMTP_WALLET_KEY env var. We never write to ~/.xmtp/.env — the XMTP CLI
+ * manages its own DB encryption key and env file. This avoids destroying
+ * existing XMTP setups when agents already have the CLI configured.
  */
 
 import { execFileSync, spawn, execSync } from "node:child_process";
@@ -76,12 +81,26 @@ function getXmtpBinaryPath(): string {
   );
 }
 
-// ── Environment sync ──
+// ── Environment ──
 
-let _synced = false;
+function getXmtpEnv(): string {
+  return getNetwork() === "base" ? "production" : "dev";
+}
 
-function syncXmtpEnv(): void {
-  if (_synced) return;
+function getXmtpEnvFile(): string {
+  return path.join(homedir(), ".xmtp", ".env");
+}
+
+/**
+ * Ensure ~/.xmtp/.env exists with at least the wallet key and a DB encryption key.
+ * If the file already exists, only update the wallet key line — preserve everything
+ * else (especially XMTP_DB_ENCRYPTION_KEY). If no file exists, run `xmtp init` to
+ * let the CLI generate its own keys, then patch in our wallet key.
+ */
+let _envReady = false;
+
+function ensureXmtpEnv(): void {
+  if (_envReady) return;
 
   const config = loadConfig();
   if (!config.privateKey) {
@@ -90,42 +109,63 @@ function syncXmtpEnv(): void {
     );
   }
 
-  const xmtpDir = path.join(homedir(), ".xmtp");
-  const envFile = path.join(xmtpDir, ".env");
+  const envFile = getXmtpEnvFile();
   const walletKey = config.privateKey.replace(/^0x/, "");
 
   if (fs.existsSync(envFile)) {
     const existing = fs.readFileSync(envFile, "utf8");
     if (existing.includes(`XMTP_WALLET_KEY=${walletKey}`)) {
-      _synced = true;
+      _envReady = true;
       return;
     }
 
-    // Update wallet key while preserving all other env vars (e.g. XMTP_DB_ENCRYPTION_KEY)
+    // Update wallet key while preserving all other vars (DB encryption key, etc.)
     const lines = existing.split("\n").filter((l) => !l.startsWith("XMTP_WALLET_KEY="));
     lines.push(`XMTP_WALLET_KEY=${walletKey}`);
     fs.writeFileSync(envFile, lines.filter(Boolean).join("\n") + "\n", { mode: 0o600 });
   } else {
-    // No existing env file — write wallet key only, XMTP CLI will manage its own DB key
+    // No env file — let XMTP CLI generate keys via `init`, then patch wallet key
+    const xmtpDir = path.join(homedir(), ".xmtp");
     fs.mkdirSync(xmtpDir, { recursive: true });
-    fs.writeFileSync(envFile, `XMTP_WALLET_KEY=${walletKey}\n`, { mode: 0o600 });
+
+    const bin = getXmtpBinaryPath();
+    const initArgs = ["init", "--env", getXmtpEnv()];
+    if (bin.endsWith(".js")) {
+      execFileSync("node", [bin, ...initArgs], {
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { ...process.env, XMTP_WALLET_KEY: walletKey },
+      });
+    } else {
+      execFileSync(bin, initArgs, {
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { ...process.env, XMTP_WALLET_KEY: walletKey },
+      });
+    }
+
+    // Patch in our wallet key (init may have generated a different one)
+    if (fs.existsSync(envFile)) {
+      const content = fs.readFileSync(envFile, "utf8");
+      const lines = content.split("\n").filter((l) => !l.startsWith("XMTP_WALLET_KEY="));
+      lines.push(`XMTP_WALLET_KEY=${walletKey}`);
+      fs.writeFileSync(envFile, lines.filter(Boolean).join("\n") + "\n", { mode: 0o600 });
+    } else {
+      // init didn't create the file — write a minimal one
+      fs.writeFileSync(envFile, `XMTP_WALLET_KEY=${walletKey}\n`, { mode: 0o600 });
+    }
   }
 
-  _synced = true;
-}
-
-function getXmtpEnv(): string {
-  return getNetwork() === "base" ? "production" : "dev";
+  _envReady = true;
 }
 
 // ── Subprocess runners ──
 
 function execXmtp(args: string[]): string {
-  syncXmtpEnv();
+  ensureXmtpEnv();
   const bin = getXmtpBinaryPath();
-  const fullArgs = [...args, "--env", getXmtpEnv()];
+  const fullArgs = [...args, "--env", getXmtpEnv(), "--env-file", getXmtpEnvFile()];
 
-  // Use node to run the bin/run.js if it's a .js file
   if (bin.endsWith(".js")) {
     return execFileSync("node", [bin, ...fullArgs], {
       encoding: "utf8",
@@ -160,21 +200,75 @@ function syncConversations(): void {
   _conversationsSynced = true;
 }
 
+// ── Stale installation cleanup ──
+
+/**
+ * Revoke stale XMTP installations for the current wallet.
+ *
+ * When an agent wipes ~/.xmtp/ and re-initializes, a new MLS installation is
+ * created but old ones remain registered on the network. When add-members runs,
+ * the MLS welcome may target a stale installation's KeyPackage — the current
+ * installation can never sync that group.
+ *
+ * This function detects and revokes all installations except the current one,
+ * ensuring add-members targets the right installation.
+ */
+function revokeStaleInstallations(inboxId: string, currentInstallationId: string): void {
+  try {
+    // Get all installations for this inbox from the network
+    const inboxStates = execXmtpJson<Array<{
+      inboxId: string;
+      installations: Array<{ id: string }>;
+    }>>(["inbox-states", inboxId]);
+
+    const state = inboxStates?.[0];
+    if (!state?.installations || state.installations.length <= 1) return;
+
+    const staleIds = state.installations
+      .map((i) => i.id)
+      .filter((id) => id !== currentInstallationId);
+
+    if (staleIds.length === 0) return;
+
+    // Revoke stale installations — only the wallet owner can do this
+    execXmtp([
+      "revoke-installations",
+      inboxId,
+      "-i",
+      staleIds.join(","),
+      "--force",
+    ]);
+  } catch {
+    // Non-fatal — stale installations are a UX issue, not a blocker
+  }
+}
+
 // ── Client ──
 
 export async function getXmtpClient(): Promise<string> {
-  syncXmtpEnv();
+  // client info returns { properties: { inboxId, installationId, ... }, options: { ... } }
+  const result = execXmtpJson<{
+    properties: {
+      inboxId: string;
+      installationId: string;
+    };
+  }>(["client", "info"]);
 
-  const result = execXmtpJson<{ inboxId: string }>(["client", "info"]);
+  const { inboxId, installationId } = result.properties;
 
   // Cache inbox ID
   const config = loadConfig();
-  if (!config.xmtpInboxId && result.inboxId) {
-    config.xmtpInboxId = result.inboxId;
+  if (!config.xmtpInboxId && inboxId) {
+    config.xmtpInboxId = inboxId;
     saveConfig(config);
   }
 
-  return result.inboxId;
+  // Clean up stale installations so add-members targets the current one
+  if (inboxId && installationId) {
+    revokeStaleInstallations(inboxId, installationId);
+  }
+
+  return inboxId;
 }
 
 // ── Group Creation ──
@@ -306,7 +400,7 @@ export async function streamMessages(
   groupId: string,
   onMessage: (msg: XmtpMessage) => void,
 ): Promise<() => void> {
-  syncXmtpEnv();
+  ensureXmtpEnv();
   const bin = getXmtpBinaryPath();
 
   const args = [
@@ -317,6 +411,8 @@ export async function streamMessages(
     "off",
     "--env",
     getXmtpEnv(),
+    "--env-file",
+    getXmtpEnvFile(),
   ];
 
   const proc = bin.endsWith(".js")
