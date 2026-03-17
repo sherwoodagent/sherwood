@@ -394,8 +394,9 @@ contract SyndicateGovernorIntegrationTest is Test {
         assertEq(usdc.balanceOf(agent), 0);
     }
 
-    function test_fullLifecycle_moonwellFullUnwind_withProfit() public {
-        // Full cycle: supply → borrow → (profit) → repay → redeem → settle with fee
+    function test_fullLifecycle_moonwellFullUnwind_cleanSettlement() public {
+        // Full cycle: supply → borrow → repay → redeem → settle
+        // No external profit — vault returns to original balance, zero P&L
 
         uint256 supplyAmount = 50_000e6;
         uint256 borrowAmount = 25_000e6;
@@ -435,27 +436,22 @@ contract SyndicateGovernorIntegrationTest is Test {
         governor.executeProposal(proposalId);
 
         // Verify mid-strategy state
-        assertEq(usdc.balanceOf(address(vault)), 75_000e6); // 100k - 50k + 25k
+        assertEq(usdc.balanceOf(address(vault)), 75_000e6); // 100k - 50k supplied + 25k borrowed
         assertEq(mUsdc.balanceOf(address(vault)), supplyAmount);
-
-        // Simulate profit: someone sends USDC to vault (e.g. yield from borrowed funds)
-        usdc.mint(address(vault), 10_000e6);
-        // Now vault has 85k USDC + 50k mTokens
 
         vm.warp(block.timestamp + 7 days);
 
-        uint256 agentBalBefore = usdc.balanceOf(agent);
-
-        // Anyone settles: repay 25k → redeem 50k → vault gets back to USDC
+        // Anyone settles: repay 25k → redeem 50k → vault back to original
         vm.prank(random);
         governor.settleProposal(proposalId);
 
         // After settlement:
-        // Vault USDC: 85k - 25k (repay) + 50k (redeem) = 110k
-        // Snapshot was 100k → P&L = +10k
-        // Fee = 20% of 10k = 2k
-        assertEq(usdc.balanceOf(address(vault)), 110_000e6 - 2_000e6); // 108k after fee
-        assertEq(usdc.balanceOf(agent), agentBalBefore + 2_000e6);
+        // Vault USDC: 75k - 25k (repay) + 50k (redeem) = 100k (back to original)
+        // P&L = 100k - 100k = 0
+        // No fee
+        assertEq(usdc.balanceOf(address(vault)), 100_000e6);
+        assertEq(mUsdc.balanceOf(address(vault)), 0);
+        assertEq(usdc.balanceOf(agent), 0);
         assertFalse(vault.redemptionsLocked());
     }
 }
