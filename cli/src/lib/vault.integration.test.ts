@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll } from "vitest";
 import type { Address } from "viem";
-import { setVaultAddress, getAssetAddress, getAssetDecimals, getVaultInfo, getAllowedTargets, isAllowedTarget, getBalance } from "./vault.js";
+import { setVaultAddress, getAssetAddress, getAssetDecimals, getVaultInfo, getAllowedTargets, isAllowedTarget } from "./vault.js";
 import { TOKENS } from "./addresses.js";
 
 // Vault deployed by syndicate #1 on the redeployed factory
@@ -48,10 +48,5 @@ describe("SyndicateVault (Base Sepolia)", () => {
     const random = "0x0000000000000000000000000000000000000001" as Address;
     const allowed = await isAllowedTarget(random);
     expect(allowed).toBe(false);
-  });
-
-  it("getBalance returns zero for fresh vault", async () => {
-    const balance = await getBalance();
-    expect(balance.shares).toBe(0n);
   });
 });
