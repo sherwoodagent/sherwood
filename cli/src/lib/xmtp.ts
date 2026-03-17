@@ -94,18 +94,22 @@ function syncXmtpEnv(): void {
   const envFile = path.join(xmtpDir, ".env");
   const walletKey = config.privateKey.replace(/^0x/, "");
 
-  // Only write if wallet key is missing or different — preserve existing DB encryption key
   if (fs.existsSync(envFile)) {
     const existing = fs.readFileSync(envFile, "utf8");
     if (existing.includes(`XMTP_WALLET_KEY=${walletKey}`)) {
       _synced = true;
       return;
     }
-  }
 
-  // Write wallet key to env file — omit DB encryption key so XMTP CLI manages its own
-  fs.mkdirSync(xmtpDir, { recursive: true });
-  fs.writeFileSync(envFile, `XMTP_WALLET_KEY=${walletKey}\n`, { mode: 0o600 });
+    // Update wallet key while preserving all other env vars (e.g. XMTP_DB_ENCRYPTION_KEY)
+    const lines = existing.split("\n").filter((l) => !l.startsWith("XMTP_WALLET_KEY="));
+    lines.push(`XMTP_WALLET_KEY=${walletKey}`);
+    fs.writeFileSync(envFile, lines.filter(Boolean).join("\n") + "\n", { mode: 0o600 });
+  } else {
+    // No existing env file — write wallet key only, XMTP CLI will manage its own DB key
+    fs.mkdirSync(xmtpDir, { recursive: true });
+    fs.writeFileSync(envFile, `XMTP_WALLET_KEY=${walletKey}\n`, { mode: 0o600 });
+  }
 
   _synced = true;
 }
