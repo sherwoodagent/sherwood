@@ -727,14 +727,23 @@ syndicate
 
       // 1. Register agent on-chain (same as syndicate add)
       spinner.text = "Registering agent on vault...";
-      const regHash = await vaultLib.registerAgent(
-        BigInt(opts.agentId),
-        opts.pkp as Address,
-        opts.eoa as Address,
-        maxPerTx,
-        dailyLimit,
-      );
-      console.log(DIM(`  Agent registered: ${getExplorerUrl(regHash)}`));
+      try {
+        const regHash = await vaultLib.registerAgent(
+          BigInt(opts.agentId),
+          opts.pkp as Address,
+          opts.eoa as Address,
+          maxPerTx,
+          dailyLimit,
+        );
+        console.log(DIM(`  Agent registered: ${getExplorerUrl(regHash)}`));
+      } catch (regErr) {
+        const msg = regErr instanceof Error ? regErr.message : String(regErr);
+        if (msg.includes("0xe098d3ee") || msg.includes("AgentAlreadyRegistered")) {
+          console.log(DIM("  Agent already registered on vault — skipping"));
+        } else {
+          throw regErr;
+        }
+      }
 
       // 2. Create AGENT_APPROVED attestation
       spinner.text = "Creating approval attestation...";
