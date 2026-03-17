@@ -71,19 +71,20 @@ contract SyndicateVaultTest is Test {
         SyndicateVault impl = new SyndicateVault();
         bytes memory initData = abi.encodeCall(
             SyndicateVault.initialize,
-            (
-                usdc,
-                "Sherwood Vault",
-                "swUSDC",
-                owner,
-                ISyndicateVault.SyndicateCaps({
-                    maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
-                }),
-                address(executorLib),
-                targets,
-                true, // openDeposits = true for test convenience
-                address(agentRegistry)
-            )
+            (ISyndicateVault.InitParams({
+                    asset: address(usdc),
+                    name: "Sherwood Vault",
+                    symbol: "swUSDC",
+                    owner: owner,
+                    caps: ISyndicateVault.SyndicateCaps({
+                        maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
+                    }),
+                    executorImpl: address(executorLib),
+                    initialTargets: targets,
+                    openDeposits: true,
+                    agentRegistry: address(agentRegistry),
+                    governor: address(0)
+                }))
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
         vault = SyndicateVault(payable(address(proxy)));
@@ -630,19 +631,20 @@ contract SyndicateVaultTest is Test {
         targets[0] = address(usdc);
         bytes memory initData = abi.encodeCall(
             SyndicateVault.initialize,
-            (
-                usdc,
-                "Closed Vault",
-                "cVault",
-                owner,
-                ISyndicateVault.SyndicateCaps({
-                    maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
-                }),
-                address(executorLib),
-                targets,
-                false, // openDeposits = false
-                address(agentRegistry)
-            )
+            (ISyndicateVault.InitParams({
+                    asset: address(usdc),
+                    name: "Closed Vault",
+                    symbol: "cVault",
+                    owner: owner,
+                    caps: ISyndicateVault.SyndicateCaps({
+                        maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
+                    }),
+                    executorImpl: address(executorLib),
+                    initialTargets: targets,
+                    openDeposits: false,
+                    agentRegistry: address(agentRegistry),
+                    governor: address(0)
+                }))
         );
         ERC1967Proxy proxy2 = new ERC1967Proxy(address(impl2), initData);
         return SyndicateVault(payable(address(proxy2)));

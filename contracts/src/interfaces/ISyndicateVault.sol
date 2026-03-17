@@ -37,6 +37,20 @@ interface ISyndicateVault {
     error InvalidGovernor();
     error ManagementFeeTooHigh();
 
+    // ── Init Params ──
+    struct InitParams {
+        address asset;
+        string name;
+        string symbol;
+        address owner;
+        SyndicateCaps caps;
+        address executorImpl;
+        address[] initialTargets;
+        bool openDeposits;
+        address agentRegistry;
+        address governor;
+    }
+
     // ── Syndicate-Level Caps (hard limits for ALL agents) ──
     struct SyndicateCaps {
         uint256 maxPerTx; // Max asset amount per single tx

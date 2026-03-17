@@ -29,6 +29,7 @@ contract SyndicateFactory {
     error SubdomainTooShort();
     error SubdomainTaken();
     error NotCreator();
+    error InvalidGovernor();
 
     struct SyndicateConfig {
         string metadataURI; // ipfs://Qm... (name, description, strategies)
@@ -63,6 +64,9 @@ contract SyndicateFactory {
     /// @notice ERC-8004 agent identity registry (ERC-721)
     IERC721 public immutable agentRegistry;
 
+    /// @notice Shared governor contract
+    address public immutable governor;
+
     /// @notice All syndicates
     mapping(uint256 => Syndicate) public syndicates;
     uint256 public syndicateCount;
@@ -79,15 +83,23 @@ contract SyndicateFactory {
     event MetadataUpdated(uint256 indexed id, string metadataURI);
     event SyndicateDeactivated(uint256 indexed id);
 
-    constructor(address executorImpl_, address vaultImpl_, address ensRegistrar_, address agentRegistry_) {
+    constructor(
+        address executorImpl_,
+        address vaultImpl_,
+        address ensRegistrar_,
+        address agentRegistry_,
+        address governor_
+    ) {
         if (executorImpl_ == address(0)) revert InvalidExecutorImpl();
         if (vaultImpl_ == address(0)) revert InvalidVaultImpl();
         if (ensRegistrar_ == address(0)) revert InvalidENSRegistrar();
         if (agentRegistry_ == address(0)) revert InvalidAgentRegistry();
+        if (governor_ == address(0)) revert InvalidGovernor();
         executorImpl = executorImpl_;
         vaultImpl = vaultImpl_;
         ensRegistrar = IL2Registrar(ensRegistrar_);
         agentRegistry = IERC721(agentRegistry_);
+        governor = governor_;
     }
 
     /// @notice Create a new syndicate — deploys vault proxy, registers ENS subname, stores everything
@@ -109,20 +121,19 @@ contract SyndicateFactory {
         syndicateId = ++syndicateCount;
 
         // Deploy vault as UUPS proxy
-        bytes memory initData = abi.encodeCall(
-            SyndicateVault.initialize,
-            (
-                config.asset,
-                config.name,
-                config.symbol,
-                msg.sender, // owner = creator
-                config.caps,
-                executorImpl,
-                config.initialTargets,
-                config.openDeposits,
-                address(agentRegistry)
-            )
-        );
+        ISyndicateVault.InitParams memory initParams = ISyndicateVault.InitParams({
+            asset: address(config.asset),
+            name: config.name,
+            symbol: config.symbol,
+            owner: msg.sender,
+            caps: config.caps,
+            executorImpl: executorImpl,
+            initialTargets: config.initialTargets,
+            openDeposits: config.openDeposits,
+            agentRegistry: address(agentRegistry),
+            governor: governor
+        });
+        bytes memory initData = abi.encodeCall(SyndicateVault.initialize, (initParams));
 
         vault = address(new ERC1967Proxy(vaultImpl, initData));
 

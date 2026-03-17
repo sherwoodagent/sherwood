@@ -58,17 +58,20 @@ contract SyndicateGovernorTest is Test {
         SyndicateVault vaultImpl = new SyndicateVault();
         bytes memory vaultInit = abi.encodeCall(
             SyndicateVault.initialize,
-            (
-                usdc,
-                "Sherwood Vault",
-                "swUSDC",
-                owner,
-                ISyndicateVault.SyndicateCaps({maxPerTx: 100_000e6, maxDailyTotal: 500_000e6, maxBorrowRatio: 7500}),
-                address(executorLib),
-                targets,
-                true, // openDeposits
-                address(agentRegistry)
-            )
+            (ISyndicateVault.InitParams({
+                    asset: address(usdc),
+                    name: "Sherwood Vault",
+                    symbol: "swUSDC",
+                    owner: owner,
+                    caps: ISyndicateVault.SyndicateCaps({
+                        maxPerTx: 100_000e6, maxDailyTotal: 500_000e6, maxBorrowRatio: 7500
+                    }),
+                    executorImpl: address(executorLib),
+                    initialTargets: targets,
+                    openDeposits: true,
+                    agentRegistry: address(agentRegistry),
+                    governor: address(0)
+                }))
         );
         vault = SyndicateVault(payable(address(new ERC1967Proxy(address(vaultImpl), vaultInit))));
 

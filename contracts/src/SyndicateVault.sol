@@ -99,38 +99,29 @@ contract SyndicateVault is
         _disableInitializers();
     }
 
-    function initialize(
-        IERC20 asset_,
-        string memory name_,
-        string memory symbol_,
-        address owner_,
-        SyndicateCaps memory caps_,
-        address executorImpl_,
-        address[] memory initialTargets_,
-        bool openDeposits_,
-        address agentRegistry_
-    ) external initializer {
-        if (owner_ == address(0)) revert InvalidOwner();
-        if (caps_.maxPerTx == 0) revert InvalidMaxPerTx();
-        if (caps_.maxDailyTotal == 0) revert InvalidMaxDailyTotal();
-        if (caps_.maxBorrowRatio > 10000) revert BorrowRatioTooHigh();
-        if (executorImpl_ == address(0)) revert InvalidExecutorImpl();
-        if (agentRegistry_ == address(0)) revert InvalidAgentRegistry();
+    function initialize(InitParams memory p) external initializer {
+        if (p.owner == address(0)) revert InvalidOwner();
+        if (p.caps.maxPerTx == 0) revert InvalidMaxPerTx();
+        if (p.caps.maxDailyTotal == 0) revert InvalidMaxDailyTotal();
+        if (p.caps.maxBorrowRatio > 10000) revert BorrowRatioTooHigh();
+        if (p.executorImpl == address(0)) revert InvalidExecutorImpl();
+        if (p.agentRegistry == address(0)) revert InvalidAgentRegistry();
 
-        __ERC4626_init(asset_);
-        __ERC20_init(name_, symbol_);
-        __Ownable_init(owner_);
+        __ERC4626_init(IERC20(p.asset));
+        __ERC20_init(p.name, p.symbol);
+        __Ownable_init(p.owner);
         __Pausable_init();
 
-        _syndicateCaps = caps_;
+        _syndicateCaps = p.caps;
         _dailySpendResetDay = block.timestamp / 1 days;
-        _executorImpl = executorImpl_;
-        _openDeposits = openDeposits_;
-        _agentRegistry = IERC721(agentRegistry_);
+        _executorImpl = p.executorImpl;
+        _openDeposits = p.openDeposits;
+        _agentRegistry = IERC721(p.agentRegistry);
+        _governor = p.governor;
 
-        for (uint256 i = 0; i < initialTargets_.length; i++) {
-            if (initialTargets_[i] == address(0)) revert InvalidTarget();
-            _allowedTargets.add(initialTargets_[i]);
+        for (uint256 i = 0; i < p.initialTargets.length; i++) {
+            if (p.initialTargets[i] == address(0)) revert InvalidTarget();
+            _allowedTargets.add(p.initialTargets[i]);
         }
     }
 

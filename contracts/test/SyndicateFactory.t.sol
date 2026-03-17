@@ -20,6 +20,7 @@ contract SyndicateFactoryTest is Test {
 
     address public creator1 = makeAddr("creator1");
     address public creator2 = makeAddr("creator2");
+    address public governorAddr = makeAddr("governor");
 
     uint256 public creator1AgentId;
     uint256 public creator2AgentId;
@@ -31,7 +32,7 @@ contract SyndicateFactoryTest is Test {
         ensRegistrar = new MockL2Registrar();
         agentRegistry = new MockAgentRegistry();
         factory = new SyndicateFactory(
-            address(executorLib), address(vaultImpl), address(ensRegistrar), address(agentRegistry)
+            address(executorLib), address(vaultImpl), address(ensRegistrar), address(agentRegistry), governorAddr
         );
 
         // Mint ERC-8004 identity NFTs for creators
