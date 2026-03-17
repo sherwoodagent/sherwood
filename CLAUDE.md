@@ -44,6 +44,9 @@ app/         Next.js dashboard
 - TypeScript, viem for chain interaction, Lit SDK for agent permissions
 - Provider pattern: each DeFi protocol = a provider with standard interface
 - `npm run typecheck` before every PR
+- **Distribution**: Published to npm as `@sherwood/cli` (primary) + standalone binary via GitHub releases (secondary)
+- The standalone binary cannot load XMTP native bindings — chat commands require the npm install
+- Bump version in `cli/package.json` to trigger a new release on merge to main
 
 ## Chat (XMTP)
 

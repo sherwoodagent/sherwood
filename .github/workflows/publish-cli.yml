@@ -38,6 +38,36 @@ jobs:
           name: ${{ steps.version.outputs.version }}
           generate_release_notes: true
 
+  # Primary distribution — npm handles native bindings (XMTP) correctly
+  publish-npm:
+    needs: release
+    if: needs.release.outputs.tag_exists == 'false'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: npm install
+
+      - name: Build
+        env:
+          PINATA_JWT: ${{ secrets.PINATA_JWT }}
+        run: npm run build
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Secondary distribution — standalone binary (no XMTP chat support)
   build-binaries:
     needs: release
     if: needs.release.outputs.tag_exists == 'false'
