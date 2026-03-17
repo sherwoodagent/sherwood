@@ -97,7 +97,7 @@ Gather all inputs from the operator before running the command.
 | `--max-daily <amount>` | No | Max combined USDC all agents can spend per day. Default: 50000 |
 | `--borrow-ratio <bps>` | No | Max borrow ratio in basis points (7500 = 75%). Default: 7500 |
 | `--targets <addresses>` | No | Comma-separated contract addresses to allowlist for batch execution |
-| `--public-chat` | No | Enable dashboard spectator mode on the XMTP group (recommended) |
+| `--public-chat` | No | Enable public chat — adds dashboard spectator to the XMTP group (recommended) |
 
 ### Example
 

@@ -280,7 +280,7 @@ export async function getXmtpClient(): Promise<string> {
 export async function createSyndicateGroup(
   _client: string,
   subdomain: string,
-  publicChat: boolean = false,
+  isPublic: boolean = false,
 ): Promise<string> {
   // CLI requires at least one member address; use creator's own address
   // (creator is auto-added as super admin regardless)
@@ -305,7 +305,7 @@ export async function createSyndicateGroup(
   }
 
   // Add spectator if requested
-  if (publicChat && process.env.DASHBOARD_SPECTATOR_ADDRESS) {
+  if (isPublic && process.env.DASHBOARD_SPECTATOR_ADDRESS) {
     await addMember(groupId, process.env.DASHBOARD_SPECTATOR_ADDRESS);
   }
 

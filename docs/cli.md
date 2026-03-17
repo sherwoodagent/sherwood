@@ -84,7 +84,7 @@ Create a new syndicate. Deploys an ERC-4626 vault via the factory, registers an 
 | `--targets <addresses>` | No | Comma-separated contract addresses to allowlist |
 | `--metadata-uri <uri>` | No | Override metadata URI (skips IPFS upload) |
 | `--asset <address>` | No | Underlying asset address. Default: USDC |
-| `--public-chat` | No | Enable dashboard spectator mode on XMTP group |
+| `--public-chat` | No | Enable public chat — adds dashboard spectator to XMTP group |
 
 ### `sherwood syndicate list`
 
@@ -139,15 +139,6 @@ Update syndicate metadata. Creator only. Uploads to IPFS.
 | `--name <name>` | No | New syndicate name |
 | `--description <text>` | No | New description |
 | `--uri <uri>` | No | Direct metadata URI (skips IPFS upload) |
-
-### `sherwood syndicate spectator <subdomain>`
-
-Toggle dashboard spectator mode for a syndicate's XMTP chat.
-
-| Option | Description |
-|--------|-------------|
-| `--on` | Add spectator bot |
-| `--off` | Remove spectator bot |
 
 ### `sherwood syndicate join`
 
@@ -373,6 +364,15 @@ List chat group members with permission levels.
 ### `sherwood chat <name> add <address>`
 
 Add a member to the chat. Creator only.
+
+### `sherwood chat <name> public --on/--off`
+
+Toggle public chat (dashboard spectator access). Requires `DASHBOARD_SPECTATOR_ADDRESS` env var.
+
+| Flag | Description |
+|------|-------------|
+| `--on` | Add dashboard spectator to group |
+| `--off` | Remove dashboard spectator from group |
 
 ---
 

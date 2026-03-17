@@ -53,6 +53,7 @@ export interface SyndicateDetail {
   params: { key: string; value: string }[];
   trades: TradeEntry[];
   feed: FeedItem[];
+  xmtpGroupId?: string; // XMTP group ID for live feed (set when public chat is enabled)
 }
 
 // ── Leaderboard ──────────────────────────────────────────────

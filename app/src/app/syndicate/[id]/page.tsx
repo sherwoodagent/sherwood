@@ -2,6 +2,7 @@ import TorusKnotBackground from "@/components/TorusKnotBackground";
 import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import EquityCurveChart from "@/components/EquityCurveChart";
+import LiveFeed from "@/components/LiveFeed";
 import { getSyndicateDetail } from "@/lib/mock-data";
 
 export async function generateMetadata({
@@ -153,47 +154,7 @@ export default async function SyndicateDetailPage({
             </div>
 
             {/* Bottom-right: Live Intelligence Feed */}
-            <div className="panel">
-              <div className="panel-title">
-                <span>Live Intelligence Feed</span>
-                <span style={{ color: "var(--color-accent)" }}>REAL-TIME</span>
-              </div>
-              {detail.feed.map((item) => (
-                <div
-                  className="feed-item"
-                  key={item.id}
-                  style={
-                    item.dimmed
-                      ? { opacity: 0.5, borderBottom: "none" }
-                      : undefined
-                  }
-                >
-                  <div
-                    className="feed-indicator"
-                    style={
-                      item.dimmed
-                        ? {
-                            background: "rgba(255,255,255,0.2)",
-                            boxShadow: "none",
-                          }
-                        : undefined
-                    }
-                  />
-                  <div>
-                    <div style={{ color: "#fff" }}>{item.message}</div>
-                    <div
-                      style={{
-                        color: "rgba(255,255,255,0.3)",
-                        fontSize: "9px",
-                        marginTop: "2px",
-                      }}
-                    >
-                      {item.time} // {item.source}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <LiveFeed groupId={detail.xmtpGroupId} />
           </div>
         </main>
       </div>

@@ -540,44 +540,6 @@ syndicate
     }
   });
 
-syndicate
-  .command("spectator")
-  .description("Toggle dashboard spectator mode for a syndicate chat")
-  .argument("<subdomain>", "Syndicate subdomain")
-  .option("--on", "Add spectator bot")
-  .option("--off", "Remove spectator bot")
-  .action(async (subdomain: string, opts: { on?: boolean; off?: boolean }) => {
-    if (!opts.on && !opts.off) {
-      console.error(chalk.red("Specify --on or --off"));
-      process.exit(1);
-    }
-
-    const spectatorAddress = process.env.DASHBOARD_SPECTATOR_ADDRESS;
-    if (!spectatorAddress) {
-      console.error(chalk.red("DASHBOARD_SPECTATOR_ADDRESS env var is required"));
-      process.exit(1);
-    }
-
-    const spinner = ora(`${opts.on ? "Enabling" : "Disabling"} spectator mode...`).start();
-    try {
-      const xmtp = await loadXmtp();
-      const xmtpClient = await xmtp.getXmtpClient();
-      const group = await xmtp.getGroup(xmtpClient, subdomain);
-
-      if (opts.on) {
-        await xmtp.addMember(group, spectatorAddress);
-        spinner.succeed("Spectator mode enabled");
-      } else {
-        await xmtp.removeMember(group, spectatorAddress);
-        spinner.succeed("Spectator mode disabled");
-      }
-    } catch (err) {
-      spinner.fail("Failed to toggle spectator mode");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
-      process.exit(1);
-    }
-  });
-
 // ── EAS Join Request / Approval Commands ──
 
 syndicate

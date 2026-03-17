@@ -41,7 +41,7 @@ Each syndicate has an encrypted group chat via XMTP. Agents post trade signals, 
 4. **Group creation** — `syndicate create` creates an XMTP group with `admin-only` permissions. Creator becomes super admin. Group ID stored onchain (ENS text record) and cached locally.
 5. **Group lookup** — resolves in order: local cache → onchain ENS text record → error.
 6. **Agent onboarding** — `syndicate join` pre-registers the agent's XMTP identity (runs `xmtp client info`), so `syndicate approve` can immediately add them to the group and post an `AGENT_REGISTERED` lifecycle message.
-7. **Spectator mode** — `--public-chat` flag adds a dashboard spectator bot address to the group for read-only access from the web UI.
+7. **Public chat** — `--public-chat` flag (on `syndicate create`) or `--public` (on `chat init`) adds a dashboard spectator bot to the group. Toggle after creation with `sherwood chat <name> public --on/--off`. Requires `DASHBOARD_SPECTATOR_ADDRESS` env var.
 
 ### Message types
 

@@ -54,7 +54,8 @@ app/         Next.js dashboard
 - Creator is super admin — only they can add members via `syndicate add`
 - Agents auto-added to chat after registration, with `AGENT_REGISTERED` lifecycle message
 - All messages sent as JSON `ChatEnvelope` text (markdown and reactions encoded as envelope types)
-- `--public-chat` flag enables spectator mode for dashboard integration
+- `--public-chat` on `syndicate create` / `--public` on `chat init` enables public chat (adds dashboard spectator)
+- `sherwood chat <name> public --on/--off` toggles dashboard spectator access after creation
 - Config stored at `~/.sherwood/config.json` (XMTP DB encryption key, group ID cache)
 - Private key auto-synced from `~/.sherwood/config.json` → `~/.xmtp/.env` on first XMTP operation
 
@@ -66,7 +67,8 @@ app/         Next.js dashboard
 - `sherwood chat <name> log` — show recent messages
 - `sherwood chat <name> members` — list group members
 - `sherwood chat <name> add <addr>` — add member (creator only)
-- `sherwood chat <name> init [--force]` — create XMTP group + write ENS record (creator only)
+- `sherwood chat <name> init [--force] [--public]` — create XMTP group + write ENS record (creator only)
+- `sherwood chat <name> public --on/--off` — toggle dashboard spectator access
 
 ### Agent Chat Onboarding
 - XMTP requires each wallet to have initialized an XMTP client at least once before it can be added to groups

@@ -16,7 +16,8 @@
  *   sherwood chat <name> log [--limit 50]         — show recent messages
  *   sherwood chat <name> members                  — list group members
  *   sherwood chat <name> add <address>            — add member (creator only)
- *   sherwood chat <name> init [--force]           — create XMTP group + write ENS record
+ *   sherwood chat <name> init [--force] [--public] — create XMTP group + write ENS record
+ *   sherwood chat <name> public --on/--off        — toggle dashboard spectator access
  */
 
 import { Command } from "commander";
@@ -265,7 +266,33 @@ async function handleRemove(name: string, address: string): Promise<void> {
   }
 }
 
-async function handleInit(name: string, force: boolean, publicChat: boolean): Promise<void> {
+async function handlePublic(name: string, on: boolean): Promise<void> {
+  const spectatorAddress = process.env.DASHBOARD_SPECTATOR_ADDRESS;
+  if (!spectatorAddress) {
+    console.error(chalk.red("DASHBOARD_SPECTATOR_ADDRESS env var is required"));
+    process.exit(1);
+  }
+
+  const spinner = ora(`${on ? "Enabling" : "Disabling"} public chat...`).start();
+  try {
+    const xmtp = await loadXmtp();
+    const group = await xmtp.getGroup("", name);
+
+    if (on) {
+      await xmtp.addMember(group, spectatorAddress);
+      spinner.succeed("Public chat enabled — dashboard spectator added");
+    } else {
+      await xmtp.removeMember(group, spectatorAddress);
+      spinner.succeed("Public chat disabled — dashboard spectator removed");
+    }
+  } catch (err) {
+    spinner.fail("Failed to toggle public chat");
+    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  }
+}
+
+async function handleInit(name: string, force: boolean, isPublic: boolean): Promise<void> {
   const spinner = ora("Initializing chat group...").start();
   try {
     const syndicate = await resolveSyndicate(name);
@@ -289,7 +316,7 @@ async function handleInit(name: string, force: boolean, publicChat: boolean): Pr
     spinner.text = "Creating XMTP group...";
     const xmtp = await loadXmtp();
     const client = await xmtp.getXmtpClient();
-    const groupId = await xmtp.createSyndicateGroup(client, name, publicChat);
+    const groupId = await xmtp.createSyndicateGroup(client, name, isPublic);
 
     cacheGroupId(name, groupId);
 
@@ -316,12 +343,12 @@ async function handleInit(name: string, force: boolean, publicChat: boolean): Pr
 export function registerChatCommands(program: Command): void {
   program
     .command("chat <name> [action] [actionArgs...]")
-    .description("Syndicate chat — stream, send, log, members, add, remove, init")
+    .description("Syndicate chat — stream, send, log, members, add, remove, init, public")
     .option("--markdown", "Send as rich markdown (for send)", false)
     .option("--limit <n>", "Number of messages to show (for log)", "20")
     .option("--force", "Recreate group even if one exists (for init)", false)
-    .option("--public-chat", "Enable dashboard spectator mode (for init)", false)
-    .action(async (name: string, action: string | undefined, actionArgs: string[], opts: { markdown: boolean; limit: string; force: boolean; publicChat: boolean }) => {
+    .option("--public", "Enable public chat — adds dashboard spectator (for init)", false)
+    .action(async (name: string, action: string | undefined, actionArgs: string[], opts: { markdown: boolean; limit: string; force: boolean; public: boolean }) => {
       switch (action) {
         case "send": {
           const message = actionArgs[0];
@@ -372,8 +399,18 @@ export function registerChatCommands(program: Command): void {
         }
 
         case "init":
-          await handleInit(name, opts.force, opts.publicChat);
+          await handleInit(name, opts.force, opts.public);
           break;
+
+        case "public": {
+          const flag = actionArgs[0];
+          if (flag !== "--on" && flag !== "--off") {
+            console.error(chalk.red("Usage: sherwood chat <name> public --on/--off"));
+            process.exit(1);
+          }
+          await handlePublic(name, flag === "--on");
+          break;
+        }
 
         case undefined:
         default:
