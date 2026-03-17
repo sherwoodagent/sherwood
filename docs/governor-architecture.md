@@ -97,9 +97,11 @@ This means:
 
 ---
 
-## Agent Registration
+## Agent Registration — Removed
 
-**Permissionless.** Any address with an ERC-8004 identity NFT can self-register as an agent. No owner approval needed. The vault's caps (daily limits, per-tx limits, target allowlist) are the protection — agents operate freely within the box.
+No agent registration needed. Anyone with an ERC-8004 identity NFT can propose strategies to any vault. Shareholders vote on the strategy, not the person. The governor verifies ERC-8004 ownership at proposal time — that's the only gate.
+
+Track record is built on-chain via proposal history (past proposals, P&L, settled vs defaulted). No need for a separate agent registry in the vault.
 
 ---
 
@@ -415,7 +417,7 @@ UUPS upgradeable. Holds all governance logic.
 - `removeVault(address vault)` — governance proposal
 - `propose(vault, metadataURI, capitalRequired, performanceFeeBps, strategyDuration, calls[])` → returns proposalId
   - Vault must be registered in governor
-  - Caller must be registered agent in that vault
+  - Caller must own an ERC-8004 identity NFT (verified on-chain)
   - `performanceFeeBps ≤ maxPerformanceFeeBps`
   - `strategyDuration ≤ maxStrategyDuration`
   - `totalCapitalAllocated[vault] + capitalRequired ≤ vault.totalAssets()`
@@ -479,11 +481,10 @@ Shareholders govern **what happens with their money** (strategy proposals). The 
   - If profit > 0: transfers performance fee to proposer
   - Emits settlement event
 
-**Modified functions:**
-- `registerAgent` — remove `onlyOwner` modifier, make permissionless
-  - Agent must own the ERC-8004 NFT themselves: `msg.sender == operatorEOA` and `nftOwner == msg.sender`
-  - Remove the check allowing vault owner to register on behalf of agents
-  - Keep all other validation (non-zero addresses, not already registered, agent limits ≤ syndicate caps)
+**Removed functions:**
+- `registerAgent` — no longer needed. Agent registration is replaced by ERC-8004 identity check at proposal time in the governor.
+- `removeAgent` — no longer needed.
+- `executeBatch` (by agents) — all execution goes through governor proposals. Consider removing or restricting to owner-only for manual vault management.
 
 **New modifier:**
 - `onlyGovernor` — `require(msg.sender == _governor)`
@@ -518,7 +519,7 @@ Full test suite:
 - **Expiry:** execution window passes → Expired
 - **Snapshot:** buying shares after proposal doesn't increase vote weight
 - **Double vote:** same address cannot vote twice
-- **Permissionless registration:** agent self-registers without owner
+- **ERC-8004 gate:** only identity holders can propose, others rejected
 - **Performance fee:** correct calculation and distribution on profit
 - **No fee on loss:** zero fee when strategy loses money
 - **Capital budget:** proposals rejected when total allocated exceeds vault assets
@@ -527,9 +528,12 @@ Full test suite:
 - **Parameter setters:** only owner, values validated
 - **Fuzz:** voting weights, fee calculations, capital limits
 
-#### 6. Existing tests — NO CHANGES
+#### 6. Existing tests — MAY NEED UPDATES
 
-All 66 existing tests must continue to pass. The only vault change that could break them is making `registerAgent` permissionless — existing tests that call `registerAgent` as owner will need the caller to also be the NFT owner / operatorEOA (review test setup).
+Some existing vault tests use `registerAgent` and `executeBatch` (agent direct execution) which are being removed/modified. These tests should be reviewed:
+- Tests for `registerAgent` / `removeAgent` → remove or adapt
+- Tests for `executeBatch` by agents → remove or change to owner-only
+- Deposit/withdraw/ragequit tests → should still pass unchanged
 
 ### CLI Changes
 
