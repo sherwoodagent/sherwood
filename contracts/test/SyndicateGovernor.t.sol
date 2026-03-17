@@ -155,6 +155,15 @@ contract SyndicateGovernorTest is Test {
         governor.executeProposal(proposalId);
     }
 
+    /// @dev Build the settle calls matching the simple proposal
+    function _simpleSettleCalls() internal view returns (BatchExecutorLib.Call[] memory) {
+        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
+        calls[0] = BatchExecutorLib.Call({
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
+        });
+        return calls;
+    }
+
     // ==================== INITIALIZATION ====================
 
     function test_initialize() public view {
@@ -431,10 +440,10 @@ contract SyndicateGovernorTest is Test {
         vm.prank(owner);
         governor.setCooldownPeriod(3 days);
 
-        // Execute and settle first proposal
+        // Execute and settle first proposal (agent settles early)
         uint256 proposalId1 = _createAndExecuteProposal(1500, 7 days);
-        vm.warp(block.timestamp + 7 days);
-        governor.settleProposal(proposalId1);
+        vm.prank(agent);
+        governor.settleByAgent(proposalId1, _simpleSettleCalls());
 
         // Create second proposal and vote immediately
         (uint256 proposalId2,) = _createSimpleProposal(1500, 7 days);
@@ -452,10 +461,10 @@ contract SyndicateGovernorTest is Test {
     }
 
     function test_executeProposal_afterCooldown_succeeds() public {
-        // Execute and settle first proposal
+        // Execute and settle first proposal (agent settles early)
         uint256 proposalId1 = _createAndExecuteProposal(1500, 7 days);
-        vm.warp(block.timestamp + 7 days);
-        governor.settleProposal(proposalId1);
+        vm.prank(agent);
+        governor.settleByAgent(proposalId1, _simpleSettleCalls());
 
         // Warp past cooldown
         vm.warp(block.timestamp + COOLDOWN_PERIOD + 1);
@@ -469,12 +478,14 @@ contract SyndicateGovernorTest is Test {
 
     // ==================== SETTLEMENT ====================
 
-    function test_settleProposal_byProposer() public {
+    // ── Path 1: Agent settle ──
+
+    function test_settleByAgent() public {
         uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
 
-        // Proposer can settle early
+        // Agent can settle early with custom calls
         vm.prank(agent);
-        governor.settleProposal(proposalId);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
 
         ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
         assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Settled));
@@ -482,14 +493,26 @@ contract SyndicateGovernorTest is Test {
         assertFalse(vault.redemptionsLocked());
     }
 
-    function test_settleProposal_byVaultOwner() public {
+    function test_settleByAgent_notProposer_reverts() public {
         uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
 
-        vm.prank(owner); // vault owner
-        governor.settleProposal(proposalId);
-
-        assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Settled));
+        vm.prank(random);
+        vm.expectRevert(ISyndicateGovernor.NotProposer.selector);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
     }
+
+    function test_settleByAgent_causedLoss_reverts() public {
+        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
+
+        // Simulate loss: burn USDC from vault
+        usdc.burn(address(vault), 5_000e6);
+
+        vm.prank(agent);
+        vm.expectRevert(ISyndicateGovernor.SettlementCausedLoss.selector);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
+    }
+
+    // ── Path 2: Permissionless settle ──
 
     function test_settleProposal_permissionless_afterDuration() public {
         uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
@@ -504,12 +527,11 @@ contract SyndicateGovernorTest is Test {
         assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Settled));
     }
 
-    function test_settleProposal_randomBeforeDuration_reverts() public {
+    function test_settleProposal_beforeDuration_reverts() public {
         uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
 
-        // Random tries to settle before duration
         vm.prank(random);
-        vm.expectRevert(ISyndicateGovernor.SettlementNotAllowed.selector);
+        vm.expectRevert(ISyndicateGovernor.StrategyDurationNotElapsed.selector);
         governor.settleProposal(proposalId);
     }
 
@@ -520,6 +542,29 @@ contract SyndicateGovernorTest is Test {
         governor.settleProposal(proposalId);
     }
 
+    // ── Path 3: Emergency settle (vault owner) ──
+
+    function test_emergencySettle_afterDuration() public {
+        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
+
+        vm.warp(block.timestamp + 7 days);
+
+        vm.prank(owner);
+        governor.emergencySettle(proposalId, _simpleSettleCalls());
+
+        assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Settled));
+        assertFalse(vault.redemptionsLocked());
+        assertEq(governor.getActiveProposal(address(vault)), 0);
+    }
+
+    function test_emergencySettle_beforeDuration_reverts() public {
+        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.StrategyDurationNotElapsed.selector);
+        governor.emergencySettle(proposalId, _simpleSettleCalls());
+    }
+
     // ==================== P&L CALCULATION ====================
 
     function test_settlement_noProfit_noFee() public {
@@ -527,38 +572,50 @@ contract SyndicateGovernorTest is Test {
 
         uint256 agentBalBefore = usdc.balanceOf(agent);
 
+        // Agent settles (no profit, no loss)
         vm.prank(agent);
-        governor.settleProposal(proposalId);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
 
         // No profit = no fee
         assertEq(usdc.balanceOf(agent), agentBalBefore);
     }
 
-    function test_settlement_withProfit_feeDistributed() public {
+    function test_settlement_withProfit_agentAndManagementFee() public {
+        // Set management fee on vault
+        vm.prank(owner);
+        vault.setManagementFeeBps(500); // 5%
+
         uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
 
-        // Simulate profit: mint extra USDC to vault
+        // Simulate profit
         usdc.mint(address(vault), 10_000e6);
 
         uint256 agentBalBefore = usdc.balanceOf(agent);
+        uint256 ownerBalBefore = usdc.balanceOf(owner);
 
+        // Agent settles with profit
         vm.prank(agent);
-        governor.settleProposal(proposalId);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
 
-        // Profit = 10,000 USDC, fee = 15% = 1,500 USDC
-        uint256 expectedFee = 10_000e6 * 1500 / 10000;
-        assertEq(usdc.balanceOf(agent), agentBalBefore + expectedFee);
+        // Agent fee: 15% of 10k = 1,500
+        // Management fee: 5% of 10k = 500
+        assertEq(usdc.balanceOf(agent), agentBalBefore + 1_500e6);
+        assertEq(usdc.balanceOf(owner), ownerBalBefore + 500e6);
     }
 
-    function test_settlement_withLoss_noFee() public {
+    function test_settlement_withLoss_permissionlessPath() public {
         uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
 
-        // Simulate loss: burn USDC from vault
+        // Simulate loss
         usdc.burn(address(vault), 5_000e6);
+
+        // Agent can't settle (would revert with SettlementCausedLoss)
+        // Warp past duration for permissionless path
+        vm.warp(block.timestamp + 7 days);
 
         uint256 agentBalBefore = usdc.balanceOf(agent);
 
-        vm.prank(agent);
+        vm.prank(random);
         governor.settleProposal(proposalId);
 
         // Loss = no fee
@@ -607,9 +664,9 @@ contract SyndicateGovernorTest is Test {
     function test_redemptionUnlocked_afterSettlement() public {
         uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
 
-        // Settle
+        // Agent settles
         vm.prank(agent);
-        governor.settleProposal(proposalId);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
 
         // Now LP can withdraw
         vm.prank(lp1);
@@ -670,33 +727,14 @@ contract SyndicateGovernorTest is Test {
         governor.emergencyCancel(proposalId);
     }
 
-    // ==================== EMERGENCY SETTLE ====================
-
-    function test_emergencySettle() public {
-        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
-
-        // Owner emergency settles with custom calls
-        BatchExecutorLib.Call[] memory customCalls = new BatchExecutorLib.Call[](1);
-        customCalls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
-        });
-
-        vm.prank(owner);
-        governor.emergencySettle(proposalId, customCalls);
-
-        assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Settled));
-        assertFalse(vault.redemptionsLocked());
-        assertEq(governor.getActiveProposal(address(vault)), 0);
-    }
-
     function test_emergencySettle_notVaultOwner_reverts() public {
         uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
 
-        BatchExecutorLib.Call[] memory customCalls = new BatchExecutorLib.Call[](0);
+        vm.warp(block.timestamp + 7 days);
 
         vm.prank(random);
         vm.expectRevert(ISyndicateGovernor.NotVaultOwner.selector);
-        governor.emergencySettle(proposalId, customCalls);
+        governor.emergencySettle(proposalId, _simpleSettleCalls());
     }
 
     // ==================== PARAMETER SETTERS ====================
@@ -832,8 +870,9 @@ contract SyndicateGovernorTest is Test {
 
         uint256 agentBalBefore = usdc.balanceOf(agent);
 
+        // Agent settles with profit
         vm.prank(agent);
-        governor.settleProposal(proposalId);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
 
         uint256 expectedFee = (profit * feeBps) / 10000;
         assertEq(usdc.balanceOf(agent), agentBalBefore + expectedFee);

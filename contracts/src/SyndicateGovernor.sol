@@ -228,18 +228,35 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     }
 
     /// @inheritdoc ISyndicateGovernor
+    /// @notice Path 1: Agent settles with custom calls. Enforces no loss.
+    function settleByAgent(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external {
+        StrategyProposal storage proposal = _proposals[proposalId];
+        if (proposal.state != ProposalState.Executed) revert ProposalNotExecuted();
+        if (msg.sender != proposal.proposer) revert NotProposer();
+
+        // Run agent-provided unwind calls
+        if (calls.length > 0) {
+            ISyndicateVault(proposal.vault).executeGovernorBatch(calls);
+        }
+
+        // Enforce no loss — agent can only settle if vault balance >= snapshot
+        address asset = IERC4626(proposal.vault).asset();
+        uint256 balanceAfter = IERC20(asset).balanceOf(proposal.vault);
+        if (balanceAfter < _capitalSnapshots[proposalId]) revert SettlementCausedLoss();
+
+        (int256 pnl, uint256 agentFee) = _finishSettlement(proposalId, proposal);
+
+        emit AgentSettled(proposalId, proposal.vault, pnl, agentFee);
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    /// @notice Path 2: Permissionless settle using pre-committed calls. After duration.
     function settleProposal(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (proposal.state != ProposalState.Executed) revert ProposalNotExecuted();
+        if (block.timestamp < proposal.executedAt + proposal.strategyDuration) revert StrategyDurationNotElapsed();
 
-        // Check settlement permissions
-        bool isProposer = msg.sender == proposal.proposer;
-        bool isVaultOwner = msg.sender == OwnableUpgradeable(proposal.vault).owner();
-        bool durationElapsed = block.timestamp >= proposal.executedAt + proposal.strategyDuration;
-
-        if (!isProposer && !isVaultOwner && !durationElapsed) revert SettlementNotAllowed();
-
-        // Run the unwind calls
+        // Run the pre-committed unwind calls
         BatchExecutorLib.Call[] storage calls = _proposalCalls[proposalId];
         uint256 splitIndex = proposal.splitIndex;
         uint256 totalCalls = calls.length;
@@ -254,17 +271,19 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     }
 
     /// @inheritdoc ISyndicateGovernor
+    /// @notice Path 3: Vault owner settles with custom calls. After duration. Backstop.
     function emergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
         if (proposal.state != ProposalState.Executed) revert ProposalNotExecuted();
+        if (block.timestamp < proposal.executedAt + proposal.strategyDuration) revert StrategyDurationNotElapsed();
 
-        // Run owner-provided unwind calls
+        // Run vault-owner-provided unwind calls
         if (calls.length > 0) {
             ISyndicateVault(proposal.vault).executeGovernorBatch(calls);
         }
 
-        int256 pnl = _finishSettlement(proposalId, proposal);
+        (int256 pnl,) = _finishSettlement(proposalId, proposal);
 
         emit EmergencySettled(proposalId, proposal.vault, pnl, calls.length);
     }
@@ -482,20 +501,34 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         return ProposalState.Approved;
     }
 
-    function _finishSettlement(uint256 proposalId, StrategyProposal storage proposal) internal returns (int256 pnl) {
+    function _finishSettlement(uint256 proposalId, StrategyProposal storage proposal)
+        internal
+        returns (int256 pnl, uint256 agentFee)
+    {
         address vault = proposal.vault;
         address asset = IERC4626(vault).asset();
         uint256 balanceAfter = IERC20(asset).balanceOf(vault);
         uint256 capitalSnapshot = _capitalSnapshots[proposalId];
 
+        // casting to int256 is safe because vault balances won't exceed int256.max
+        // forge-lint: disable-next-line(unsafe-typecast)
         pnl = int256(balanceAfter) - int256(capitalSnapshot);
 
-        // Performance fee on profit
-        uint256 fee = 0;
+        // Distribute fees on profit
+        agentFee = 0;
+        uint256 mgmtFee = 0;
         if (pnl > 0) {
-            fee = (uint256(pnl) * proposal.performanceFeeBps) / 10000;
-            if (fee > 0) {
-                ISyndicateVault(vault).transferPerformanceFee(asset, proposal.proposer, fee);
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint256 profit = uint256(pnl);
+            agentFee = (profit * proposal.performanceFeeBps) / 10000;
+            mgmtFee = (profit * ISyndicateVault(vault).managementFeeBps()) / 10000;
+
+            if (agentFee > 0) {
+                ISyndicateVault(vault).transferPerformanceFee(asset, proposal.proposer, agentFee);
+            }
+            if (mgmtFee > 0) {
+                address vaultOwner = OwnableUpgradeable(vault).owner();
+                ISyndicateVault(vault).transferPerformanceFee(asset, vaultOwner, mgmtFee);
             }
         }
 
@@ -510,7 +543,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         proposal.state = ProposalState.Settled;
 
         uint256 duration = block.timestamp - proposal.executedAt;
-        emit ProposalSettled(proposalId, vault, pnl, fee, duration);
+        emit ProposalSettled(proposalId, vault, pnl, agentFee + mgmtFee, duration);
     }
 
     // ── Validation helpers ──

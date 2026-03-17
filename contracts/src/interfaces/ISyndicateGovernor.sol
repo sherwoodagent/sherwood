@@ -74,6 +74,8 @@ interface ISyndicateGovernor {
     error ZeroAddress();
     error ExecutionWindowNotExpired();
     error NotVaultOwner();
+    error SettlementCausedLoss();
+    error StrategyDurationNotElapsed();
 
     // ── Events ──
 
@@ -97,6 +99,8 @@ interface ISyndicateGovernor {
     );
 
     event ProposalCancelled(uint256 indexed proposalId, address indexed cancelledBy);
+
+    event AgentSettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 performanceFee);
 
     event EmergencySettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 customCallCount);
 
@@ -124,6 +128,8 @@ interface ISyndicateGovernor {
     function vote(uint256 proposalId, bool support) external;
 
     function executeProposal(uint256 proposalId) external;
+
+    function settleByAgent(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external;
 
     function settleProposal(uint256 proposalId) external;
 

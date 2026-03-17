@@ -256,6 +256,9 @@ contract SyndicateGovernorIntegrationTest is Test {
         // Simulate profit
         usdc.mint(address(vault), 3_000e6);
 
+        // Warp past duration — emergency settle only available after duration
+        vm.warp(block.timestamp + 7 days);
+
         // Owner emergency settles with custom unwind
         BatchExecutorLib.Call[] memory customCalls = new BatchExecutorLib.Call[](1);
         customCalls[0] = BatchExecutorLib.Call({

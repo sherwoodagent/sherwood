@@ -185,15 +185,38 @@ Two separate clocks:
                                                                       (no new strategies)
 ```
 
-### Who can settle and when
+### Three Settlement Paths
 
-| Who | When | Use case |
-|-----|------|----------|
-| Agent (proposer) | Anytime after execution | Early close — agent decides position has run its course |
-| Anyone (permissionless) | After strategy duration ends | Public good — no one needs to trust the agent to settle |
-| Owner | Anytime (emergency) | Force-close or emergency |
+Since we can't predict the exact on-chain state at settlement time (slippage, pool state, interest accrued), pre-committed unwind calls may revert. Three distinct settlement paths handle this:
 
-Once `strategyDuration` has elapsed, **anyone** can call `settleProposal(proposalId)`. This is permissionless because settlement just runs the pre-committed unwind calls and returns assets to the vault — there's no trust required. If the agent disappears, any keeper, depositor, or bot can trigger settlement.
+| Path | Who | When | Calls | Constraint |
+|------|-----|------|-------|------------|
+| **Agent settle** | Proposer (agent) | Anytime after execution | Agent provides custom calls | `require(balanceAfter >= balanceBefore)` — no loss allowed |
+| **Permissionless settle** | Anyone | After `strategyDuration` ends | Pre-committed calls from proposal | None — uses the voted-on unwind calls |
+| **Emergency settle** | Vault owner | After `strategyDuration` ends | Owner provides custom calls | None — backstop for when other paths fail |
+
+#### Path 1: Agent settle (`settleByAgent`)
+
+The agent can close the position **at any time** using custom unwind calls. This is the preferred path because:
+- Agent has the most context about current market conditions
+- Agent is incentivized to monitor closely — they only earn performance fee if `balanceAfter >= balanceBefore`
+- The `require(balanceAfter >= balanceBefore)` guard protects depositors from malicious or sloppy unwinds
+- If the strategy is underwater, the agent can wait for recovery or let it expire to permissionless settlement
+
+#### Path 2: Permissionless settle (`settleProposal`)
+
+After `strategyDuration` expires, **anyone** can trigger settlement using the pre-committed unwind calls (voted on by shareholders). This is the standard/happy path. No trust required — if the agent disappears, any keeper, depositor, or bot can trigger it.
+
+**Risk:** Pre-committed calls may revert due to stale parameters (slippage, exact repayment amounts). If this happens, falls through to Path 3.
+
+#### Path 3: Emergency settle (`emergencySettle`)
+
+After `strategyDuration` expires, the **vault owner** can settle with custom unwind calls. This is the backstop for when:
+- Permissionless settlement reverts (stale params)
+- Agent doesn't act (disappeared, negligent)
+- Market conditions require a different unwind path
+
+The vault owner provides replacement calls that achieve the same goal (close positions, return deposit asset) but with params that work given current market conditions.
 
 ### Cooldown Window
 
@@ -221,26 +244,35 @@ During strategy:
   - Agent cannot interact with vault directly — only governor can trigger calls
   - Redemptions are locked
 
-Settle:
-  1. Vault executes the pre-approved calls[splitIndex..] (unwind)
-  2. P&L = vault.depositAssetBalance() - capitalSnapshot
-  3. If P&L > 0: fee = P&L * performanceFeeBps / 10000, transferred to proposer
-  4. If P&L ≤ 0: no fee, loss is socialized across shareholders
-  5. Redemptions unlocked, cooldown starts
-  6. Proposal state → Settled
+Settle (three paths):
+  Path 1 — Agent settle (custom calls, anytime):
+    1. Agent provides custom unwind calls
+    2. Vault executes the agent's calls
+    3. require(vault.depositAssetBalance() >= capitalSnapshot) — no loss allowed
+    4. P&L = balance - capitalSnapshot, fee paid if positive
+
+  Path 2 — Permissionless settle (pre-committed calls, after duration):
+    1. Vault executes the pre-approved calls[splitIndex..] (unwind)
+    2. P&L = vault.depositAssetBalance() - capitalSnapshot
+    3. If P&L > 0: fee paid. If P&L ≤ 0: no fee, loss socialized.
+
+  Path 3 — Emergency settle (vault owner custom calls, after duration):
+    1. Vault owner provides custom unwind calls
+    2. Vault executes the owner's calls
+    3. P&L calculated, fees distributed normally
+
+  All paths end with:
+    - Redemptions unlocked, cooldown starts
+    - Proposal state → Settled
 ```
 
-#### Who can trigger settlement
+#### Why three paths?
 
-| Who | When |
-|-----|------|
-| Proposer (agent) | Anytime after execution — early close |
-| Anyone | After `strategyDuration` expires — permissionless |
-| Owner | Anytime — emergency |
+Pre-committed unwind calls are a best-effort prediction of future on-chain state. Slippage, interest accrual, pool rebalancing, and oracle updates can all cause them to revert. The three-path model ensures settlement always succeeds:
 
-Settlement is safe to make permissionless because it runs the pre-committed unwind calls (voted on by shareholders). No arbitrary input.
-
-**If unwind calls revert:** Owner can emergency-settle with custom unwind calls. The pre-committed calls may fail due to stale slippage, changed pool state, etc. — the owner provides replacement calls that achieve the same goal (close positions, return deposit asset to vault) but with params that work given current market conditions. The vault must end up holding its deposit asset after emergency settlement — positions cannot be left open.
+1. **Agent path** — most likely to succeed because the agent crafts calls for current conditions. The `balanceAfter >= balanceBefore` guard protects depositors.
+2. **Permissionless path** — works when on-chain state hasn't drifted too far from proposal time. Zero trust required.
+3. **Emergency path** — vault owner backstop. Always works because the owner can craft any calls needed.
 
 #### PnL Attestation
 
@@ -301,7 +333,7 @@ struct StrategyProposal {
 
 **Settlement should return to deposit asset.** After the unwind calls execute, the vault should hold the deposit asset (e.g. USDC) again. If non-deposit-asset tokens remain on the vault after settlement (something went wrong), the owner can manually handle them via `executeBatch` (owner-only).
 
-**Stale parameters:** Since unwind calls are committed at proposal time, params like slippage tolerance and exact repayment amounts may be stale by settlement time. Agents should use generous slippage tolerances in their unwind calls. If unwind calls revert due to stale params, the owner can call `emergencySettle(proposalId, calls[])` with replacement unwind calls that work with current market conditions.
+**Stale parameters:** Since pre-committed unwind calls are a prediction of future state, agents should use generous slippage tolerances. If permissionless settlement reverts, the agent can use `settleByAgent` with fresh calls, or the vault owner can use `emergencySettle` as a backstop.
 
 ---
 
@@ -345,6 +377,35 @@ Strategy IS live:   Vault redemptions blocked
 Cooldown window:    Vault redemptions re-enabled
                     Depositors can redeem normally OR sell in pool
 ```
+
+---
+
+## Fee Structure
+
+Two fees are distributed from strategy profits at settlement:
+
+| Fee | Recipient | Set by | Purpose |
+|-----|-----------|--------|---------|
+| Performance fee | Agent (proposer) | Agent at proposal time | Incentivize good strategy proposals |
+| Management fee | Vault owner | Vault owner (stored on vault) | Incentivize vault operation and curation |
+
+Both fees only apply when P&L > 0. On loss, neither fee is charged.
+
+**Fee calculation at settlement:**
+```
+profit = balanceAfter - capitalSnapshot
+if profit > 0:
+  agentFee    = profit * performanceFeeBps / 10000
+  managementFee = profit * managementFeeBps / 10000
+  totalFees   = agentFee + managementFee
+  transfer agentFee to agent
+  transfer managementFee to vault owner
+  remaining profit stays in vault (accrues to all shareholders)
+```
+
+**Safety:** `performanceFeeBps` is capped by `maxPerformanceFeeBps` (governor parameter). `managementFeeBps` is capped at the vault level (e.g. max 1000 = 10%). Combined fees can never exceed profit.
+
+**Why a management fee?** Without it, there's no incentive to operate a vault — the owner curates agents, manages targets, sets parameters, handles emergencies, but earns nothing. The management fee aligns vault owner incentives with depositor outcomes (owner only earns on profit).
 
 ---
 
@@ -471,24 +532,27 @@ UUPS upgradeable. Holds all governance logic.
   - Calls `vault.executeBatch(proposal.calls[0..splitIndex-1])` — vault runs the execution calls
   - Sets `activeProposal[vault] = proposalId`
   - Updates `proposal.state = Executed`, records `executedAt`
-- `settleProposal(proposalId)`
-  - If caller is proposer: anytime after execution (early close)
-  - If caller is anyone: after `strategyDuration` has elapsed (permissionless)
-  - If caller is owner: anytime (emergency)
-  - Calls `vault.executeBatch(proposal.calls[splitIndex..])` — runs the pre-committed unwind calls
-  - Calculates P&L = vault.depositAssetBalance() - capitalSnapshot[proposalId]
-  - If P&L > 0: transfers performance fee (P&L * performanceFeeBps / 10000) to proposer
-  - Calls `vault.unlockRedemptions()` — re-enables withdraw/redeem
-  - Sets `activeProposal[vault] = 0`
-  - Sets `lastSettledAt[vault] = block.timestamp` — starts cooldown
-  - Mints EAS PnL attestation (see PnL Attestation section)
+- `settleByAgent(proposalId, calls[])` — agent provides custom unwind calls
+  - Caller must be the proposer
+  - Anytime after execution (early close incentive)
+  - Vault executes the agent's custom calls
+  - `require(balanceAfter >= capitalSnapshot)` — no loss allowed via this path
+  - If profitable: performance fee + management fee distributed
+  - Unlocks redemptions, clears active proposal, starts cooldown
+- `settleProposal(proposalId)` — permissionless, uses pre-committed calls
+  - Anyone can call after `strategyDuration` has elapsed
+  - Runs `vault.executeBatch(proposal.calls[splitIndex..])` — the voted-on unwind calls
+  - P&L calculated, fees distributed (performance fee to agent, management fee to vault owner)
+  - Unlocks redemptions, clears active proposal, starts cooldown
+- `emergencySettle(proposalId, calls[])` — vault owner provides custom unwind calls
+  - Caller must be vault owner
+  - Only after `strategyDuration` has elapsed (backstop, not a shortcut)
+  - For when permissionless settlement reverts and agent doesn't act
+  - Vault owner provides replacement calls that close positions
+  - P&L calculated, fees distributed normally
+  - Unlocks redemptions, clears active proposal, starts cooldown
 - `cancelProposal(proposalId)` — proposer can cancel before voting ends
-- `emergencyCancel(proposalId)` — owner can cancel anytime before settlement
-- `emergencySettle(proposalId, calls[])` — onlyOwner, runs owner-provided unwind calls instead of pre-committed ones
-  - For when pre-committed unwind calls revert due to stale params or market conditions
-  - Owner provides replacement calls that close the positions and return deposit asset to vault
-  - Still unlocks redemptions, clears active proposal, starts cooldown
-  - Still mints PnL attestation (with actual returned amount)
+- `emergencyCancel(proposalId)` — vault owner can cancel anytime before settlement
 - **Setters** (onlyOwner): `setVotingPeriod`, `setExecutionWindow`, `setQuorumBps`, `setMaxPerformanceFeeBps`, `setMaxStrategyDuration`, `setCooldownPeriod`, `addVault`, `removeVault`
 - **Views**: `getProposal`, `getProposalState`, `getVoteWeight`, `hasVoted`, `proposalCount`, `getGovernorParams`, `getRegisteredVaults`, `getActiveProposal`, `getCooldownEnd`
 
@@ -506,9 +570,11 @@ Shareholders govern **what happens with their money** (strategy proposals). The 
 - `maxStrategyDuration`: min 1 hour, max 365 days
 - `cooldownPeriod`: min 1 hour, max 30 days
 
-**Emergency powers** (onlyOwner):
+**Vault owner powers:**
 - `emergencyCancel(proposalId)` — cancel any proposal before settlement
-- `emergencySettle(proposalId, calls[])` — force-settle with custom unwind calls (positions must be closed)
+- `emergencySettle(proposalId, calls[])` — custom unwind after strategy duration ends (backstop)
+
+**Governor owner powers:**
 - Parameter setters — change governor settings within safety bounds
 - `addVault` / `removeVault` — manage vault registry
 
@@ -519,9 +585,11 @@ Shareholders govern **what happens with their money** (strategy proposals). The 
 **New storage slots** (appended — UUPS safe):
 - `address private _governor` — trusted governor contract
 - `bool private _redemptionsLocked` — true when a strategy is live
+- `uint256 private _managementFeeBps` — vault owner's cut of profits (e.g. 500 = 5%)
 
 **New functions:**
 - `setGovernor(address governor_)` — onlyOwner, sets trusted governor address
+- `setManagementFeeBps(uint256 feeBps)` — onlyOwner, sets vault management fee (capped)
 - `lockRedemptions()` — onlyGovernor, sets `_redemptionsLocked = true`
 - `unlockRedemptions()` — onlyGovernor, sets `_redemptionsLocked = false`
 

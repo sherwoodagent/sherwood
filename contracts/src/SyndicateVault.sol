@@ -88,6 +88,12 @@ contract SyndicateVault is
     /// @notice True when a strategy is live (redemptions blocked)
     bool private _redemptionsLocked;
 
+    /// @notice Vault owner's management fee on strategy profits (basis points)
+    uint256 private _managementFeeBps;
+
+    /// @notice Max management fee (10%)
+    uint256 public constant MAX_MANAGEMENT_FEE_BPS = 1000;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -427,6 +433,14 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
+    function setManagementFeeBps(uint256 feeBps) external onlyOwner {
+        if (feeBps > MAX_MANAGEMENT_FEE_BPS) revert ManagementFeeTooHigh();
+        uint256 old = _managementFeeBps;
+        _managementFeeBps = feeBps;
+        emit ManagementFeeBpsUpdated(old, feeBps);
+    }
+
+    /// @inheritdoc ISyndicateVault
     function lockRedemptions() external onlyGovernor {
         _redemptionsLocked = true;
         emit RedemptionsLockedEvent();
@@ -462,6 +476,11 @@ contract SyndicateVault is
     /// @inheritdoc ISyndicateVault
     function redemptionsLocked() external view returns (bool) {
         return _redemptionsLocked;
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function managementFeeBps() external view returns (uint256) {
+        return _managementFeeBps;
     }
 
     // ==================== OVERRIDES ====================
