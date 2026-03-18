@@ -503,7 +503,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             // forge-lint: disable-next-line(unsafe-typecast)
             uint256 profit = uint256(pnl);
             agentFee = (profit * proposal.performanceFeeBps) / 10000;
-            mgmtFee = (profit * ISyndicateVault(vault).managementFeeBps()) / 10000;
+            mgmtFee = ((profit - agentFee) * ISyndicateVault(vault).managementFeeBps()) / 10000;
 
             if (agentFee > 0) {
                 ISyndicateVault(vault).transferPerformanceFee(asset, proposal.proposer, agentFee);

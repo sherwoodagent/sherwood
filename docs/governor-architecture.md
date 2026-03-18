@@ -97,10 +97,11 @@ This means:
 
 ## Voting
 
-- **Voting power = shares of the target vault** (ERC-4626 balanceOf on `proposal.vault`)
+- **Voting power = shares of the target vault** (via ERC20Votes checkpoints on the vault)
 - Only shareholders of the target vault can vote — your money, your decision
-- Snapshot at proposal creation (block.timestamp) to prevent flash-loan manipulation
-- 1 address = 1 vote per proposal (weighted by shares at snapshot)
+- Snapshot at proposal creation (`block.number`) via ERC20Votes — prevents flash-loan manipulation
+- Auto-delegation on first deposit — shareholders get voting power without extra tx
+- 1 address = 1 vote per proposal (weighted by shares at snapshot block)
 - Simple majority: votesFor > votesAgainst (if quorum met)
 - Quorum = minimum % of target vault's total supply that must participate
 
@@ -387,7 +388,7 @@ Two fees are distributed from strategy profits at settlement:
 | Fee | Recipient | Set by | Purpose |
 |-----|-----------|--------|---------|
 | Performance fee | Agent (proposer) | Agent at proposal time | Incentivize good strategy proposals |
-| Management fee | Vault owner | Vault owner (stored on vault) | Incentivize vault operation and curation |
+| Management fee | Vault owner | Factory constant (0.5%) | Incentivize vault operation and curation |
 
 Both fees only apply when P&L > 0. On loss, neither fee is charged.
 
@@ -395,15 +396,16 @@ Both fees only apply when P&L > 0. On loss, neither fee is charged.
 ```
 profit = balanceAfter - capitalSnapshot
 if profit > 0:
-  agentFee    = profit * performanceFeeBps / 10000
-  managementFee = profit * managementFeeBps / 10000
-  totalFees   = agentFee + managementFee
+  agentFee      = profit * performanceFeeBps / 10000
+  managementFee = (profit - agentFee) * managementFeeBps / 10000
   transfer agentFee to agent
   transfer managementFee to vault owner
   remaining profit stays in vault (accrues to all shareholders)
 ```
 
-**Safety:** `performanceFeeBps` is capped by `maxPerformanceFeeBps` (governor parameter). `managementFeeBps` is capped at the vault level (e.g. max 1000 = 10%). Combined fees can never exceed profit.
+Management fee is calculated on profit **after** the agent's cut. This ensures combined fees never exceed profit and the agent fee takes priority.
+
+**Safety:** `performanceFeeBps` is capped by `maxPerformanceFeeBps` (governor parameter). `managementFeeBps` is a fixed constant (50 bps = 0.5%) set at the factory level — vault owners cannot change it.
 
 **Why a management fee?** Without it, there's no incentive to operate a vault — the owner curates agents, manages targets, sets parameters, handles emergencies, but earns nothing. The management fee aligns vault owner incentives with depositor outcomes (owner only earns on profit).
 
@@ -499,29 +501,30 @@ UUPS upgradeable. Holds all governance logic.
 - `proposals` mapping (uint256 → StrategyProposal)
 - `proposalCount` counter
 - `hasVoted` mapping (proposalId → address → bool)
-- `snapshotBalances` mapping (proposalId → address → uint256) for vote weight snapshots
 - `capitalSnapshot` mapping (proposalId → uint256) — vault balance at execution time
 - `activeProposal` mapping (vault address → uint256) — currently executing proposal (0 if none)
 - `lastSettledAt` mapping (vault address → uint256) — timestamp of last settlement (for cooldown enforcement)
 - `registeredVaults` — EnumerableSet of vault addresses the governor manages
 - Governor parameters: `votingPeriod`, `executionWindow`, `quorumBps`, `maxPerformanceFeeBps`, `maxStrategyDuration`, `cooldownPeriod`
 
+**Vote weight snapshots:** Handled by vault's ERC20Votes (OZ `ERC20VotesUpgradeable`). Governor uses `getPastVotes(voter, snapshotBlock)` and `getPastTotalSupply(snapshotBlock)` — no snapshot storage in the governor.
+
 **Functions:**
 - `initialize(owner, votingPeriod, executionWindow, quorumBps, maxPerformanceFeeBps, maxStrategyDuration, cooldownPeriod)`
 - `addVault(address vault)` — governance proposal (or owner during bootstrap)
 - `removeVault(address vault)` — governance proposal
-- `propose(vault, metadataURI, capitalRequired, performanceFeeBps, strategyDuration, calls[], splitIndex)` → returns proposalId
+- `propose(vault, metadataURI, performanceFeeBps, strategyDuration, calls[], splitIndex)` → returns proposalId
   - Vault must be registered in governor
   - Caller must be a registered agent in the vault (ERC-8004 identity verified at registration)
   - `performanceFeeBps ≤ maxPerformanceFeeBps`
-  - `strategyDuration ≤ maxStrategyDuration`
+  - `strategyDuration >= MIN_STRATEGY_DURATION (1 hour)` and `≤ maxStrategyDuration`
   - `splitIndex > 0 && splitIndex < calls.length` (must have both execution and settlement actions)
-  - Snapshots all current shareholder balances (or uses a checkpoint pattern)
+  - Stores `block.number` as snapshot — vault's ERC20Votes checkpoints provide vote weights
 - `vote(proposalId, support)` — support = true (FOR) / false (AGAINST)
   - Must be within voting period
-  - Voter must have had shares at snapshot time
+  - Voter must have had shares at snapshot block (via ERC20Votes `getPastVotes`)
   - Cannot vote twice
-  - Weight = share balance at snapshot
+  - Weight = share balance at snapshot block
 - `executeProposal(proposalId)` — permissionless, no arguments beyond ID
   - Proposal must be Approved (voting ended, quorum met, majority FOR)
   - Must be within execution window
@@ -529,7 +532,7 @@ UUPS upgradeable. Holds all governance logic.
   - Cooldown must have elapsed: `block.timestamp >= lastSettledAt[vault] + cooldownPeriod`
   - Calls `vault.lockRedemptions()` — blocks withdraw/redeem on the vault
   - Snapshots vault's deposit asset balance → `capitalSnapshot[proposalId]`
-  - Calls `vault.executeBatch(proposal.calls[0..splitIndex-1])` — vault runs the execution calls
+  - Calls `vault.executeGovernorBatch(proposal.calls[0..splitIndex-1])` — vault runs the execution calls
   - Sets `activeProposal[vault] = proposalId`
   - Updates `proposal.state = Executed`, records `executedAt`
 - `settleByAgent(proposalId, calls[])` — agent provides custom unwind calls
@@ -541,7 +544,7 @@ UUPS upgradeable. Holds all governance logic.
   - Unlocks redemptions, clears active proposal, starts cooldown
 - `settleProposal(proposalId)` — permissionless, uses pre-committed calls
   - Anyone can call after `strategyDuration` has elapsed
-  - Runs `vault.executeBatch(proposal.calls[splitIndex..])` — the voted-on unwind calls
+  - Runs `vault.executeGovernorBatch(proposal.calls[splitIndex..])` — the voted-on unwind calls
   - P&L calculated, fees distributed (performance fee to agent, management fee to vault owner)
   - Unlocks redemptions, clears active proposal, starts cooldown
 - `emergencySettle(proposalId, calls[])` — vault owner provides custom unwind calls
@@ -582,46 +585,43 @@ Shareholders govern **what happens with their money** (strategy proposals). The 
 
 #### SyndicateVault.sol (modifications)
 
-**New storage slots** (appended — UUPS safe):
+**New inheritance:** `ERC20VotesUpgradeable` — enables checkpoint-based vote weight snapshots. Auto-delegates to self on first deposit.
+
+**New storage:**
 - `address private _governor` — trusted governor contract
 - `bool private _redemptionsLocked` — true when a strategy is live
-- `uint256 private _managementFeeBps` — vault owner's cut of profits (e.g. 500 = 5%)
+- `uint256 private _managementFeeBps` — vault owner's cut of profits (50 bps, set at init via factory)
+
+**Removed storage (dead code from pre-governor model):**
+- `_syndicateCaps` — caps no longer enforced (strategies go through governor proposals)
+- `_dailySpendTotal`, `_dailySpendResetDay` — agent spend tracking removed
+- `_allowedTargets` — target allowlist removed (governor controls execution)
 
 **New functions:**
-- `setGovernor(address governor_)` — onlyOwner, sets trusted governor address
-- `setManagementFeeBps(uint256 feeBps)` — onlyOwner, sets vault management fee (capped)
-- `lockRedemptions()` — onlyGovernor, sets `_redemptionsLocked = true`
-- `unlockRedemptions()` — onlyGovernor, sets `_redemptionsLocked = false`
+- `setGovernor(address governor_)` — onlyOwner
+- `lockRedemptions()` / `unlockRedemptions()` — onlyGovernor
+- `executeGovernorBatch(calls[])` — onlyGovernor, executes strategy calls via delegatecall
+- `transferPerformanceFee(asset, to, amount)` — onlyGovernor, transfers fees from vault
 
 **Modified functions:**
-- `withdraw` / `redeem` — revert with `RedemptionsLocked()` when `_redemptionsLocked == true`
-- `deposit` / `mint` — **unchanged**, anyone can deposit at any time (even during a live strategy)
-- `executeBatch` — restricted to onlyGovernor (for strategy calls) or onlyOwner (for manual vault management)
+- `withdraw` / `redeem` — revert with `RedemptionsLocked()` during live strategy
+- `deposit` / `mint` — auto-delegates to self via ERC20Votes on first deposit
+- `executeBatch` — owner-only (manual vault management)
+- `registerAgent` — simplified (no caps params)
+- `initialize` — takes `InitParams` struct (includes governor, managementFeeBps)
 
-**Kept functions (unchanged):**
-- `registerAgent` / `removeAgent` — still needed. Only registered agents can propose via the governor.
-
-**New modifier:**
-- `onlyGovernor` — `require(msg.sender == _governor)`
-
-**New events:**
-- `GovernorUpdated(address indexed oldGovernor, address indexed newGovernor)`
-- `RedemptionsLocked()`
-- `RedemptionsUnlocked()`
+**Removed functions:**
+- `simulateBatch`, `updateSyndicateCaps`, `getSyndicateCaps`, `getDailySpendTotal`
+- All target management (`addTarget`, `removeTarget`, `addTargets`, etc.)
 
 #### SyndicateFactory.sol (modifications)
 
-Since the governor is a singleton managing multiple vaults, the factory doesn't deploy a governor. Instead:
+Governor is a singleton deployed separately. Factory stores it as an immutable and passes it to every vault at creation.
 
-1. Governor is deployed once (separate from factory)
-2. Factory's `createSyndicate()` accepts an optional `governor` address in config
-3. If provided, factory calls `vault.setGovernor(governor)` after deployment
-4. Governor's `addVault()` is called separately (governance proposal, or owner during bootstrap)
-
-```solidity
-// Added to SyndicateConfig:
-address governor;  // optional — address(0) means no governor
-```
+- `governor` — immutable, passed to vault `InitParams`
+- `MANAGEMENT_FEE_BPS` — constant (50 bps = 0.5%), passed to vault `InitParams`
+- `SyndicateConfig` simplified — removed `caps` and `initialTargets`
+- Governor's `addVault()` called separately after vault creation
 
 ### New Tests
 

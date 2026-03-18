@@ -606,9 +606,9 @@ contract SyndicateGovernorTest is Test {
         governor.settleByAgent(proposalId, _simpleSettleCalls());
 
         // Agent fee: 15% of 10k = 1,500
-        // Management fee: 0.5% of 10k = 50
+        // Management fee: 0.5% of (10k - 1,500) = 0.5% of 8,500 = 42.5 → 42 (truncated)
         assertEq(usdc.balanceOf(agent), agentBalBefore + 1_500e6);
-        assertEq(usdc.balanceOf(owner), ownerBalBefore + 50e6);
+        assertEq(usdc.balanceOf(owner), ownerBalBefore + 42_500000);
     }
 
     function test_settlement_withLoss_permissionlessPath() public {
