@@ -63,8 +63,8 @@ describe("addresses", () => {
     });
 
     it("returns correct Sherwood protocol addresses on Sepolia", () => {
-      expect(SHERWOOD().FACTORY).toBe("0xc705F04fF2781aF9bB53ba416Cb32A29540c4624");
-      expect(SHERWOOD().STRATEGY_REGISTRY).toBe("0x8A45f769553D10F26a6633d019B04f7805b1368A");
+      expect(SHERWOOD().FACTORY).toBe("0x60bf54dDce61ece85BE5e66CBaA17cC312DEa6C8");
+      expect(SHERWOOD().STRATEGY_REGISTRY).toBe("0xf1e6E9bd1a735B54F383b18ad6603Ddd566C71cE");
     });
   });
 });
