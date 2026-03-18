@@ -33,10 +33,6 @@ contract SyndicateVaultTest is Test {
     uint256 public agent1NftId;
     uint256 public agent2NftId;
 
-    uint256 constant MAX_PER_TX = 10_000e6; // 10k USDC (6 decimals)
-    uint256 constant MAX_DAILY = 50_000e6; // 50k USDC
-    uint256 constant MAX_BORROW = 7500; // 75% LTV
-
     function setUp() public {
         // Deploy tokens
         usdc = new ERC20Mock("USD Coin", "USDC", 6);
@@ -54,20 +50,10 @@ contract SyndicateVaultTest is Test {
         agentRegistry = new MockAgentRegistry();
 
         // Mint ERC-8004 identity NFTs for agents
-        // Agent 1: NFT owned by agentEoa (operator)
         agent1NftId = agentRegistry.mint(agentEoa);
-        // Agent 2: NFT owned by agentEoa2 (operator)
         agent2NftId = agentRegistry.mint(agentEoa2);
 
-        // Allowlist targets
-        address[] memory targets = new address[](5);
-        targets[0] = address(usdc);
-        targets[1] = address(weth);
-        targets[2] = address(mUsdc);
-        targets[3] = address(comptroller);
-        targets[4] = address(swapRouter);
-
-        // Deploy vault via proxy with executor lib and initial targets
+        // Deploy vault via proxy with executor lib
         SyndicateVault impl = new SyndicateVault();
         bytes memory initData = abi.encodeCall(
             SyndicateVault.initialize,
@@ -76,11 +62,7 @@ contract SyndicateVaultTest is Test {
                     name: "Sherwood Vault",
                     symbol: "swUSDC",
                     owner: owner,
-                    caps: ISyndicateVault.SyndicateCaps({
-                        maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
-                    }),
                     executorImpl: address(executorLib),
-                    initialTargets: targets,
                     openDeposits: true,
                     agentRegistry: address(agentRegistry),
                     governor: address(0),
@@ -102,7 +84,7 @@ contract SyndicateVaultTest is Test {
 
         // Register agent (NFT owned by agentEoa)
         vm.prank(owner);
-        vault.registerAgent(agent1NftId, agentPkp, agentEoa, 5_000e6, 20_000e6);
+        vault.registerAgent(agent1NftId, agentPkp, agentEoa);
     }
 
     // ==================== INITIALIZATION ====================
@@ -113,22 +95,6 @@ contract SyndicateVaultTest is Test {
         assertEq(vault.owner(), owner);
         assertEq(address(vault.asset()), address(usdc));
         assertEq(vault.getExecutorImpl(), address(executorLib));
-
-        ISyndicateVault.SyndicateCaps memory caps = vault.getSyndicateCaps();
-        assertEq(caps.maxPerTx, MAX_PER_TX);
-        assertEq(caps.maxDailyTotal, MAX_DAILY);
-        assertEq(caps.maxBorrowRatio, MAX_BORROW);
-    }
-
-    function test_initialize_withTargets() public view {
-        assertTrue(vault.isAllowedTarget(address(usdc)));
-        assertTrue(vault.isAllowedTarget(address(weth)));
-        assertTrue(vault.isAllowedTarget(address(mUsdc)));
-        assertTrue(vault.isAllowedTarget(address(comptroller)));
-        assertTrue(vault.isAllowedTarget(address(swapRouter)));
-
-        address[] memory targets = vault.getAllowedTargets();
-        assertEq(targets.length, 5);
     }
 
     // ==================== DEPOSITS & WITHDRAWALS ====================
@@ -141,6 +107,18 @@ contract SyndicateVaultTest is Test {
 
         assertGt(shares, 0);
         assertEq(vault.balanceOf(lp1), shares);
+    }
+
+    function test_deposit_autoDelegates() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        // After deposit, lp1 should be self-delegated
+        assertEq(vault.delegates(lp1), lp1);
+        // And should have voting power
+        assertGt(vault.getVotes(lp1), 0);
     }
 
     function test_ragequit() public {
@@ -185,8 +163,6 @@ contract SyndicateVaultTest is Test {
         assertEq(config.agentId, agent1NftId);
         assertEq(config.pkpAddress, agentPkp);
         assertEq(config.operatorEOA, agentEoa);
-        assertEq(config.maxPerTx, 5_000e6);
-        assertEq(config.dailyLimit, 20_000e6);
         assertTrue(config.active);
     }
 
@@ -195,7 +171,7 @@ contract SyndicateVaultTest is Test {
         uint256 ownerNftId = agentRegistry.mint(owner);
 
         vm.prank(owner);
-        vault.registerAgent(ownerNftId, agentPkp2, agentEoa2, 5_000e6, 20_000e6);
+        vault.registerAgent(ownerNftId, agentPkp2, agentEoa2);
 
         assertTrue(vault.isAgent(agentPkp2));
         ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPkp2);
@@ -210,19 +186,13 @@ contract SyndicateVaultTest is Test {
         // Try to register with NFT not owned by operatorEOA or vault owner
         vm.prank(owner);
         vm.expectRevert(ISyndicateVault.NotAgentOwner.selector);
-        vault.registerAgent(randomNftId, agentPkp2, agentEoa2, 5_000e6, 20_000e6);
-    }
-
-    function test_registerAgent_exceedsSyndicateCap_reverts() public {
-        vm.prank(owner);
-        vm.expectRevert(ISyndicateVault.AgentMaxPerTxExceedsCap.selector);
-        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2, MAX_PER_TX + 1, 20_000e6);
+        vault.registerAgent(randomNftId, agentPkp2, agentEoa2);
     }
 
     function test_registerAgent_notOwner_reverts() public {
         vm.prank(lp1);
         vm.expectRevert();
-        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2, 5_000e6, 20_000e6);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2);
     }
 
     function test_removeAgent() public {
@@ -231,46 +201,6 @@ contract SyndicateVaultTest is Test {
 
         assertFalse(vault.isAgent(agentPkp));
         assertEq(vault.getAgentCount(), 0);
-    }
-
-    // ==================== TARGET MANAGEMENT ====================
-
-    function test_addTarget() public {
-        address newTarget = makeAddr("newProtocol");
-
-        vm.prank(owner);
-        vault.addTarget(newTarget);
-
-        assertTrue(vault.isAllowedTarget(newTarget));
-        assertEq(vault.getAllowedTargets().length, 6); // 5 from setUp + 1
-    }
-
-    function test_removeTarget() public {
-        vm.prank(owner);
-        vault.removeTarget(address(swapRouter));
-
-        assertFalse(vault.isAllowedTarget(address(swapRouter)));
-    }
-
-    function test_addTarget_notOwner_reverts() public {
-        vm.prank(makeAddr("rando"));
-        vm.expectRevert();
-        vault.addTarget(makeAddr("target"));
-    }
-
-    function test_addTargets() public {
-        address t1 = makeAddr("t1");
-        address t2 = makeAddr("t2");
-        address[] memory newTargets = new address[](2);
-        newTargets[0] = t1;
-        newTargets[1] = t2;
-
-        vm.prank(owner);
-        vault.addTargets(newTargets);
-
-        assertTrue(vault.isAllowedTarget(t1));
-        assertTrue(vault.isAllowedTarget(t2));
-        assertEq(vault.getAllowedTargets().length, 7); // 5 + 2
     }
 
     // ==================== BATCH EXECUTION (owner-only, via delegatecall) ====================
@@ -313,38 +243,6 @@ contract SyndicateVaultTest is Test {
         vault.executeBatch(calls);
     }
 
-    // ==================== SIMULATION ====================
-
-    function test_simulateBatch_success() public {
-        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
-        calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUsdc), 10_000e6)), value: 0
-        });
-
-        // Anyone can simulate (no agent check)
-        BatchExecutorLib.CallResult[] memory results = vault.simulateBatch(calls);
-
-        assertEq(results.length, 1);
-        assertTrue(results[0].success);
-    }
-
-    function test_simulateBatch_failingCall() public {
-        // Simulate a call to an address with no code — will fail
-        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
-        calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeWithSignature("nonExistentFunction()"), value: 0
-        });
-
-        BatchExecutorLib.CallResult[] memory results = vault.simulateBatch(calls);
-
-        // ERC20 fallback won't revert but the function doesn't exist — depends on implementation
-        // Just verify we get a result back
-        assertEq(results.length, 1);
-    }
-
-    // (Caps enforcement tests removed — agent caps no longer apply to executeBatch.
-    //  Strategy execution goes through governor proposals.)
-
     // ==================== PAUSE ====================
 
     function test_pause_blocksDeposits() public {
@@ -356,20 +254,6 @@ contract SyndicateVaultTest is Test {
         vm.expectRevert();
         vault.deposit(10_000e6, lp1);
         vm.stopPrank();
-    }
-
-    // ==================== SYNDICATE CAPS ====================
-
-    function test_updateSyndicateCaps() public {
-        vm.prank(owner);
-        vault.updateSyndicateCaps(
-            ISyndicateVault.SyndicateCaps({maxPerTx: 20_000e6, maxDailyTotal: 100_000e6, maxBorrowRatio: 8000})
-        );
-
-        ISyndicateVault.SyndicateCaps memory caps = vault.getSyndicateCaps();
-        assertEq(caps.maxPerTx, 20_000e6);
-        assertEq(caps.maxDailyTotal, 100_000e6);
-        assertEq(caps.maxBorrowRatio, 8000);
     }
 
     // ==================== RECEIVE ETH ====================
@@ -430,8 +314,6 @@ contract SyndicateVaultTest is Test {
     /// @dev Helper to deploy a closed-deposits vault for whitelist tests
     function _deployClosedVault() internal returns (SyndicateVault) {
         SyndicateVault impl2 = new SyndicateVault();
-        address[] memory targets = new address[](1);
-        targets[0] = address(usdc);
         bytes memory initData = abi.encodeCall(
             SyndicateVault.initialize,
             (ISyndicateVault.InitParams({
@@ -439,11 +321,7 @@ contract SyndicateVaultTest is Test {
                     name: "Closed Vault",
                     symbol: "cVault",
                     owner: owner,
-                    caps: ISyndicateVault.SyndicateCaps({
-                        maxPerTx: MAX_PER_TX, maxDailyTotal: MAX_DAILY, maxBorrowRatio: MAX_BORROW
-                    }),
                     executorImpl: address(executorLib),
-                    initialTargets: targets,
                     openDeposits: false,
                     agentRegistry: address(agentRegistry),
                     governor: address(0),
@@ -580,7 +458,7 @@ contract SyndicateVaultTest is Test {
 
     function test_getAgentOperators_multiple() public {
         vm.prank(owner);
-        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2, 5_000e6, 20_000e6);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2);
 
         address[] memory operators = vault.getAgentOperators();
         assertEq(operators.length, 2);
@@ -597,7 +475,7 @@ contract SyndicateVaultTest is Test {
 
     function test_getAgentOperators_afterRemoval() public {
         vm.startPrank(owner);
-        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2, 5_000e6, 20_000e6);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2);
         vault.removeAgent(agentPkp);
         vm.stopPrank();
 
@@ -612,5 +490,32 @@ contract SyndicateVaultTest is Test {
 
         address[] memory operators = vault.getAgentOperators();
         assertEq(operators.length, 0);
+    }
+
+    // ==================== ERC20VOTES ====================
+
+    function test_getPastVotes_afterDeposit() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        // Mine a block so getPastVotes works
+        vm.roll(block.number + 1);
+
+        uint256 pastVotes = vault.getPastVotes(lp1, block.number - 1);
+        assertEq(pastVotes, 10_000e6);
+    }
+
+    function test_getPastTotalSupply_afterDeposit() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        vm.roll(block.number + 1);
+
+        uint256 pastSupply = vault.getPastTotalSupply(block.number - 1);
+        assertEq(pastSupply, 10_000e6);
     }
 }

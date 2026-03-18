@@ -37,7 +37,7 @@ interface ISyndicateGovernor {
         uint256 strategyDuration;
         uint256 votesFor;
         uint256 votesAgainst;
-        uint256 snapshotTimestamp;
+        uint256 snapshotBlock;
         uint256 voteEnd;
         uint256 executeBy;
         uint256 executedAt;
@@ -51,6 +51,7 @@ interface ISyndicateGovernor {
     error NotRegisteredAgent();
     error PerformanceFeeTooHigh();
     error StrategyDurationTooLong();
+    error StrategyDurationTooShort();
     error InvalidSplitIndex();
     error EmptyCalls();
     error NotWithinVotingPeriod();
@@ -61,7 +62,6 @@ interface ISyndicateGovernor {
     error StrategyAlreadyActive();
     error CooldownNotElapsed();
     error ProposalNotExecuted();
-    error SettlementNotAllowed();
     error ProposalNotCancellable();
     error NotProposer();
     error InvalidVotingPeriod();
@@ -72,7 +72,6 @@ interface ISyndicateGovernor {
     error InvalidCooldownPeriod();
     error InvalidVault();
     error ZeroAddress();
-    error ExecutionWindowNotExpired();
     error NotVaultOwner();
     error SettlementCausedLoss();
     error StrategyDurationNotElapsed();

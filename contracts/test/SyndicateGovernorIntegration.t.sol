@@ -61,13 +61,7 @@ contract SyndicateGovernorIntegrationTest is Test {
         agentRegistry = new MockAgentRegistry();
         agentNftId = agentRegistry.mint(agentEoa);
 
-        // Deploy vault with DeFi targets allowed
-        address[] memory targets = new address[](4);
-        targets[0] = address(usdc);
-        targets[1] = address(targetToken);
-        targets[2] = address(mUsdc);
-        targets[3] = address(comptroller);
-
+        // Deploy vault
         SyndicateVault vaultImpl = new SyndicateVault();
         bytes memory vaultInit = abi.encodeCall(
             SyndicateVault.initialize,
@@ -76,11 +70,7 @@ contract SyndicateGovernorIntegrationTest is Test {
                     name: "Sherwood Vault",
                     symbol: "swUSDC",
                     owner: owner,
-                    caps: ISyndicateVault.SyndicateCaps({
-                        maxPerTx: 100_000e6, maxDailyTotal: 500_000e6, maxBorrowRatio: 7500
-                    }),
                     executorImpl: address(executorLib),
-                    initialTargets: targets,
                     openDeposits: true,
                     agentRegistry: address(agentRegistry),
                     governor: address(0),
@@ -91,7 +81,7 @@ contract SyndicateGovernorIntegrationTest is Test {
 
         // Register agent
         vm.prank(owner);
-        vault.registerAgent(agentNftId, agent, agentEoa, 100_000e6, 500_000e6);
+        vault.registerAgent(agentNftId, agent, agentEoa);
 
         // Deploy governor
         SyndicateGovernor govImpl = new SyndicateGovernor();
@@ -131,6 +121,9 @@ contract SyndicateGovernorIntegrationTest is Test {
 
         // Fund mToken with borrow liquidity
         usdc.mint(address(mUsdc), 1_000_000e6);
+
+        // Mine a block so ERC20Votes checkpoints are queryable
+        vm.roll(block.number + 1);
     }
 
     // ── Helpers ──
@@ -143,6 +136,9 @@ contract SyndicateGovernorIntegrationTest is Test {
     ) internal returns (uint256 proposalId) {
         vm.prank(agent);
         proposalId = governor.propose(address(vault), "ipfs://test", feeBps, duration, calls, splitIndex);
+
+        // Mine a block so the snapshot block is in the past
+        vm.roll(block.number + 1);
 
         vm.prank(lp1);
         governor.vote(proposalId, true);
@@ -166,6 +162,9 @@ contract SyndicateGovernorIntegrationTest is Test {
 
         vm.prank(agent);
         uint256 proposalId = governor.propose(address(vault), "ipfs://strategy1", 1500, 7 days, calls, 1);
+
+        // Mine a block for checkpoint
+        vm.roll(block.number + 1);
 
         // 2. Shareholders vote
         vm.prank(lp1);
@@ -228,6 +227,9 @@ contract SyndicateGovernorIntegrationTest is Test {
 
         vm.prank(agent);
         uint256 proposalId = governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1);
+
+        // Mine a block for checkpoint
+        vm.roll(block.number + 1);
 
         // Majority votes against
         vm.prank(lp1);
@@ -318,16 +320,6 @@ contract SyndicateGovernorIntegrationTest is Test {
 
     function test_fullLifecycle_moonwellSupplyBorrowUnwind() public {
         // Strategy: supply USDC as collateral on Moonwell, borrow more USDC, then unwind
-        //
-        // Execute calls:
-        //   1. approve mUsdc to pull USDC
-        //   2. mint mTokens (supply collateral)
-        //   3. enterMarkets
-        //   4. borrow USDC
-        //
-        // Settle calls:
-        //   5. repay borrow
-        //   6. redeem collateral
 
         uint256 supplyAmount = 50_000e6;
         uint256 borrowAmount = 25_000e6;
@@ -402,9 +394,6 @@ contract SyndicateGovernorIntegrationTest is Test {
     }
 
     function test_fullLifecycle_moonwellFullUnwind_cleanSettlement() public {
-        // Full cycle: supply → borrow → repay → redeem → settle
-        // No external profit — vault returns to original balance, zero P&L
-
         uint256 supplyAmount = 50_000e6;
         uint256 borrowAmount = 25_000e6;
 
@@ -452,10 +441,6 @@ contract SyndicateGovernorIntegrationTest is Test {
         vm.prank(random);
         governor.settleProposal(proposalId);
 
-        // After settlement:
-        // Vault USDC: 75k - 25k (repay) + 50k (redeem) = 100k (back to original)
-        // P&L = 100k - 100k = 0
-        // No fee
         assertEq(usdc.balanceOf(address(vault)), 100_000e6);
         assertEq(mUsdc.balanceOf(address(vault)), 0);
         assertEq(usdc.balanceOf(agent), 0);

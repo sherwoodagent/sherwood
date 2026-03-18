@@ -14,7 +14,7 @@ import {IL2Registrar} from "./interfaces/IL2Registrar.sol";
  *
  *   All syndicates share the same executor lib (stateless, called via delegatecall)
  *   and vault implementation. Each vault proxy has its own storage: positions,
- *   agent registry, allowlist, and caps.
+ *   agent registry, and depositor whitelist.
  *
  *   ENS subnames are registered atomically via Durin L2 Registrar, so each
  *   syndicate gets a <subdomain>.sherwoodagent.eth name resolving to its vault.
@@ -36,8 +36,6 @@ contract SyndicateFactory {
         IERC20 asset; // Deposit asset (e.g., USDC)
         string name; // Vault token name
         string symbol; // Vault token symbol
-        ISyndicateVault.SyndicateCaps caps; // Syndicate-wide limits
-        address[] initialTargets; // Protocol addresses to allowlist
         bool openDeposits; // If true, anyone can deposit. If false, depositor whitelist enforced.
         string subdomain; // ENS subdomain label (e.g. "alpha-seekers")
     }
@@ -129,9 +127,7 @@ contract SyndicateFactory {
             name: config.name,
             symbol: config.symbol,
             owner: msg.sender,
-            caps: config.caps,
             executorImpl: executorImpl,
-            initialTargets: config.initialTargets,
             openDeposits: config.openDeposits,
             agentRegistry: address(agentRegistry),
             governor: governor,

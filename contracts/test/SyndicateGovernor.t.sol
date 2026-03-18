@@ -51,10 +51,6 @@ contract SyndicateGovernorTest is Test {
         agentNftId = agentRegistry.mint(agentEoa);
 
         // Deploy vault
-        address[] memory targets = new address[](2);
-        targets[0] = address(usdc);
-        targets[1] = address(targetToken);
-
         SyndicateVault vaultImpl = new SyndicateVault();
         bytes memory vaultInit = abi.encodeCall(
             SyndicateVault.initialize,
@@ -63,11 +59,7 @@ contract SyndicateGovernorTest is Test {
                     name: "Sherwood Vault",
                     symbol: "swUSDC",
                     owner: owner,
-                    caps: ISyndicateVault.SyndicateCaps({
-                        maxPerTx: 100_000e6, maxDailyTotal: 500_000e6, maxBorrowRatio: 7500
-                    }),
                     executorImpl: address(executorLib),
-                    initialTargets: targets,
                     openDeposits: true,
                     agentRegistry: address(agentRegistry),
                     governor: address(0),
@@ -78,7 +70,7 @@ contract SyndicateGovernorTest is Test {
 
         // Register agent on vault
         vm.prank(owner);
-        vault.registerAgent(agentNftId, agent, agentEoa, 100_000e6, 500_000e6);
+        vault.registerAgent(agentNftId, agent, agentEoa);
 
         // Deploy governor
         SyndicateGovernor govImpl = new SyndicateGovernor();
@@ -116,6 +108,9 @@ contract SyndicateGovernorTest is Test {
         usdc.approve(address(vault), 40_000e6);
         vault.deposit(40_000e6, lp2);
         vm.stopPrank();
+
+        // Mine a block so ERC20Votes checkpoints are queryable
+        vm.roll(block.number + 1);
     }
 
     // ==================== HELPERS ====================
@@ -137,6 +132,9 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         proposalId = governor.propose(address(vault), "ipfs://test", perfFeeBps, duration, calls, 1);
+
+        // Mine a block so the snapshot block is in the past for voting
+        vm.roll(block.number + 1);
     }
 
     /// @dev Create proposal, vote it through, and return proposal ID
@@ -242,6 +240,16 @@ contract SyndicateGovernorTest is Test {
         governor.propose(address(vault), "ipfs://test", 1500, MAX_STRATEGY_DURATION + 1, calls, 1);
     }
 
+    function test_propose_strategyDurationTooShort_reverts() public {
+        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](2);
+        calls[0] = BatchExecutorLib.Call({target: address(usdc), data: "", value: 0});
+        calls[1] = BatchExecutorLib.Call({target: address(usdc), data: "", value: 0});
+
+        vm.prank(agent);
+        vm.expectRevert(ISyndicateGovernor.StrategyDurationTooShort.selector);
+        governor.propose(address(vault), "ipfs://test", 1500, 30 minutes, calls, 1);
+    }
+
     function test_propose_invalidSplitIndex_reverts() public {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](2);
         calls[0] = BatchExecutorLib.Call({target: address(usdc), data: "", value: 0});
@@ -315,7 +323,7 @@ contract SyndicateGovernorTest is Test {
         governor.vote(proposalId, true);
     }
 
-    function test_vote_snapshotPreventsDoubleVoting() public {
+    function test_vote_snapshotPreventsTransferVoting() public {
         (uint256 proposalId,) = _createSimpleProposal(1500, 7 days);
 
         // LP1 votes first
@@ -335,13 +343,14 @@ contract SyndicateGovernorTest is Test {
         vm.expectRevert(ISyndicateGovernor.AlreadyVoted.selector);
         governor.vote(proposalId, true);
 
-        // Random can vote with the transferred shares
+        // Random cannot vote because they had no balance at snapshot block
         vm.prank(random);
+        vm.expectRevert(ISyndicateGovernor.NoVotingPower.selector);
         governor.vote(proposalId, false);
 
         ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
         assertEq(p.votesFor, lp1Weight); // LP1's original balance
-        assertEq(p.votesAgainst, lp1Shares); // Random got LP1's shares
+        assertEq(p.votesAgainst, 0); // Random couldn't vote
     }
 
     // ==================== PROPOSAL STATE RESOLUTION ====================
@@ -354,9 +363,7 @@ contract SyndicateGovernorTest is Test {
     function test_proposalState_rejected_noQuorum() public {
         (uint256 proposalId,) = _createSimpleProposal(1500, 7 days);
 
-        // Only LP1 votes (60% of shares) but we need 40% quorum — wait, that's met
-        // Let's have only a small holder vote
-        // Actually 60k/100k = 60% > 40% quorum. Let's test with no votes at all.
+        // No votes at all — warp past voting period
         vm.warp(block.timestamp + VOTING_PERIOD + 1);
 
         assertEq(uint256(governor.getProposalState(proposalId)), uint256(ISyndicateGovernor.ProposalState.Rejected));
@@ -840,7 +847,7 @@ contract SyndicateGovernorTest is Test {
 
     // ==================== GOVERNOR ON VAULT ====================
 
-    function test_setGovernor_onVault() public {
+    function test_setGovernor_onVault() public view {
         assertEq(vault.governor(), address(governor));
     }
 

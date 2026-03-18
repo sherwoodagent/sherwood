@@ -10,7 +10,7 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 /**
  * @title SyndicateGovernor
@@ -22,10 +22,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  *   - Cooldown window between strategies for depositor exit
  *   - Permissionless settlement after strategy duration ends
  *   - P&L calculated via balance snapshot diffs
+ *   - Vote weight from ERC20Votes checkpoints (block-number snapshots)
  */
 contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradeable, UUPSUpgradeable {
     using EnumerableSet for EnumerableSet.AddressSet;
-    using SafeERC20 for IERC20;
 
     // ── Safety bounds (hardcoded) ──
 
@@ -57,12 +57,6 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
     /// @notice Proposal ID → voter → bool
     mapping(uint256 => mapping(address => bool)) private _hasVoted;
-
-    /// @notice Proposal ID → voter → vote weight (snapshot at proposal creation)
-    mapping(uint256 => mapping(address => uint256)) private _snapshotBalances;
-
-    /// @notice Proposal ID → snapshot of total supply at proposal creation
-    mapping(uint256 => uint256) private _snapshotTotalSupply;
 
     /// @notice Proposal ID → vault balance at execution time
     mapping(uint256 => uint256) private _capitalSnapshots;
@@ -126,6 +120,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         if (!ISyndicateVault(vault).isAgent(msg.sender)) revert NotRegisteredAgent();
         if (performanceFeeBps > _params.maxPerformanceFeeBps) revert PerformanceFeeTooHigh();
         if (strategyDuration > _params.maxStrategyDuration) revert StrategyDurationTooLong();
+        if (strategyDuration < MIN_STRATEGY_DURATION) revert StrategyDurationTooShort();
         if (calls.length == 0) revert EmptyCalls();
         if (splitIndex == 0 || splitIndex >= calls.length) revert InvalidSplitIndex();
 
@@ -141,7 +136,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             strategyDuration: strategyDuration,
             votesFor: 0,
             votesAgainst: 0,
-            snapshotTimestamp: block.timestamp,
+            snapshotBlock: block.number,
             voteEnd: block.timestamp + _params.votingPeriod,
             executeBy: block.timestamp + _params.votingPeriod + _params.executionWindow,
             executedAt: 0,
@@ -152,9 +147,6 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         for (uint256 i = 0; i < calls.length; i++) {
             _proposalCalls[proposalId].push(calls[i]);
         }
-
-        // Snapshot total supply for quorum calculation
-        _snapshotTotalSupply[proposalId] = IERC4626(vault).totalSupply();
 
         emit ProposalCreated(
             proposalId, msg.sender, vault, performanceFeeBps, strategyDuration, splitIndex, calls.length, metadataURI
@@ -169,8 +161,8 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         if (proposal.state != ProposalState.Pending) revert NotWithinVotingPeriod();
         if (_hasVoted[proposalId][msg.sender]) revert AlreadyVoted();
 
-        // Get or snapshot vote weight
-        uint256 weight = _getOrSnapshotBalance(proposalId, msg.sender, proposal.vault, proposal.snapshotTimestamp);
+        // Get vote weight from ERC20Votes checkpoint at proposal creation block
+        uint256 weight = IVotes(proposal.vault).getPastVotes(msg.sender, proposal.snapshotBlock);
         if (weight == 0) revert NoVotingPower();
 
         _hasVoted[proposalId][msg.sender] = true;
@@ -244,7 +236,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         uint256 balanceAfter = IERC20(asset).balanceOf(proposal.vault);
         if (balanceAfter < _capitalSnapshots[proposalId]) revert SettlementCausedLoss();
 
-        (int256 pnl, uint256 agentFee) = _finishSettlement(proposalId, proposal);
+        (int256 pnl, uint256 agentFee) = _finishSettlement(proposalId, proposal, balanceAfter);
 
         emit AgentSettled(proposalId, proposal.vault, pnl, agentFee);
     }
@@ -267,7 +259,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         }
         ISyndicateVault(proposal.vault).executeGovernorBatch(settleCalls);
 
-        _finishSettlement(proposalId, proposal);
+        _finishSettlement(proposalId, proposal, 0);
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -283,7 +275,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             ISyndicateVault(proposal.vault).executeGovernorBatch(calls);
         }
 
-        (int256 pnl,) = _finishSettlement(proposalId, proposal);
+        (int256 pnl,) = _finishSettlement(proposalId, proposal, 0);
 
         emit EmergencySettled(proposalId, proposal.vault, pnl, calls.length);
     }
@@ -400,7 +392,9 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
     /// @inheritdoc ISyndicateGovernor
     function getVoteWeight(uint256 proposalId, address voter) external view returns (uint256) {
-        return _snapshotBalances[proposalId][voter];
+        StrategyProposal storage proposal = _proposals[proposalId];
+        if (proposal.id == 0) return 0;
+        return IVotes(proposal.vault).getPastVotes(voter, proposal.snapshotBlock);
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -445,28 +439,14 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
     // ==================== INTERNAL ====================
 
-    function _getOrSnapshotBalance(uint256 proposalId, address voter, address vault, uint256)
-        internal
-        returns (uint256)
-    {
-        // Lazy snapshot: record balance on first interaction
-        uint256 cached = _snapshotBalances[proposalId][voter];
-        if (cached != 0) return cached;
-
-        uint256 balance = IERC4626(vault).balanceOf(voter);
-        if (balance > 0) {
-            _snapshotBalances[proposalId][voter] = balance;
-        }
-        return balance;
-    }
-
     function _resolveState(StrategyProposal storage proposal) internal returns (ProposalState) {
         if (proposal.state != ProposalState.Pending) return proposal.state;
         if (block.timestamp <= proposal.voteEnd) return ProposalState.Pending;
 
         // Voting ended — determine outcome
         uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        uint256 quorumRequired = (_snapshotTotalSupply[proposal.id] * _params.quorumBps) / 10000;
+        uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotBlock);
+        uint256 quorumRequired = (pastTotalSupply * _params.quorumBps) / 10000;
 
         if (totalVotes < quorumRequired || proposal.votesFor <= proposal.votesAgainst) {
             proposal.state = ProposalState.Rejected;
@@ -488,7 +468,8 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         if (block.timestamp <= proposal.voteEnd) return ProposalState.Pending;
 
         uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        uint256 quorumRequired = (_snapshotTotalSupply[proposal.id] * _params.quorumBps) / 10000;
+        uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotBlock);
+        uint256 quorumRequired = (pastTotalSupply * _params.quorumBps) / 10000;
 
         if (totalVotes < quorumRequired || proposal.votesFor <= proposal.votesAgainst) {
             return ProposalState.Rejected;
@@ -501,13 +482,14 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         return ProposalState.Approved;
     }
 
-    function _finishSettlement(uint256 proposalId, StrategyProposal storage proposal)
+    /// @param balanceAfterOverride If non-zero, use this value instead of reading from chain.
+    function _finishSettlement(uint256 proposalId, StrategyProposal storage proposal, uint256 balanceAfterOverride)
         internal
         returns (int256 pnl, uint256 agentFee)
     {
         address vault = proposal.vault;
         address asset = IERC4626(vault).asset();
-        uint256 balanceAfter = IERC20(asset).balanceOf(vault);
+        uint256 balanceAfter = balanceAfterOverride > 0 ? balanceAfterOverride : IERC20(asset).balanceOf(vault);
         uint256 capitalSnapshot = _capitalSnapshots[proposalId];
 
         // casting to int256 is safe because vault balances won't exceed int256.max

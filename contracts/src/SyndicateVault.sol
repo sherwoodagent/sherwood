@@ -4,6 +4,10 @@ pragma solidity 0.8.28;
 import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
 import {BatchExecutorLib} from "./BatchExecutorLib.sol";
 import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
+import {
+    ERC20VotesUpgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
+import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -22,13 +26,11 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
  *   swapped tokens) via delegatecall to a shared BatchExecutorLib. Deploy one
  *   executor lib, share it across all syndicates.
  *
- *   Two-layer permission model:
- *     Layer 1 (onchain): Syndicate caps + target allowlist enforced here.
- *     Layer 2 (offchain): Agent-level Lit Action policies.
+ *   Strategy execution goes through the governor via proposals. Owner retains
+ *   executeBatch for manual vault management (e.g. recovering stuck tokens).
  *
- *   Agents call executeBatch() with an array of protocol calls. The vault checks
- *   caps and allowlist, then delegatecalls the executor lib which makes the calls
- *   as the vault.
+ *   Inherits ERC20VotesUpgradeable to provide proper vote checkpointing for
+ *   the governor's snapshot-based voting system.
  *
  *   LPs can ragequit at any time for their pro-rata share.
  */
@@ -36,6 +38,7 @@ contract SyndicateVault is
     ISyndicateVault,
     Initializable,
     ERC4626Upgradeable,
+    ERC20VotesUpgradeable,
     OwnableUpgradeable,
     PausableUpgradeable,
     UUPSUpgradeable,
@@ -47,26 +50,16 @@ contract SyndicateVault is
     // ==================== STORAGE ====================
     // WARNING: Never reorder existing slots. Append-only for UUPS safety.
 
-    /// @notice Syndicate-level hard caps
-    SyndicateCaps private _syndicateCaps;
-
     /// @notice PKP address => agent config
     mapping(address => AgentConfig) private _agents;
 
     /// @notice Set of all registered PKP addresses
     EnumerableSet.AddressSet private _agentSet;
 
-    /// @notice Combined daily spend tracking across all agents
-    uint256 private _dailySpendTotal;
-    uint256 private _dailySpendResetDay;
-
     // ── New storage (appended after existing slots) ──
 
     /// @notice Shared executor lib (stateless, called via delegatecall)
     address private _executorImpl;
-
-    /// @notice Approved protocol targets for batch execution
-    EnumerableSet.AddressSet private _allowedTargets;
 
     /// @notice Approved depositor addresses (whitelist for deposits)
     EnumerableSet.AddressSet private _approvedDepositors;
@@ -98,29 +91,20 @@ contract SyndicateVault is
 
     function initialize(InitParams memory p) external initializer {
         if (p.owner == address(0)) revert InvalidOwner();
-        if (p.caps.maxPerTx == 0) revert InvalidMaxPerTx();
-        if (p.caps.maxDailyTotal == 0) revert InvalidMaxDailyTotal();
-        if (p.caps.maxBorrowRatio > 10000) revert BorrowRatioTooHigh();
         if (p.executorImpl == address(0)) revert InvalidExecutorImpl();
         if (p.agentRegistry == address(0)) revert InvalidAgentRegistry();
 
         __ERC4626_init(IERC20(p.asset));
         __ERC20_init(p.name, p.symbol);
+        __EIP712_init(p.name, "1");
         __Ownable_init(p.owner);
         __Pausable_init();
 
-        _syndicateCaps = p.caps;
-        _dailySpendResetDay = block.timestamp / 1 days;
         _executorImpl = p.executorImpl;
         _openDeposits = p.openDeposits;
         _agentRegistry = IERC721(p.agentRegistry);
         _governor = p.governor;
         _managementFeeBps = p.managementFeeBps;
-
-        for (uint256 i = 0; i < p.initialTargets.length; i++) {
-            if (p.initialTargets[i] == address(0)) revert InvalidTarget();
-            _allowedTargets.add(p.initialTargets[i]);
-        }
     }
 
     // ==================== LP FUNCTIONS ====================
@@ -148,53 +132,6 @@ contract SyndicateVault is
                 revert(add(returnData, 32), mload(returnData))
             }
         }
-
-        emit BatchExecuted(msg.sender, calls.length);
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function simulateBatch(BatchExecutorLib.Call[] calldata calls)
-        external
-        returns (BatchExecutorLib.CallResult[] memory)
-    {
-        (bool success, bytes memory returnData) =
-            _executorImpl.delegatecall(abi.encodeCall(BatchExecutorLib.simulateBatch, (calls)));
-        if (!success) revert SimulationFailed();
-        return abi.decode(returnData, (BatchExecutorLib.CallResult[]));
-    }
-
-    // ==================== TARGET MANAGEMENT ====================
-
-    /// @inheritdoc ISyndicateVault
-    function addTarget(address target) external onlyOwner {
-        if (target == address(0)) revert InvalidTarget();
-        if (!_allowedTargets.add(target)) revert TargetAlreadyAllowed();
-        emit TargetAdded(target);
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function removeTarget(address target) external onlyOwner {
-        if (!_allowedTargets.remove(target)) revert TargetNotInAllowlist();
-        emit TargetRemoved(target);
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function addTargets(address[] calldata targets) external onlyOwner {
-        for (uint256 i = 0; i < targets.length; i++) {
-            if (targets[i] == address(0)) revert InvalidTarget();
-            _allowedTargets.add(targets[i]);
-            emit TargetAdded(targets[i]);
-        }
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function isAllowedTarget(address target) external view returns (bool) {
-        return _allowedTargets.contains(target);
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function getAllowedTargets() external view returns (address[] memory) {
-        return _allowedTargets.values();
     }
 
     // ==================== DEPOSITOR WHITELIST ====================
@@ -250,22 +187,8 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
-    function getSyndicateCaps() external view returns (SyndicateCaps memory) {
-        return _syndicateCaps;
-    }
-
-    /// @inheritdoc ISyndicateVault
     function getAgentCount() external view returns (uint256) {
         return _agentSet.length();
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function getDailySpendTotal() external view returns (uint256) {
-        uint256 today = block.timestamp / 1 days;
-        if (today > _dailySpendResetDay) {
-            return 0; // Would reset on next tx
-        }
-        return _dailySpendTotal;
     }
 
     /// @inheritdoc ISyndicateVault
@@ -296,13 +219,7 @@ contract SyndicateVault is
     // ==================== ADMIN ====================
 
     /// @inheritdoc ISyndicateVault
-    function registerAgent(
-        uint256 agentId,
-        address pkpAddress,
-        address operatorEOA,
-        uint256 maxPerTx,
-        uint256 dailyLimit
-    ) external onlyOwner {
+    function registerAgent(uint256 agentId, address pkpAddress, address operatorEOA) external onlyOwner {
         if (pkpAddress == address(0)) revert InvalidPKPAddress();
         if (operatorEOA == address(0)) revert InvalidOperatorEOA();
         if (_agents[pkpAddress].active) revert AgentAlreadyRegistered();
@@ -311,24 +228,12 @@ contract SyndicateVault is
         address nftOwner = _agentRegistry.ownerOf(agentId);
         if (nftOwner != operatorEOA && nftOwner != owner()) revert NotAgentOwner();
 
-        // Agent limits can't exceed syndicate caps
-        if (maxPerTx > _syndicateCaps.maxPerTx) revert AgentMaxPerTxExceedsCap();
-        if (dailyLimit > _syndicateCaps.maxDailyTotal) revert AgentDailyLimitExceedsCap();
-
-        _agents[pkpAddress] = AgentConfig({
-            agentId: agentId,
-            pkpAddress: pkpAddress,
-            operatorEOA: operatorEOA,
-            maxPerTx: maxPerTx,
-            dailyLimit: dailyLimit,
-            spentToday: 0,
-            lastResetDay: block.timestamp / 1 days,
-            active: true
-        });
+        _agents[pkpAddress] =
+            AgentConfig({agentId: agentId, pkpAddress: pkpAddress, operatorEOA: operatorEOA, active: true});
 
         _agentSet.add(pkpAddress);
 
-        emit AgentRegistered(agentId, pkpAddress, operatorEOA, maxPerTx, dailyLimit);
+        emit AgentRegistered(agentId, pkpAddress, operatorEOA);
     }
 
     /// @inheritdoc ISyndicateVault
@@ -339,17 +244,6 @@ contract SyndicateVault is
         _agentSet.remove(pkpAddress);
 
         emit AgentRemoved(pkpAddress);
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function updateSyndicateCaps(SyndicateCaps calldata caps) external onlyOwner {
-        if (caps.maxPerTx == 0) revert InvalidMaxPerTx();
-        if (caps.maxDailyTotal == 0) revert InvalidMaxDailyTotal();
-        if (caps.maxBorrowRatio > 10000) revert BorrowRatioTooHigh();
-
-        _syndicateCaps = caps;
-
-        emit SyndicateCapsUpdated(caps.maxPerTx, caps.maxDailyTotal, caps.maxBorrowRatio);
     }
 
     /// @inheritdoc ISyndicateVault
@@ -421,7 +315,21 @@ contract SyndicateVault is
 
     // ==================== OVERRIDES ====================
 
+    /// @dev Resolve diamond between ERC20Upgradeable and ERC20VotesUpgradeable
+    function _update(address from, address to, uint256 value)
+        internal
+        override(ERC20Upgradeable, ERC20VotesUpgradeable)
+    {
+        super._update(from, to, value);
+    }
+
+    /// @dev Resolve decimals diamond between ERC20Upgradeable and ERC4626Upgradeable
+    function decimals() public view override(ERC4626Upgradeable, ERC20Upgradeable) returns (uint8) {
+        return super.decimals();
+    }
+
     /// @dev Block deposits when paused or depositor not approved. Track totalDeposited.
+    ///      Auto-delegate to self on first deposit so shareholders get voting power.
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares)
         internal
         override
@@ -430,6 +338,11 @@ contract SyndicateVault is
         if (!_openDeposits && !_approvedDepositors.contains(receiver)) revert NotApprovedDepositor();
         _totalDeposited += assets;
         super._deposit(caller, receiver, assets, shares);
+
+        // Auto-delegate: if receiver has no delegate, delegate to self
+        if (delegates(receiver) == address(0)) {
+            _delegate(receiver, receiver);
+        }
     }
 
     function _withdraw(address caller, address receiver, address _owner, uint256 assets, uint256 shares)
