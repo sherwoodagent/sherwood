@@ -27,6 +27,7 @@ interface SubgraphSyndicate {
   id: string;
   vault: string;
   creator: string;
+  subdomain: string;
   metadataURI: string;
   createdAt: string;
   active: boolean;
@@ -52,6 +53,7 @@ interface SyndicateMetadata {
 export interface SyndicateDisplay {
   id: string;
   vault: string;
+  subdomain: string;
   name: string;
   strategy: string;
   tvl: number;
@@ -129,6 +131,7 @@ export async function getActiveSyndicates(): Promise<SyndicateDisplay[]> {
         id
         vault
         creator
+        subdomain
         metadataURI
         createdAt
         active
@@ -168,6 +171,7 @@ export async function getActiveSyndicates(): Promise<SyndicateDisplay[]> {
       return {
         id: s.id,
         vault: s.vault,
+        subdomain: s.subdomain,
         name: metadata?.name || `Syndicate #${s.id}`,
         strategy,
         tvl,

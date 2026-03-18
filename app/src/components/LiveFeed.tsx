@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 
 // ── Types ──
 
@@ -14,26 +14,40 @@ interface SpectatorMessage {
 }
 
 interface ChatEnvelope {
-  type: string;
+  type:
+    | "MESSAGE"
+    | "REACTION"
+    | "TRADE_EXECUTED"
+    | "TRADE_SIGNAL"
+    | "POSITION_UPDATE"
+    | "RISK_ALERT"
+    | "LP_REPORT"
+    | "APPROVAL_REQUEST"
+    | "STRATEGY_PROPOSAL"
+    | "MEMBER_JOIN"
+    | "RAGEQUIT_NOTICE"
+    | "AGENT_REGISTERED";
   from?: string;
   text?: string;
   agent?: { erc8004Id?: number; address: string };
+  syndicate?: string;
   data?: Record<string, unknown>;
   timestamp: number;
 }
 
 interface FeedItem {
   id: string;
+  sender: string;
   message: string;
   time: string;
   source: string;
+  type: string;
   dimmed?: boolean;
 }
 
-// ── Env ──
+// ── Known inbox IDs to filter ──
 
-const SPECTATOR_URL =
-  process.env.NEXT_PUBLIC_SPECTATOR_URL || "http://localhost:3100";
+const SPECTATOR_INBOX_PREFIX = "744cfb";
 
 // ── Helpers ──
 
@@ -56,16 +70,60 @@ function sourceLabel(type: string): string {
   return labels[type] || type;
 }
 
-/** Format an ISO timestamp as relative time (e.g. "3.2s ago", "2m ago"). */
+/** Format an ISO timestamp as relative time. */
 function relativeTime(iso: string): string {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return `${diff.toFixed(1)}s ago`;
+  if (diff < 0) return "now";
+  if (diff < 60) return `${Math.floor(diff)}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+/** Determine if a raw message is a group membership event (not a ChatEnvelope). */
+function isGroupEvent(content: string): boolean {
+  try {
+    const parsed = JSON.parse(content);
+    return !!(parsed.addedInboxes || parsed.removedInboxes);
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve a sender name from the envelope + address map. */
+function resolveSender(
+  envelope: ChatEnvelope | null,
+  addressNames?: Record<string, string>,
+): string {
+  // Try agent address from envelope
+  if (envelope?.agent?.address && addressNames) {
+    const name = addressNames[envelope.agent.address.toLowerCase()];
+    if (name) return name;
+  }
+  // Try from field
+  if (envelope?.from && addressNames) {
+    const name = addressNames[envelope.from.toLowerCase()];
+    if (name) return name;
+  }
+  // Fallback to truncated address or empty
+  if (envelope?.from) {
+    return `${envelope.from.slice(0, 6)}...${envelope.from.slice(-4)}`;
+  }
+  return "";
 }
 
 /** Parse a SpectatorMessage into a FeedItem for rendering. */
-function toFeedItem(msg: SpectatorMessage, dimmed = false): FeedItem {
+function toFeedItem(
+  msg: SpectatorMessage,
+  addressNames?: Record<string, string>,
+  dimmed = false,
+): FeedItem | null {
+  // Filter spectator bot messages
+  if (msg.senderInboxId.startsWith(SPECTATOR_INBOX_PREFIX)) return null;
+
+  // Filter group membership events
+  if (isGroupEvent(msg.content)) return null;
+
   let envelope: ChatEnvelope | null = null;
   try {
     envelope = JSON.parse(msg.content);
@@ -73,13 +131,44 @@ function toFeedItem(msg: SpectatorMessage, dimmed = false): FeedItem {
     // Not a valid ChatEnvelope — show raw content
   }
 
+  // For reactions, show the reaction target
+  if (envelope?.type === "REACTION") {
+    return null; // Skip reactions in the feed for now
+  }
+
   return {
     id: msg.id,
+    sender: resolveSender(envelope, addressNames),
     message: envelope?.text || envelope?.type || msg.content,
     time: relativeTime(msg.sentAt),
     source: envelope ? sourceLabel(envelope.type) : "UNKNOWN",
+    type: envelope?.type || "UNKNOWN",
     dimmed,
   };
+}
+
+/** Color for envelope type indicator dot */
+function indicatorColor(type: string): string {
+  switch (type) {
+    case "TRADE_EXECUTED":
+      return "var(--color-accent)";
+    case "TRADE_SIGNAL":
+      return "#4dd0e1";
+    case "RISK_ALERT":
+      return "#ff4d4d";
+    case "RAGEQUIT_NOTICE":
+      return "#ff4d4d";
+    case "POSITION_UPDATE":
+      return "#ffa726";
+    case "APPROVAL_REQUEST":
+    case "STRATEGY_PROPOSAL":
+      return "#ab47bc";
+    case "AGENT_REGISTERED":
+    case "MEMBER_JOIN":
+      return "#78909c";
+    default:
+      return "var(--color-accent)";
+  }
 }
 
 // ── Mock fallback data ──
@@ -87,26 +176,47 @@ function toFeedItem(msg: SpectatorMessage, dimmed = false): FeedItem {
 const MOCK_FEED: FeedItem[] = [
   {
     id: "mock-1",
+    sender: "",
     message: "Waiting for spectator connection...",
     time: "—",
     source: "SYSTEM",
+    type: "MESSAGE",
     dimmed: true,
   },
 ];
 
+// ── WebSocket URL builder ──
+
+function getWsUrl(groupId: string): string {
+  // In the browser, derive the WS URL from the spectator service
+  // Next.js rewrites don't proxy WebSockets, so we use the direct URL
+  const spectatorWs =
+    process.env.NEXT_PUBLIC_SPECTATOR_WS_URL ||
+    "wss://spectator.sherwood.sh";
+  return `${spectatorWs}/messages/${groupId}/stream`;
+}
+
 // ── Component ──
 
-export default function LiveFeed({ groupId }: { groupId?: string }) {
+export default function LiveFeed({
+  groupId,
+  addressNames,
+}: {
+  groupId?: string;
+  /** Map of lowercase address → display name for sender resolution */
+  addressNames?: Record<string, string>;
+}) {
   const queryClient = useQueryClient();
   const wsRef = useRef<WebSocket | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
 
-  // Fetch recent messages on mount
+  // Fetch recent messages via the Next.js proxy
   const { data: messages } = useQuery<SpectatorMessage[]>({
     queryKey: ["feed", groupId],
     queryFn: async () => {
       if (!groupId) return [];
       const res = await fetch(
-        `${SPECTATOR_URL}/messages/${groupId}?limit=20`,
+        `/api/spectator/messages/${groupId}?limit=20`,
       );
       if (!res.ok) throw new Error("Failed to fetch messages");
       const json = await res.json();
@@ -122,7 +232,8 @@ export default function LiveFeed({ groupId }: { groupId?: string }) {
       if (!groupId) return;
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === "connected") return; // handshake
+        // Skip handshake / control frames
+        if (msg.type === "connected" || msg.type === "pong") return;
 
         queryClient.setQueryData<SpectatorMessage[]>(
           ["feed", groupId],
@@ -144,13 +255,19 @@ export default function LiveFeed({ groupId }: { groupId?: string }) {
   useEffect(() => {
     if (!groupId) return;
 
-    const wsUrl = SPECTATOR_URL.replace(/^http/, "ws");
-    const ws = new WebSocket(`${wsUrl}/messages/${groupId}/stream`);
+    const ws = new WebSocket(getWsUrl(groupId));
     wsRef.current = ws;
 
+    ws.onopen = () => setWsConnected(true);
     ws.onmessage = onWsMessage;
-    ws.onerror = () => console.warn("Spectator WS error");
-    ws.onclose = () => console.log("Spectator WS closed");
+    ws.onerror = () => {
+      console.warn("Spectator WS error");
+      setWsConnected(false);
+    };
+    ws.onclose = () => {
+      console.log("Spectator WS closed");
+      setWsConnected(false);
+    };
 
     return () => {
       ws.close();
@@ -158,55 +275,83 @@ export default function LiveFeed({ groupId }: { groupId?: string }) {
     };
   }, [groupId, onWsMessage]);
 
-  // Build feed items
+  // Build feed items (filter nulls from spectator/group events)
   const feed: FeedItem[] =
     messages && messages.length > 0
-      ? messages.map((m, i) => toFeedItem(m, i >= messages.length - 1))
+      ? (messages.map((m) => toFeedItem(m, addressNames)).filter(Boolean) as FeedItem[])
       : MOCK_FEED;
+
+  // If all messages were filtered, show placeholder
+  const displayFeed = feed.length > 0 ? feed : MOCK_FEED;
+
+  const isLive = wsConnected || (messages && messages.length > 0);
 
   return (
     <div className="panel">
       <div className="panel-title">
         <span>Live Intelligence Feed</span>
-        <span style={{ color: "var(--color-accent)" }}>
-          {messages && messages.length > 0 ? "REAL-TIME" : "OFFLINE"}
+        <span
+          style={{
+            color: isLive ? "var(--color-accent)" : "#ff4d4d",
+            fontSize: "10px",
+          }}
+        >
+          {isLive ? "● REAL-TIME" : "● OFFLINE"}
         </span>
       </div>
-      {feed.map((item) => (
-        <div
-          className="feed-item"
-          key={item.id}
-          style={
-            item.dimmed
-              ? { opacity: 0.5, borderBottom: "none" }
-              : undefined
-          }
-        >
+      <div style={{ maxHeight: "320px", overflowY: "auto" }}>
+        {displayFeed.map((item) => (
           <div
-            className="feed-indicator"
+            className="feed-item"
+            key={item.id}
             style={
               item.dimmed
-                ? {
-                    background: "rgba(255,255,255,0.2)",
-                    boxShadow: "none",
-                  }
+                ? { opacity: 0.5, borderBottom: "none" }
                 : undefined
             }
-          />
-          <div>
-            <div style={{ color: "#fff" }}>{item.message}</div>
+          >
             <div
+              className="feed-indicator"
               style={{
-                color: "rgba(255,255,255,0.3)",
-                fontSize: "9px",
-                marginTop: "2px",
+                background: item.dimmed
+                  ? "rgba(255,255,255,0.2)"
+                  : indicatorColor(item.type),
+                boxShadow: item.dimmed
+                  ? "none"
+                  : `0 0 6px ${indicatorColor(item.type)}`,
               }}
-            >
-              {item.time} // {item.source}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: "11px",
+                  lineHeight: "1.4",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {item.sender && (
+                  <span style={{ color: "var(--color-accent)", marginRight: "6px" }}>
+                    {item.sender}
+                  </span>
+                )}
+                <span style={{ color: "#fff" }}>{item.message}</span>
+              </div>
+              <div
+                style={{
+                  color: "rgba(255,255,255,0.3)",
+                  fontSize: "9px",
+                  marginTop: "2px",
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {item.time} // {item.source}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

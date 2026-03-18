@@ -475,6 +475,17 @@ body {
   box-shadow: 0 0 15px var(--color-accent-dim);
 }
 
+/* Hidden trigger for OnchainKit connect modal — invisible but clickable */
+.hidden-connect-trigger {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── Leaderboard Table ─────────────────────────────────── */
 
 .table-container {
@@ -677,6 +688,127 @@ body {
 .chart-container {
   height: 300px;
   width: 100%;
+}
+
+/* ── Agent Cards ───────────────────────────────────────── */
+
+.agent-card {
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1rem;
+}
+
+.spend-bar {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.spend-bar-fill {
+  height: 100%;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+/* ── Attestation Items ─────────────────────────────────── */
+
+.attestation-item {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.attestation-item:last-child {
+  border-bottom: none;
+}
+
+.attestation-badge {
+  font-family: var(--font-jetbrains-mono), "JetBrains Mono", monospace;
+  font-size: 8px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.attestation-badge[data-type="JOIN_REQUEST"] {
+  background: rgba(77, 148, 255, 0.2);
+  color: #4d94ff;
+}
+
+.attestation-badge[data-type="APPROVED"] {
+  background: var(--color-accent-dim);
+  color: var(--color-accent);
+}
+
+.attestation-badge[data-type="revoked"] {
+  background: rgba(255, 77, 77, 0.2);
+  color: #ff4d4d;
+  text-decoration: line-through;
+}
+
+.attestation-link {
+  color: var(--color-accent);
+  text-decoration: none;
+  font-family: var(--font-jetbrains-mono), "JetBrains Mono", monospace;
+}
+
+.attestation-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Modal ─────────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-content {
+  border: 1px solid var(--color-border);
+  background: #0a0a0a;
+  padding: 2rem;
+  width: 100%;
+  max-width: 420px;
+}
+
+.modal-warning {
+  font-family: var(--font-jetbrains-mono), "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: #ff4d4d;
+  background: rgba(255, 77, 77, 0.1);
+  border: 1px solid rgba(255, 77, 77, 0.2);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.deposit-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--color-border);
+  padding: 0.5rem;
+}
+
+.deposit-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-family: var(--font-jetbrains-mono), "JetBrains Mono", monospace;
+  font-size: 1.25rem;
+  padding: 0.5rem;
+}
+
+.deposit-input::placeholder {
+  color: rgba(255, 255, 255, 0.2);
 }
 
 /* ── Responsive ─────────────────────────────────────────── */

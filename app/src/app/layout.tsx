@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import Providers from "@/components/Providers";
+import "@coinbase/onchainkit/styles.css";
 import "./globals.css";
 
 const inter = Inter({

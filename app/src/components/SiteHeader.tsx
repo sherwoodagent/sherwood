@@ -9,7 +9,7 @@ export default function SiteHeader() {
       >
         sherwood<span className="text-[var(--color-accent)]">.sh</span>
       </Link>
-      <nav>
+      <nav className="flex items-center">
         <Link href="/#how-it-works">How It Works</Link>
         <Link href="/#syndicates">Live Syndicates</Link>
       </nav>

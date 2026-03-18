@@ -208,7 +208,7 @@ export default async function Home() {
                     {syndicates.map((s) => (
                       <tr key={s.id}>
                         <td>
-                          <Link href={`/syndicate/${s.id}`} className="text-inherit no-underline hover:text-[var(--color-accent)]">
+                          <Link href={`/syndicate/${s.subdomain}`} className="text-inherit no-underline hover:text-[var(--color-accent)]">
                             {s.name}{" "}
                             <span className="text-white/30">
                               // 0x{s.vault.slice(2, 6)}
