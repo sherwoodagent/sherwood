@@ -93,7 +93,7 @@ async function getMessages(
   await conv.sync();
 
   const opts: Record<string, unknown> = {
-    limit: BigInt(limit),
+    limit,
     direction: "descending",
   };
   if (beforeNs) {
