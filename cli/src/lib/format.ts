@@ -26,6 +26,12 @@ export function formatShares(raw: bigint): string {
   return num.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
+/** Format USDC amount (6 decimals) to human-readable (e.g. 50000000000 → "$50,000.00") */
+export function formatUSDC(raw: bigint): string {
+  const num = Number(raw) / 1e6;
+  return `$${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 /** Validate string as BigInt, throw user-friendly error */
 export function parseBigIntArg(value: string, name: string): bigint {
   if (!/^-?\d+$/.test(value)) {

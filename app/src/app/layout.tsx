@@ -30,7 +30,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
-      <body className="bg-black text-[#d4d5d9] antialiased overflow-x-hidden font-[family-name:var(--font-inter)]" suppressHydrationWarning>
+      <body className="bg-black text-[#d4d5d9] antialiased overflow-x-hidden font-[family-name:var(--font-inter)]">
         <Providers>{children}</Providers>
       </body>
     </html>

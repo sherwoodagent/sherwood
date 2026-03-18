@@ -38,7 +38,7 @@ import {
   PROPOSAL_STATES,
 } from "../lib/governor.js";
 import type { BatchCall } from "../lib/governor.js";
-import { formatDurationShort as formatDuration, formatShares, parseBigIntArg } from "../lib/format.js";
+import { formatDurationShort as formatDuration, formatShares, formatUSDC, parseBigIntArg } from "../lib/format.js";
 
 const G = chalk.green;
 const W = chalk.white;
@@ -250,7 +250,7 @@ export function registerProposalCommands(program: Command): void {
     .action(async (idStr) => {
       const spinner = ora("Loading proposal...").start();
       try {
-        const id = BigInt(idStr);
+        const id = parseBigIntArg(idStr, "proposal ID");
         const p = await getProposal(id);
         const state = await getProposalState(id);
         const calls = await getProposalCalls(id);
@@ -303,7 +303,7 @@ export function registerProposalCommands(program: Command): void {
             const cap = await getCapitalSnapshot(id);
             console.log();
             console.log(LABEL("  Capital"));
-            console.log(W(`  Snapshot:         ${cap}`));
+            console.log(W(`  Snapshot:         ${formatUSDC(cap)}`));
           } catch { /* no snapshot */ }
         }
 
@@ -333,7 +333,7 @@ export function registerProposalCommands(program: Command): void {
     .requiredOption("--support <yes|no>", "Vote direction: yes or no")
     .action(async (opts) => {
       try {
-        const proposalId = BigInt(opts.id);
+        const proposalId = parseBigIntArg(opts.id, "proposal ID");
         const support = opts.support.toLowerCase() === "yes";
         const account = getAccount();
 
@@ -361,7 +361,7 @@ export function registerProposalCommands(program: Command): void {
         console.log(W(`  Proposal:  #${proposalId}`));
         console.log(W(`  Vault:     ${G(p.vault)}`));
         console.log(W(`  Support:   ${support ? G("YES") : chalk.red("NO")}`));
-        console.log(W(`  Weight:    ${weight}`));
+        console.log(W(`  Weight:    ${formatShares(weight)} shares`));
         SEP();
 
         const voteSpinner = ora({ text: W("Submitting vote..."), color: "green" }).start();
@@ -383,7 +383,7 @@ export function registerProposalCommands(program: Command): void {
     .requiredOption("--id <proposalId>", "Proposal ID")
     .action(async (opts) => {
       try {
-        const proposalId = BigInt(opts.id);
+        const proposalId = parseBigIntArg(opts.id, "proposal ID");
 
         const spinner = ora("Loading proposal...").start();
         const state = await getProposalState(proposalId);
@@ -401,7 +401,7 @@ export function registerProposalCommands(program: Command): void {
 
         try {
           const cap = await getCapitalSnapshot(proposalId);
-          console.log(DIM(`  Capital snapshot: ${cap}`));
+          console.log(DIM(`  Capital snapshot: ${formatUSDC(cap)}`));
         } catch { /* no snapshot yet */ }
 
         console.log();
@@ -420,7 +420,7 @@ export function registerProposalCommands(program: Command): void {
     .option("--calls <path>", "Path to JSON file with settle Call[] (for agent/emergency settle)")
     .action(async (opts) => {
       try {
-        const proposalId = BigInt(opts.id);
+        const proposalId = parseBigIntArg(opts.id, "proposal ID");
         const account = getAccount();
 
         const spinner = ora("Loading proposal...").start();
@@ -477,7 +477,7 @@ export function registerProposalCommands(program: Command): void {
     .option("--emergency", "Emergency cancel (vault owner only, any non-settled state)")
     .action(async (opts) => {
       try {
-        const proposalId = BigInt(opts.id);
+        const proposalId = parseBigIntArg(opts.id, "proposal ID");
 
         const spinner = ora("Loading proposal...").start();
         const state = await getProposalState(proposalId);
