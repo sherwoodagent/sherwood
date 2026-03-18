@@ -85,6 +85,15 @@ agent.on("start", () => {
   console.log(`  Env:      ${process.env.XMTP_ENV || "dev"}`);
 });
 
+// ── Global error handlers ──
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+});
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled rejection:", err);
+});
+
 // ── Start HTTP/WS server first, then agent ──
 
 const server = startServer(agent, wsClients, streamAlive);
@@ -100,4 +109,8 @@ process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
 // Start the XMTP agent (connects + streams)
-await agent.start();
+try {
+  await agent.start();
+} catch (err) {
+  console.error("Agent failed to start:", err);
+}
