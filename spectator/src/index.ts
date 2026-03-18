@@ -85,6 +85,10 @@ agent.on("start", () => {
   console.log(`  Env:      ${process.env.XMTP_ENV || "dev"}`);
 });
 
+agent.on("error", (err: unknown) => {
+  console.error("Agent error:", err);
+});
+
 // ── Global error handlers ──
 
 process.on("uncaughtException", (err) => {
@@ -111,6 +115,12 @@ process.on("SIGINT", shutdown);
 // Start the XMTP agent (connects + streams)
 try {
   await agent.start();
+  console.log("Agent stream setup complete — server keepalive active");
 } catch (err) {
   console.error("Agent failed to start:", err);
 }
+
+// Heartbeat — proves process is alive
+setInterval(() => {
+  console.log(`[heartbeat] uptime=${Math.floor(process.uptime())}s stream=${streamAlive.value}`);
+}, 60_000);
