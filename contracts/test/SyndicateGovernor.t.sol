@@ -885,4 +885,215 @@ contract SyndicateGovernorTest is Test {
         uint256 expectedFee = (profit * feeBps) / 10000;
         assertEq(usdc.balanceOf(agent), agentBalBefore + expectedFee);
     }
+
+    // ==================== TEST GAPS (from PR review) ====================
+
+    function test_vote_buySharesAfterProposal_noVotingPower() public {
+        // Create proposal BEFORE random buys shares
+        (uint256 proposalId,) = _createSimpleProposal(1500, 7 days);
+
+        // Random buys shares AFTER proposal creation (after snapshot block)
+        usdc.mint(random, 50_000e6);
+        vm.startPrank(random);
+        usdc.approve(address(vault), 50_000e6);
+        vault.deposit(50_000e6, random);
+        vm.stopPrank();
+
+        vm.roll(block.number + 1);
+
+        // Random has shares now but had zero at snapshot block — cannot vote
+        assertGt(vault.balanceOf(random), 0);
+        vm.prank(random);
+        vm.expectRevert(ISyndicateGovernor.NoVotingPower.selector);
+        governor.vote(proposalId, true);
+
+        // Original LPs can still vote normally
+        vm.prank(lp1);
+        governor.vote(proposalId, true);
+
+        uint256 lp1Weight = governor.getVoteWeight(proposalId, lp1);
+        assertEq(lp1Weight, 60_000e6);
+    }
+
+    function test_settlement_feesNeverExceedProfit() public {
+        // Use max performance fee (30%) + management fee (0.5% of remainder)
+        uint256 proposalId = _createAndExecuteProposal(MAX_PERF_FEE_BPS, 7 days);
+
+        // Small profit: 1 USDC (1e6) — test boundary
+        usdc.mint(address(vault), 1e6);
+
+        uint256 vaultBalBefore = usdc.balanceOf(address(vault));
+        uint256 agentBalBefore = usdc.balanceOf(agent);
+        uint256 ownerBalBefore = usdc.balanceOf(owner);
+
+        vm.prank(agent);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
+
+        uint256 agentGot = usdc.balanceOf(agent) - agentBalBefore;
+        uint256 ownerGot = usdc.balanceOf(owner) - ownerBalBefore;
+        uint256 totalFees = agentGot + ownerGot;
+
+        // Fees must not exceed profit
+        assertLe(totalFees, 1e6);
+
+        // Vault should have lost exactly totalFees from the profit
+        assertEq(usdc.balanceOf(address(vault)), vaultBalBefore - totalFees);
+
+        // Agent fee: 30% of 1e6 = 300000
+        assertEq(agentGot, 300000);
+        // Management fee: 0.5% of (1e6 - 300000) = 0.5% of 700000 = 3500
+        assertEq(ownerGot, 3500);
+    }
+
+    function test_removeVault_withActiveProposal() public {
+        // Execute a proposal so it's active
+        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
+        assertEq(governor.getActiveProposal(address(vault)), proposalId);
+
+        // Governor owner removes the vault while strategy is live
+        vm.prank(owner);
+        governor.removeVault(address(vault));
+
+        assertFalse(governor.isRegisteredVault(address(vault)));
+
+        // The active proposal is still tracked — settlement still works
+        // Agent can still settle (proposal references vault directly, not registry)
+        vm.prank(agent);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
+
+        assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Settled));
+        assertFalse(vault.redemptionsLocked());
+
+        // But new proposals on this vault are blocked
+        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](2);
+        calls[0] = BatchExecutorLib.Call({target: address(usdc), data: "", value: 0});
+        calls[1] = BatchExecutorLib.Call({target: address(usdc), data: "", value: 0});
+
+        vm.prank(agent);
+        vm.expectRevert(ISyndicateGovernor.VaultNotRegistered.selector);
+        governor.propose(address(vault), "ipfs://new", 1500, 7 days, calls, 1);
+    }
+
+    function test_multipleVaults_interleavedProposals() public {
+        // Deploy a second vault with its own LPs
+        address lp3 = makeAddr("lp3");
+        address lp4 = makeAddr("lp4");
+        address agent2 = makeAddr("agent2");
+        address agent2Eoa = makeAddr("agent2Eoa");
+        uint256 agent2NftId = agentRegistry.mint(agent2Eoa);
+
+        SyndicateVault vaultImpl2 = new SyndicateVault();
+        bytes memory vault2Init = abi.encodeCall(
+            SyndicateVault.initialize,
+            (ISyndicateVault.InitParams({
+                    asset: address(usdc),
+                    name: "Vault B",
+                    symbol: "swUSDC-B",
+                    owner: owner,
+                    executorImpl: address(executorLib),
+                    openDeposits: true,
+                    agentRegistry: address(agentRegistry),
+                    governor: address(governor),
+                    managementFeeBps: 50
+                }))
+        );
+        SyndicateVault vault2 = SyndicateVault(payable(address(new ERC1967Proxy(address(vaultImpl2), vault2Init))));
+
+        vm.startPrank(owner);
+        governor.addVault(address(vault2));
+        vault2.registerAgent(agent2NftId, agent2, agent2Eoa);
+        vm.stopPrank();
+
+        // Fund and deposit into vault2
+        usdc.mint(lp3, 80_000e6);
+        usdc.mint(lp4, 20_000e6);
+
+        vm.startPrank(lp3);
+        usdc.approve(address(vault2), 80_000e6);
+        vault2.deposit(80_000e6, lp3);
+        vm.stopPrank();
+
+        vm.startPrank(lp4);
+        usdc.approve(address(vault2), 20_000e6);
+        vault2.deposit(20_000e6, lp4);
+        vm.stopPrank();
+
+        vm.roll(block.number + 1);
+
+        // Create proposals on BOTH vaults
+        BatchExecutorLib.Call[] memory calls1 = new BatchExecutorLib.Call[](2);
+        calls1[0] = BatchExecutorLib.Call({
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 50_000e6)), value: 0
+        });
+        calls1[1] = BatchExecutorLib.Call({
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
+        });
+
+        BatchExecutorLib.Call[] memory calls2 = new BatchExecutorLib.Call[](2);
+        calls2[0] = BatchExecutorLib.Call({
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 30_000e6)), value: 0
+        });
+        calls2[1] = BatchExecutorLib.Call({
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
+        });
+
+        // Propose on vault1
+        vm.prank(agent);
+        uint256 pid1 = governor.propose(address(vault), "ipfs://v1-strategy", 1500, 7 days, calls1, 1);
+
+        // Propose on vault2
+        vm.prank(agent2);
+        uint256 pid2 = governor.propose(address(vault2), "ipfs://v2-strategy", 2000, 5 days, calls2, 1);
+
+        vm.roll(block.number + 1);
+
+        // Vault1 LPs vote on pid1 only
+        vm.prank(lp1);
+        governor.vote(pid1, true);
+        vm.prank(lp2);
+        governor.vote(pid1, true);
+
+        // Vault2 LPs vote on pid2 only
+        vm.prank(lp3);
+        governor.vote(pid2, true);
+        vm.prank(lp4);
+        governor.vote(pid2, true);
+
+        // Vault1 LP cannot vote on vault2 proposal (no shares at snapshot)
+        vm.prank(lp1);
+        vm.expectRevert(ISyndicateGovernor.NoVotingPower.selector);
+        governor.vote(pid2, true);
+
+        // Warp past voting
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+
+        // Execute BOTH — different vaults, both can be live simultaneously
+        governor.executeProposal(pid1);
+        governor.executeProposal(pid2);
+
+        assertEq(governor.getActiveProposal(address(vault)), pid1);
+        assertEq(governor.getActiveProposal(address(vault2)), pid2);
+        assertTrue(vault.redemptionsLocked());
+        assertTrue(vault2.redemptionsLocked());
+
+        // Settle vault2 first (agent2 settles early)
+        vm.prank(agent2);
+        governor.settleByAgent(pid2, calls2);
+
+        assertEq(uint256(governor.getProposal(pid2).state), uint256(ISyndicateGovernor.ProposalState.Settled));
+        assertFalse(vault2.redemptionsLocked());
+        // Vault1 still locked
+        assertTrue(vault.redemptionsLocked());
+
+        // Settle vault1
+        vm.prank(agent);
+        governor.settleByAgent(pid1, _simpleSettleCalls());
+
+        assertEq(uint256(governor.getProposal(pid1).state), uint256(ISyndicateGovernor.ProposalState.Settled));
+        assertFalse(vault.redemptionsLocked());
+
+        // Both vaults fully settled, independent of each other
+        assertEq(governor.getActiveProposal(address(vault)), 0);
+        assertEq(governor.getActiveProposal(address(vault2)), 0);
+    }
 }
