@@ -272,6 +272,14 @@ export const SYNDICATE_VAULT_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "address[]" }],
   },
+  // Governor
+  {
+    name: "governor",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
   // OZ inherited (not in CLI ABI)
   {
     name: "owner",
@@ -286,6 +294,122 @@ export const SYNDICATE_VAULT_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
+export const SYNDICATE_GOVERNOR_ABI = [
+  {
+    name: "proposalCount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "getProposal",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "proposalId", type: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "id", type: "uint256" },
+          { name: "proposer", type: "address" },
+          { name: "vault", type: "address" },
+          { name: "metadataURI", type: "string" },
+          { name: "performanceFeeBps", type: "uint256" },
+          { name: "splitIndex", type: "uint256" },
+          { name: "strategyDuration", type: "uint256" },
+          { name: "votesFor", type: "uint256" },
+          { name: "votesAgainst", type: "uint256" },
+          { name: "snapshotTimestamp", type: "uint256" },
+          { name: "voteEnd", type: "uint256" },
+          { name: "executeBy", type: "uint256" },
+          { name: "executedAt", type: "uint256" },
+          { name: "state", type: "uint8" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "getProposalState",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "proposalId", type: "uint256" }],
+    outputs: [{ name: "", type: "uint8" }],
+  },
+  {
+    name: "getActiveProposal",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "vault", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "getGovernorParams",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "votingPeriod", type: "uint256" },
+          { name: "executionWindow", type: "uint256" },
+          { name: "quorumBps", type: "uint256" },
+          { name: "maxPerformanceFeeBps", type: "uint256" },
+          { name: "maxStrategyDuration", type: "uint256" },
+          { name: "cooldownPeriod", type: "uint256" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "getCooldownEnd",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "vault", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "getCapitalSnapshot",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "proposalId", type: "uint256" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "getVoteWeight",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      { name: "proposalId", type: "uint256" },
+      { name: "voter", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "hasVoted",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      { name: "proposalId", type: "uint256" },
+      { name: "voter", type: "address" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "vote",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "proposalId", type: "uint256" },
+      { name: "support", type: "bool" },
+    ],
+    outputs: [],
   },
 ] as const;
 

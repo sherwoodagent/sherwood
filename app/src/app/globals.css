@@ -811,6 +811,37 @@ body {
   color: rgba(255, 255, 255, 0.2);
 }
 
+/* ── Vote Progress Bar ─────────────────────────────────── */
+
+.vote-progress-bar {
+  position: relative;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  display: flex;
+  overflow: hidden;
+}
+
+.vote-progress-for {
+  height: 100%;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+.vote-progress-against {
+  height: 100%;
+  background: #ff4d4d;
+  transition: width 0.3s ease;
+}
+
+.vote-progress-quorum {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+}
+
 /* ── Responsive ─────────────────────────────────────────── */
 
 @media (max-width: 1024px) {

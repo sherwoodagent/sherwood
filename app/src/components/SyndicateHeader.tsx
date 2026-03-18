@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type Address } from "viem";
 import { truncateAddress } from "@/lib/contracts";
 
@@ -60,7 +61,13 @@ export default function SyndicateHeader({
             </span>
           </h1>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
+          <Link
+            href={`/syndicate/${subdomain}/proposals`}
+            className="btn-follow"
+          >
+            [ PROPOSALS ]
+          </Link>
           <button className="btn-action" onClick={onDeposit}>
             [ DEPOSIT ]
           </button>
