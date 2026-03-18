@@ -136,7 +136,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             strategyDuration: strategyDuration,
             votesFor: 0,
             votesAgainst: 0,
-            snapshotBlock: block.number,
+            snapshotTimestamp: block.timestamp,
             voteEnd: block.timestamp + _params.votingPeriod,
             executeBy: block.timestamp + _params.votingPeriod + _params.executionWindow,
             executedAt: 0,
@@ -162,7 +162,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         if (_hasVoted[proposalId][msg.sender]) revert AlreadyVoted();
 
         // Get vote weight from ERC20Votes checkpoint at proposal creation block
-        uint256 weight = IVotes(proposal.vault).getPastVotes(msg.sender, proposal.snapshotBlock);
+        uint256 weight = IVotes(proposal.vault).getPastVotes(msg.sender, proposal.snapshotTimestamp);
         if (weight == 0) revert NoVotingPower();
 
         _hasVoted[proposalId][msg.sender] = true;
@@ -394,7 +394,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     function getVoteWeight(uint256 proposalId, address voter) external view returns (uint256) {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (proposal.id == 0) return 0;
-        return IVotes(proposal.vault).getPastVotes(voter, proposal.snapshotBlock);
+        return IVotes(proposal.vault).getPastVotes(voter, proposal.snapshotTimestamp);
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -445,7 +445,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
         // Voting ended — determine outcome
         uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotBlock);
+        uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotTimestamp);
         uint256 quorumRequired = (pastTotalSupply * _params.quorumBps) / 10000;
 
         if (totalVotes < quorumRequired || proposal.votesFor <= proposal.votesAgainst) {
@@ -468,7 +468,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         if (block.timestamp <= proposal.voteEnd) return ProposalState.Pending;
 
         uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotBlock);
+        uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotTimestamp);
         uint256 quorumRequired = (pastTotalSupply * _params.quorumBps) / 10000;
 
         if (totalVotes < quorumRequired || proposal.votesFor <= proposal.votesAgainst) {

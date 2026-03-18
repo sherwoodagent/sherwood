@@ -110,7 +110,7 @@ contract SyndicateGovernorTest is Test {
         vm.stopPrank();
 
         // Mine a block so ERC20Votes checkpoints are queryable
-        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
     }
 
     // ==================== HELPERS ====================
@@ -134,7 +134,7 @@ contract SyndicateGovernorTest is Test {
         proposalId = governor.propose(address(vault), "ipfs://test", perfFeeBps, duration, calls, 1);
 
         // Mine a block so the snapshot block is in the past for voting
-        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
     }
 
     /// @dev Create proposal, vote it through, and return proposal ID
@@ -899,7 +899,7 @@ contract SyndicateGovernorTest is Test {
         vault.deposit(50_000e6, random);
         vm.stopPrank();
 
-        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
 
         // Random has shares now but had zero at snapshot block — cannot vote
         assertGt(vault.balanceOf(random), 0);
@@ -1018,7 +1018,7 @@ contract SyndicateGovernorTest is Test {
         vault2.deposit(20_000e6, lp4);
         vm.stopPrank();
 
-        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
 
         // Create proposals on BOTH vaults
         BatchExecutorLib.Call[] memory calls1 = new BatchExecutorLib.Call[](2);
@@ -1045,7 +1045,7 @@ contract SyndicateGovernorTest is Test {
         vm.prank(agent2);
         uint256 pid2 = governor.propose(address(vault2), "ipfs://v2-strategy", 2000, 5 days, calls2, 1);
 
-        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
 
         // Vault1 LPs vote on pid1 only
         vm.prank(lp1);

@@ -123,7 +123,7 @@ contract SyndicateGovernorIntegrationTest is Test {
         usdc.mint(address(mUsdc), 1_000_000e6);
 
         // Mine a block so ERC20Votes checkpoints are queryable
-        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
     }
 
     // ── Helpers ──
@@ -138,7 +138,7 @@ contract SyndicateGovernorIntegrationTest is Test {
         proposalId = governor.propose(address(vault), "ipfs://test", feeBps, duration, calls, splitIndex);
 
         // Mine a block so the snapshot block is in the past
-        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
 
         vm.prank(lp1);
         governor.vote(proposalId, true);
@@ -164,7 +164,7 @@ contract SyndicateGovernorIntegrationTest is Test {
         uint256 proposalId = governor.propose(address(vault), "ipfs://strategy1", 1500, 7 days, calls, 1);
 
         // Mine a block for checkpoint
-        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
 
         // 2. Shareholders vote
         vm.prank(lp1);
@@ -229,7 +229,7 @@ contract SyndicateGovernorIntegrationTest is Test {
         uint256 proposalId = governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1);
 
         // Mine a block for checkpoint
-        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
 
         // Majority votes against
         vm.prank(lp1);

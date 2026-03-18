@@ -323,6 +323,17 @@ contract SyndicateVault is
         super._update(from, to, value);
     }
 
+    /// @dev Use timestamp-based voting checkpoints instead of block numbers
+    function clock() public view override returns (uint48) {
+        return uint48(block.timestamp);
+    }
+
+    /// @dev EIP-6372: declare timestamp-based clock
+    // solhint-disable-next-line func-name-mixedcase
+    function CLOCK_MODE() public pure override returns (string memory) {
+        return "mode=timestamp";
+    }
+
     /// @dev Resolve decimals diamond between ERC20Upgradeable and ERC4626Upgradeable
     function decimals() public view override(ERC4626Upgradeable, ERC20Upgradeable) returns (uint8) {
         return super.decimals();

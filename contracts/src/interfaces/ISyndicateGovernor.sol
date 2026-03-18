@@ -37,7 +37,7 @@ interface ISyndicateGovernor {
         uint256 strategyDuration;
         uint256 votesFor;
         uint256 votesAgainst;
-        uint256 snapshotBlock;
+        uint256 snapshotTimestamp;
         uint256 voteEnd;
         uint256 executeBy;
         uint256 executedAt;

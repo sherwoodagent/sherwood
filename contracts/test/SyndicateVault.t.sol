@@ -495,27 +495,31 @@ contract SyndicateVaultTest is Test {
     // ==================== ERC20VOTES ====================
 
     function test_getPastVotes_afterDeposit() public {
+        uint256 depositTime = block.timestamp;
+
         vm.startPrank(lp1);
         usdc.approve(address(vault), 10_000e6);
         vault.deposit(10_000e6, lp1);
         vm.stopPrank();
 
-        // Mine a block so getPastVotes works
-        vm.roll(block.number + 1);
+        // Advance time so getPastVotes works (timestamp-based clock)
+        vm.warp(block.timestamp + 1);
 
-        uint256 pastVotes = vault.getPastVotes(lp1, block.number - 1);
+        uint256 pastVotes = vault.getPastVotes(lp1, depositTime);
         assertEq(pastVotes, 10_000e6);
     }
 
     function test_getPastTotalSupply_afterDeposit() public {
+        uint256 depositTime = block.timestamp;
+
         vm.startPrank(lp1);
         usdc.approve(address(vault), 10_000e6);
         vault.deposit(10_000e6, lp1);
         vm.stopPrank();
 
-        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
 
-        uint256 pastSupply = vault.getPastTotalSupply(block.number - 1);
+        uint256 pastSupply = vault.getPastTotalSupply(depositTime);
         assertEq(pastSupply, 10_000e6);
     }
 }
