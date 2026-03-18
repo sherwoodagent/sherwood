@@ -624,7 +624,16 @@ syndicate
       }
 
       spinner.text = "Querying EAS attestations...";
-      const requests = await easLib.queryJoinRequests(creatorAddress);
+      const [allRequests, approvals] = await Promise.all([
+        easLib.queryJoinRequests(creatorAddress),
+        easLib.queryApprovals(creatorAddress),
+      ]);
+
+      // Filter out agents that have already been approved
+      const approvedAgentIds = new Set(approvals.map((a) => a.decoded.agentId.toString()));
+      const requests = allRequests.filter(
+        (r) => !approvedAgentIds.has(r.decoded.agentId.toString()),
+      );
 
       spinner.stop();
 
@@ -667,7 +676,6 @@ syndicate
   .requiredOption("--agent-id <id>", "Agent's ERC-8004 identity token ID")
   .requiredOption("--pkp <address>", "Agent PKP address")
   .requiredOption("--eoa <address>", "Operator EOA address")
-  .option("--revoke-request <uid>", "Revoke the join request attestation after approval")
   .action(async (opts) => {
     const spinner = ora("Verifying creator...").start();
     try {
@@ -706,25 +714,29 @@ syndicate
         }
       }
 
-      // 2. Create AGENT_APPROVED attestation
-      spinner.text = "Creating approval attestation...";
-      const { uid: approvalUid } = await easLib.createApproval(
-        syndicateId,
-        BigInt(opts.agentId),
-        vaultAddress,
-        opts.eoa as Address,
+      // 2. Create AGENT_APPROVED attestation (skip if one already exists)
+      spinner.text = "Checking for existing approval...";
+      const existingApprovals = await easLib.queryApprovals(getAccount().address);
+      const alreadyApproved = existingApprovals.find(
+        (a) => a.decoded.agentId === BigInt(opts.agentId) && a.decoded.vault.toLowerCase() === vaultAddress.toLowerCase(),
       );
 
-      // 3. Optionally revoke the join request
-      if (opts.revokeRequest) {
-        spinner.text = "Revoking join request...";
-        await easLib.revokeAttestation(
-          EAS_SCHEMAS().SYNDICATE_JOIN_REQUEST,
-          opts.revokeRequest as `0x${string}`,
+      let approvalUid: `0x${string}`;
+      if (alreadyApproved) {
+        approvalUid = alreadyApproved.uid;
+        console.log(DIM(`  Approval attestation already exists — skipping`));
+      } else {
+        spinner.text = "Creating approval attestation...";
+        const result = await easLib.createApproval(
+          syndicateId,
+          BigInt(opts.agentId),
+          vaultAddress,
+          opts.eoa as Address,
         );
+        approvalUid = result.uid;
       }
 
-      // 4. Auto-add agent to XMTP chat group
+      // 3. Auto-add agent to XMTP chat group
       try {
         spinner.text = "Adding to chat...";
         const xmtp = await loadXmtp();

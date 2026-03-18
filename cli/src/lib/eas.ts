@@ -192,6 +192,91 @@ export interface JoinRequestAttestation {
  * Query pending (non-revoked) join requests for a given recipient (creator address).
  * Uses the EAS GraphQL API.
  */
+export interface ApprovalAttestation {
+  uid: Hex;
+  attester: Address;
+  recipient: Address;
+  time: number;
+  decoded: {
+    syndicateId: bigint;
+    agentId: bigint;
+    vault: Address;
+  };
+}
+
+/**
+ * Query existing (non-revoked) AGENT_APPROVED attestations created by a given attester (creator).
+ * Used to check for duplicates before creating a new approval and to filter already-approved agents from requests.
+ */
+export async function queryApprovals(
+  attester: Address,
+): Promise<ApprovalAttestation[]> {
+  assertSchemasRegistered();
+  const schemaUid = EAS_SCHEMAS().AGENT_APPROVED;
+  const url = getEasGraphqlUrl();
+
+  const query = `
+    query Approvals($schemaId: String!, $attester: String!) {
+      attestations(
+        where: {
+          schemaId: { equals: $schemaId }
+          attester: { equals: $attester }
+          revoked: { equals: false }
+        }
+        orderBy: [{ time: desc }]
+      ) {
+        id
+        attester
+        recipient
+        time
+        data
+      }
+    }
+  `;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query,
+      variables: { schemaId: schemaUid, attester },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`EAS GraphQL query failed: ${response.statusText}`);
+  }
+
+  const json = await response.json() as {
+    data?: {
+      attestations: Array<{
+        id: string;
+        attester: string;
+        recipient: string;
+        time: number;
+        data: string;
+      }>;
+    };
+  };
+
+  if (!json.data?.attestations) return [];
+
+  return json.data.attestations.map((a) => {
+    const decoded = decodeAbiParameters(AGENT_APPROVED_PARAMS, a.data as Hex);
+    return {
+      uid: a.id as Hex,
+      attester: a.attester as Address,
+      recipient: a.recipient as Address,
+      time: a.time,
+      decoded: {
+        syndicateId: decoded[0],
+        agentId: decoded[1],
+        vault: decoded[2],
+      },
+    };
+  });
+}
+
 export async function queryJoinRequests(
   recipient: Address,
 ): Promise<JoinRequestAttestation[]> {
