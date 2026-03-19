@@ -3,15 +3,17 @@
  *
  * Docs: https://docs.messari.io
  * Payment: x402 (USDC on Base) — no API key required
- * Data: 34,000+ assets, market metrics, protocol data, asset profiles
+ * Data: 34,000+ assets, market metrics, asset profiles
  * Pricing: $0.10/call for asset details, ROI, ATH. $0.15–$0.35 for timeseries.
  *          $0.55 for news/signals. Full pricing: https://docs.messari.io/api-reference/x402-payments
  *
- * Supports all query types:
- *   token   → asset profile (description, technology, governance)
- *   market  → market metrics (price, volume, market cap, ROI, ATH)
- *   smart-money → asset metrics filtered to on-chain activity
- *   wallet  → not natively supported, falls back to asset lookup by address
+ * Supports:
+ *   token  → asset details (description, category, sector, links, market snapshot)
+ *   market → market metrics + ATH (price, volume, market cap, ROI, ATH, cycle low)
+ *
+ * Not supported (use --provider nansen instead):
+ *   smart-money → on-chain analytics not available in Messari x402 API
+ *   wallet      → wallet profiling not available in Messari x402 API
  */
 
 import { base, baseSepolia } from "viem/chains";
@@ -19,14 +21,12 @@ import type { ProviderInfo } from "../../types.js";
 import type { ResearchProvider, ResearchQuery, ResearchResult } from "./index.js";
 import { getX402Fetch } from "../../lib/x402.js";
 
-const BASE_URL = "https://data.messari.io/api";
+const BASE_URL = "https://api.messari.io";
 
 /** Known x402 cost per Messari query (approximate). */
 export const MESSARI_COST_ESTIMATE: Record<string, string> = {
   token: "~$0.10",
-  market: "~$0.10",
-  "smart-money": "~$0.10",
-  wallet: "~$0.10",
+  market: "~$0.20",
 };
 
 export class MessariProvider implements ResearchProvider {
@@ -37,8 +37,6 @@ export class MessariProvider implements ResearchProvider {
       capabilities: [
         "research.token",
         "research.market",
-        "research.smart-money",
-        "research.wallet",
       ],
       supportedChains: [base, baseSepolia],
     };
@@ -51,21 +49,58 @@ export class MessariProvider implements ResearchProvider {
       case "market":
         return this.marketOverview(params.target);
       case "smart-money":
-        return this.smartMoney(params.options?.token ?? params.target);
+        throw new Error(
+          "Messari x402 API does not support on-chain analytics. Use --provider nansen for smart money data.",
+        );
       case "wallet":
-        return this.walletLookup(params.target);
+        throw new Error(
+          "Messari does not support wallet analytics. Use --provider nansen for wallet profiling.",
+        );
       default:
         throw new Error(`Unsupported query type: ${params.type}`);
     }
   }
 
   /**
-   * Get full asset profile: description, technology, contributors, governance, etc.
-   * Endpoint: GET /v2/assets/{assetKey}/profile
+   * Resolve any user input (symbol, name, slug, address) to a Messari asset slug.
+   * Uses the free /metrics/v2/assets endpoint ($0.00) to search.
    */
-  private async tokenReport(assetKey: string): Promise<ResearchResult> {
+  private async resolveSlug(target: string): Promise<string> {
     const fetchWithPay = await getX402Fetch();
-    const url = `${BASE_URL}/v2/assets/${encodeURIComponent(assetKey)}/profile`;
+    const params = new URLSearchParams({
+      search: target,
+      limit: "1",
+    });
+    const url = `${BASE_URL}/metrics/v2/assets?${params}`;
+
+    const res = await fetchWithPay(url, { method: "GET" });
+    if (!res.ok) {
+      throw new Error(
+        `Messari asset lookup failed: ${res.status} ${res.statusText}`,
+      );
+    }
+
+    const json = (await res.json()) as {
+      data?: Array<{ slug?: string }>;
+    };
+
+    const slug = json.data?.[0]?.slug;
+    if (!slug) {
+      throw new Error(
+        `No Messari asset found for "${target}". Try a different name, symbol, or slug.`,
+      );
+    }
+    return slug;
+  }
+
+  /**
+   * Get asset details: description, category, sector, links, market snapshot.
+   * Endpoint: GET /metrics/v2/assets/details?assetIDs={slug}  ($0.10)
+   */
+  private async tokenReport(target: string): Promise<ResearchResult> {
+    const slug = await this.resolveSlug(target);
+    const fetchWithPay = await getX402Fetch();
+    const url = `${BASE_URL}/metrics/v2/assets/details?assetIDs=${encodeURIComponent(slug)}`;
 
     const res = await fetchWithPay(url, { method: "GET" });
     if (!res.ok) {
@@ -74,147 +109,103 @@ export class MessariProvider implements ResearchProvider {
       );
     }
 
-    const json = (await res.json()) as { data?: Record<string, unknown> };
+    const json = (await res.json()) as {
+      data?: Array<Record<string, unknown>>;
+    };
     const costUsdc = this.extractCost(res);
+    const asset = json.data?.[0] ?? {};
 
     return {
       provider: "messari",
       queryType: "token",
-      target: assetKey,
-      data: json.data ?? (json as Record<string, unknown>),
+      target,
+      data: asset,
       costUsdc,
       timestamp: Math.floor(Date.now() / 1000),
     };
   }
 
   /**
-   * Get market metrics: price, volume, market cap, ROI, ATH, etc.
-   * Endpoint: GET /v1/assets/{assetKey}/metrics
+   * Get market metrics + ATH: price, volume, market cap, ROI, all-time high, cycle low.
+   * Makes two parallel calls:
+   *   GET /metrics/v2/assets/details?assetIDs={slug}  ($0.10)
+   *   GET /metrics/v2/assets/ath?assetIDs={slug}      ($0.10)
+   * Total: ~$0.20
    */
-  private async marketOverview(assetKey: string): Promise<ResearchResult> {
+  private async marketOverview(target: string): Promise<ResearchResult> {
+    const slug = await this.resolveSlug(target);
     const fetchWithPay = await getX402Fetch();
-    const url = `${BASE_URL}/v1/assets/${encodeURIComponent(assetKey)}/metrics`;
+    const assetParam = encodeURIComponent(slug);
 
-    const res = await fetchWithPay(url, { method: "GET" });
-    if (!res.ok) {
+    const [detailsRes, athRes] = await Promise.all([
+      fetchWithPay(`${BASE_URL}/metrics/v2/assets/details?assetIDs=${assetParam}`, { method: "GET" }),
+      fetchWithPay(`${BASE_URL}/metrics/v2/assets/ath?assetIDs=${assetParam}`, { method: "GET" }),
+    ]);
+
+    if (!detailsRes.ok) {
       throw new Error(
-        `Messari market query failed: ${res.status} ${res.statusText}`,
+        `Messari market query failed: ${detailsRes.status} ${detailsRes.statusText}`,
+      );
+    }
+    if (!athRes.ok) {
+      throw new Error(
+        `Messari ATH query failed: ${athRes.status} ${athRes.statusText}`,
       );
     }
 
-    const json = (await res.json()) as { data?: Record<string, unknown> };
-    const costUsdc = this.extractCost(res);
+    const detailsJson = (await detailsRes.json()) as {
+      data?: Array<Record<string, unknown>>;
+    };
+    const athJson = (await athRes.json()) as {
+      data?: Array<Record<string, unknown>>;
+    };
+
+    // Sum costs from both responses
+    const cost1 = this.extractCostRaw(detailsRes);
+    const cost2 = this.extractCostRaw(athRes);
+    const totalCost = cost1 + cost2;
+    const costUsdc = totalCost > 0 ? totalCost.toFixed(4) : "unknown";
+
+    const details = detailsJson.data?.[0] ?? {};
+    const ath = athJson.data?.[0] ?? {};
 
     return {
       provider: "messari",
       queryType: "market",
-      target: assetKey,
-      data: json.data ?? (json as Record<string, unknown>),
+      target,
+      data: {
+        ...details,
+        allTimeHigh: ath.allTimeHigh ?? null,
+      },
       costUsdc,
       timestamp: Math.floor(Date.now() / 1000),
     };
   }
 
   /**
-   * Smart money — Messari's on-chain metrics for the asset.
-   * Uses the metrics endpoint filtered to on-chain activity data
-   * (active addresses, transaction volume, NVT, exchange flows).
-   * Endpoint: GET /v1/assets/{assetKey}/metrics
+   * Extract cost from x402 response headers as a number (USDC).
+   * Returns 0 if no payment info found.
    */
-  private async smartMoney(assetKey: string): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
-    const url = `${BASE_URL}/v1/assets/${encodeURIComponent(assetKey)}/metrics`;
-
-    const res = await fetchWithPay(url, { method: "GET" });
-    if (!res.ok) {
-      throw new Error(
-        `Messari smart-money query failed: ${res.status} ${res.statusText}`,
-      );
-    }
-
-    const json = (await res.json()) as { data?: Record<string, unknown> };
-    const costUsdc = this.extractCost(res);
-
-    // Extract on-chain relevant fields from the full metrics response
-    const metrics = json.data ?? {};
-    const onChainData: Record<string, unknown> = {};
-    const onChainKeys = [
-      "on_chain_data",
-      "blockchain_stats_24_hours",
-      "exchange_flows",
-      "miner_flows",
-      "supply",
-      "market_data",
-    ];
-    for (const key of onChainKeys) {
-      if (key in metrics) {
-        onChainData[key] = metrics[key];
-      }
-    }
-
-    return {
-      provider: "messari",
-      queryType: "smart-money",
-      target: assetKey,
-      data: Object.keys(onChainData).length > 0 ? onChainData : metrics,
-      costUsdc,
-      timestamp: Math.floor(Date.now() / 1000),
-    };
-  }
-
-  /**
-   * Wallet lookup — Messari doesn't have per-wallet analytics, but if the
-   * address corresponds to a known asset, we can return its profile.
-   * Falls back to a search by address.
-   * Endpoint: GET /v2/assets/{address}/profile
-   */
-  private async walletLookup(address: string): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
-
-    // Try looking up the address as an asset (works for token contract addresses)
-    const url = `${BASE_URL}/v2/assets/${encodeURIComponent(address)}/profile`;
-
-    const res = await fetchWithPay(url, { method: "GET" });
-    if (!res.ok) {
-      throw new Error(
-        `Messari wallet/asset lookup failed: ${res.status} ${res.statusText}. ` +
-          `Messari maps addresses to token profiles — for full wallet analytics, use --provider nansen`,
-      );
-    }
-
-    const json = (await res.json()) as { data?: Record<string, unknown> };
-    const costUsdc = this.extractCost(res);
-
-    return {
-      provider: "messari",
-      queryType: "wallet",
-      target: address,
-      data: json.data ?? (json as Record<string, unknown>),
-      costUsdc,
-      timestamp: Math.floor(Date.now() / 1000),
-    };
-  }
-
-  /**
-   * Extract cost from x402 response headers.
-   * The PAYMENT-RESPONSE header may contain settlement details including the amount paid.
-   */
-  private extractCost(res: Response): string {
+  private extractCostRaw(res: Response): number {
     const paymentResponse = res.headers.get("payment-response");
     if (paymentResponse) {
       try {
-        const parsed = JSON.parse(paymentResponse) as {
-          amount?: string;
-        };
+        const parsed = JSON.parse(paymentResponse) as { amount?: string };
         if (parsed.amount) {
-          // x402 amounts are in USDC atomic units (6 decimals)
-          const cents = Number(parsed.amount) / 1e6;
-          return cents.toFixed(4);
+          return Number(parsed.amount) / 1e6;
         }
       } catch {
-        // Fall through to default
+        // Fall through
       }
     }
-    return "unknown";
+    return 0;
+  }
+
+  /**
+   * Extract cost from x402 response headers as a formatted string.
+   */
+  private extractCost(res: Response): string {
+    const cost = this.extractCostRaw(res);
+    return cost > 0 ? cost.toFixed(4) : "unknown";
   }
 }
