@@ -11,9 +11,12 @@ import {MockMToken} from "./mocks/MockMToken.sol";
 import {MockComptroller} from "./mocks/MockComptroller.sol";
 import {MockSwapRouter} from "./mocks/MockSwapRouter.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
+import {SyndicateGovernor} from "../src/SyndicateGovernor.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract SyndicateVaultTest is Test {
     SyndicateVault public vault;
+    SyndicateGovernor public governor;
     BatchExecutorLib public executorLib;
     ERC20Mock public usdc;
     ERC20Mock public weth;
@@ -53,6 +56,13 @@ contract SyndicateVaultTest is Test {
         agent1NftId = agentRegistry.mint(agentEoa);
         agent2NftId = agentRegistry.mint(agentEoa2);
 
+        // Deploy governor first
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        bytes memory govInit = abi.encodeCall(
+            SyndicateGovernor.initialize, (owner, 1 days, 1 days, 4000, 3000, 1 days, 1 days, 7 days, 48 hours, 5)
+        );
+        governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
+
         // Deploy vault via proxy with executor lib
         SyndicateVault impl = new SyndicateVault();
         bytes memory initData = abi.encodeCall(
@@ -65,7 +75,7 @@ contract SyndicateVaultTest is Test {
                     executorImpl: address(executorLib),
                     openDeposits: true,
                     agentRegistry: address(agentRegistry),
-                    governor: address(0),
+                    governor: address(governor),
                     managementFeeBps: 0
                 }))
         );
@@ -324,7 +334,7 @@ contract SyndicateVaultTest is Test {
                     executorImpl: address(executorLib),
                     openDeposits: false,
                     agentRegistry: address(agentRegistry),
-                    governor: address(0),
+                    governor: address(governor),
                     managementFeeBps: 0
                 }))
         );

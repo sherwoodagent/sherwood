@@ -52,31 +52,7 @@ contract CollaborativeProposalsTest is Test {
         coNftId2 = agentRegistry.mint(coAgent2Eoa);
 
         // Deploy vault
-        SyndicateVault vaultImpl = new SyndicateVault();
-        bytes memory vaultInit = abi.encodeCall(
-            SyndicateVault.initialize,
-            (ISyndicateVault.InitParams({
-                    asset: address(usdc),
-                    name: "Sherwood Vault",
-                    symbol: "swUSDC",
-                    owner: owner,
-                    executorImpl: address(executorLib),
-                    openDeposits: true,
-                    agentRegistry: address(agentRegistry),
-                    governor: address(0),
-                    managementFeeBps: 50
-                }))
-        );
-        vault = SyndicateVault(payable(address(new ERC1967Proxy(address(vaultImpl), vaultInit))));
-
-        // Register agents
-        vm.startPrank(owner);
-        vault.registerAgent(leadNftId, leadAgent, leadAgentEoa);
-        vault.registerAgent(coNftId1, coAgent1, coAgent1Eoa);
-        vault.registerAgent(coNftId2, coAgent2, coAgent2Eoa);
-        vm.stopPrank();
-
-        // Deploy governor
+        // Deploy governor first
         SyndicateGovernor govImpl = new SyndicateGovernor();
         bytes memory govInit = abi.encodeCall(
             SyndicateGovernor.initialize,
@@ -95,9 +71,31 @@ contract CollaborativeProposalsTest is Test {
         );
         governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
 
-        // Wire up
+        // Deploy vault with governor set
+        SyndicateVault vaultImpl = new SyndicateVault();
+        bytes memory vaultInit = abi.encodeCall(
+            SyndicateVault.initialize,
+            (ISyndicateVault.InitParams({
+                    asset: address(usdc),
+                    name: "Sherwood Vault",
+                    symbol: "swUSDC",
+                    owner: owner,
+                    executorImpl: address(executorLib),
+                    openDeposits: true,
+                    agentRegistry: address(agentRegistry),
+                    governor: address(governor),
+                    managementFeeBps: 50
+                }))
+        );
+        vault = SyndicateVault(payable(address(new ERC1967Proxy(address(vaultImpl), vaultInit))));
+
+        // Register agents
         vm.startPrank(owner);
-        vault.setGovernor(address(governor));
+        vault.registerAgent(leadNftId, leadAgent, leadAgentEoa);
+        vault.registerAgent(coNftId1, coAgent1, coAgent1Eoa);
+        vm.stopPrank();
+        vm.startPrank(owner);
+        vault.registerAgent(coNftId2, coAgent2, coAgent2Eoa);
         governor.addVault(address(vault));
         vm.stopPrank();
 

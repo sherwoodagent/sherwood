@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SyndicateVault} from "./SyndicateVault.sol";
 import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
+import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
 import {IL2Registrar} from "./interfaces/IL2Registrar.sol";
 
 /**
@@ -136,6 +137,9 @@ contract SyndicateFactory {
         bytes memory initData = abi.encodeCall(SyndicateVault.initialize, (initParams));
 
         vault = address(new ERC1967Proxy(vaultImpl, initData));
+
+        // Register vault on governor
+        ISyndicateGovernor(governor).addVault(vault);
 
         // Register ENS subname — vault is both address record + NFT owner
         ensRegistrar.register(config.subdomain, vault);

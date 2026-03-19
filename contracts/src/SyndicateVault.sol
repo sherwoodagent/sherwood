@@ -91,6 +91,7 @@ contract SyndicateVault is
         if (p.owner == address(0)) revert InvalidOwner();
         if (p.executorImpl == address(0)) revert InvalidExecutorImpl();
         if (p.agentRegistry == address(0)) revert InvalidAgentRegistry();
+        if (p.governor == address(0)) revert InvalidGovernor();
 
         __ERC4626_init(IERC20(p.asset));
         __ERC20_init(p.name, p.symbol);

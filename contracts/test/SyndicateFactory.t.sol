@@ -6,6 +6,8 @@ import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../src/SyndicateFactory.sol";
+import {SyndicateGovernor} from "../src/SyndicateGovernor.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockL2Registrar} from "./mocks/MockL2Registrar.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
@@ -18,9 +20,11 @@ contract SyndicateFactoryTest is Test {
     MockL2Registrar public ensRegistrar;
     MockAgentRegistry public agentRegistry;
 
+    SyndicateGovernor public governor;
+
+    address public owner = makeAddr("owner");
     address public creator1 = makeAddr("creator1");
     address public creator2 = makeAddr("creator2");
-    address public governorAddr = makeAddr("governor");
 
     uint256 public creator1AgentId;
     uint256 public creator2AgentId;
@@ -31,9 +35,21 @@ contract SyndicateFactoryTest is Test {
         vaultImpl = new SyndicateVault();
         ensRegistrar = new MockL2Registrar();
         agentRegistry = new MockAgentRegistry();
-        factory = new SyndicateFactory(
-            address(executorLib), address(vaultImpl), address(ensRegistrar), address(agentRegistry), governorAddr
+
+        // Deploy real governor
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        bytes memory govInit = abi.encodeCall(
+            SyndicateGovernor.initialize, (owner, 1 days, 1 days, 4000, 3000, 1 days, 1 days, 7 days, 48 hours, 5)
         );
+        governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
+
+        factory = new SyndicateFactory(
+            address(executorLib), address(vaultImpl), address(ensRegistrar), address(agentRegistry), address(governor)
+        );
+
+        // Set factory on governor so it can call addVault
+        vm.prank(owner);
+        governor.setFactory(address(factory));
 
         // Mint ERC-8004 identity NFTs for creators
         creator1AgentId = agentRegistry.mint(creator1);

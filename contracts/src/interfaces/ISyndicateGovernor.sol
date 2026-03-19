@@ -102,6 +102,7 @@ interface ISyndicateGovernor {
     error DuplicateCoProposer();
     error NotDraftState();
     error InvalidCollaborationWindow();
+    error NotAuthorized();
     error InvalidMaxCoProposers();
 
     // ── Events ──
@@ -131,6 +132,7 @@ interface ISyndicateGovernor {
 
     event EmergencySettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 customCallCount);
 
+    event FactoryUpdated(address indexed factory);
     event VaultAdded(address indexed vault);
     event VaultRemoved(address indexed vault);
 
@@ -188,6 +190,7 @@ interface ISyndicateGovernor {
 
     function addVault(address vault) external;
     function removeVault(address vault) external;
+    function setFactory(address factory_) external;
     function setVotingPeriod(uint256 newVotingPeriod) external;
     function setExecutionWindow(uint256 newExecutionWindow) external;
     function setQuorumBps(uint256 newQuorumBps) external;

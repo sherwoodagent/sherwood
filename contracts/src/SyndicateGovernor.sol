@@ -89,6 +89,9 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     /// @notice Proposal ID → deadline for co-proposer consent
     mapping(uint256 => uint256) public collaborationDeadline;
 
+    /// @notice Authorized factory that can register vaults
+    address public factory;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -401,10 +404,17 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     // ==================== VAULT MANAGEMENT ====================
 
     /// @inheritdoc ISyndicateGovernor
-    function addVault(address vault) external onlyOwner {
+    function addVault(address vault) external {
+        if (msg.sender != owner() && msg.sender != factory) revert NotAuthorized();
         if (vault == address(0)) revert InvalidVault();
         if (!_registeredVaults.add(vault)) revert VaultAlreadyRegistered();
         emit VaultAdded(vault);
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    function setFactory(address factory_) external onlyOwner {
+        factory = factory_;
+        emit FactoryUpdated(factory_);
     }
 
     /// @inheritdoc ISyndicateGovernor
