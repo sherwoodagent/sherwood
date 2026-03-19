@@ -103,6 +103,11 @@ Each epoch, veWOOD holders allocate their voting power across one or more syndic
 
 **Eligible syndicates:** Any syndicate registered in the SyndicateFactory with an active vault and a `shareToken/WOOD` Uniswap V3 pool.
 
+**Bootstrapping new syndicates:** New syndicates face a chicken-and-egg problem — they need a WOOD pool to be eligible for votes, but need TVL/reputation to justify liquidity. To solve this:
+- **Genesis Pool Program:** The protocol treasury seeds initial `shareToken/WOOD` liquidity (single-sided WOOD) for the first N syndicates (e.g., first 10). This comes from the 50M genesis liquidity allocation.
+- **Minimum TVL gate:** After the genesis cohort, new syndicates must reach a minimum vault TVL (e.g., $10k USDC equivalent) before the protocol creates their gauge pool. This filters low-quality syndicates.
+- **Self-bootstrap:** Syndicate agents can always create their own pool permissionlessly and request gauge registration from governance.
+
 ### 3. WOOD Emissions (Minter.sol)
 
 WOOD is minted each epoch and distributed to syndicate gauges proportionally to votes.
@@ -113,9 +118,11 @@ WOOD is minted each epoch and distributed to syndicate gauges proportionally to 
 |-------|--------|-------------|-------------|
 | Take-off | 1–14 | +3%/week | Rapid growth, bootstrap liquidity |
 | Cruise | 15+ | -1%/week | Gradual decay as protocol matures |
-| WOOD Fed | ~67+ | Voter-controlled | veWOOD voters decide: +0.01%, -0.01%, or hold |
+| WOOD Fed | ~67+ | Voter-controlled | veWOOD voters decide: +0.01%, -0.01%, or hold (capped ±5% from baseline per epoch) |
 
 **Initial emissions:** 10M WOOD/week (2% of initial supply).
+
+**WOOD Fed guardrails:** To prevent whales from voting to keep emissions permanently high (diluting newcomers), the WOOD Fed rate adjustment is capped at ±5% deviation from a rolling 8-week baseline. This ensures gradual, bounded changes rather than abrupt manipulation.
 
 **Team allocation:** 5% of weekly emissions to team/protocol treasury.
 
@@ -128,6 +135,8 @@ Distributed to veWOOD holders proportionally to locked amounts, protecting again
 ### 4. Syndicate Gauges (SyndicateGauge.sol)
 
 One gauge per syndicate. Receives WOOD emissions proportional to votes.
+
+**Gauge cap:** No single syndicate can receive more than **35% of total epoch emissions**, regardless of vote share. Excess votes above the cap are redistributed proportionally to other gauges. This prevents a single whale from monopolizing emissions and ensures a healthier distribution across syndicates. (Inspired by Aerodrome's Slipstream v2 cap.)
 
 **Who earns emissions:**
 - The syndicate vault rewards buffer (for vault depositors/strategies)
@@ -177,6 +186,11 @@ Scheduled WOOD emissions for a voted syndicate are paid into that syndicate vaul
 4. **Claim:** Depositors/strategies claim WOOD from the distributor contract using Merkle proofs
 
 This makes depositor payout deterministic and auditable while keeping per-user distribution gas-efficient.
+
+**Trust model:** The Merkle root publisher is a trusted role. In v1, the protocol operator (multisig) publishes roots. To mitigate abuse:
+- **Dispute window:** Roots are posted with a 24-hour challenge period before claims activate. During this window, anyone can submit a fraud proof showing the root doesn't match the on-chain vault share snapshot.
+- **Fallback:** If no root is published within 48h of epoch end, depositors can trigger a proportional on-chain distribution (gas-heavy but trustless fallback).
+- **v2 consideration:** Move to fully on-chain streaming (e.g., Sablier-style) once gas costs justify it or the protocol graduates from multisig to full governance.
 
 ## Token Distribution
 
@@ -288,10 +302,11 @@ Wednesday 23:59 UTC — Epoch N ends
 ## Open Questions
 
 1. **WOOD token launch mechanism:** LBP (Balancer Liquidity Bootstrapping Pool)? Fair launch? Fixed-price sale?
-2. **Gauge cap:** Should there be a max % of emissions any single syndicate can receive? (Aerodrome added this in Slipstream v2)
+2. ~~**Gauge cap:**~~ **Resolved** — 35% cap per syndicate, excess redistributed (see §4).
 3. **Minimum lock duration:** 1 week or higher? Shorter locks = more accessible but less commitment.
-4. **Syndicate eligibility:** Any syndicate can get a gauge, or need minimum TVL/age?
+4. ~~**Syndicate eligibility:**~~ **Resolved** — Genesis Pool Program for first 10 syndicates, then minimum TVL gate (see §2).
 5. **Multi-chain:** Base only initially, or plan for L2 expansion?
+6. **Merkle root publisher:** Multisig in v1 with dispute window. Acceptable for launch? (see §7)
 
 ## Implementation Order
 
