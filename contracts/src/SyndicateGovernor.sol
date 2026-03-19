@@ -84,10 +84,10 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     mapping(uint256 => CoProposer[]) private _coProposers;
 
     /// @notice Proposal ID → co-proposer address → approved
-    mapping(uint256 => mapping(address => bool)) private _coProposerApprovals;
+    mapping(uint256 => mapping(address => bool)) public coProposerApprovals;
 
     /// @notice Proposal ID → deadline for co-proposer consent
-    mapping(uint256 => uint256) private _collaborationDeadline;
+    mapping(uint256 => uint256) public collaborationDeadline;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -356,19 +356,19 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     function approveCollaboration(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (proposal.state != ProposalState.Draft) revert NotDraftState();
-        if (block.timestamp > _collaborationDeadline[proposalId]) revert CollaborationExpired();
+        if (block.timestamp > collaborationDeadline[proposalId]) revert CollaborationExpired();
 
         _requireCoProposer(proposalId);
-        if (_coProposerApprovals[proposalId][msg.sender]) revert AlreadyApproved();
+        if (coProposerApprovals[proposalId][msg.sender]) revert AlreadyApproved();
 
-        _coProposerApprovals[proposalId][msg.sender] = true;
+        coProposerApprovals[proposalId][msg.sender] = true;
         emit CollaborationApproved(proposalId, msg.sender);
 
         // Check if all co-proposers have approved
         CoProposer[] storage coProps = _coProposers[proposalId];
         bool allApproved = true;
         for (uint256 i = 0; i < coProps.length; i++) {
-            if (!_coProposerApprovals[proposalId][coProps[i].agent]) {
+            if (!coProposerApprovals[proposalId][coProps[i].agent]) {
                 allApproved = false;
                 break;
             }
@@ -400,7 +400,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     function expireCollaboration(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (proposal.state != ProposalState.Draft) revert NotDraftState();
-        if (block.timestamp <= _collaborationDeadline[proposalId]) revert CollaborationNotExpired();
+        if (block.timestamp <= collaborationDeadline[proposalId]) revert CollaborationNotExpired();
 
         proposal.state = ProposalState.Expired;
         emit CollaborationDeadlineExpired(proposalId);
@@ -578,11 +578,6 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         return _coProposers[proposalId];
     }
 
-    /// @inheritdoc ISyndicateGovernor
-    function getCollaborationDeadline(uint256 proposalId) external view returns (uint256) {
-        return _collaborationDeadline[proposalId];
-    }
-
     // ==================== INTERNAL ====================
 
     /// @dev Store proposal calls separately for gas efficiency
@@ -621,7 +616,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         for (uint256 i = 0; i < coProposers.length; i++) {
             _coProposers[proposalId].push(coProposers[i]);
         }
-        _collaborationDeadline[proposalId] = block.timestamp + _params.collaborationWindow;
+        collaborationDeadline[proposalId] = block.timestamp + _params.collaborationWindow;
 
         address[] memory coAddrs = new address[](coProposers.length);
         uint256[] memory splits = new uint256[](coProposers.length);
@@ -693,7 +688,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     function _resolveState(StrategyProposal storage proposal) internal returns (ProposalState) {
         // Auto-expire Draft proposals past collaboration deadline
         if (proposal.state == ProposalState.Draft) {
-            if (block.timestamp > _collaborationDeadline[proposal.id]) {
+            if (block.timestamp > collaborationDeadline[proposal.id]) {
                 proposal.state = ProposalState.Expired;
                 emit CollaborationDeadlineExpired(proposal.id);
                 return ProposalState.Expired;
@@ -727,7 +722,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     function _resolveStateView(StrategyProposal storage proposal) internal view returns (ProposalState) {
         // Auto-expire Draft proposals past collaboration deadline
         if (proposal.state == ProposalState.Draft) {
-            if (block.timestamp > _collaborationDeadline[proposal.id]) {
+            if (block.timestamp > collaborationDeadline[proposal.id]) {
                 return ProposalState.Expired;
             }
             return ProposalState.Draft;

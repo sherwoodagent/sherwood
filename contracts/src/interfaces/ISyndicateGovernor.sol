@@ -208,5 +208,4 @@ interface ISyndicateGovernor {
     function getCapitalSnapshot(uint256 proposalId) external view returns (uint256);
     function isRegisteredVault(address vault) external view returns (bool);
     function getCoProposers(uint256 proposalId) external view returns (CoProposer[] memory);
-    function getCollaborationDeadline(uint256 proposalId) external view returns (uint256);
 }
