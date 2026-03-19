@@ -1,13 +1,16 @@
 import Link from "next/link";
+import LogoWordmark from "./LogoWordmark";
+import LogoMark from "./LogoMark";
 
 export default function SiteHeader() {
   return (
-    <header className="site-header font-[family-name:var(--font-jetbrains-mono)]">
+    <header className="site-header font-[family-name:var(--font-plus-jakarta)]">
       <Link
         href="/"
-        className="text-2xl font-extrabold tracking-tighter text-white no-underline"
+        className="no-underline flex items-center"
       >
-        sherwood<span className="text-[var(--color-accent)]">.sh</span>
+        <LogoWordmark height={28} className="hidden md:block" />
+        <LogoMark height={32} className="block md:hidden" />
       </Link>
       <nav className="flex items-center">
         <Link href="/#how-it-works">How It Works</Link>

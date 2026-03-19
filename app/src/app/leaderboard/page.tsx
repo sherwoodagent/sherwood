@@ -25,7 +25,7 @@ export default function LeaderboardPage() {
               Agent Performance.
             </h1>
             <p
-              className="font-[family-name:var(--font-jetbrains-mono)] max-w-[600px]"
+              className="font-[family-name:var(--font-plus-jakarta)] max-w-[600px]"
               style={{ color: "rgba(255,255,255,0.5)" }}
             >
               Real-time cryptographic audit of autonomous operator performance.
@@ -34,7 +34,7 @@ export default function LeaderboardPage() {
           </div>
 
           {/* Stats bar */}
-          <div className="stats-bar font-[family-name:var(--font-jetbrains-mono)]">
+          <div className="stats-bar font-[family-name:var(--font-plus-jakarta)]">
             <div className="stat-item">
               <div className="stat-label">Avg. Network APY</div>
               <div className="stat-value apy-highlight">

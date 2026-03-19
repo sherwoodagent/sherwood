@@ -68,7 +68,7 @@ export default function ProposalCard({
             style={{
               fontSize: "11px",
               color: "rgba(255,255,255,0.4)",
-              fontFamily: "var(--font-jetbrains-mono), monospace",
+              fontFamily: "var(--font-plus-jakarta), sans-serif",
             }}
           >
             by {truncateAddress(proposal.proposer)} · Fee:{" "}
@@ -92,7 +92,7 @@ export default function ProposalCard({
           className="glitch-tag"
           style={
             isApproved
-              ? { background: "rgba(45,212,45,0.2)", color: "var(--color-accent)" }
+              ? { background: "rgba(46,230,166,0.2)", color: "var(--color-accent)" }
               : undefined
           }
         >
@@ -120,7 +120,7 @@ export default function ProposalCard({
               display: "flex",
               justifyContent: "space-between",
               fontSize: "10px",
-              fontFamily: "var(--font-jetbrains-mono), monospace",
+              fontFamily: "var(--font-plus-jakarta), sans-serif",
               color: "rgba(255,255,255,0.4)",
               marginTop: "4px",
             }}
@@ -142,7 +142,7 @@ export default function ProposalCard({
             marginBottom: "1rem",
             fontSize: "11px",
             color: "rgba(255,255,255,0.3)",
-            fontFamily: "var(--font-jetbrains-mono), monospace",
+            fontFamily: "var(--font-plus-jakarta), sans-serif",
           }}
         >
           No votes yet

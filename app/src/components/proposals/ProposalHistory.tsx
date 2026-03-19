@@ -17,7 +17,7 @@ function StateBadge({ state, pnl }: { state: ProposalState; pnl?: bigint }) {
   switch (state) {
     case ProposalState.Settled:
       if (pnl !== undefined && pnl > 0n) {
-        bg = "rgba(45, 212, 45, 0.2)";
+        bg = "rgba(46, 230, 166, 0.2)";
         color = "var(--color-accent)";
       } else if (pnl !== undefined && pnl < 0n) {
         bg = "rgba(255, 77, 77, 0.2)";
@@ -44,7 +44,7 @@ function StateBadge({ state, pnl }: { state: ProposalState; pnl?: bigint }) {
   return (
     <span
       style={{
-        fontFamily: "var(--font-jetbrains-mono), monospace",
+        fontFamily: "var(--font-plus-jakarta), sans-serif",
         fontSize: "9px",
         padding: "2px 6px",
         borderRadius: "2px",
@@ -90,7 +90,7 @@ export default function ProposalHistory({ proposals }: ProposalHistoryProps) {
             textAlign: "center",
             padding: "2rem 0",
             color: "rgba(255,255,255,0.3)",
-            fontFamily: "var(--font-jetbrains-mono), monospace",
+            fontFamily: "var(--font-plus-jakarta), sans-serif",
             fontSize: "12px",
           }}
         >

@@ -29,7 +29,7 @@ export default function ActiveProposal({
             textAlign: "center",
             padding: "2rem 0",
             color: "rgba(255,255,255,0.4)",
-            fontFamily: "var(--font-jetbrains-mono), monospace",
+            fontFamily: "var(--font-plus-jakarta), sans-serif",
             fontSize: "12px",
           }}
         >
@@ -59,7 +59,7 @@ export default function ActiveProposal({
       className="panel"
       style={{
         borderColor: "var(--color-accent)",
-        boxShadow: "0 0 15px rgba(45, 212, 45, 0.1)",
+        boxShadow: "0 0 15px rgba(46, 230, 166, 0.1)",
       }}
     >
       <div className="panel-title">
@@ -85,7 +85,7 @@ export default function ActiveProposal({
             style={{
               fontSize: "12px",
               color: "rgba(255,255,255,0.5)",
-              fontFamily: "var(--font-jetbrains-mono), monospace",
+              fontFamily: "var(--font-plus-jakarta), sans-serif",
               lineHeight: 1.5,
               maxHeight: "3em",
               overflow: "hidden",

@@ -73,9 +73,9 @@ export default function ForestBackground() {
           vec2 sway = vec2(sin(uTime * 0.2), cos(uTime * 0.15)) * 0.05;
           float n = fbm(vUv * 4.0 + sway);
 
-          vec3 col1 = vec3(0.01, 0.08, 0.02);
-          vec3 col2 = vec3(0.1, 0.4, 0.1);
-          vec3 col3 = vec3(0.17, 0.83, 0.17);
+          vec3 col1 = vec3(0.01, 0.06, 0.04);
+          vec3 col2 = vec3(0.08, 0.4, 0.28);
+          vec3 col3 = vec3(0.18, 0.9, 0.65);
 
           vec3 finalCol = mix(col1, col2, n);
           finalCol = mix(finalCol, col3, pow(n, 3.0));
@@ -110,7 +110,7 @@ export default function ForestBackground() {
       leafGeom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
 
       const leafMat = new THREE.PointsMaterial({
-        color: 0x2dd42d,
+        color: 0x2ee6a6,
         size: 0.012,
         transparent: true,
         opacity: 0.6,

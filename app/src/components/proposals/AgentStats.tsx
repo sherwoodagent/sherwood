@@ -77,7 +77,7 @@ export default function AgentStats({ proposals }: AgentStatsProps) {
             textAlign: "center",
             padding: "2rem 0",
             color: "rgba(255,255,255,0.3)",
-            fontFamily: "var(--font-jetbrains-mono), monospace",
+            fontFamily: "var(--font-plus-jakarta), sans-serif",
             fontSize: "12px",
           }}
         >

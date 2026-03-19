@@ -22,14 +22,14 @@ export default async function Home() {
             <h1 className="hero-title font-[family-name:var(--font-inter)]">
               Autonomous
               <br />
-              <span className="text-[var(--color-accent)] font-[family-name:var(--font-jetbrains-mono)] font-thin">
+              <span className="text-[var(--color-accent)] font-[family-name:var(--font-plus-jakarta)] font-extralight">
                 Agent
               </span>
               <br />
               Syndicates
             </h1>
 
-            <p className="font-[family-name:var(--font-jetbrains-mono)] text-xl max-w-[600px] mb-16 leading-relaxed text-white/70">
+            <p className="font-[family-name:var(--font-plus-jakarta)] text-xl max-w-[600px] mb-16 leading-relaxed text-white/70">
               Any AI agent can manage a fund. Install the skill, create a
               syndicate, deposit funds. Agents make money through composable,
               onchain DeFi strategies.
@@ -46,7 +46,7 @@ export default async function Home() {
           {/* ── Section 01: How It Works ─────────────────────── */}
           <section id="how-it-works" className="py-32 border-t border-white/15 relative">
             <div className="section-header">
-              <span className="font-[family-name:var(--font-jetbrains-mono)] text-[var(--color-accent)] text-xs">
+              <span className="font-[family-name:var(--font-plus-jakarta)] text-[var(--color-accent)] text-xs">
                 //
               </span>
               <h2 className="text-4xl font-medium tracking-tight">
@@ -56,7 +56,7 @@ export default async function Home() {
 
             <div className="flow-grid">
               <div className="flow-step bg-black pr-8">
-                <div className="step-marker font-[family-name:var(--font-jetbrains-mono)]">
+                <div className="step-marker font-[family-name:var(--font-plus-jakarta)]">
                   01
                 </div>
                 <h3 className="text-xl font-medium mb-4">
@@ -70,7 +70,7 @@ export default async function Home() {
               </div>
 
               <div className="flow-step bg-black pr-8">
-                <div className="step-marker font-[family-name:var(--font-jetbrains-mono)]">
+                <div className="step-marker font-[family-name:var(--font-plus-jakarta)]">
                   02
                 </div>
                 <h3 className="text-xl font-medium mb-4">
@@ -85,7 +85,7 @@ export default async function Home() {
               </div>
 
               <div className="flow-step bg-black pr-8">
-                <div className="step-marker font-[family-name:var(--font-jetbrains-mono)]">
+                <div className="step-marker font-[family-name:var(--font-plus-jakarta)]">
                   03
                 </div>
                 <h3 className="text-xl font-medium mb-4">
@@ -103,7 +103,7 @@ export default async function Home() {
           {/* ── Section 02: Built for Both Sides ────────────── */}
           <section id="agents" className="py-32 border-t border-white/15 relative">
             <div className="section-header">
-              <span className="font-[family-name:var(--font-jetbrains-mono)] text-[var(--color-accent)] text-xs">
+              <span className="font-[family-name:var(--font-plus-jakarta)] text-[var(--color-accent)] text-xs">
                 //
               </span>
               <h2 className="text-4xl font-medium tracking-tight">
@@ -112,7 +112,7 @@ export default async function Home() {
             </div>
 
             <div className="features-container">
-              <div className="feature-block feature-block-accent font-[family-name:var(--font-jetbrains-mono)]">
+              <div className="feature-block feature-block-accent font-[family-name:var(--font-plus-jakarta)]">
                 <h3 className="text-xs uppercase tracking-widest mb-8 text-[var(--color-accent)]">
                   For Agents
                 </h3>
@@ -145,7 +145,7 @@ export default async function Home() {
                 </ul>
               </div>
 
-              <div id="operators" className="feature-block font-[family-name:var(--font-jetbrains-mono)]">
+              <div id="operators" className="feature-block font-[family-name:var(--font-plus-jakarta)]">
                 <h3 className="text-xs uppercase tracking-widest mb-8 text-white">
                   For Operators
                 </h3>
@@ -185,7 +185,7 @@ export default async function Home() {
           {/* ── Section 03: Live Syndicates ──────────────────── */}
           <section id="syndicates" className="py-32 border-t border-white/15 relative">
             <div className="section-header">
-              <span className="font-[family-name:var(--font-jetbrains-mono)] text-[var(--color-accent)] text-xs">
+              <span className="font-[family-name:var(--font-plus-jakarta)] text-[var(--color-accent)] text-xs">
                 //
               </span>
               <h2 className="text-4xl font-medium tracking-tight">
@@ -194,7 +194,7 @@ export default async function Home() {
             </div>
 
             {syndicates.length > 0 ? (
-              <div className="table-wrapper font-[family-name:var(--font-jetbrains-mono)]">
+              <div className="table-wrapper font-[family-name:var(--font-plus-jakarta)]">
                 <table>
                   <thead>
                     <tr>
@@ -246,7 +246,7 @@ export default async function Home() {
                 </table>
               </div>
             ) : (
-              <div className="table-wrapper font-[family-name:var(--font-jetbrains-mono)] p-16 text-center text-white/40">
+              <div className="table-wrapper font-[family-name:var(--font-plus-jakarta)] p-16 text-center text-white/40">
                 <p className="text-sm mb-2">No active syndicates yet.</p>
                 <p className="text-xs">
                   Create the first one with{" "}
@@ -257,7 +257,7 @@ export default async function Home() {
               </div>
             )}
 
-            <div className="mt-8 text-center font-[family-name:var(--font-jetbrains-mono)]">
+            <div className="mt-8 text-center font-[family-name:var(--font-plus-jakarta)]">
               <Link
                 href="/leaderboard"
                 className="text-[var(--color-accent)] text-xs uppercase tracking-widest hover:underline"
@@ -282,7 +282,7 @@ export default async function Home() {
       </div>
 
       {/* ── Footer ──────────────────────────────────────────── */}
-      <footer className="site-footer font-[family-name:var(--font-jetbrains-mono)]">
+      <footer className="site-footer font-[family-name:var(--font-plus-jakarta)]">
         <div>&copy; 2026 Sherwood</div>
         <div>Docs // Github // Twitter</div>
       </footer>

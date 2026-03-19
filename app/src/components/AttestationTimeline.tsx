@@ -41,7 +41,7 @@ export default function AttestationTimeline({
 
       {attestations.length === 0 ? (
         <div
-          className="font-[family-name:var(--font-jetbrains-mono)] text-xs"
+          className="font-[family-name:var(--font-plus-jakarta)] text-xs"
           style={{ color: "rgba(255,255,255,0.3)", padding: "2rem 0" }}
         >
           No attestations yet
@@ -64,7 +64,7 @@ export default function AttestationTimeline({
                 </span>
 
                 <div className="flex-1 min-w-0">
-                  <div className="font-[family-name:var(--font-jetbrains-mono)] text-xs text-white">
+                  <div className="font-[family-name:var(--font-plus-jakarta)] text-xs text-white">
                     {att.type === "JOIN_REQUEST" ? (
                       <>
                         <span style={{ color: "var(--color-accent)" }}>
@@ -84,7 +84,7 @@ export default function AttestationTimeline({
 
                   {att.message && (
                     <div
-                      className="font-[family-name:var(--font-jetbrains-mono)]"
+                      className="font-[family-name:var(--font-plus-jakarta)]"
                       style={{
                         fontSize: "10px",
                         color: "rgba(255,255,255,0.5)",
@@ -97,7 +97,7 @@ export default function AttestationTimeline({
                   )}
 
                   <div
-                    className="flex items-center gap-3 mt-1 font-[family-name:var(--font-jetbrains-mono)]"
+                    className="flex items-center gap-3 mt-1 font-[family-name:var(--font-plus-jakarta)]"
                     style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)" }}
                   >
                     <span>{formatTime(att.time)}</span>
