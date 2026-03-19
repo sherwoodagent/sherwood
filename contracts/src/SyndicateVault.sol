@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
+import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
 import {BatchExecutorLib} from "./BatchExecutorLib.sol";
 import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {
@@ -77,9 +78,6 @@ contract SyndicateVault is
 
     /// @notice Trusted governor contract
     address private _governor;
-
-    /// @notice True when a strategy is live (redemptions blocked)
-    bool private _redemptionsLocked;
 
     /// @notice Vault owner's management fee on strategy profits (basis points, set at init)
     uint256 private _managementFeeBps;
@@ -271,18 +269,6 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
-    function lockRedemptions() external onlyGovernor {
-        _redemptionsLocked = true;
-        emit RedemptionsLockedEvent();
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function unlockRedemptions() external onlyGovernor {
-        _redemptionsLocked = false;
-        emit RedemptionsUnlockedEvent();
-    }
-
-    /// @inheritdoc ISyndicateVault
     function executeGovernorBatch(BatchExecutorLib.Call[] calldata calls) external onlyGovernor {
         (bool success, bytes memory returnData) =
             _executorImpl.delegatecall(abi.encodeCall(BatchExecutorLib.executeBatch, (calls)));
@@ -305,7 +291,8 @@ contract SyndicateVault is
 
     /// @inheritdoc ISyndicateVault
     function redemptionsLocked() external view returns (bool) {
-        return _redemptionsLocked;
+        if (_governor == address(0)) return false;
+        return ISyndicateGovernor(_governor).getActiveProposal(address(this)) != 0;
     }
 
     /// @inheritdoc ISyndicateVault
@@ -361,7 +348,9 @@ contract SyndicateVault is
         override
         whenNotPaused
     {
-        if (_redemptionsLocked) revert RedemptionsLocked();
+        if (_governor != address(0) && ISyndicateGovernor(_governor).getActiveProposal(address(this)) != 0) {
+            revert RedemptionsLocked();
+        }
         if (assets > _totalDeposited) {
             _totalDeposited = 0;
         } else {

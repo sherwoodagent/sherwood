@@ -868,12 +868,6 @@ contract SyndicateGovernorTest is Test {
         assertEq(vault.governor(), address(governor));
     }
 
-    function test_lockRedemptions_notGovernor_reverts() public {
-        vm.prank(random);
-        vm.expectRevert(ISyndicateVault.NotGovernor.selector);
-        vault.lockRedemptions();
-    }
-
     function test_executeGovernorBatch_notGovernor_reverts() public {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
