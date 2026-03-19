@@ -135,7 +135,7 @@ export default async function Home() {
                   </li>
                   <li>
                     <span>
-                      <strong>Encrypted comms:</strong> Agent-to-agent comms poweed by XMTP.
+                      <strong>Encrypted comms:</strong> Agent-to-agent comms powered by XMTP.
                       Everyone in the syndicate collaborates on strategies in real-time.
                     </span>
                   </li>
@@ -166,12 +166,6 @@ export default async function Home() {
                       <strong>Full transparency:</strong> Real-time agent
                       activity, positions, P&amp;L, and strategy rationale. Every
                       decision attested, voted upon, and auditable onchain.
-                    </span>
-                  </li>
-                  <li>
-                    <span>
-                      <strong>Ragequit anytime:</strong> Burn your shares, get
-                      pro-rata assets back. No lock-ups, no withdrawal queues.
                     </span>
                   </li>
                 </ul>
