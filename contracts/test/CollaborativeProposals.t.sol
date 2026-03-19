@@ -333,7 +333,7 @@ contract CollaborativeProposalsTest is Test {
 
     // ==================== EXPIRY ====================
 
-    function test_expiry_afterDeadline_cancels() public {
+    function test_expiry_afterDeadline_expires() public {
         uint256 proposalId = _createCollabProposal();
 
         // Only one approves
@@ -348,7 +348,18 @@ contract CollaborativeProposalsTest is Test {
         governor.expireCollaboration(proposalId);
 
         ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
-        assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Cancelled));
+        assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Expired));
+    }
+
+    function test_expiry_autoResolvesViaStateView() public {
+        uint256 proposalId = _createCollabProposal();
+
+        // Warp past collaboration window
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        // getProposalState should auto-resolve to Expired without calling expireCollaboration
+        ISyndicateGovernor.ProposalState state = governor.getProposalState(proposalId);
+        assertEq(uint256(state), uint256(ISyndicateGovernor.ProposalState.Expired));
     }
 
     function test_expiry_beforeDeadline_reverts() public {
@@ -698,7 +709,7 @@ contract CollaborativeProposalsTest is Test {
         governor.expireCollaboration(proposalId);
 
         ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
-        assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Cancelled));
+        assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Expired));
     }
 
     function test_setCollaborationWindow_notOwner_reverts() public {
@@ -729,6 +740,64 @@ contract CollaborativeProposalsTest is Test {
         assertEq(usdc.balanceOf(coAgent1), co1BalBefore + 600e6);
         assertEq(usdc.balanceOf(coAgent2), co2BalBefore + 200e6);
         assertEq(usdc.balanceOf(leadAgent), leadBalBefore + 1_200e6);
+    }
+
+    // ==================== SINGLE CO-PROPOSER ====================
+
+    // ==================== SETTER BOUNDARY TESTS ====================
+
+    function test_setCollaborationWindow_belowMin_reverts() public {
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.InvalidCollaborationWindow.selector);
+        governor.setCollaborationWindow(30 minutes);
+    }
+
+    function test_setCollaborationWindow_aboveMax_reverts() public {
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.InvalidCollaborationWindow.selector);
+        governor.setCollaborationWindow(8 days);
+    }
+
+    function test_setMaxCoProposers_zero_reverts() public {
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.InvalidMaxCoProposers.selector);
+        governor.setMaxCoProposers(0);
+    }
+
+    function test_setMaxCoProposers_aboveAbsoluteMax_reverts() public {
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.InvalidMaxCoProposers.selector);
+        governor.setMaxCoProposers(11);
+    }
+
+    function test_setMaxCoProposers_succeeds() public {
+        vm.prank(owner);
+        governor.setMaxCoProposers(3);
+        assertEq(governor.getMaxCoProposers(), 3);
+    }
+
+    function test_setMaxCoProposers_notOwner_reverts() public {
+        vm.prank(random);
+        vm.expectRevert();
+        governor.setMaxCoProposers(3);
+    }
+
+    // ==================== ADDITIONAL ACCESS CONTROL ====================
+
+    function test_rejectCollaboration_leadProposer_reverts() public {
+        uint256 proposalId = _createCollabProposal();
+
+        vm.prank(leadAgent);
+        vm.expectRevert(ISyndicateGovernor.NotCoProposer.selector);
+        governor.rejectCollaboration(proposalId);
+    }
+
+    function test_settleByAgent_coProposer_reverts() public {
+        uint256 proposalId = _createAndExecuteCollabProposal();
+
+        vm.prank(coAgent1);
+        vm.expectRevert(ISyndicateGovernor.NotProposer.selector);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
     }
 
     // ==================== SINGLE CO-PROPOSER ====================

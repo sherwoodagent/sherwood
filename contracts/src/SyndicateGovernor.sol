@@ -356,22 +356,14 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         if (proposal.state != ProposalState.Draft) revert NotDraftState();
         if (block.timestamp > _collaborationDeadline[proposalId]) revert CollaborationExpired();
 
-        // Verify caller is a co-proposer
-        CoProposer[] storage coProps = _coProposers[proposalId];
-        bool isCoProposer = false;
-        for (uint256 i = 0; i < coProps.length; i++) {
-            if (coProps[i].agent == msg.sender) {
-                isCoProposer = true;
-                break;
-            }
-        }
-        if (!isCoProposer) revert NotCoProposer();
+        _requireCoProposer(proposalId);
         if (_coProposerApprovals[proposalId][msg.sender]) revert AlreadyApproved();
 
         _coProposerApprovals[proposalId][msg.sender] = true;
         emit CollaborationApproved(proposalId, msg.sender);
 
         // Check if all co-proposers have approved
+        CoProposer[] storage coProps = _coProposers[proposalId];
         bool allApproved = true;
         for (uint256 i = 0; i < coProps.length; i++) {
             if (!_coProposerApprovals[proposalId][coProps[i].agent]) {
@@ -383,7 +375,6 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         if (allApproved) {
             // Transition to Pending — voting begins
             proposal.state = ProposalState.Pending;
-            // Set voting timestamps from now
             proposal.snapshotTimestamp = block.timestamp;
             proposal.voteEnd = block.timestamp + _params.votingPeriod;
             proposal.executeBy = block.timestamp + _params.votingPeriod + _params.executionWindow;
@@ -396,16 +387,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         StrategyProposal storage proposal = _proposals[proposalId];
         if (proposal.state != ProposalState.Draft) revert NotDraftState();
 
-        // Verify caller is a co-proposer
-        CoProposer[] storage coProps = _coProposers[proposalId];
-        bool isCoProposer = false;
-        for (uint256 i = 0; i < coProps.length; i++) {
-            if (coProps[i].agent == msg.sender) {
-                isCoProposer = true;
-                break;
-            }
-        }
-        if (!isCoProposer) revert NotCoProposer();
+        _requireCoProposer(proposalId);
 
         proposal.state = ProposalState.Cancelled;
         emit CollaborationRejected(proposalId, msg.sender);
@@ -418,9 +400,8 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         if (proposal.state != ProposalState.Draft) revert NotDraftState();
         if (block.timestamp <= _collaborationDeadline[proposalId]) revert CollaborationNotExpired();
 
-        proposal.state = ProposalState.Cancelled;
+        proposal.state = ProposalState.Expired;
         emit CollaborationDeadlineExpired(proposalId);
-        emit ProposalCancelled(proposalId, address(0));
     }
 
     // ==================== VAULT MANAGEMENT ====================
@@ -601,7 +582,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         }
     }
 
-    /// @dev Emit ProposalCreated event (extracted to avoid stack-too-deep)
+    /// @dev Emit ProposalCreated event (reads from storage to avoid stack-too-deep in propose())
     function _emitProposalCreated(uint256 proposalId, uint256 callCount, string calldata metadataURI) internal {
         StrategyProposal storage p = _proposals[proposalId];
         emit ProposalCreated(
@@ -614,6 +595,15 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             callCount,
             metadataURI
         );
+    }
+
+    /// @dev Verify caller is a co-proposer on the given proposal
+    function _requireCoProposer(uint256 proposalId) internal view {
+        CoProposer[] storage coProps = _coProposers[proposalId];
+        for (uint256 i = 0; i < coProps.length; i++) {
+            if (coProps[i].agent == msg.sender) return;
+        }
+        revert NotCoProposer();
     }
 
     /// @dev Store co-proposers, set deadline, emit event
@@ -691,6 +681,16 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     }
 
     function _resolveState(StrategyProposal storage proposal) internal returns (ProposalState) {
+        // Auto-expire Draft proposals past collaboration deadline
+        if (proposal.state == ProposalState.Draft) {
+            if (block.timestamp > _collaborationDeadline[proposal.id]) {
+                proposal.state = ProposalState.Expired;
+                emit CollaborationDeadlineExpired(proposal.id);
+                return ProposalState.Expired;
+            }
+            return ProposalState.Draft;
+        }
+
         if (proposal.state != ProposalState.Pending) return proposal.state;
         if (block.timestamp <= proposal.voteEnd) return ProposalState.Pending;
 
@@ -715,6 +715,14 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
     /// @dev View-only version of state resolution (doesn't modify storage)
     function _resolveStateView(StrategyProposal storage proposal) internal view returns (ProposalState) {
+        // Auto-expire Draft proposals past collaboration deadline
+        if (proposal.state == ProposalState.Draft) {
+            if (block.timestamp > _collaborationDeadline[proposal.id]) {
+                return ProposalState.Expired;
+            }
+            return ProposalState.Draft;
+        }
+
         if (proposal.state != ProposalState.Pending) return proposal.state;
         if (block.timestamp <= proposal.voteEnd) return ProposalState.Pending;
 
