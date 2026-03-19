@@ -25,6 +25,8 @@ import type { SyndicateMetadata } from "./lib/ipfs.js";
 import { registerVeniceCommands } from "./commands/venice.js";
 import { registerAllowanceCommands } from "./commands/allowance.js";
 import { registerIdentityCommands } from "./commands/identity.js";
+import { registerProposalCommands } from "./commands/proposal.js";
+import { registerGovernorCommands } from "./commands/governor.js";
 import { setTextRecord, getTextRecord, resolveVaultSyndicate, resolveSyndicate } from "./lib/ens.js";
 import * as easLib from "./lib/eas.js";
 import { EAS_SCHEMAS } from "./lib/addresses.js";
@@ -1066,6 +1068,12 @@ registerAllowanceCommands(program);
 
 // ── Identity commands ──
 registerIdentityCommands(program);
+
+// ── Proposal commands ──
+registerProposalCommands(program);
+
+// ── Governor commands ──
+registerGovernorCommands(program);
 
 // ── Research commands ──
 const { registerResearchCommands } = await import("./commands/research.js");

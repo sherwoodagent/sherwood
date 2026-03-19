@@ -1,11 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
 import { useAccount, useReadContract } from "wagmi";
 import { formatUnits, type Address } from "viem";
-import { ConnectWallet, Wallet } from "@coinbase/onchainkit/wallet";
-import SyndicateHeader from "./SyndicateHeader";
-import DepositModal from "./DepositModal";
+import SyndicateHeader, { type TabId } from "./SyndicateHeader";
 import { SYNDICATE_VAULT_ABI, formatUSDC } from "@/lib/contracts";
 
 interface SyndicateClientProps {
@@ -14,7 +11,7 @@ interface SyndicateClientProps {
   vault: Address;
   creator: Address;
   paused: boolean;
-  openDeposits: boolean;
+  activeTab?: TabId;
 }
 
 export default function SyndicateClient({
@@ -23,11 +20,9 @@ export default function SyndicateClient({
   vault,
   creator,
   paused,
-  openDeposits,
+  activeTab = "vault",
 }: SyndicateClientProps) {
   const { address, isConnected } = useAccount();
-  const [showDeposit, setShowDeposit] = useState(false);
-  const connectRef = useRef<HTMLDivElement>(null);
 
   // User's vault shares
   const { data: userShares } = useReadContract({
@@ -47,32 +42,15 @@ export default function SyndicateClient({
     query: { enabled: !!userShares && userShares > 0n },
   });
 
-  function handleDeposit() {
-    if (!isConnected) {
-      // Click the hidden ConnectWallet to trigger the OnchainKit modal
-      const btn = connectRef.current?.querySelector("button");
-      btn?.click();
-      return;
-    }
-    setShowDeposit(true);
-  }
-
   return (
     <>
-      {/* Hidden ConnectWallet — triggers OnchainKit modal when clicked */}
-      <div ref={connectRef} className="hidden-connect-trigger">
-        <Wallet>
-          <ConnectWallet />
-        </Wallet>
-      </div>
-
       <SyndicateHeader
         name={name}
         subdomain={subdomain}
         vault={vault}
         creator={creator}
         paused={paused}
-        onDeposit={handleDeposit}
+        activeTab={activeTab}
       />
 
       {/* User position — only shown when connected and has shares */}
@@ -91,16 +69,6 @@ export default function SyndicateClient({
             </div>
           </div>
         </div>
-      )}
-
-      {showDeposit && (
-        <DepositModal
-          vault={vault}
-          vaultName={name}
-          openDeposits={openDeposits}
-          paused={paused}
-          onClose={() => setShowDeposit(false)}
-        />
       )}
     </>
   );

@@ -1,7 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { type Address } from "viem";
 import { truncateAddress } from "@/lib/contracts";
+import WalletButton from "@/components/WalletButton";
+
+export type TabId = "vault" | "proposals";
 
 interface SyndicateHeaderProps {
   name: string;
@@ -9,7 +13,7 @@ interface SyndicateHeaderProps {
   vault: Address;
   creator: Address;
   paused: boolean;
-  onDeposit: () => void;
+  activeTab: TabId;
 }
 
 function InlineCopy({ value }: { value: string }) {
@@ -37,7 +41,7 @@ export default function SyndicateHeader({
   vault,
   creator,
   paused,
-  onDeposit,
+  activeTab,
 }: SyndicateHeaderProps) {
   return (
     <div className="agent-header" style={{ flexDirection: "column", alignItems: "stretch", gap: "1rem" }}>
@@ -60,11 +64,7 @@ export default function SyndicateHeader({
             </span>
           </h1>
         </div>
-        <div className="flex gap-3">
-          <button className="btn-action" onClick={onDeposit}>
-            [ DEPOSIT ]
-          </button>
-        </div>
+        <WalletButton />
       </div>
 
       <div
@@ -81,6 +81,22 @@ export default function SyndicateHeader({
           Creator: {truncateAddress(creator)} <InlineCopy value={creator} />
         </span>
       </div>
+
+      {/* Tab Navigation */}
+      <nav className="syndicate-tabs">
+        <Link
+          href={`/syndicate/${subdomain}`}
+          className={`syndicate-tab ${activeTab === "vault" ? "syndicate-tab-active" : ""}`}
+        >
+          Vault
+        </Link>
+        <Link
+          href={`/syndicate/${subdomain}/proposals`}
+          className={`syndicate-tab ${activeTab === "proposals" ? "syndicate-tab-active" : ""}`}
+        >
+          Proposals
+        </Link>
+      </nav>
     </div>
   );
 }

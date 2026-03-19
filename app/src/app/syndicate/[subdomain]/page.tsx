@@ -3,6 +3,7 @@ import TorusKnotBackground from "@/components/TorusKnotBackground";
 import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import SyndicateClient from "@/components/SyndicateClient";
+import DepositButton from "@/components/DepositButton";
 import EquityCurveChart from "@/components/EquityCurveChart";
 import VaultOverview from "@/components/VaultOverview";
 import AgentRoster from "@/components/AgentRoster";
@@ -91,33 +92,41 @@ export default async function SyndicateDetailPage({
             vault={data.vault}
             creator={data.creator}
             paused={data.paused}
-            openDeposits={data.openDeposits}
+            activeTab="vault"
           />
 
-          {/* Stats bar */}
-          <div className="stats-bar">
-            <div className="stat-item">
-              <div className="stat-label">TVL</div>
-              <div className="stat-value">{data.display.tvl}</div>
-            </div>
-            <div className="stat-item">
-              <div className="stat-label">Total Deposited</div>
-              <div className="stat-value">{data.display.totalDeposited}</div>
-            </div>
-            <div className="stat-item">
-              <div className="stat-label">Agents</div>
-              <div className="stat-value">{data.agentCount.toString()}</div>
-            </div>
-            <div className="stat-item">
-              <div className="stat-label">Mgmt Fee</div>
-              <div className="stat-value">{data.display.managementFee}</div>
-            </div>
-            <div className="stat-item">
-              <div className="stat-label">Redemptions</div>
-              <div className="stat-value" style={{ color: data.redemptionsLocked ? "#ff4d4d" : "var(--color-accent)" }}>
-                {data.redemptionsLocked ? "LOCKED" : "OPEN"}
+          {/* Stats bar + Deposit */}
+          <div className="stats-bar-row">
+            <div className="stats-bar" style={{ flex: 1, marginBottom: 0 }}>
+              <div className="stat-item">
+                <div className="stat-label">TVL</div>
+                <div className="stat-value">{data.display.tvl}</div>
+              </div>
+              <div className="stat-item">
+                <div className="stat-label">Total Deposited</div>
+                <div className="stat-value">{data.display.totalDeposited}</div>
+              </div>
+              <div className="stat-item">
+                <div className="stat-label">Agents</div>
+                <div className="stat-value">{data.agentCount.toString()}</div>
+              </div>
+              <div className="stat-item">
+                <div className="stat-label">Mgmt Fee</div>
+                <div className="stat-value">{data.display.managementFee}</div>
+              </div>
+              <div className="stat-item">
+                <div className="stat-label">Redemptions</div>
+                <div className="stat-value" style={{ color: data.redemptionsLocked ? "#ff4d4d" : "var(--color-accent)" }}>
+                  {data.redemptionsLocked ? "LOCKED" : "OPEN"}
+                </div>
               </div>
             </div>
+            <DepositButton
+              vault={data.vault}
+              vaultName={name}
+              openDeposits={data.openDeposits}
+              paused={data.paused}
+            />
           </div>
 
           {/* Dashboard grid */}

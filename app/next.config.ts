@@ -2,6 +2,14 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  webpack(config) {
+    // Stub React Native modules pulled in by @metamask/sdk via wagmi's injected() connector
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      "@react-native-async-storage/async-storage": false,
+    };
+    return config;
+  },
   async rewrites() {
     const spectatorUrl = process.env.SPECTATOR_URL || 'https://spectator.sherwood.sh';
     return [

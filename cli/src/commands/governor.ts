@@ -1,0 +1,192 @@
+/**
+ * Governor commands — sherwood governor <subcommand>
+ *
+ * View and manage SyndicateGovernor parameters (owner-only setters).
+ */
+
+import { Command } from "commander";
+import chalk from "chalk";
+import ora from "ora";
+import { getExplorerUrl } from "../lib/network.js";
+import {
+  getGovernorAddress,
+  getGovernorParams,
+  getRegisteredVaults,
+  setVotingPeriod,
+  setExecutionWindow,
+  setQuorumBps,
+  setMaxPerformanceFeeBps,
+  setMaxStrategyDuration,
+  setCooldownPeriod,
+} from "../lib/governor.js";
+import { formatDurationLong as formatDuration, parseBigIntArg } from "../lib/format.js";
+
+const G = chalk.green;
+const W = chalk.white;
+const DIM = chalk.gray;
+const BOLD = chalk.white.bold;
+const LABEL = chalk.green.bold;
+const SEP = () => console.log(DIM("─".repeat(60)));
+
+export function registerGovernorCommands(program: Command): void {
+  const governor = program.command("governor").description("Governor parameters and vault management");
+
+  // ── governor info ──
+
+  governor
+    .command("info")
+    .description("Display current governor parameters and registered vaults")
+    .action(async () => {
+      const spinner = ora("Loading governor info...").start();
+      try {
+        const [params, vaults] = await Promise.all([
+          getGovernorParams(),
+          getRegisteredVaults(),
+        ]);
+
+        spinner.stop();
+
+        console.log();
+        console.log(LABEL("  ◆ Governor Parameters"));
+        SEP();
+        console.log(W(`  Address:              ${G(getGovernorAddress())}`));
+        console.log(W(`  Voting Period:        ${BOLD(formatDuration(params.votingPeriod))}`));
+        console.log(W(`  Execution Window:     ${BOLD(formatDuration(params.executionWindow))}`));
+        console.log(W(`  Quorum:               ${BOLD(`${Number(params.quorumBps) / 100}%`)}`));
+        console.log(W(`  Max Performance Fee:  ${BOLD(`${Number(params.maxPerformanceFeeBps) / 100}%`)}`));
+        console.log(W(`  Max Strategy Duration:${BOLD(` ${formatDuration(params.maxStrategyDuration)}`)}`));
+        console.log(W(`  Cooldown Period:      ${BOLD(formatDuration(params.cooldownPeriod))}`));
+
+        console.log();
+        console.log(LABEL(`  Registered Vaults (${vaults.length})`));
+        if (vaults.length === 0) {
+          console.log(DIM("  (none)"));
+        } else {
+          for (const v of vaults) {
+            console.log(W(`    ${G(v)}`));
+          }
+        }
+
+        SEP();
+        console.log();
+      } catch (err) {
+        spinner.fail("Failed to load governor info");
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
+    });
+
+  // ── governor set-voting-period ──
+
+  governor
+    .command("set-voting-period")
+    .description("Set the voting period (owner only)")
+    .requiredOption("--seconds <n>", "New voting period in seconds")
+    .action(async (opts) => {
+      const spinner = ora("Setting voting period...").start();
+      try {
+        const hash = await setVotingPeriod(parseBigIntArg(opts.seconds, "seconds"));
+        spinner.succeed(G(`Voting period updated to ${opts.seconds}s`));
+        console.log(DIM(`  ${getExplorerUrl(hash)}`));
+      } catch (err) {
+        spinner.fail("Failed to set voting period");
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
+    });
+
+  // ── governor set-execution-window ──
+
+  governor
+    .command("set-execution-window")
+    .description("Set the execution window (owner only)")
+    .requiredOption("--seconds <n>", "New execution window in seconds")
+    .action(async (opts) => {
+      const spinner = ora("Setting execution window...").start();
+      try {
+        const hash = await setExecutionWindow(parseBigIntArg(opts.seconds, "seconds"));
+        spinner.succeed(G(`Execution window updated to ${opts.seconds}s`));
+        console.log(DIM(`  ${getExplorerUrl(hash)}`));
+      } catch (err) {
+        spinner.fail("Failed to set execution window");
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
+    });
+
+  // ── governor set-quorum ──
+
+  governor
+    .command("set-quorum")
+    .description("Set the quorum threshold in bps (owner only)")
+    .requiredOption("--bps <n>", "New quorum in bps (e.g. 4000 = 40%)")
+    .action(async (opts) => {
+      const spinner = ora("Setting quorum...").start();
+      try {
+        const hash = await setQuorumBps(parseBigIntArg(opts.bps, "bps"));
+        spinner.succeed(G(`Quorum updated to ${Number(opts.bps) / 100}%`));
+        console.log(DIM(`  ${getExplorerUrl(hash)}`));
+      } catch (err) {
+        spinner.fail("Failed to set quorum");
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
+    });
+
+  // ── governor set-max-fee ──
+
+  governor
+    .command("set-max-fee")
+    .description("Set the max performance fee in bps (owner only)")
+    .requiredOption("--bps <n>", "New max fee in bps (e.g. 3000 = 30%)")
+    .action(async (opts) => {
+      const spinner = ora("Setting max fee...").start();
+      try {
+        const hash = await setMaxPerformanceFeeBps(parseBigIntArg(opts.bps, "bps"));
+        spinner.succeed(G(`Max performance fee updated to ${Number(opts.bps) / 100}%`));
+        console.log(DIM(`  ${getExplorerUrl(hash)}`));
+      } catch (err) {
+        spinner.fail("Failed to set max fee");
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
+    });
+
+  // ── governor set-max-duration ──
+
+  governor
+    .command("set-max-duration")
+    .description("Set the max strategy duration in seconds (owner only)")
+    .requiredOption("--seconds <n>", "New max duration in seconds")
+    .action(async (opts) => {
+      const spinner = ora("Setting max duration...").start();
+      try {
+        const hash = await setMaxStrategyDuration(parseBigIntArg(opts.seconds, "seconds"));
+        spinner.succeed(G(`Max strategy duration updated to ${opts.seconds}s`));
+        console.log(DIM(`  ${getExplorerUrl(hash)}`));
+      } catch (err) {
+        spinner.fail("Failed to set max duration");
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
+    });
+
+  // ── governor set-cooldown ──
+
+  governor
+    .command("set-cooldown")
+    .description("Set the cooldown period in seconds (owner only)")
+    .requiredOption("--seconds <n>", "New cooldown in seconds")
+    .action(async (opts) => {
+      const spinner = ora("Setting cooldown...").start();
+      try {
+        const hash = await setCooldownPeriod(parseBigIntArg(opts.seconds, "seconds"));
+        spinner.succeed(G(`Cooldown period updated to ${opts.seconds}s`));
+        console.log(DIM(`  ${getExplorerUrl(hash)}`));
+      } catch (err) {
+        spinner.fail("Failed to set cooldown");
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
+    });
+}

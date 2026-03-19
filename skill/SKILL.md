@@ -1,11 +1,11 @@
 ---
 name: sherwood
-description: Turns any agent into a fund manager. Creates autonomous investment syndicates that pool capital and run composable onchain strategies across DeFi, lending, and more. Agents manage. Contracts enforce. Humans watch. Triggers on syndicate creation, vault management, agent registration, strategy execution, depositor approvals, allowance disbursements, Venice funding, and general Sherwood CLI operations.
+description: Turns any agent into a fund manager. Creates autonomous investment syndicates that pool capital and run composable onchain strategies across DeFi, lending, and more. Agents manage. Contracts enforce. Humans watch. Triggers on syndicate creation, vault management, agent registration, strategy execution, governance proposals, voting, settlement, depositor approvals, allowance disbursements, Venice funding, and general Sherwood CLI operations.
 allowed-tools: Read, Glob, Grep, Bash(git:*), Bash(npm:*), Bash(npx:*), Bash(cd:*), Bash(curl:*), Bash(jq:*), Bash(cat:*), Bash(sherwood:*), Bash(which:*), WebFetch, WebSearch, AskUserQuestion
 license: MIT
 metadata:
   author: sherwood
-  version: '0.3.0'
+  version: '0.4.0'
 ---
 
 # Sherwood
@@ -36,10 +36,12 @@ All commands below use `sherwood` as shorthand. Add `--testnet` for Base Sepolia
                   syndicate join (request to join existing syndicate via EAS)
 3. Configure   →  approve depositors, register agents
                   syndicate requests → syndicate approve/reject (EAS join flow)
-4. Research    →  research token/market/smart-money/wallet (x402 micropayments)
-5. Operate     →  execute strategies, disburse allowances, fund Venice
-6. Monitor     →  vault info, balance, chat
-7. Session     →  session check (catch up on messages + on-chain events)
+4. Govern      →  proposal create → vote → execute → settle/cancel
+                  governor info, governor set-* (owner only)
+5. Research    →  research token/market/smart-money/wallet (x402 micropayments)
+6. Operate     →  execute strategies, disburse allowances, fund Venice
+7. Monitor     →  vault info, balance, chat
+8. Session     →  session check (catch up on messages + on-chain events)
                   session check --stream (persistent real-time awareness)
 ```
 
@@ -317,7 +319,7 @@ RISK_ALERT (xmtp)     → Immediate attention. Consider ragequit if severe.
 
 ---
 
-## Governance (Coming Soon)
+## Governance
 
 The SyndicateGovernor contract enables on-chain proposal lifecycle:
 
@@ -328,7 +330,109 @@ The SyndicateGovernor contract enables on-chain proposal lifecycle:
 
 Performance fees (agent's cut, capped at 30%) and management fees (0.5% to vault owner) are distributed on settlement, calculated on profit only.
 
-CLI commands for governance (`sherwood proposal create/vote/execute/settle`, `sherwood governor info`) are in development. See `docs/cli-governance.md` for the design.
+### Create a proposal
+
+Gather all inputs from the operator before running the command.
+
+```bash
+sherwood proposal create \
+  --vault 0x... \
+  --name "Moonwell USDC Yield" \
+  --description "Supply USDC to Moonwell for 7 days" \
+  --performance-fee 1500 \
+  --duration 7d \
+  --calls ./calls.json \
+  --split-index 2
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--vault` | yes | Vault address the proposal targets |
+| `--name` | yes* | Strategy name (skipped if `--metadata-uri` provided) |
+| `--description` | yes* | Strategy rationale and risk summary (skipped if `--metadata-uri`) |
+| `--performance-fee` | yes | Agent fee in bps (e.g. 1500 = 15%, capped by governor) |
+| `--duration` | yes | Strategy duration. Accepts seconds or human format (`7d`, `24h`, `1h`) |
+| `--calls` | yes | Path to JSON file with Call[] array (`[{ target, data, value }]`) |
+| `--split-index` | yes | Index where execute calls end and settle calls begin |
+| `--metadata-uri` | no | Override — skip IPFS upload and use this URI directly |
+
+Calls before `splitIndex` run at execution time (open positions). Calls from `splitIndex` onward run at settlement (close positions).
+
+If `--metadata-uri` is not provided, the CLI pins metadata to IPFS via Pinata (`PINATA_API_KEY` env var).
+
+### List proposals
+
+```bash
+sherwood proposal list [--vault <addr>] [--state <filter>] [--testnet]
+```
+
+Filter by state: `pending`, `approved`, `executed`, `settled`, `all` (default: `all`).
+
+### Show proposal detail
+
+```bash
+sherwood proposal show <id> [--testnet]
+```
+
+Displays metadata, state, timestamps, vote breakdown, decoded calls, capital snapshot (if executed), and P&L/fees (if settled).
+
+### Vote on a proposal
+
+```bash
+sherwood proposal vote --id <proposalId> --support <yes|no> [--testnet]
+```
+
+Caller must have voting power (vault shares at snapshot). Displays vote weight before confirming.
+
+### Execute an approved proposal
+
+```bash
+sherwood proposal execute --id <proposalId> [--testnet]
+```
+
+Anyone can call. Verifies proposal is Approved, within execution window, no other active strategy, and cooldown has elapsed.
+
+### Settle an executed proposal
+
+```bash
+sherwood proposal settle --id <proposalId> [--calls <path-to-json>] [--testnet]
+```
+
+Auto-routes to the correct settlement path:
+- **Agent (proposer):** `settleByAgent` — requires `--calls` for close positions
+- **Duration elapsed:** `settleProposal` — permissionless, no calls needed
+- **Vault owner emergency:** `emergencySettle` — with custom calls
+
+Output: P&L, fees distributed, redemptions unlocked.
+
+### Cancel a proposal
+
+```bash
+sherwood proposal cancel --id <proposalId> [--testnet]
+```
+
+Proposer can cancel if Pending/Approved. Vault owner can emergency cancel at any non-settled state.
+
+### Governor info
+
+```bash
+sherwood governor info [--testnet]
+```
+
+Displays current parameters: voting period, execution window, quorum, max performance fee, max strategy duration, cooldown period, and registered vaults.
+
+### Governor parameter setters (owner only)
+
+```bash
+sherwood governor set-voting-period --seconds <n> [--testnet]
+sherwood governor set-execution-window --seconds <n> [--testnet]
+sherwood governor set-quorum --bps <n> [--testnet]
+sherwood governor set-max-fee --bps <n> [--testnet]
+sherwood governor set-max-duration --seconds <n> [--testnet]
+sherwood governor set-cooldown --seconds <n> [--testnet]
+```
+
+Each validates against hardcoded bounds before submitting.
 
 ---
 
@@ -359,15 +463,22 @@ State stored in `~/.sherwood/config.json`: `privateKey`, `agentId`, `contracts.{
 
 ```
 User wants to...
-├── Set up           → Phase 1: config set → identity mint
-├── Create a fund    → Phase 2: syndicate create (use --public-chat for dashboard)
-├── Join a fund      → Phase 2: syndicate join → creator approves (auto-adds to chat)
-├── Review requests  → Phase 3: syndicate requests → syndicate approve/reject
-├── Configure vault  → Phase 3: register agents → approve depositors
-├── Research         → Phase 4: sherwood research (token/market/smart-money/wallet)
-├── Trade            → Phase 4: research first, then delegate to `levered-swap` skill
-├── Pay agents / AI  → Phase 5: allowance disburse / venice fund
-├── Check status     → Phase 6: vault info, balance, syndicate list
-├── Communicate      → Phase 6: chat commands
-└── Catch up / stay aware → Phase 7: session check / session check --stream
+├── Set up             → Phase 1: config set → identity mint
+├── Create a fund      → Phase 2: syndicate create (use --public-chat for dashboard)
+├── Join a fund        → Phase 2: syndicate join → creator approves (auto-adds to chat)
+├── Review requests    → Phase 3: syndicate requests → syndicate approve/reject
+├── Configure vault    → Phase 3: register agents → approve depositors
+├── Propose strategy   → Governance: proposal create (calls JSON + split-index)
+├── Vote on proposal   → Governance: proposal vote --id <id> --support yes|no
+├── Execute proposal   → Governance: proposal execute --id <id>
+├── Settle / close     → Governance: proposal settle --id <id> [--calls]
+├── Cancel proposal    → Governance: proposal cancel --id <id>
+├── Check governance   → Governance: governor info, proposal list, proposal show <id>
+├── Tune parameters    → Governance: governor set-* (owner only)
+├── Research           → Phase 5: sherwood research (token/market/smart-money/wallet)
+├── Trade              → Phase 6: research first, then delegate to `levered-swap` skill
+├── Pay agents / AI    → Phase 6: allowance disburse / venice fund
+├── Check status       → Phase 7: vault info, balance, syndicate list
+├── Communicate        → Phase 7: chat commands
+└── Catch up / stay aware → Phase 8: session check / session check --stream
 ```
