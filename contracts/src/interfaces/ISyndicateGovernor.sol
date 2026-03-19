@@ -7,14 +7,14 @@ interface ISyndicateGovernor {
     // ── Enums ──
 
     enum ProposalState {
+        Draft, // collaborative proposal awaiting co-proposer consent
         Pending, // voting active
         Approved, // voting ended, quorum met, majority FOR
         Rejected, // voting ended, failed quorum or majority
         Expired, // execution window passed without execution
         Executed, // strategy is live
         Settled, // P&L calculated, fee distributed
-        Cancelled, // proposer or owner cancelled
-        Draft // collaborative proposal awaiting co-proposer consent (appended to preserve existing enum values)
+        Cancelled // proposer or owner cancelled
     }
 
     // ── Structs ──
@@ -85,6 +85,7 @@ interface ISyndicateGovernor {
     // ── Collaborative proposal errors ──
     error NotCoProposer();
     error CollaborationExpired();
+    error CollaborationNotExpired();
     error AlreadyApproved();
     error InvalidSplits();
     error TooManyCoProposers();
@@ -92,6 +93,7 @@ interface ISyndicateGovernor {
     error SplitTooLow();
     error DuplicateCoProposer();
     error NotDraftState();
+    error InvalidCollaborationWindow();
 
     // ── Events ──
 
@@ -136,6 +138,7 @@ interface ISyndicateGovernor {
     );
     event CollaborationApproved(uint256 indexed proposalId, address indexed agent);
     event CollaborationRejected(uint256 indexed proposalId, address indexed agent);
+    event CollaborationTransitionedToPending(uint256 indexed proposalId);
     event CollaborationDeadlineExpired(uint256 indexed proposalId);
     event CollaborationWindowUpdated(uint256 oldValue, uint256 newValue);
 
@@ -198,4 +201,6 @@ interface ISyndicateGovernor {
     function getCapitalSnapshot(uint256 proposalId) external view returns (uint256);
     function isRegisteredVault(address vault) external view returns (bool);
     function getCoProposers(uint256 proposalId) external view returns (CoProposer[] memory);
+    function getCollaborationDeadline(uint256 proposalId) external view returns (uint256);
+    function getCollaborationWindow() external view returns (uint256);
 }

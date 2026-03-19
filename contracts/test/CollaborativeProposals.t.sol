@@ -355,7 +355,7 @@ contract CollaborativeProposalsTest is Test {
         uint256 proposalId = _createCollabProposal();
 
         vm.prank(random);
-        vm.expectRevert(ISyndicateGovernor.CollaborationExpired.selector);
+        vm.expectRevert(ISyndicateGovernor.CollaborationNotExpired.selector);
         governor.expireCollaboration(proposalId);
     }
 

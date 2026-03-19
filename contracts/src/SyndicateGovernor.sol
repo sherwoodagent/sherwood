@@ -158,6 +158,8 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
         proposalId = ++_proposalCount;
 
+        bool isCollaborative = coProposers.length > 0;
+
         _proposals[proposalId] = StrategyProposal({
             id: proposalId,
             proposer: msg.sender,
@@ -168,11 +170,11 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             strategyDuration: strategyDuration,
             votesFor: 0,
             votesAgainst: 0,
-            snapshotTimestamp: block.timestamp,
-            voteEnd: block.timestamp + _params.votingPeriod,
-            executeBy: block.timestamp + _params.votingPeriod + _params.executionWindow,
+            snapshotTimestamp: isCollaborative ? 0 : block.timestamp,
+            voteEnd: isCollaborative ? 0 : block.timestamp + _params.votingPeriod,
+            executeBy: isCollaborative ? 0 : block.timestamp + _params.votingPeriod + _params.executionWindow,
             executedAt: 0,
-            state: coProposers.length > 0 ? ProposalState.Draft : ProposalState.Pending
+            state: isCollaborative ? ProposalState.Draft : ProposalState.Pending
         });
 
         // Store calls separately
@@ -377,10 +379,11 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         if (allApproved) {
             // Transition to Pending — voting begins
             proposal.state = ProposalState.Pending;
-            // Reset voting timestamps from now (co-proposers consumed time during Draft)
+            // Set voting timestamps from now
             proposal.snapshotTimestamp = block.timestamp;
             proposal.voteEnd = block.timestamp + _params.votingPeriod;
             proposal.executeBy = block.timestamp + _params.votingPeriod + _params.executionWindow;
+            emit CollaborationTransitionedToPending(proposalId);
         }
     }
 
@@ -409,7 +412,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     function expireCollaboration(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (proposal.state != ProposalState.Draft) revert NotDraftState();
-        if (block.timestamp <= _collaborationDeadline[proposalId]) revert CollaborationExpired();
+        if (block.timestamp <= _collaborationDeadline[proposalId]) revert CollaborationNotExpired();
 
         proposal.state = ProposalState.Cancelled;
         emit CollaborationDeadlineExpired(proposalId);
@@ -484,7 +487,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     /// @inheritdoc ISyndicateGovernor
     function setCollaborationWindow(uint256 newCollaborationWindow) external onlyOwner {
         if (newCollaborationWindow < MIN_COLLABORATION_WINDOW || newCollaborationWindow > MAX_COLLABORATION_WINDOW) {
-            revert InvalidExecutionWindow();
+            revert InvalidCollaborationWindow();
         }
         uint256 old = _collaborationWindow;
         _collaborationWindow = newCollaborationWindow;
@@ -558,6 +561,16 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     /// @inheritdoc ISyndicateGovernor
     function getCoProposers(uint256 proposalId) external view returns (CoProposer[] memory) {
         return _coProposers[proposalId];
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    function getCollaborationDeadline(uint256 proposalId) external view returns (uint256) {
+        return _collaborationDeadline[proposalId];
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    function getCollaborationWindow() external view returns (uint256) {
+        return _collaborationWindow;
     }
 
     // ==================== INTERNAL ====================
