@@ -92,7 +92,7 @@ export class NansenProvider implements ResearchProvider {
     }
 
     const json = (await res.json()) as { data?: unknown[] };
-    const costUsdc = this.extractCost(res);
+    const costUsdc = this.extractCost(res, "token");
 
     return {
       provider: "nansen",
@@ -138,7 +138,7 @@ export class NansenProvider implements ResearchProvider {
     }
 
     const json = (await res.json()) as { data?: unknown[] };
-    const costUsdc = this.extractCost(res);
+    const costUsdc = this.extractCost(res, "market");
 
     return {
       provider: "nansen",
@@ -188,7 +188,7 @@ export class NansenProvider implements ResearchProvider {
     }
 
     const json = (await res.json()) as { data?: unknown[] };
-    const costUsdc = this.extractCost(res);
+    const costUsdc = this.extractCost(res, "smart-money");
 
     return {
       provider: "nansen",
@@ -226,7 +226,7 @@ export class NansenProvider implements ResearchProvider {
     }
 
     const json = (await res.json()) as { data?: Record<string, unknown> };
-    const costUsdc = this.extractCost(res);
+    const costUsdc = this.extractCost(res, "wallet");
 
     return {
       provider: "nansen",
@@ -272,8 +272,9 @@ export class NansenProvider implements ResearchProvider {
 
   /**
    * Extract cost from x402 response headers.
+   * Falls back to the known estimate for the query type when headers are absent.
    */
-  private extractCost(res: Response): string {
+  private extractCost(res: Response, queryType: string): string {
     // Check Nansen-specific credit header
     const creditsUsed = res.headers.get("x-nansen-credits-used");
     if (creditsUsed) {
@@ -292,6 +293,12 @@ export class NansenProvider implements ResearchProvider {
       } catch {
         // Fall through
       }
+    }
+
+    // Fall back to known estimate (strip "~$" prefix)
+    const est = NANSEN_COST_ESTIMATE[queryType];
+    if (est) {
+      return est.replace("~$", "");
     }
 
     return "unknown";

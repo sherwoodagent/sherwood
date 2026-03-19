@@ -112,7 +112,7 @@ export class MessariProvider implements ResearchProvider {
     const json = (await res.json()) as {
       data?: Array<Record<string, unknown>>;
     };
-    const costUsdc = this.extractCost(res);
+    const costUsdc = this.extractCost(res, "token");
     const asset = json.data?.[0] ?? {};
 
     return {
@@ -164,7 +164,9 @@ export class MessariProvider implements ResearchProvider {
     const cost1 = this.extractCostRaw(detailsRes);
     const cost2 = this.extractCostRaw(athRes);
     const totalCost = cost1 + cost2;
-    const costUsdc = totalCost > 0 ? totalCost.toFixed(4) : "unknown";
+    const costUsdc = totalCost > 0
+      ? totalCost.toFixed(4)
+      : MESSARI_COST_ESTIMATE["market"]?.replace("~$", "") ?? "unknown";
 
     const details = detailsJson.data?.[0] ?? {};
     const ath = athJson.data?.[0] ?? {};
@@ -203,9 +205,16 @@ export class MessariProvider implements ResearchProvider {
 
   /**
    * Extract cost from x402 response headers as a formatted string.
+   * Falls back to the known estimate for the query type when headers are absent.
    */
-  private extractCost(res: Response): string {
+  private extractCost(res: Response, queryType: string = "token"): string {
     const cost = this.extractCostRaw(res);
-    return cost > 0 ? cost.toFixed(4) : "unknown";
+    if (cost > 0) return cost.toFixed(4);
+
+    // Fall back to known estimate (strip "~$" prefix)
+    const est = MESSARI_COST_ESTIMATE[queryType];
+    if (est) return est.replace("~$", "");
+
+    return "unknown";
   }
 }

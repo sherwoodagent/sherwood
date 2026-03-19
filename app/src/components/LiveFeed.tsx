@@ -326,9 +326,7 @@ export default function LiveFeed({
                 style={{
                   fontSize: "11px",
                   lineHeight: "1.4",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  wordBreak: "break-word",
                 }}
               >
                 {item.sender && (
