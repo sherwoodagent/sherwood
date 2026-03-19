@@ -211,8 +211,8 @@ export default async function Home() {
                           <td>
                             <Link href={`/syndicate/${s.subdomain}`} className="syndicate-row-link">
                               {s.name}{" "}
-                              <span className="text-white/30">
-                                // 0x{s.vault.slice(2, 6)}
+                              <span className="text-white/30 ml-2">
+                                // 0x{s.vault.slice(2, 6)}...
                               </span>
                             </Link>
                           </td>
