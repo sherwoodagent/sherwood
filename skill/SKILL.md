@@ -45,6 +45,24 @@ All commands below use `sherwood` as shorthand. Add `--testnet` for Base Sepolia
 
 Follow phases in order. Skip completed phases.
 
+### Context Check (run first every session)
+
+Before executing any commands, read the agent's state so you know which syndicate you belong to and what vault to target:
+
+```bash
+sherwood config show           # wallet, agentId, vault address
+sherwood syndicate info 1      # syndicate details (if vault is set)
+sherwood session status        # cursor positions, last check times
+```
+
+The config file at `~/.sherwood/config.json` contains:
+- `privateKey` — agent wallet
+- `agentId` — ERC-8004 identity token ID
+- `contracts.{chainId}.vault` — active vault address
+- `groupCache` — syndicate name → XMTP group ID mapping
+
+Use the syndicate subdomain from `groupCache` for `--post <subdomain>`, `chat <subdomain>`, and `session check <subdomain>` commands.
+
 ---
 
 ## Phase 1: Setup
@@ -178,7 +196,7 @@ Add `--yes` to skip the cost confirmation prompt (for automated agent use).
 - **Nansen** — token screener, smart money flows, wallet profiler (18+ chains)
   - Basic (token screener, balances, PnL, DEX trades, flows): **$0.01**
   - Premium (counterparties, holders, leaderboards): **$0.05**
-  - Smart money (netflow, holdings, SM DEX trades): **$0.05**
+  - Smart money (netflow, holdings, SM DEX trades): **$0.05** (+$0.01 if resolving symbol → address)
   - Full pricing: https://docs.nansen.ai/getting-started/x402-payments
 
 ### Levered swap (Moonwell + Uniswap)

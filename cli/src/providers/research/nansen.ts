@@ -24,7 +24,7 @@ const BASE_URL = "https://api.nansen.ai";
 export const NANSEN_COST_ESTIMATE: Record<string, string> = {
   token: "~$0.01",
   market: "~$0.01",
-  "smart-money": "~$0.05",
+  "smart-money": "~$0.06",
   wallet: "~$0.01",
 };
 
@@ -154,19 +154,26 @@ export class NansenProvider implements ResearchProvider {
    * Smart Money Net Flow — capital flow analysis from labeled wallets.
    * Endpoint: POST /api/v1/smart-money/netflow
    * Cost: ~$0.05 (premium tier)
+   *
+   * The netflow endpoint only accepts `token_address` filters (not `token_symbol`).
+   * If the target is a symbol, we resolve it to an address via the token screener first.
    */
   private async smartMoneyNetflow(
-    tokenSymbol: string,
+    target: string,
   ): Promise<ResearchResult> {
     const fetchWithPay = await getX402Fetch();
 
-    const body = {
+    // Resolve symbol → address if needed (token screener is $0.01)
+    const tokenAddress = await this.resolveTokenAddress(target);
+
+    const body: Record<string, unknown> = {
       chains: ["base"],
-      filters: {
-        token_symbol: [tokenSymbol.toUpperCase()],
-      },
       pagination: { page: 1, records_per_page: 10 },
     };
+
+    if (tokenAddress) {
+      body.filters = { token_address: [tokenAddress] };
+    }
 
     const res = await fetchWithPay(`${BASE_URL}/api/v1/smart-money/netflow`, {
       method: "POST",
@@ -186,7 +193,7 @@ export class NansenProvider implements ResearchProvider {
     return {
       provider: "nansen",
       queryType: "smart-money",
-      target: tokenSymbol,
+      target,
       data: { flows: json.data ?? [], count: (json.data ?? []).length },
       costUsdc,
       timestamp: Math.floor(Date.now() / 1000),
@@ -229,6 +236,38 @@ export class NansenProvider implements ResearchProvider {
       costUsdc,
       timestamp: Math.floor(Date.now() / 1000),
     };
+  }
+
+  /**
+   * Resolve a token symbol or name to its contract address on Base.
+   * Uses the token screener endpoint ($0.01) to look up the address.
+   * If the target is already an address (0x...), returns it as-is.
+   */
+  private async resolveTokenAddress(target: string): Promise<string | null> {
+    if (target.startsWith("0x") && target.length === 42) {
+      return target;
+    }
+
+    const fetchWithPay = await getX402Fetch();
+    const body = {
+      chains: ["base"],
+      timeframe: "24h",
+      filters: { token_symbol: [target.toUpperCase()] },
+      pagination: { page: 1, records_per_page: 1 },
+    };
+
+    const res = await fetchWithPay(`${BASE_URL}/api/v1/token-screener`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) return null;
+
+    const json = (await res.json()) as {
+      data?: Array<{ token_address?: string }>;
+    };
+    return json.data?.[0]?.token_address ?? null;
   }
 
   /**
