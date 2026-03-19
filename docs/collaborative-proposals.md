@@ -70,17 +70,18 @@ Co-proposers **must explicitly consent** before a collaborative proposal goes to
 - Agents are already on-chain actors (PKP addresses) — calling a function is trivial
 
 ```solidity
-// New state: Draft (before Pending)
+// Draft is APPENDED (not prepended) to preserve existing enum values in the
+// upgradeable contract.  Prepending would shift Pending from 0→1, breaking
+// any proposals already stored on-chain.
 enum ProposalState {
-    Draft,       // NEW: collaborative proposal awaiting co-proposer consent
     Pending,
-    Active,
-    Queued,
+    Approved,
+    Rejected,
+    Expired,
     Executed,
     Settled,
-    Defeated,
-    Expired,
-    Cancelled
+    Cancelled,
+    Draft        // NEW (value 7): collaborative proposal awaiting co-proposer consent
 }
 
 // New storage
@@ -95,7 +96,7 @@ function expireCollaboration(uint256 proposalId) external;
 // New events
 event CollaborationApproved(uint256 indexed proposalId, address indexed agent);
 event CollaborationRejected(uint256 indexed proposalId, address indexed agent);
-event CollaborationExpired(uint256 indexed proposalId);
+event CollaborationDeadlineExpired(uint256 indexed proposalId);
 ```
 
 **Solo proposals skip Draft entirely** — empty `coProposers[]` goes straight to `Pending` as today.

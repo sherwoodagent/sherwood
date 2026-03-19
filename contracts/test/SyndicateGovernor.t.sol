@@ -54,8 +54,7 @@ contract SyndicateGovernorTest is Test {
         SyndicateVault vaultImpl = new SyndicateVault();
         bytes memory vaultInit = abi.encodeCall(
             SyndicateVault.initialize,
-            (
-                ISyndicateVault.InitParams({
+            (ISyndicateVault.InitParams({
                     asset: address(usdc),
                     name: "Sherwood Vault",
                     symbol: "swUSDC",
@@ -65,8 +64,7 @@ contract SyndicateGovernorTest is Test {
                     agentRegistry: address(agentRegistry),
                     governor: address(0),
                     managementFeeBps: 50
-                })
-            )
+                }))
         );
         vault = SyndicateVault(payable(address(new ERC1967Proxy(address(vaultImpl), vaultInit))));
 
@@ -117,6 +115,10 @@ contract SyndicateGovernorTest is Test {
 
     // ==================== HELPERS ====================
 
+    function _emptyCoProposers() internal pure returns (ISyndicateGovernor.CoProposer[] memory) {
+        return new ISyndicateGovernor.CoProposer[](0);
+    }
+
     /// @dev Create a simple proposal: "approve USDC to target" as execute, "approve 0" as settle
     function _createSimpleProposal(uint256 perfFeeBps, uint256 duration)
         internal
@@ -125,19 +127,16 @@ contract SyndicateGovernorTest is Test {
         calls = new BatchExecutorLib.Call[](2);
         // Execute call: approve targetToken to spend vault's USDC
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(targetToken), 50_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 50_000e6)), value: 0
         });
         // Settle call: revoke approval
         calls[1] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(targetToken), 0)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
         });
 
         vm.prank(agent);
-        proposalId = governor.propose(address(vault), "ipfs://test", perfFeeBps, duration, calls, 1);
+        proposalId =
+            governor.propose(address(vault), "ipfs://test", perfFeeBps, duration, calls, 1, _emptyCoProposers());
 
         // Mine a block so the snapshot block is in the past for voting
         vm.warp(block.timestamp + 1);
@@ -167,9 +166,7 @@ contract SyndicateGovernorTest is Test {
     function _simpleSettleCalls() internal view returns (BatchExecutorLib.Call[] memory) {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(targetToken), 0)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
         });
         return calls;
     }
@@ -215,7 +212,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(random);
         vm.expectRevert(ISyndicateGovernor.NotRegisteredAgent.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1);
+        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
     }
 
     function test_propose_vaultNotRegistered_reverts() public {
@@ -225,7 +222,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.VaultNotRegistered.selector);
-        governor.propose(makeAddr("fakeVault"), "ipfs://test", 1500, 7 days, calls, 1);
+        governor.propose(makeAddr("fakeVault"), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
     }
 
     function test_propose_performanceFeeTooHigh_reverts() public {
@@ -235,7 +232,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.PerformanceFeeTooHigh.selector);
-        governor.propose(address(vault), "ipfs://test", MAX_PERF_FEE_BPS + 1, 7 days, calls, 1);
+        governor.propose(address(vault), "ipfs://test", MAX_PERF_FEE_BPS + 1, 7 days, calls, 1, _emptyCoProposers());
     }
 
     function test_propose_strategyDurationTooLong_reverts() public {
@@ -245,7 +242,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.StrategyDurationTooLong.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, MAX_STRATEGY_DURATION + 1, calls, 1);
+        governor.propose(address(vault), "ipfs://test", 1500, MAX_STRATEGY_DURATION + 1, calls, 1, _emptyCoProposers());
     }
 
     function test_propose_strategyDurationTooShort_reverts() public {
@@ -255,7 +252,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.StrategyDurationTooShort.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, 30 minutes, calls, 1);
+        governor.propose(address(vault), "ipfs://test", 1500, 30 minutes, calls, 1, _emptyCoProposers());
     }
 
     function test_propose_invalidSplitIndex_reverts() public {
@@ -266,12 +263,12 @@ contract SyndicateGovernorTest is Test {
         // splitIndex = 0 (no execute calls)
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.InvalidSplitIndex.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 0);
+        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 0, _emptyCoProposers());
 
         // splitIndex = calls.length (no settle calls)
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.InvalidSplitIndex.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 2);
+        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 2, _emptyCoProposers());
     }
 
     function test_propose_emptyCalls_reverts() public {
@@ -279,7 +276,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.EmptyCalls.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1);
+        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
     }
 
     // ==================== VOTING ====================
@@ -979,7 +976,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.VaultNotRegistered.selector);
-        governor.propose(address(vault), "ipfs://new", 1500, 7 days, calls, 1);
+        governor.propose(address(vault), "ipfs://new", 1500, 7 days, calls, 1, _emptyCoProposers());
     }
 
     function test_multipleVaults_interleavedProposals() public {
@@ -993,8 +990,7 @@ contract SyndicateGovernorTest is Test {
         SyndicateVault vaultImpl2 = new SyndicateVault();
         bytes memory vault2Init = abi.encodeCall(
             SyndicateVault.initialize,
-            (
-                ISyndicateVault.InitParams({
+            (ISyndicateVault.InitParams({
                     asset: address(usdc),
                     name: "Vault B",
                     symbol: "swUSDC-B",
@@ -1004,8 +1000,7 @@ contract SyndicateGovernorTest is Test {
                     agentRegistry: address(agentRegistry),
                     governor: address(governor),
                     managementFeeBps: 50
-                })
-            )
+                }))
         );
         SyndicateVault vault2 = SyndicateVault(payable(address(new ERC1967Proxy(address(vaultImpl2), vault2Init))));
 
@@ -1033,35 +1028,29 @@ contract SyndicateGovernorTest is Test {
         // Create proposals on BOTH vaults
         BatchExecutorLib.Call[] memory calls1 = new BatchExecutorLib.Call[](2);
         calls1[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(targetToken), 50_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 50_000e6)), value: 0
         });
         calls1[1] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(targetToken), 0)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
         });
 
         BatchExecutorLib.Call[] memory calls2 = new BatchExecutorLib.Call[](2);
         calls2[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(targetToken), 30_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 30_000e6)), value: 0
         });
         calls2[1] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (address(targetToken), 0)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
         });
 
         // Propose on vault1
         vm.prank(agent);
-        uint256 pid1 = governor.propose(address(vault), "ipfs://v1-strategy", 1500, 7 days, calls1, 1);
+        uint256 pid1 =
+            governor.propose(address(vault), "ipfs://v1-strategy", 1500, 7 days, calls1, 1, _emptyCoProposers());
 
         // Propose on vault2
         vm.prank(agent2);
-        uint256 pid2 = governor.propose(address(vault2), "ipfs://v2-strategy", 2000, 5 days, calls2, 1);
+        uint256 pid2 =
+            governor.propose(address(vault2), "ipfs://v2-strategy", 2000, 5 days, calls2, 1, _emptyCoProposers());
 
         vm.warp(block.timestamp + 1);
 

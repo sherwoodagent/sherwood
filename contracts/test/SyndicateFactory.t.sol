@@ -145,9 +145,7 @@ contract SyndicateFactoryTest is Test {
         // Owner executes batch (simple approve call — owner-only in governor model)
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
-            target: address(usdc),
-            data: abi.encodeCall(usdc.approve, (makeAddr("protocol"), 1_000e6)),
-            value: 0
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (makeAddr("protocol"), 1_000e6)), value: 0
         });
 
         vm.prank(creator1); // vault owner

@@ -13,8 +13,8 @@ interface ISyndicateGovernor {
         Expired, // execution window passed without execution
         Executed, // strategy is live
         Settled, // P&L calculated, fee distributed
-        Cancelled // proposer or owner cancelled
-
+        Cancelled, // proposer or owner cancelled
+        Draft // collaborative proposal awaiting co-proposer consent (appended to preserve existing enum values)
     }
 
     // ── Structs ──
@@ -43,6 +43,11 @@ interface ISyndicateGovernor {
         uint256 executeBy;
         uint256 executedAt;
         ProposalState state;
+    }
+
+    struct CoProposer {
+        address agent;
+        uint256 splitBps;
     }
 
     // ── Errors ──
@@ -76,6 +81,17 @@ interface ISyndicateGovernor {
     error NotVaultOwner();
     error SettlementCausedLoss();
     error StrategyDurationNotElapsed();
+
+    // ── Collaborative proposal errors ──
+    error NotCoProposer();
+    error CollaborationExpired();
+    error AlreadyApproved();
+    error InvalidSplits();
+    error TooManyCoProposers();
+    error LeadSplitTooLow();
+    error SplitTooLow();
+    error DuplicateCoProposer();
+    error NotDraftState();
 
     // ── Events ──
 
@@ -114,6 +130,15 @@ interface ISyndicateGovernor {
     event MaxStrategyDurationUpdated(uint256 oldValue, uint256 newValue);
     event CooldownPeriodUpdated(uint256 oldValue, uint256 newValue);
 
+    // ── Collaborative proposal events ──
+    event CollaborativeProposalCreated(
+        uint256 indexed proposalId, address indexed leadProposer, address[] coProposers, uint256[] splitsBps
+    );
+    event CollaborationApproved(uint256 indexed proposalId, address indexed agent);
+    event CollaborationRejected(uint256 indexed proposalId, address indexed agent);
+    event CollaborationDeadlineExpired(uint256 indexed proposalId);
+    event CollaborationWindowUpdated(uint256 oldValue, uint256 newValue);
+
     // ── Functions ──
 
     function propose(
@@ -122,7 +147,8 @@ interface ISyndicateGovernor {
         uint256 performanceFeeBps,
         uint256 strategyDuration,
         BatchExecutorLib.Call[] calldata calls,
-        uint256 splitIndex
+        uint256 splitIndex,
+        CoProposer[] calldata coProposers
     ) external returns (uint256 proposalId);
 
     function vote(uint256 proposalId, bool support) external;
@@ -139,6 +165,12 @@ interface ISyndicateGovernor {
 
     function emergencyCancel(uint256 proposalId) external;
 
+    // ── Collaborative proposal functions ──
+
+    function approveCollaboration(uint256 proposalId) external;
+    function rejectCollaboration(uint256 proposalId) external;
+    function expireCollaboration(uint256 proposalId) external;
+
     // ── Setters ──
 
     function addVault(address vault) external;
@@ -149,6 +181,7 @@ interface ISyndicateGovernor {
     function setMaxPerformanceFeeBps(uint256 newMaxPerformanceFeeBps) external;
     function setMaxStrategyDuration(uint256 newMaxStrategyDuration) external;
     function setCooldownPeriod(uint256 newCooldownPeriod) external;
+    function setCollaborationWindow(uint256 newCollaborationWindow) external;
 
     // ── Views ──
 
@@ -164,4 +197,5 @@ interface ISyndicateGovernor {
     function getCooldownEnd(address vault) external view returns (uint256);
     function getCapitalSnapshot(uint256 proposalId) external view returns (uint256);
     function isRegisteredVault(address vault) external view returns (bool);
+    function getCoProposers(uint256 proposalId) external view returns (CoProposer[] memory);
 }

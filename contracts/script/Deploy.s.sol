@@ -109,11 +109,12 @@ contract Deploy is Script {
         // 5. Register deployer as agent (dev mode — PKP and EOA are both deployer)
         // NOTE: agentId must be set to the deployer's ERC-8004 agent ID
         uint256 agentId = creatorAgentId;
-        SyndicateVault(payable(vaultProxy)).registerAgent(
-            agentId, // ERC-8004 identity
-            deployer, // pkpAddress (in dev, deployer acts as agent)
-            deployer // operatorEOA
-        );
+        SyndicateVault(payable(vaultProxy))
+            .registerAgent(
+                agentId, // ERC-8004 identity
+                deployer, // pkpAddress (in dev, deployer acts as agent)
+                deployer // operatorEOA
+            );
         console.log("Registered deployer as agent");
 
         vm.stopBroadcast();
