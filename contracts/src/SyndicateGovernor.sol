@@ -205,7 +205,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     /// @inheritdoc ISyndicateGovernor
     function vote(uint256 proposalId, VoteType support) external {
         StrategyProposal storage proposal = _proposals[proposalId];
-        if (proposal.id == 0) revert ProposalNotApproved(); // proposal doesn't exist
+        if (proposal.id == 0) revert ProposalNotFound();
         if (_resolveState(proposal) != ProposalState.Pending) revert NotWithinVotingPeriod();
         if (_hasVoted[proposalId][msg.sender]) revert AlreadyVoted();
 
@@ -373,6 +373,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         }
 
         _requireCoProposer(proposalId);
+        if (!ISyndicateVault(proposal.vault).isAgent(msg.sender)) revert NotRegisteredAgent();
         if (coProposerApprovals[proposalId][msg.sender]) revert AlreadyApproved();
 
         coProposerApprovals[proposalId][msg.sender] = true;
@@ -523,8 +524,9 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     // ==================== VIEWS ====================
 
     /// @inheritdoc ISyndicateGovernor
-    function getProposal(uint256 proposalId) external view returns (StrategyProposal memory) {
-        return _proposals[proposalId];
+    function getProposal(uint256 proposalId) external view returns (StrategyProposal memory p) {
+        p = _proposals[proposalId];
+        p.state = _resolveStateView(_proposals[proposalId]);
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -820,10 +822,11 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
                 CoProposer[] storage coProps = _coProposers[proposalId];
                 if (coProps.length > 0) {
                     // Distribute to co-proposers first, lead gets remainder
+                    // Deregistered co-proposers are skipped — their share goes to the lead
                     uint256 distributed = 0;
                     for (uint256 i = 0; i < coProps.length; i++) {
                         uint256 share = (agentFee * coProps[i].splitBps) / 10000;
-                        if (share > 0) {
+                        if (share > 0 && ISyndicateVault(vault).isAgent(coProps[i].agent)) {
                             ISyndicateVault(vault).transferPerformanceFee(asset, coProps[i].agent, share);
                             distributed += share;
                         }

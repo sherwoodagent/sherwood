@@ -845,4 +845,155 @@ contract CollaborativeProposalsTest is Test {
         assertEq(usdc.balanceOf(coAgent1), co1BalBefore + 400e6);
         assertEq(usdc.balanceOf(leadAgent), leadBalBefore + 600e6);
     }
+
+    // ==================== DEREGISTERED CO-PROPOSER ====================
+
+    function test_approveCollaboration_deregisteredCoProposer_reverts() public {
+        uint256 proposalId = _createCollabProposal();
+
+        // Owner deregisters coAgent1 after proposal creation
+        vm.prank(owner);
+        vault.removeAgent(coAgent1);
+
+        // Deregistered co-proposer cannot approve
+        vm.prank(coAgent1);
+        vm.expectRevert(ISyndicateGovernor.NotRegisteredAgent.selector);
+        governor.approveCollaboration(proposalId);
+    }
+
+    function test_settlement_deregisteredCoProposer_shareGoesToLead() public {
+        uint256 proposalId = _createAndExecuteCollabProposal();
+
+        // Simulate profit
+        usdc.mint(address(vault), 10_000e6);
+
+        // Deregister coAgent1 after execution
+        vm.prank(owner);
+        vault.removeAgent(coAgent1);
+
+        uint256 leadBalBefore = usdc.balanceOf(leadAgent);
+        uint256 co1BalBefore = usdc.balanceOf(coAgent1);
+        uint256 co2BalBefore = usdc.balanceOf(coAgent2);
+
+        vm.prank(leadAgent);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
+
+        // Performance fee: 20% of 10k = 2000
+        // coAgent1 deregistered → 600 skipped, goes to lead
+        // coAgent2: 10% of 2000 = 200
+        // Lead remainder: 2000 - 200 = 1800
+        assertEq(usdc.balanceOf(coAgent1), co1BalBefore); // no payment
+        assertEq(usdc.balanceOf(coAgent2), co2BalBefore + 200e6);
+        assertEq(usdc.balanceOf(leadAgent), leadBalBefore + 1_800e6);
+    }
+
+    // ==================== EMERGENCY SETTLE WITH COLLABORATIVE ====================
+
+    function test_emergencySettle_distributesToCoProposers() public {
+        uint256 proposalId = _createAndExecuteCollabProposal();
+
+        // Simulate profit
+        usdc.mint(address(vault), 10_000e6);
+
+        uint256 leadBalBefore = usdc.balanceOf(leadAgent);
+        uint256 co1BalBefore = usdc.balanceOf(coAgent1);
+        uint256 co2BalBefore = usdc.balanceOf(coAgent2);
+
+        // Warp past strategy duration
+        vm.warp(block.timestamp + 7 days);
+
+        vm.prank(owner);
+        governor.emergencySettle(proposalId, _simpleSettleCalls());
+
+        // Same distribution: coAgent1 600, coAgent2 200, lead 1200
+        assertEq(usdc.balanceOf(coAgent1), co1BalBefore + 600e6);
+        assertEq(usdc.balanceOf(coAgent2), co2BalBefore + 200e6);
+        assertEq(usdc.balanceOf(leadAgent), leadBalBefore + 1_200e6);
+    }
+
+    // ==================== SETTLE BY AGENT WITH LOSS ====================
+
+    function test_settleByAgent_withLoss_collaborative_reverts() public {
+        uint256 proposalId = _createAndExecuteCollabProposal();
+
+        // Simulate loss by burning vault tokens
+        uint256 vaultBal = usdc.balanceOf(address(vault));
+        vm.prank(address(vault));
+        usdc.transfer(address(0xdead), vaultBal / 2);
+
+        vm.prank(leadAgent);
+        vm.expectRevert(ISyndicateGovernor.SettlementCausedLoss.selector);
+        governor.settleByAgent(proposalId, _simpleSettleCalls());
+    }
+
+    // ==================== ABSTAIN VOTE ON COLLABORATIVE ====================
+
+    function test_abstainVote_collaborative_countsTowardQuorum() public {
+        uint256 proposalId = _createApprovedCollabProposal();
+
+        // lp1 votes For, lp2 votes Abstain
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.Abstain);
+
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+
+        // Should be Approved (60k For + 40k Abstain = 100k total, quorum 40% of 100k = 40k met)
+        assertEq(uint256(governor.getProposalState(proposalId)), uint256(ISyndicateGovernor.ProposalState.Approved));
+    }
+
+    function test_abstainOnlyVote_collaborative_rejected() public {
+        uint256 proposalId = _createApprovedCollabProposal();
+
+        // Both vote Abstain — quorum met but votesFor (0) <= votesAgainst (0)
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.Abstain);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.Abstain);
+
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+
+        assertEq(uint256(governor.getProposalState(proposalId)), uint256(ISyndicateGovernor.ProposalState.Rejected));
+    }
+
+    // ==================== getProposal RETURNS RESOLVED STATE ====================
+
+    function test_getProposal_returnsResolvedState_expired() public {
+        uint256 proposalId = _createCollabProposal();
+
+        // Warp past collaboration deadline
+        vm.warp(block.timestamp + 48 hours + 1);
+
+        ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
+        // getProposal should return resolved Expired, not stale Draft
+        assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Expired));
+        // Should match getProposalState
+        assertEq(uint256(p.state), uint256(governor.getProposalState(proposalId)));
+    }
+
+    function test_getProposal_returnsResolvedState_approved() public {
+        uint256 proposalId = _createApprovedCollabProposal();
+
+        // Vote in favor
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+
+        // Warp past voting period
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+
+        ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
+        assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Approved));
+        assertEq(uint256(p.state), uint256(governor.getProposalState(proposalId)));
+    }
+
+    // ==================== VOTE ON NON-EXISTENT PROPOSAL ====================
+
+    function test_vote_nonExistentProposal_reverts() public {
+        vm.prank(lp1);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotFound.selector);
+        governor.vote(999, ISyndicateGovernor.VoteType.For);
+    }
 }

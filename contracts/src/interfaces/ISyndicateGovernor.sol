@@ -86,6 +86,7 @@ interface ISyndicateGovernor {
     error NotWithinVotingPeriod();
     error NoVotingPower();
     error AlreadyVoted();
+    error ProposalNotFound();
     error ProposalNotApproved();
     error ExecutionWindowExpired();
     error StrategyAlreadyActive();
