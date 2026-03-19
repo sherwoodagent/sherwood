@@ -509,7 +509,8 @@ contract SyndicateGovernorTest is Test {
         });
 
         vm.prank(agent);
-        uint256 proposalId = governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
+        uint256 proposalId =
+            governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
         vm.warp(block.timestamp + 1);
 
         vm.prank(lp1);
@@ -635,11 +636,13 @@ contract SyndicateGovernorTest is Test {
         calls[0] = BatchExecutorLib.Call({
             target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 50_000e6)), value: 0
         });
-        calls[1] =
-            BatchExecutorLib.Call({target: address(revertingTarget), data: abi.encodeCall(revertingTarget.fail, ()), value: 0});
+        calls[1] = BatchExecutorLib.Call({
+            target: address(revertingTarget), data: abi.encodeCall(revertingTarget.fail, ()), value: 0
+        });
 
         vm.prank(agent);
-        uint256 proposalId = governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
+        uint256 proposalId =
+            governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
         vm.warp(block.timestamp + 1);
 
         vm.prank(lp1);
