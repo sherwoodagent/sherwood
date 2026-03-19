@@ -89,7 +89,6 @@ interface ISyndicateGovernor {
     error AlreadyApproved();
     error InvalidSplits();
     error TooManyCoProposers();
-    error LeadSplitTooLow();
     error SplitTooLow();
     error DuplicateCoProposer();
     error NotDraftState();

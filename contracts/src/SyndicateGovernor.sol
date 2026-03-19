@@ -46,7 +46,6 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
     uint256 public constant DEFAULT_MAX_CO_PROPOSERS = 5;
     uint256 public constant MIN_SPLIT_BPS = 100; // 1%
-    uint256 public constant MIN_LEAD_SPLIT_BPS = 1000; // 10%
     uint256 public constant DEFAULT_COLLABORATION_WINDOW = 48 hours;
     uint256 public constant MIN_COLLABORATION_WINDOW = 1 hours;
     uint256 public constant MAX_COLLABORATION_WINDOW = 7 days;
@@ -659,10 +658,8 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             totalCoSplitBps += splitBps;
         }
 
-        // Lead split = 10000 - totalCoSplitBps
+        // Lead split = 10000 - totalCoSplitBps (must be > 0)
         if (totalCoSplitBps >= 10000) revert InvalidSplits();
-        uint256 leadSplitBps = 10000 - totalCoSplitBps;
-        if (leadSplitBps < MIN_LEAD_SPLIT_BPS) revert LeadSplitTooLow();
     }
 
     /// @dev Try pre-committed unwind calls first. If they revert, run the fallback calls.

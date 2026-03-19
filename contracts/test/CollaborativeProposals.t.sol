@@ -493,17 +493,6 @@ contract CollaborativeProposalsTest is Test {
         governor.propose(address(vault), "ipfs://test", 2000, 7 days, _simpleCalls(), 1, coProps);
     }
 
-    function test_validation_leadSplitTooLow() public {
-        // co splits sum to 9100, lead = 900 (below 1000 min)
-        ISyndicateGovernor.CoProposer[] memory coProps = new ISyndicateGovernor.CoProposer[](2);
-        coProps[0] = ISyndicateGovernor.CoProposer({agent: coAgent1, splitBps: 5000});
-        coProps[1] = ISyndicateGovernor.CoProposer({agent: coAgent2, splitBps: 4100});
-
-        vm.prank(leadAgent);
-        vm.expectRevert(ISyndicateGovernor.LeadSplitTooLow.selector);
-        governor.propose(address(vault), "ipfs://test", 2000, 7 days, _simpleCalls(), 1, coProps);
-    }
-
     function test_validation_splitTooLow() public {
         // One co-proposer has less than 100 bps (1%)
         ISyndicateGovernor.CoProposer[] memory coProps = new ISyndicateGovernor.CoProposer[](1);
