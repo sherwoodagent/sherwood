@@ -4,6 +4,8 @@
  * Docs: https://docs.messari.io
  * Payment: x402 (USDC on Base) — no API key required
  * Data: 34,000+ assets, market metrics, protocol data, asset profiles
+ * Pricing: $0.10/call for asset details, ROI, ATH. $0.15–$0.35 for timeseries.
+ *          $0.55 for news/signals. Full pricing: https://docs.messari.io/api-reference/x402-payments
  *
  * Supports all query types:
  *   token   → asset profile (description, technology, governance)
@@ -21,10 +23,10 @@ const BASE_URL = "https://data.messari.io/api";
 
 /** Known x402 cost per Messari query (approximate). */
 export const MESSARI_COST_ESTIMATE: Record<string, string> = {
-  token: "~$0.01",
-  market: "~$0.01",
-  "smart-money": "~$0.01",
-  wallet: "~$0.01",
+  token: "~$0.10",
+  market: "~$0.10",
+  "smart-money": "~$0.10",
+  wallet: "~$0.10",
 };
 
 export class MessariProvider implements ResearchProvider {
