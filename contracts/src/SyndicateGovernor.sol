@@ -92,6 +92,12 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     /// @notice Authorized factory that can register vaults
     address public factory;
 
+    /// @notice Simple reentrancy lock for execute/settle entrypoints
+    uint256 private _reentrancyStatus;
+
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -128,6 +134,14 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             minStrategyDuration: p.minStrategyDuration,
             maxStrategyDuration: p.maxStrategyDuration
         });
+        _reentrancyStatus = _NOT_ENTERED;
+    }
+
+    modifier nonReentrant() {
+        if (_reentrancyStatus == _ENTERED) revert Reentrancy();
+        _reentrancyStatus = _ENTERED;
+        _;
+        _reentrancyStatus = _NOT_ENTERED;
     }
 
     // ==================== PROPOSAL LIFECYCLE ====================
@@ -213,7 +227,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     }
 
     /// @inheritdoc ISyndicateGovernor
-    function executeProposal(uint256 proposalId) external {
+    function executeProposal(uint256 proposalId) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
 
         // Resolve state (may transition Pending→Approved/Rejected/Expired or Approved→Expired)
@@ -241,19 +255,19 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         for (uint256 i = 0; i < splitIdx; i++) {
             executeCalls[i] = calls[i];
         }
-        ISyndicateVault(vault).executeGovernorBatch(executeCalls);
-
         // Update state
         _activeProposal[vault] = proposalId;
         proposal.state = ProposalState.Executed;
         proposal.executedAt = block.timestamp;
+
+        ISyndicateVault(vault).executeGovernorBatch(executeCalls);
 
         emit ProposalExecuted(proposalId, vault, balanceBefore);
     }
 
     /// @inheritdoc ISyndicateGovernor
     /// @notice Path 1: Agent settles. Tries pre-committed calls first, falls back to custom calls. Enforces no loss.
-    function settleByAgent(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external {
+    function settleByAgent(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
         if (msg.sender != proposal.proposer) revert NotProposer();
@@ -273,7 +287,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
     /// @inheritdoc ISyndicateGovernor
     /// @notice Path 2: Permissionless settle using pre-committed calls. After duration.
-    function settleProposal(uint256 proposalId) external {
+    function settleProposal(uint256 proposalId) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
         if (block.timestamp < proposal.executedAt + proposal.strategyDuration) revert StrategyDurationNotElapsed();
@@ -294,7 +308,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
     /// @inheritdoc ISyndicateGovernor
     /// @notice Path 3: Vault owner settles. Tries pre-committed calls first, falls back to custom. After duration.
-    function emergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external {
+    function emergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
         if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
@@ -650,7 +664,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         if (totalCoSplitBps >= 10000) revert InvalidSplits();
     }
 
-    /// @dev Try pre-committed unwind calls first. If they revert, run the fallback calls.
+    /// @dev Try pre-committed unwind calls first. If they revert, run fallback calls or bubble original error.
     function _tryPrecommittedThenFallback(
         uint256 proposalId,
         StrategyProposal storage proposal,
@@ -670,11 +684,15 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         try ISyndicateVault(proposal.vault).executeGovernorBatch(settleCalls) {
         // Pre-committed calls succeeded — done
         }
-        catch {
+        catch (bytes memory reason) {
             // Pre-committed calls failed — run fallback calls
-            if (fallbackCalls.length > 0) {
-                ISyndicateVault(proposal.vault).executeGovernorBatch(fallbackCalls);
+            if (fallbackCalls.length == 0) {
+                assembly {
+                    revert(add(reason, 32), mload(reason))
+                }
             }
+
+            ISyndicateVault(proposal.vault).executeGovernorBatch(fallbackCalls);
         }
     }
 
@@ -783,6 +801,11 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         // Distribute fees on profit
         agentFee = 0;
         uint256 mgmtFee = 0;
+        // Finalize state before external transfers to avoid reentrancy on stale state.
+        _activeProposal[vault] = 0;
+        _lastSettledAt[vault] = block.timestamp;
+        proposal.state = ProposalState.Settled;
+
         if (pnl > 0) {
             // forge-lint: disable-next-line(unsafe-typecast)
             uint256 profit = uint256(pnl);
@@ -816,13 +839,6 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
                 ISyndicateVault(vault).transferPerformanceFee(asset, vaultOwner, mgmtFee);
             }
         }
-
-        // Clear active proposal
-        _activeProposal[vault] = 0;
-        _lastSettledAt[vault] = block.timestamp;
-
-        // Update state
-        proposal.state = ProposalState.Settled;
 
         uint256 duration = block.timestamp - proposal.executedAt;
         emit ProposalSettled(proposalId, vault, pnl, agentFee + mgmtFee, duration);

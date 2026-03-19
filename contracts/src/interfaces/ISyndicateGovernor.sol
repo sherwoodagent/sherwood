@@ -117,6 +117,7 @@ interface ISyndicateGovernor {
     error InvalidCollaborationWindow();
     error NotAuthorized();
     error InvalidMaxCoProposers();
+    error Reentrancy();
 
     // ── Events ──
 

@@ -12,6 +12,19 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
 
+contract AssertActiveProposalOnExecute {
+    function assertActive(address governor, address vault, uint256 proposalId) external view {
+        uint256 active = ISyndicateGovernor(governor).getActiveProposal(vault);
+        require(active == proposalId, "active proposal not set");
+    }
+}
+
+contract RevertingTarget {
+    function fail() external pure {
+        revert("expected revert");
+    }
+}
+
 contract SyndicateGovernorTest is Test {
     SyndicateGovernor public governor;
     SyndicateVault public vault;
@@ -37,11 +50,15 @@ contract SyndicateGovernorTest is Test {
 
     // ── A simple target contract for testing batch execution ──
     ERC20Mock public targetToken;
+    AssertActiveProposalOnExecute public activeAssertTarget;
+    RevertingTarget public revertingTarget;
 
     function setUp() public {
         // Deploy tokens
         usdc = new ERC20Mock("USD Coin", "USDC", 6);
         targetToken = new ERC20Mock("Target", "TGT", 18);
+        activeAssertTarget = new AssertActiveProposalOnExecute();
+        revertingTarget = new RevertingTarget();
 
         // Deploy shared executor lib
         executorLib = new BatchExecutorLib();
@@ -480,6 +497,31 @@ contract SyndicateGovernorTest is Test {
         assertEq(governor.getCapitalSnapshot(proposalId), 100_000e6); // 60k + 40k
     }
 
+    function test_executeProposal_setsActiveBeforeExternalCalls() public {
+        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](2);
+        calls[0] = BatchExecutorLib.Call({
+            target: address(activeAssertTarget),
+            data: abi.encodeCall(activeAssertTarget.assertActive, (address(governor), address(vault), 1)),
+            value: 0
+        });
+        calls[1] = BatchExecutorLib.Call({
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
+        });
+
+        vm.prank(agent);
+        uint256 proposalId = governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
+        vm.warp(block.timestamp + 1);
+
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+
+        governor.executeProposal(proposalId);
+        assertEq(governor.getActiveProposal(address(vault)), proposalId);
+    }
+
     function test_executeProposal_notApproved_reverts() public {
         (uint256 proposalId,) = _createSimpleProposal(1500, 7 days);
 
@@ -586,6 +628,33 @@ contract SyndicateGovernorTest is Test {
         vm.prank(random);
         vm.expectRevert(ISyndicateGovernor.NotProposer.selector);
         governor.settleByAgent(proposalId, _simpleSettleCalls());
+    }
+
+    function test_settleByAgent_precommittedFailWithoutFallback_reverts() public {
+        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](2);
+        calls[0] = BatchExecutorLib.Call({
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 50_000e6)), value: 0
+        });
+        calls[1] =
+            BatchExecutorLib.Call({target: address(revertingTarget), data: abi.encodeCall(revertingTarget.fail, ()), value: 0});
+
+        vm.prank(agent);
+        uint256 proposalId = governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
+        vm.warp(block.timestamp + 1);
+
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+        governor.executeProposal(proposalId);
+        vm.warp(block.timestamp + 7 days);
+
+        vm.prank(agent);
+        vm.expectRevert(bytes("expected revert"));
+        governor.settleByAgent(proposalId, new BatchExecutorLib.Call[](0));
+
+        assertEq(uint256(governor.getProposalState(proposalId)), uint256(ISyndicateGovernor.ProposalState.Executed));
     }
 
     function test_settleByAgent_causedLoss_reverts() public {
