@@ -8,6 +8,7 @@ import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
 
@@ -119,6 +120,21 @@ contract SyndicateGovernorTest is Test {
         return new ISyndicateGovernor.CoProposer[](0);
     }
 
+    function _defaultInitParams() internal view returns (ISyndicateGovernor.InitParams memory) {
+        return ISyndicateGovernor.InitParams({
+            owner: owner,
+            votingPeriod: VOTING_PERIOD,
+            executionWindow: EXECUTION_WINDOW,
+            quorumBps: QUORUM_BPS,
+            maxPerformanceFeeBps: MAX_PERF_FEE_BPS,
+            cooldownPeriod: COOLDOWN_PERIOD,
+            collaborationWindow: 48 hours,
+            maxCoProposers: 5,
+            minStrategyDuration: 1 days,
+            maxStrategyDuration: 7 days
+        });
+    }
+
     /// @dev Create a simple proposal: "approve USDC to target" as execute, "approve 0" as settle
     function _createSimpleProposal(uint256 perfFeeBps, uint256 duration)
         internal
@@ -184,6 +200,47 @@ contract SyndicateGovernorTest is Test {
         assertEq(governor.getGovernorParams().maxStrategyDuration, 7 days);
         assertEq(governor.proposalCount(), 0);
         assertTrue(governor.isRegisteredVault(address(vault)));
+    }
+
+    function test_initialize_zeroOwner_reverts() public {
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        ISyndicateGovernor.InitParams memory p = _defaultInitParams();
+        p.owner = address(0);
+
+        bytes memory initData = abi.encodeCall(SyndicateGovernor.initialize, (p));
+        vm.expectRevert(ISyndicateGovernor.ZeroAddress.selector);
+        new ERC1967Proxy(address(govImpl), initData);
+    }
+
+    function test_initialize_invalidStrategyDurationBounds_reverts() public {
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        ISyndicateGovernor.InitParams memory p = _defaultInitParams();
+        p.minStrategyDuration = 8 days;
+        p.maxStrategyDuration = 7 days;
+
+        bytes memory initData = abi.encodeCall(SyndicateGovernor.initialize, (p));
+        vm.expectRevert(ISyndicateGovernor.InvalidStrategyDurationBounds.selector);
+        new ERC1967Proxy(address(govImpl), initData);
+    }
+
+    function test_initialize_invalidCollaborationWindow_reverts() public {
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        ISyndicateGovernor.InitParams memory p = _defaultInitParams();
+        p.collaborationWindow = 30 minutes;
+
+        bytes memory initData = abi.encodeCall(SyndicateGovernor.initialize, (p));
+        vm.expectRevert(ISyndicateGovernor.InvalidCollaborationWindow.selector);
+        new ERC1967Proxy(address(govImpl), initData);
+    }
+
+    function test_initialize_invalidMaxCoProposers_reverts() public {
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        ISyndicateGovernor.InitParams memory p = _defaultInitParams();
+        p.maxCoProposers = 0;
+
+        bytes memory initData = abi.encodeCall(SyndicateGovernor.initialize, (p));
+        vm.expectRevert(ISyndicateGovernor.InvalidMaxCoProposers.selector);
+        new ERC1967Proxy(address(govImpl), initData);
     }
 
     // ==================== PROPOSE ====================
@@ -829,19 +886,19 @@ contract SyndicateGovernorTest is Test {
 
     function test_setters_notOwner_reverts() public {
         vm.startPrank(random);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setVotingPeriod(2 days);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setExecutionWindow(2 days);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setQuorumBps(5000);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setMaxPerformanceFeeBps(2000);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setMaxStrategyDuration(14 days);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setMinStrategyDuration(2 hours);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setCooldownPeriod(2 days);
         vm.stopPrank();
     }
@@ -859,6 +916,25 @@ contract SyndicateGovernorTest is Test {
         vm.prank(owner);
         vm.expectRevert(ISyndicateGovernor.VaultAlreadyRegistered.selector);
         governor.addVault(address(vault));
+    }
+
+    function test_addVault_notAuthorized_reverts() public {
+        vm.prank(random);
+        vm.expectRevert(ISyndicateGovernor.NotAuthorized.selector);
+        governor.addVault(makeAddr("newVault"));
+    }
+
+    function test_addVault_factoryAuthorized_succeeds() public {
+        address factory_ = makeAddr("factory");
+        address newVault = makeAddr("newVault");
+
+        vm.prank(owner);
+        governor.setFactory(factory_);
+
+        vm.prank(factory_);
+        governor.addVault(newVault);
+
+        assertTrue(governor.isRegisteredVault(newVault));
     }
 
     function test_removeVault() public {

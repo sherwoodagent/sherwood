@@ -8,6 +8,7 @@ import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
 
@@ -362,7 +363,7 @@ contract CollaborativeProposalsTest is Test {
 
         // Trying to approve after expiry reverts
         vm.prank(coAgent1);
-        vm.expectRevert(ISyndicateGovernor.NotDraftState.selector);
+        vm.expectRevert(ISyndicateGovernor.CollaborationExpired.selector);
         governor.approveCollaboration(proposalId);
     }
 
@@ -614,7 +615,7 @@ contract CollaborativeProposalsTest is Test {
         vm.warp(block.timestamp + 48 hours + 1);
 
         vm.prank(coAgent1);
-        vm.expectRevert(ISyndicateGovernor.NotDraftState.selector);
+        vm.expectRevert(ISyndicateGovernor.CollaborationExpired.selector);
         governor.approveCollaboration(proposalId);
     }
 
@@ -694,7 +695,7 @@ contract CollaborativeProposalsTest is Test {
 
     function test_setCollaborationWindow_notOwner_reverts() public {
         vm.prank(random);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setCollaborationWindow(24 hours);
     }
 
@@ -758,7 +759,7 @@ contract CollaborativeProposalsTest is Test {
 
     function test_setMaxCoProposers_notOwner_reverts() public {
         vm.prank(random);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setMaxCoProposers(3);
     }
 

@@ -14,6 +14,8 @@ import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
 import {SyndicateGovernor} from "../src/SyndicateGovernor.sol";
 import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 contract SyndicateVaultTest is Test {
     SyndicateVault public vault;
@@ -214,7 +216,7 @@ contract SyndicateVaultTest is Test {
 
     function test_registerAgent_notOwner_reverts() public {
         vm.prank(lp1);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, lp1));
         vault.registerAgent(agent2NftId, agentPkp2, agentEoa2);
     }
 
@@ -251,7 +253,7 @@ contract SyndicateVaultTest is Test {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
         vm.prank(agentPkp);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, agentPkp));
         vault.executeBatch(calls);
     }
 
@@ -262,7 +264,7 @@ contract SyndicateVaultTest is Test {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
         vm.prank(owner);
-        vm.expectRevert();
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         vault.executeBatch(calls);
     }
 
@@ -274,7 +276,7 @@ contract SyndicateVaultTest is Test {
 
         vm.startPrank(lp1);
         usdc.approve(address(vault), 10_000e6);
-        vm.expectRevert();
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         vault.deposit(10_000e6, lp1);
         vm.stopPrank();
     }
@@ -305,7 +307,7 @@ contract SyndicateVaultTest is Test {
 
     function test_approveDepositor_notOwner_reverts() public {
         vm.prank(lp1);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, lp1));
         vault.approveDepositor(makeAddr("depositor"));
     }
 
