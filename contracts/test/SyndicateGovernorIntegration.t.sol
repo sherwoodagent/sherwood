@@ -41,7 +41,6 @@ contract SyndicateGovernorIntegrationTest is Test {
     uint256 constant EXECUTION_WINDOW = 1 days;
     uint256 constant QUORUM_BPS = 4000; // 40%
     uint256 constant MAX_PERF_FEE_BPS = 3000; // 30%
-    uint256 constant MAX_STRATEGY_DURATION = 30 days;
     uint256 constant COOLDOWN_PERIOD = 1 days;
 
     function setUp() public {
@@ -60,7 +59,26 @@ contract SyndicateGovernorIntegrationTest is Test {
         agentRegistry = new MockAgentRegistry();
         agentNftId = agentRegistry.mint(agent);
 
-        // Deploy vault
+        // Deploy governor first
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        bytes memory govInit = abi.encodeCall(
+            SyndicateGovernor.initialize,
+            (ISyndicateGovernor.InitParams({
+                    owner: owner,
+                    votingPeriod: VOTING_PERIOD,
+                    executionWindow: EXECUTION_WINDOW,
+                    quorumBps: QUORUM_BPS,
+                    maxPerformanceFeeBps: MAX_PERF_FEE_BPS,
+                    cooldownPeriod: COOLDOWN_PERIOD,
+                    collaborationWindow: 48 hours,
+                    maxCoProposers: 5,
+                    minStrategyDuration: 1 days,
+                    maxStrategyDuration: 7 days
+                }))
+        );
+        governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
+
+        // Deploy vault with governor set
         SyndicateVault vaultImpl = new SyndicateVault();
         bytes memory vaultInit = abi.encodeCall(
             SyndicateVault.initialize,
@@ -72,35 +90,15 @@ contract SyndicateGovernorIntegrationTest is Test {
                     executorImpl: address(executorLib),
                     openDeposits: true,
                     agentRegistry: address(agentRegistry),
-                    governor: address(0),
+                    governor: address(governor),
                     managementFeeBps: 0
                 }))
         );
         vault = SyndicateVault(payable(address(new ERC1967Proxy(address(vaultImpl), vaultInit))));
 
-        // Register agent
-        vm.prank(owner);
-        vault.registerAgent(agentNftId, agent);
-
-        // Deploy governor
-        SyndicateGovernor govImpl = new SyndicateGovernor();
-        bytes memory govInit = abi.encodeCall(
-            SyndicateGovernor.initialize,
-            (
-                owner,
-                VOTING_PERIOD,
-                EXECUTION_WINDOW,
-                QUORUM_BPS,
-                MAX_PERF_FEE_BPS,
-                MAX_STRATEGY_DURATION,
-                COOLDOWN_PERIOD
-            )
-        );
-        governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
-
-        // Wire up
+        // Register agent and wire up
         vm.startPrank(owner);
-        vault.setGovernor(address(governor));
+        vault.registerAgent(agentNftId, agent);
         governor.addVault(address(vault));
         vm.stopPrank();
 
@@ -127,6 +125,10 @@ contract SyndicateGovernorIntegrationTest is Test {
 
     // ── Helpers ──
 
+    function _emptyCoProposers() internal pure returns (ISyndicateGovernor.CoProposer[] memory) {
+        return new ISyndicateGovernor.CoProposer[](0);
+    }
+
     function _proposeVoteApprove(
         BatchExecutorLib.Call[] memory calls,
         uint256 splitIndex,
@@ -134,15 +136,16 @@ contract SyndicateGovernorIntegrationTest is Test {
         uint256 duration
     ) internal returns (uint256 proposalId) {
         vm.prank(agent);
-        proposalId = governor.propose(address(vault), "ipfs://test", feeBps, duration, calls, splitIndex);
+        proposalId =
+            governor.propose(address(vault), "ipfs://test", feeBps, duration, calls, splitIndex, _emptyCoProposers());
 
         // Mine a block so the snapshot block is in the past
         vm.warp(block.timestamp + 1);
 
         vm.prank(lp1);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
         vm.prank(lp2);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         vm.warp(block.timestamp + VOTING_PERIOD + 1);
     }
@@ -160,16 +163,17 @@ contract SyndicateGovernorIntegrationTest is Test {
         });
 
         vm.prank(agent);
-        uint256 proposalId = governor.propose(address(vault), "ipfs://strategy1", 1500, 7 days, calls, 1);
+        uint256 proposalId =
+            governor.propose(address(vault), "ipfs://strategy1", 1500, 7 days, calls, 1, _emptyCoProposers());
 
         // Mine a block for checkpoint
         vm.warp(block.timestamp + 1);
 
         // 2. Shareholders vote
         vm.prank(lp1);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
         vm.prank(lp2);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         // 3. Voting ends → Approved
         vm.warp(block.timestamp + VOTING_PERIOD + 1);
@@ -225,16 +229,17 @@ contract SyndicateGovernorIntegrationTest is Test {
         });
 
         vm.prank(agent);
-        uint256 proposalId = governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1);
+        uint256 proposalId =
+            governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
 
         // Mine a block for checkpoint
         vm.warp(block.timestamp + 1);
 
         // Majority votes against
         vm.prank(lp1);
-        governor.vote(proposalId, false);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.Against);
         vm.prank(lp2);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         vm.warp(block.timestamp + VOTING_PERIOD + 1);
 

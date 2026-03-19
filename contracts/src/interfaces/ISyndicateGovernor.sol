@@ -7,6 +7,7 @@ interface ISyndicateGovernor {
     // ── Enums ──
 
     enum ProposalState {
+        Draft, // collaborative proposal awaiting co-proposer consent
         Pending, // voting active
         Approved, // voting ended, quorum met, majority FOR
         Rejected, // voting ended, failed quorum or majority
@@ -16,15 +17,37 @@ interface ISyndicateGovernor {
         Cancelled // proposer or owner cancelled
     }
 
+    enum VoteType {
+        For,
+        Against,
+        Abstain
+    }
+
     // ── Structs ──
+
+    struct InitParams {
+        address owner;
+        uint256 votingPeriod;
+        uint256 executionWindow;
+        uint256 quorumBps;
+        uint256 maxPerformanceFeeBps;
+        uint256 cooldownPeriod;
+        uint256 collaborationWindow;
+        uint256 maxCoProposers;
+        uint256 minStrategyDuration;
+        uint256 maxStrategyDuration;
+    }
 
     struct GovernorParams {
         uint256 votingPeriod;
         uint256 executionWindow;
         uint256 quorumBps;
         uint256 maxPerformanceFeeBps;
-        uint256 maxStrategyDuration;
         uint256 cooldownPeriod;
+        uint256 collaborationWindow;
+        uint256 maxCoProposers;
+        uint256 minStrategyDuration;
+        uint256 maxStrategyDuration;
     }
 
     struct StrategyProposal {
@@ -37,11 +60,17 @@ interface ISyndicateGovernor {
         uint256 strategyDuration;
         uint256 votesFor;
         uint256 votesAgainst;
+        uint256 votesAbstain;
         uint256 snapshotTimestamp;
         uint256 voteEnd;
         uint256 executeBy;
         uint256 executedAt;
         ProposalState state;
+    }
+
+    struct CoProposer {
+        address agent;
+        uint256 splitBps;
     }
 
     // ── Errors ──
@@ -57,6 +86,7 @@ interface ISyndicateGovernor {
     error NotWithinVotingPeriod();
     error NoVotingPower();
     error AlreadyVoted();
+    error ProposalNotFound();
     error ProposalNotApproved();
     error ExecutionWindowExpired();
     error StrategyAlreadyActive();
@@ -68,13 +98,28 @@ interface ISyndicateGovernor {
     error InvalidExecutionWindow();
     error InvalidQuorumBps();
     error InvalidMaxPerformanceFeeBps();
-    error InvalidMaxStrategyDuration();
+    error InvalidStrategyDurationBounds();
     error InvalidCooldownPeriod();
     error InvalidVault();
     error ZeroAddress();
     error NotVaultOwner();
     error SettlementCausedLoss();
     error StrategyDurationNotElapsed();
+
+    // ── Collaborative proposal errors ──
+    error NotCoProposer();
+    error CollaborationExpired();
+    error AlreadyApproved();
+    error InvalidSplits();
+    error TooManyCoProposers();
+    error SplitTooLow();
+    error LeadSplitTooLow();
+    error DuplicateCoProposer();
+    error NotDraftState();
+    error InvalidCollaborationWindow();
+    error NotAuthorized();
+    error InvalidMaxCoProposers();
+    error Reentrancy();
 
     // ── Events ──
 
@@ -89,7 +134,7 @@ interface ISyndicateGovernor {
         string metadataURI
     );
 
-    event VoteCast(uint256 indexed proposalId, address indexed voter, bool support, uint256 weight);
+    event VoteCast(uint256 indexed proposalId, address indexed voter, VoteType support, uint256 weight);
 
     event ProposalExecuted(uint256 indexed proposalId, address indexed vault, uint256 capitalSnapshot);
 
@@ -103,6 +148,7 @@ interface ISyndicateGovernor {
 
     event EmergencySettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 customCallCount);
 
+    event FactoryUpdated(address indexed factory);
     event VaultAdded(address indexed vault);
     event VaultRemoved(address indexed vault);
 
@@ -110,8 +156,20 @@ interface ISyndicateGovernor {
     event ExecutionWindowUpdated(uint256 oldValue, uint256 newValue);
     event QuorumBpsUpdated(uint256 oldValue, uint256 newValue);
     event MaxPerformanceFeeBpsUpdated(uint256 oldValue, uint256 newValue);
+    event MinStrategyDurationUpdated(uint256 oldValue, uint256 newValue);
     event MaxStrategyDurationUpdated(uint256 oldValue, uint256 newValue);
     event CooldownPeriodUpdated(uint256 oldValue, uint256 newValue);
+
+    // ── Collaborative proposal events ──
+    event CollaborativeProposalCreated(
+        uint256 indexed proposalId, address indexed leadProposer, address[] coProposers, uint256[] splitsBps
+    );
+    event CollaborationApproved(uint256 indexed proposalId, address indexed agent);
+    event CollaborationRejected(uint256 indexed proposalId, address indexed agent);
+    event CollaborationTransitionedToPending(uint256 indexed proposalId);
+    event CollaborationDeadlineExpired(uint256 indexed proposalId);
+    event CollaborationWindowUpdated(uint256 oldValue, uint256 newValue);
+    event MaxCoProposersUpdated(uint256 oldValue, uint256 newValue);
 
     // ── Functions ──
 
@@ -121,10 +179,11 @@ interface ISyndicateGovernor {
         uint256 performanceFeeBps,
         uint256 strategyDuration,
         BatchExecutorLib.Call[] calldata calls,
-        uint256 splitIndex
+        uint256 splitIndex,
+        CoProposer[] calldata coProposers
     ) external returns (uint256 proposalId);
 
-    function vote(uint256 proposalId, bool support) external;
+    function vote(uint256 proposalId, VoteType support) external;
 
     function executeProposal(uint256 proposalId) external;
 
@@ -138,16 +197,25 @@ interface ISyndicateGovernor {
 
     function emergencyCancel(uint256 proposalId) external;
 
+    // ── Collaborative proposal functions ──
+
+    function approveCollaboration(uint256 proposalId) external;
+    function rejectCollaboration(uint256 proposalId) external;
+
     // ── Setters ──
 
     function addVault(address vault) external;
     function removeVault(address vault) external;
+    function setFactory(address factory_) external;
     function setVotingPeriod(uint256 newVotingPeriod) external;
     function setExecutionWindow(uint256 newExecutionWindow) external;
     function setQuorumBps(uint256 newQuorumBps) external;
     function setMaxPerformanceFeeBps(uint256 newMaxPerformanceFeeBps) external;
+    function setMinStrategyDuration(uint256 newMinStrategyDuration) external;
     function setMaxStrategyDuration(uint256 newMaxStrategyDuration) external;
     function setCooldownPeriod(uint256 newCooldownPeriod) external;
+    function setCollaborationWindow(uint256 newCollaborationWindow) external;
+    function setMaxCoProposers(uint256 newMaxCoProposers) external;
 
     // ── Views ──
 
@@ -163,4 +231,5 @@ interface ISyndicateGovernor {
     function getCooldownEnd(address vault) external view returns (uint256);
     function getCapitalSnapshot(uint256 proposalId) external view returns (uint256);
     function isRegisteredVault(address vault) external view returns (bool);
+    function getCoProposers(uint256 proposalId) external view returns (CoProposer[] memory);
 }

@@ -55,7 +55,7 @@ dataSources:
       eventHandlers:
         - event: ProposalCreated(indexed uint256,indexed address,indexed address,uint256,uint256,uint256,uint256,string)
           handler: handleProposalCreated
-        - event: VoteCast(indexed uint256,indexed address,bool,uint256)
+        - event: VoteCast(indexed uint256,indexed address,uint8,uint256)
           handler: handleVoteCast
         - event: ProposalExecuted(indexed uint256,indexed address,uint256)
           handler: handleProposalExecuted
@@ -112,11 +112,4 @@ templates:
         # Config changes
         - event: OpenDepositsUpdated(bool)
           handler: handleOpenDepositsUpdated
-        # Governor integration
-        - event: GovernorUpdated(indexed address,indexed address)
-          handler: handleGovernorUpdated
-        - event: RedemptionsLockedEvent()
-          handler: handleRedemptionsLocked
-        - event: RedemptionsUnlockedEvent()
-          handler: handleRedemptionsUnlocked
       file: ./src/vault.ts

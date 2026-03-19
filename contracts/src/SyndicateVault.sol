@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
+import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
 import {BatchExecutorLib} from "./BatchExecutorLib.sol";
 import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {
@@ -78,11 +79,11 @@ contract SyndicateVault is
     /// @notice Trusted governor contract
     address private _governor;
 
-    /// @notice True when a strategy is live (redemptions blocked)
-    bool private _redemptionsLocked;
-
     /// @notice Vault owner's management fee on strategy profits (basis points, set at init)
     uint256 private _managementFeeBps;
+
+    /// @dev Reserved storage for future upgrades. Decrease by 1 for each new slot added.
+    uint256[40] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -92,6 +93,7 @@ contract SyndicateVault is
     function initialize(InitParams memory p) external initializer {
         if (p.owner == address(0)) revert InvalidOwner();
         if (p.executorImpl == address(0)) revert InvalidExecutorImpl();
+        if (p.governor == address(0)) revert InvalidGovernor();
         // agentRegistry may be address(0) on chains without ERC-8004
 
         __ERC4626_init(IERC20(p.asset));
@@ -259,25 +261,6 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
-    function setGovernor(address governor_) external onlyOwner {
-        address old = _governor;
-        _governor = governor_;
-        emit GovernorUpdated(old, governor_);
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function lockRedemptions() external onlyGovernor {
-        _redemptionsLocked = true;
-        emit RedemptionsLockedEvent();
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function unlockRedemptions() external onlyGovernor {
-        _redemptionsLocked = false;
-        emit RedemptionsUnlockedEvent();
-    }
-
-    /// @inheritdoc ISyndicateVault
     function executeGovernorBatch(BatchExecutorLib.Call[] calldata calls) external onlyGovernor {
         (bool success, bytes memory returnData) =
             _executorImpl.delegatecall(abi.encodeCall(BatchExecutorLib.executeBatch, (calls)));
@@ -300,7 +283,7 @@ contract SyndicateVault is
 
     /// @inheritdoc ISyndicateVault
     function redemptionsLocked() external view returns (bool) {
-        return _redemptionsLocked;
+        return ISyndicateGovernor(_governor).getActiveProposal(address(this)) != 0;
     }
 
     /// @inheritdoc ISyndicateVault
@@ -356,7 +339,7 @@ contract SyndicateVault is
         override
         whenNotPaused
     {
-        if (_redemptionsLocked) revert RedemptionsLocked();
+        if (ISyndicateGovernor(_governor).getActiveProposal(address(this)) != 0) revert RedemptionsLocked();
         if (assets > _totalDeposited) {
             _totalDeposited = 0;
         } else {

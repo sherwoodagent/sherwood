@@ -7,6 +7,7 @@ import {SyndicateVault} from "../../src/SyndicateVault.sol";
 import {BatchExecutorLib} from "../../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../../src/SyndicateFactory.sol";
 import {SyndicateGovernor} from "../../src/SyndicateGovernor.sol";
+import {ISyndicateGovernor} from "../../src/interfaces/ISyndicateGovernor.sol";
 import {StrategyRegistry} from "../../src/StrategyRegistry.sol";
 
 /**
@@ -59,15 +60,18 @@ contract DeployTestnet is Script {
         SyndicateGovernor govImpl = new SyndicateGovernor();
         bytes memory govInitData = abi.encodeCall(
             SyndicateGovernor.initialize,
-            (
-                deployer, // owner
-                1 days, // votingPeriod
-                1 days, // executionWindow
-                4000, // quorumBps (40%)
-                3000, // maxPerformanceFeeBps (30%)
-                30 days, // maxStrategyDuration
-                1 days // cooldownPeriod
-            )
+            (ISyndicateGovernor.InitParams({
+                    owner: deployer,
+                    votingPeriod: 1 days,
+                    executionWindow: 1 days,
+                    quorumBps: 4000,
+                    maxPerformanceFeeBps: 3000,
+                    cooldownPeriod: 1 days,
+                    collaborationWindow: 48 hours,
+                    maxCoProposers: 5,
+                    minStrategyDuration: 1 days,
+                    maxStrategyDuration: 7 days
+                }))
         );
         address governorProxy = address(new ERC1967Proxy(address(govImpl), govInitData));
         console.log("SyndicateGovernor:", governorProxy);
@@ -76,6 +80,9 @@ contract DeployTestnet is Script {
         SyndicateFactory factory =
             new SyndicateFactory(address(executorLib), address(vaultImpl), L2_REGISTRAR, AGENT_REGISTRY, governorProxy);
         console.log("SyndicateFactory:", address(factory));
+
+        // Authorize factory to register new vaults on governor
+        ISyndicateGovernor(governorProxy).setFactory(address(factory));
 
         // 4. Deploy StrategyRegistry (UUPS proxy)
         StrategyRegistry registryImpl = new StrategyRegistry();

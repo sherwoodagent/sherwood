@@ -6,6 +6,9 @@ import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../src/SyndicateFactory.sol";
+import {SyndicateGovernor} from "../src/SyndicateGovernor.sol";
+import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockL2Registrar} from "./mocks/MockL2Registrar.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
@@ -18,9 +21,11 @@ contract SyndicateFactoryTest is Test {
     MockL2Registrar public ensRegistrar;
     MockAgentRegistry public agentRegistry;
 
+    SyndicateGovernor public governor;
+
+    address public owner = makeAddr("owner");
     address public creator1 = makeAddr("creator1");
     address public creator2 = makeAddr("creator2");
-    address public governorAddr = makeAddr("governor");
 
     uint256 public creator1AgentId;
     uint256 public creator2AgentId;
@@ -31,9 +36,33 @@ contract SyndicateFactoryTest is Test {
         vaultImpl = new SyndicateVault();
         ensRegistrar = new MockL2Registrar();
         agentRegistry = new MockAgentRegistry();
-        factory = new SyndicateFactory(
-            address(executorLib), address(vaultImpl), address(ensRegistrar), address(agentRegistry), governorAddr
+
+        // Deploy real governor
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        bytes memory govInit = abi.encodeCall(
+            SyndicateGovernor.initialize,
+            (ISyndicateGovernor.InitParams({
+                    owner: owner,
+                    votingPeriod: 1 days,
+                    executionWindow: 1 days,
+                    quorumBps: 4000,
+                    maxPerformanceFeeBps: 3000,
+                    cooldownPeriod: 1 days,
+                    collaborationWindow: 48 hours,
+                    maxCoProposers: 5,
+                    minStrategyDuration: 1 days,
+                    maxStrategyDuration: 7 days
+                }))
         );
+        governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
+
+        factory = new SyndicateFactory(
+            address(executorLib), address(vaultImpl), address(ensRegistrar), address(agentRegistry), address(governor)
+        );
+
+        // Set factory on governor so it can call addVault
+        vm.prank(owner);
+        governor.setFactory(address(factory));
 
         // Mint ERC-8004 identity NFTs for creators
         creator1AgentId = agentRegistry.mint(creator1);
@@ -281,7 +310,9 @@ contract SyndicateFactoryTest is Test {
     function test_createFactory_noRegistries() public {
         // Deploy factory with address(0) for ENS + agent registry (Robinhood L2 scenario)
         SyndicateFactory noRegFactory =
-            new SyndicateFactory(address(executorLib), address(vaultImpl), address(0), address(0), governorAddr);
+            new SyndicateFactory(address(executorLib), address(vaultImpl), address(0), address(0), address(governor));
+        vm.prank(owner);
+        governor.setFactory(address(noRegFactory));
 
         // createSyndicate works without identity verification
         vm.prank(creator1);
@@ -298,7 +329,9 @@ contract SyndicateFactoryTest is Test {
 
     function test_createFactory_noRegistries_noENSRegistration() public {
         SyndicateFactory noRegFactory =
-            new SyndicateFactory(address(executorLib), address(vaultImpl), address(0), address(0), governorAddr);
+            new SyndicateFactory(address(executorLib), address(vaultImpl), address(0), address(0), address(governor));
+        vm.prank(owner);
+        governor.setFactory(address(noRegFactory));
 
         vm.prank(creator1);
         noRegFactory.createSyndicate(0, _configWithSubdomain("no-ens-fund"));
@@ -310,7 +343,9 @@ contract SyndicateFactoryTest is Test {
 
     function test_createFactory_noRegistries_isSubdomainAvailable() public {
         SyndicateFactory noRegFactory =
-            new SyndicateFactory(address(executorLib), address(vaultImpl), address(0), address(0), governorAddr);
+            new SyndicateFactory(address(executorLib), address(vaultImpl), address(0), address(0), address(governor));
+        vm.prank(owner);
+        governor.setFactory(address(noRegFactory));
 
         assertTrue(noRegFactory.isSubdomainAvailable("available-name"));
 
@@ -322,7 +357,9 @@ contract SyndicateFactoryTest is Test {
 
     function test_createFactory_noRegistries_registerAgent() public {
         SyndicateFactory noRegFactory =
-            new SyndicateFactory(address(executorLib), address(vaultImpl), address(0), address(0), governorAddr);
+            new SyndicateFactory(address(executorLib), address(vaultImpl), address(0), address(0), address(governor));
+        vm.prank(owner);
+        governor.setFactory(address(noRegFactory));
 
         vm.prank(creator1);
         (, address vaultAddr) = noRegFactory.createSyndicate(0, _defaultConfig());

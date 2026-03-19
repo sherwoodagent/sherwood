@@ -226,8 +226,11 @@ function buildMockData(vault: Address): GovernorData {
       executionWindow: DAY,
       quorumBps: 2000n,  // 20%
       maxPerformanceFeeBps: 3000n, // 30%
-      maxStrategyDuration: 90n * DAY,
       cooldownPeriod: DAY,
+      collaborationWindow: 48n * 3600n,
+      maxCoProposers: 5n,
+      minStrategyDuration: DAY,
+      maxStrategyDuration: 90n * DAY,
     },
   };
 }

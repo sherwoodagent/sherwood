@@ -16,16 +16,18 @@ import {
 // ── Types ──────────────────────────────────────────────────
 
 export enum ProposalState {
-  Pending = 0,
-  Approved = 1,
-  Rejected = 2,
-  Expired = 3,
-  Executed = 4,
-  Settled = 5,
-  Cancelled = 6,
+  Draft = 0,
+  Pending = 1,
+  Approved = 2,
+  Rejected = 3,
+  Expired = 4,
+  Executed = 5,
+  Settled = 6,
+  Cancelled = 7,
 }
 
 export const PROPOSAL_STATE_LABELS: Record<ProposalState, string> = {
+  [ProposalState.Draft]: "Draft",
   [ProposalState.Pending]: "Pending",
   [ProposalState.Approved]: "Approved",
   [ProposalState.Rejected]: "Rejected",
@@ -50,6 +52,7 @@ export interface ProposalData {
   strategyDuration: bigint;
   votesFor: bigint;
   votesAgainst: bigint;
+  votesAbstain?: bigint;
   snapshotTimestamp: bigint;
   voteEnd: bigint;
   executeBy: bigint;
@@ -67,8 +70,11 @@ export interface GovernorParams {
   executionWindow: bigint;
   quorumBps: bigint;
   maxPerformanceFeeBps: bigint;
-  maxStrategyDuration: bigint;
   cooldownPeriod: bigint;
+  collaborationWindow: bigint;
+  maxCoProposers: bigint;
+  minStrategyDuration: bigint;
+  maxStrategyDuration: bigint;
 }
 
 export interface GovernorData {
@@ -183,8 +189,11 @@ export async function fetchGovernorData(
     executionWindow: 0n,
     quorumBps: 0n,
     maxPerformanceFeeBps: 0n,
-    maxStrategyDuration: 0n,
     cooldownPeriod: 0n,
+    collaborationWindow: 0n,
+    maxCoProposers: 0n,
+    minStrategyDuration: 0n,
+    maxStrategyDuration: 0n,
   };
   const activeProposalId = (baseResults[2].result as bigint) ?? 0n;
   const cooldownEnd = (baseResults[3].result as bigint) ?? 0n;
@@ -250,6 +259,7 @@ export async function fetchGovernorData(
       strategyDuration: bigint;
       votesFor: bigint;
       votesAgainst: bigint;
+      votesAbstain: bigint;
       snapshotTimestamp: bigint;
       voteEnd: bigint;
       executeBy: bigint;
@@ -280,6 +290,7 @@ export async function fetchGovernorData(
       strategyDuration: p.strategyDuration,
       votesFor: p.votesFor,
       votesAgainst: p.votesAgainst,
+      votesAbstain: p.votesAbstain,
       snapshotTimestamp: p.snapshotTimestamp,
       voteEnd: p.voteEnd,
       executeBy: p.executeBy,

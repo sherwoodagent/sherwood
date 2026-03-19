@@ -11,9 +11,15 @@ import {MockMToken} from "./mocks/MockMToken.sol";
 import {MockComptroller} from "./mocks/MockComptroller.sol";
 import {MockSwapRouter} from "./mocks/MockSwapRouter.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
+import {SyndicateGovernor} from "../src/SyndicateGovernor.sol";
+import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 contract SyndicateVaultTest is Test {
     SyndicateVault public vault;
+    SyndicateGovernor public governor;
     BatchExecutorLib public executorLib;
     ERC20Mock public usdc;
     ERC20Mock public weth;
@@ -51,6 +57,25 @@ contract SyndicateVaultTest is Test {
         agent1NftId = agentRegistry.mint(agentWallet);
         agent2NftId = agentRegistry.mint(agentWallet2);
 
+        // Deploy governor first
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        bytes memory govInit = abi.encodeCall(
+            SyndicateGovernor.initialize,
+            (ISyndicateGovernor.InitParams({
+                    owner: owner,
+                    votingPeriod: 1 days,
+                    executionWindow: 1 days,
+                    quorumBps: 4000,
+                    maxPerformanceFeeBps: 3000,
+                    cooldownPeriod: 1 days,
+                    collaborationWindow: 48 hours,
+                    maxCoProposers: 5,
+                    minStrategyDuration: 1 days,
+                    maxStrategyDuration: 7 days
+                }))
+        );
+        governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
+
         // Deploy vault via proxy with executor lib
         SyndicateVault impl = new SyndicateVault();
         bytes memory initData = abi.encodeCall(
@@ -63,7 +88,7 @@ contract SyndicateVaultTest is Test {
                     executorImpl: address(executorLib),
                     openDeposits: true,
                     agentRegistry: address(agentRegistry),
-                    governor: address(0),
+                    governor: address(governor),
                     managementFeeBps: 0
                 }))
         );
@@ -236,7 +261,7 @@ contract SyndicateVaultTest is Test {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
         vm.prank(owner);
-        vm.expectRevert();
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         vault.executeBatch(calls);
     }
 
@@ -248,7 +273,7 @@ contract SyndicateVaultTest is Test {
 
         vm.startPrank(lp1);
         usdc.approve(address(vault), 10_000e6);
-        vm.expectRevert();
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         vault.deposit(10_000e6, lp1);
         vm.stopPrank();
     }
@@ -279,7 +304,7 @@ contract SyndicateVaultTest is Test {
 
     function test_approveDepositor_notOwner_reverts() public {
         vm.prank(lp1);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, lp1));
         vault.approveDepositor(makeAddr("depositor"));
     }
 
@@ -321,7 +346,7 @@ contract SyndicateVaultTest is Test {
                     executorImpl: address(executorLib),
                     openDeposits: false,
                     agentRegistry: address(agentRegistry),
-                    governor: address(0),
+                    governor: address(governor),
                     managementFeeBps: 0
                 }))
         );

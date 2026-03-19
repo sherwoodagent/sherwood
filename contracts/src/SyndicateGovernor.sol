@@ -23,6 +23,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
  *   - Permissionless settlement after strategy duration ends
  *   - P&L calculated via balance snapshot diffs
  *   - Vote weight from ERC20Votes checkpoints (block-number snapshots)
+ *   - Collaborative proposals: multiple agents co-submit with fee splits
  */
 contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradeable, UUPSUpgradeable {
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -36,12 +37,19 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     uint256 public constant MIN_QUORUM_BPS = 1000; // 10%
     uint256 public constant MAX_QUORUM_BPS = 10000; // 100%
     uint256 public constant MAX_PERFORMANCE_FEE_CAP = 5000; // 50%
-    uint256 public constant MIN_STRATEGY_DURATION = 1 hours;
-    uint256 public constant MAX_STRATEGY_DURATION_CAP = 365 days;
+    uint256 public constant ABSOLUTE_MIN_STRATEGY_DURATION = 1 hours;
+    uint256 public constant ABSOLUTE_MAX_STRATEGY_DURATION = 30 days;
     uint256 public constant MIN_COOLDOWN_PERIOD = 1 hours;
     uint256 public constant MAX_COOLDOWN_PERIOD = 30 days;
 
-    // ── Storage ──
+    // ── Collaborative proposal constants (safety bounds) ──
+
+    uint256 public constant MIN_SPLIT_BPS = 100; // 1%
+    uint256 public constant MIN_COLLABORATION_WINDOW = 1 hours;
+    uint256 public constant MAX_COLLABORATION_WINDOW = 7 days;
+    uint256 public constant ABSOLUTE_MAX_CO_PROPOSERS = 10;
+
+    // ── Storage (existing — DO NOT reorder) ──
 
     /// @notice Governor parameters
     GovernorParams private _params;
@@ -70,39 +78,73 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     /// @notice Set of registered vault addresses
     EnumerableSet.AddressSet private _registeredVaults;
 
+    // ── Collaborative proposal storage ──
+
+    /// @notice Proposal ID → co-proposers array
+    mapping(uint256 => CoProposer[]) private _coProposers;
+
+    /// @notice Proposal ID → co-proposer address → approved
+    mapping(uint256 => mapping(address => bool)) public coProposerApprovals;
+
+    /// @notice Proposal ID → deadline for co-proposer consent
+    mapping(uint256 => uint256) public collaborationDeadline;
+
+    /// @notice Authorized factory that can register vaults
+    address public factory;
+
+    /// @notice Simple reentrancy lock for execute/settle entrypoints
+    uint256 private _reentrancyStatus;
+
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
+    /// @dev Reserved storage for future upgrades. Decrease by 1 for each new slot added.
+    uint256[40] private __gap;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
 
-    function initialize(
-        address owner_,
-        uint256 votingPeriod_,
-        uint256 executionWindow_,
-        uint256 quorumBps_,
-        uint256 maxPerformanceFeeBps_,
-        uint256 maxStrategyDuration_,
-        uint256 cooldownPeriod_
-    ) external initializer {
-        if (owner_ == address(0)) revert ZeroAddress();
+    function initialize(InitParams memory p) external initializer {
+        if (p.owner == address(0)) revert ZeroAddress();
+        if (
+            p.minStrategyDuration < ABSOLUTE_MIN_STRATEGY_DURATION
+                || p.maxStrategyDuration > ABSOLUTE_MAX_STRATEGY_DURATION
+                || p.minStrategyDuration > p.maxStrategyDuration
+        ) revert InvalidStrategyDurationBounds();
+        if (p.collaborationWindow < MIN_COLLABORATION_WINDOW || p.collaborationWindow > MAX_COLLABORATION_WINDOW) {
+            revert InvalidCollaborationWindow();
+        }
+        if (p.maxCoProposers == 0 || p.maxCoProposers > ABSOLUTE_MAX_CO_PROPOSERS) revert InvalidMaxCoProposers();
 
-        __Ownable_init(owner_);
+        __Ownable_init(p.owner);
 
-        _validateVotingPeriod(votingPeriod_);
-        _validateExecutionWindow(executionWindow_);
-        _validateQuorumBps(quorumBps_);
-        _validateMaxPerformanceFeeBps(maxPerformanceFeeBps_);
-        _validateMaxStrategyDuration(maxStrategyDuration_);
-        _validateCooldownPeriod(cooldownPeriod_);
+        _validateVotingPeriod(p.votingPeriod);
+        _validateExecutionWindow(p.executionWindow);
+        _validateQuorumBps(p.quorumBps);
+        _validateMaxPerformanceFeeBps(p.maxPerformanceFeeBps);
+        _validateCooldownPeriod(p.cooldownPeriod);
 
         _params = GovernorParams({
-            votingPeriod: votingPeriod_,
-            executionWindow: executionWindow_,
-            quorumBps: quorumBps_,
-            maxPerformanceFeeBps: maxPerformanceFeeBps_,
-            maxStrategyDuration: maxStrategyDuration_,
-            cooldownPeriod: cooldownPeriod_
+            votingPeriod: p.votingPeriod,
+            executionWindow: p.executionWindow,
+            quorumBps: p.quorumBps,
+            maxPerformanceFeeBps: p.maxPerformanceFeeBps,
+            cooldownPeriod: p.cooldownPeriod,
+            collaborationWindow: p.collaborationWindow,
+            maxCoProposers: p.maxCoProposers,
+            minStrategyDuration: p.minStrategyDuration,
+            maxStrategyDuration: p.maxStrategyDuration
         });
+        _reentrancyStatus = _NOT_ENTERED;
+    }
+
+    modifier nonReentrant() {
+        if (_reentrancyStatus == _ENTERED) revert Reentrancy();
+        _reentrancyStatus = _ENTERED;
+        _;
+        _reentrancyStatus = _NOT_ENTERED;
     }
 
     // ==================== PROPOSAL LIFECYCLE ====================
@@ -114,17 +156,25 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         uint256 performanceFeeBps,
         uint256 strategyDuration,
         BatchExecutorLib.Call[] calldata calls,
-        uint256 splitIndex
+        uint256 splitIndex,
+        CoProposer[] calldata coProposers
     ) external returns (uint256 proposalId) {
         if (!_registeredVaults.contains(vault)) revert VaultNotRegistered();
         if (!ISyndicateVault(vault).isAgent(msg.sender)) revert NotRegisteredAgent();
         if (performanceFeeBps > _params.maxPerformanceFeeBps) revert PerformanceFeeTooHigh();
         if (strategyDuration > _params.maxStrategyDuration) revert StrategyDurationTooLong();
-        if (strategyDuration < MIN_STRATEGY_DURATION) revert StrategyDurationTooShort();
+        if (strategyDuration < _params.minStrategyDuration) revert StrategyDurationTooShort();
         if (calls.length == 0) revert EmptyCalls();
         if (splitIndex == 0 || splitIndex >= calls.length) revert InvalidSplitIndex();
 
+        // Validate co-proposers if present
+        if (coProposers.length > 0) {
+            _validateCoProposers(vault, coProposers);
+        }
+
         proposalId = ++_proposalCount;
+
+        bool isCollaborative = coProposers.length > 0;
 
         _proposals[proposalId] = StrategyProposal({
             id: proposalId,
@@ -136,29 +186,30 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             strategyDuration: strategyDuration,
             votesFor: 0,
             votesAgainst: 0,
-            snapshotTimestamp: block.timestamp,
-            voteEnd: block.timestamp + _params.votingPeriod,
-            executeBy: block.timestamp + _params.votingPeriod + _params.executionWindow,
+            votesAbstain: 0,
+            snapshotTimestamp: isCollaborative ? 0 : block.timestamp,
+            voteEnd: isCollaborative ? 0 : block.timestamp + _params.votingPeriod,
+            executeBy: isCollaborative ? 0 : block.timestamp + _params.votingPeriod + _params.executionWindow,
             executedAt: 0,
-            state: ProposalState.Pending
+            state: isCollaborative ? ProposalState.Draft : ProposalState.Pending
         });
 
         // Store calls separately
-        for (uint256 i = 0; i < calls.length; i++) {
-            _proposalCalls[proposalId].push(calls[i]);
+        _storeCalls(proposalId, calls);
+
+        // Store co-proposers and set collaboration deadline
+        if (coProposers.length > 0) {
+            _storeCoProposers(proposalId, coProposers);
         }
 
-        emit ProposalCreated(
-            proposalId, msg.sender, vault, performanceFeeBps, strategyDuration, splitIndex, calls.length, metadataURI
-        );
+        _emitProposalCreated(proposalId, calls.length, metadataURI);
     }
 
     /// @inheritdoc ISyndicateGovernor
-    function vote(uint256 proposalId, bool support) external {
+    function vote(uint256 proposalId, VoteType support) external {
         StrategyProposal storage proposal = _proposals[proposalId];
-        if (proposal.id == 0) revert ProposalNotApproved(); // proposal doesn't exist
-        if (block.timestamp > proposal.voteEnd) revert NotWithinVotingPeriod();
-        if (proposal.state != ProposalState.Pending) revert NotWithinVotingPeriod();
+        if (proposal.id == 0) revert ProposalNotFound();
+        if (_resolveState(proposal) != ProposalState.Pending) revert NotWithinVotingPeriod();
         if (_hasVoted[proposalId][msg.sender]) revert AlreadyVoted();
 
         // Get vote weight from ERC20Votes checkpoint at proposal creation block
@@ -167,23 +218,24 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
         _hasVoted[proposalId][msg.sender] = true;
 
-        if (support) {
+        if (support == VoteType.For) {
             proposal.votesFor += weight;
-        } else {
+        } else if (support == VoteType.Against) {
             proposal.votesAgainst += weight;
+        } else {
+            proposal.votesAbstain += weight;
         }
 
         emit VoteCast(proposalId, msg.sender, support, weight);
     }
 
     /// @inheritdoc ISyndicateGovernor
-    function executeProposal(uint256 proposalId) external {
+    function executeProposal(uint256 proposalId) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
 
-        // Resolve state (may transition from Pending to Approved/Rejected/Expired)
+        // Resolve state (may transition Pending→Approved/Rejected/Expired or Approved→Expired)
         ProposalState currentState = _resolveState(proposal);
         if (currentState != ProposalState.Approved) revert ProposalNotApproved();
-        if (block.timestamp > proposal.executeBy) revert ExecutionWindowExpired();
 
         address vault = proposal.vault;
         if (_activeProposal[vault] != 0) revert StrategyAlreadyActive();
@@ -193,9 +245,6 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             revert CooldownNotElapsed();
         }
 
-        // Lock redemptions
-        ISyndicateVault(vault).lockRedemptions();
-
         // Snapshot vault balance before execution
         address asset = IERC4626(vault).asset();
         uint256 balanceBefore = IERC20(asset).balanceOf(vault);
@@ -203,27 +252,27 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
         // Execute the opening calls via the vault
         BatchExecutorLib.Call[] storage calls = _proposalCalls[proposalId];
-        uint256 splitIndex = proposal.splitIndex;
+        uint256 splitIdx = proposal.splitIndex;
 
-        BatchExecutorLib.Call[] memory executeCalls = new BatchExecutorLib.Call[](splitIndex);
-        for (uint256 i = 0; i < splitIndex; i++) {
+        BatchExecutorLib.Call[] memory executeCalls = new BatchExecutorLib.Call[](splitIdx);
+        for (uint256 i = 0; i < splitIdx; i++) {
             executeCalls[i] = calls[i];
         }
-        ISyndicateVault(vault).executeGovernorBatch(executeCalls);
-
         // Update state
         _activeProposal[vault] = proposalId;
         proposal.state = ProposalState.Executed;
         proposal.executedAt = block.timestamp;
+
+        ISyndicateVault(vault).executeGovernorBatch(executeCalls);
 
         emit ProposalExecuted(proposalId, vault, balanceBefore);
     }
 
     /// @inheritdoc ISyndicateGovernor
     /// @notice Path 1: Agent settles. Tries pre-committed calls first, falls back to custom calls. Enforces no loss.
-    function settleByAgent(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external {
+    function settleByAgent(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
-        if (proposal.state != ProposalState.Executed) revert ProposalNotExecuted();
+        if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
         if (msg.sender != proposal.proposer) revert NotProposer();
 
         // Try pre-committed unwind calls first, fall back to agent-provided calls
@@ -241,19 +290,19 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
     /// @inheritdoc ISyndicateGovernor
     /// @notice Path 2: Permissionless settle using pre-committed calls. After duration.
-    function settleProposal(uint256 proposalId) external {
+    function settleProposal(uint256 proposalId) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
-        if (proposal.state != ProposalState.Executed) revert ProposalNotExecuted();
+        if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
         if (block.timestamp < proposal.executedAt + proposal.strategyDuration) revert StrategyDurationNotElapsed();
 
         // Run the pre-committed unwind calls
         BatchExecutorLib.Call[] storage calls = _proposalCalls[proposalId];
-        uint256 splitIndex = proposal.splitIndex;
+        uint256 splitIdx = proposal.splitIndex;
         uint256 totalCalls = calls.length;
 
-        BatchExecutorLib.Call[] memory settleCalls = new BatchExecutorLib.Call[](totalCalls - splitIndex);
-        for (uint256 i = splitIndex; i < totalCalls; i++) {
-            settleCalls[i - splitIndex] = calls[i];
+        BatchExecutorLib.Call[] memory settleCalls = new BatchExecutorLib.Call[](totalCalls - splitIdx);
+        for (uint256 i = splitIdx; i < totalCalls; i++) {
+            settleCalls[i - splitIdx] = calls[i];
         }
         ISyndicateVault(proposal.vault).executeGovernorBatch(settleCalls);
 
@@ -262,10 +311,10 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
     /// @inheritdoc ISyndicateGovernor
     /// @notice Path 3: Vault owner settles. Tries pre-committed calls first, falls back to custom. After duration.
-    function emergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external {
+    function emergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
-        if (proposal.state != ProposalState.Executed) revert ProposalNotExecuted();
+        if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
         if (block.timestamp < proposal.executedAt + proposal.strategyDuration) revert StrategyDurationNotElapsed();
 
         // Try pre-committed unwind calls first, fall back to owner-provided calls
@@ -280,9 +329,15 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     function cancelProposal(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != proposal.proposer) revert NotProposer();
-        if (proposal.state != ProposalState.Pending) revert ProposalNotCancellable();
-        // Can only cancel during voting period
-        if (block.timestamp > proposal.voteEnd) revert ProposalNotCancellable();
+        ProposalState currentState = _resolveState(proposal);
+        // Can cancel during Draft (collaborative) or Pending (voting) state
+        if (currentState != ProposalState.Pending && currentState != ProposalState.Draft) {
+            revert ProposalNotCancellable();
+        }
+        // For Pending proposals, can only cancel during voting period
+        if (currentState == ProposalState.Pending && block.timestamp > proposal.voteEnd) {
+            revert ProposalNotCancellable();
+        }
 
         proposal.state = ProposalState.Cancelled;
         emit ProposalCancelled(proposalId, msg.sender);
@@ -292,10 +347,11 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     function emergencyCancel(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
-        // Can cancel anything that isn't already settled or cancelled
+        ProposalState currentState = _resolveState(proposal);
+        // Can cancel anything that isn't already settled, cancelled, or executed
         if (
-            proposal.state == ProposalState.Settled || proposal.state == ProposalState.Cancelled
-                || proposal.state == ProposalState.Executed
+            currentState == ProposalState.Settled || currentState == ProposalState.Cancelled
+                || currentState == ProposalState.Executed
         ) {
             revert ProposalNotCancellable();
         }
@@ -304,13 +360,74 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         emit ProposalCancelled(proposalId, msg.sender);
     }
 
+    // ==================== COLLABORATIVE PROPOSALS ====================
+
+    /// @inheritdoc ISyndicateGovernor
+    function approveCollaboration(uint256 proposalId) external {
+        StrategyProposal storage proposal = _proposals[proposalId];
+        ProposalState storedState = proposal.state;
+        ProposalState state = _resolveState(proposal);
+        // Give a specific error for expired collaboration windows
+        if (state != ProposalState.Draft) {
+            if (storedState == ProposalState.Draft && block.timestamp > collaborationDeadline[proposalId]) {
+                revert CollaborationExpired();
+            }
+            revert NotDraftState();
+        }
+
+        _requireCoProposer(proposalId);
+        if (!ISyndicateVault(proposal.vault).isAgent(msg.sender)) revert NotRegisteredAgent();
+        if (coProposerApprovals[proposalId][msg.sender]) revert AlreadyApproved();
+
+        coProposerApprovals[proposalId][msg.sender] = true;
+        emit CollaborationApproved(proposalId, msg.sender);
+
+        // Check if all co-proposers have approved
+        CoProposer[] storage coProps = _coProposers[proposalId];
+        bool allApproved = true;
+        for (uint256 i = 0; i < coProps.length; i++) {
+            if (!coProposerApprovals[proposalId][coProps[i].agent]) {
+                allApproved = false;
+                break;
+            }
+        }
+
+        if (allApproved) {
+            // Transition to Pending — voting begins
+            proposal.state = ProposalState.Pending;
+            proposal.snapshotTimestamp = block.timestamp;
+            proposal.voteEnd = block.timestamp + _params.votingPeriod;
+            proposal.executeBy = block.timestamp + _params.votingPeriod + _params.executionWindow;
+            emit CollaborationTransitionedToPending(proposalId);
+        }
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    function rejectCollaboration(uint256 proposalId) external {
+        StrategyProposal storage proposal = _proposals[proposalId];
+        if (_resolveState(proposal) != ProposalState.Draft) revert NotDraftState();
+
+        _requireCoProposer(proposalId);
+
+        proposal.state = ProposalState.Cancelled;
+        emit CollaborationRejected(proposalId, msg.sender);
+        emit ProposalCancelled(proposalId, msg.sender);
+    }
+
     // ==================== VAULT MANAGEMENT ====================
 
     /// @inheritdoc ISyndicateGovernor
-    function addVault(address vault) external onlyOwner {
+    function addVault(address vault) external {
+        if (msg.sender != owner() && msg.sender != factory) revert NotAuthorized();
         if (vault == address(0)) revert InvalidVault();
         if (!_registeredVaults.add(vault)) revert VaultAlreadyRegistered();
         emit VaultAdded(vault);
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    function setFactory(address factory_) external onlyOwner {
+        factory = factory_;
+        emit FactoryUpdated(factory_);
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -354,8 +471,26 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     }
 
     /// @inheritdoc ISyndicateGovernor
+    function setMinStrategyDuration(uint256 newMinStrategyDuration) external onlyOwner {
+        if (
+            newMinStrategyDuration < ABSOLUTE_MIN_STRATEGY_DURATION
+                || newMinStrategyDuration > _params.maxStrategyDuration
+        ) {
+            revert InvalidStrategyDurationBounds();
+        }
+        uint256 old = _params.minStrategyDuration;
+        _params.minStrategyDuration = newMinStrategyDuration;
+        emit MinStrategyDurationUpdated(old, newMinStrategyDuration);
+    }
+
+    /// @inheritdoc ISyndicateGovernor
     function setMaxStrategyDuration(uint256 newMaxStrategyDuration) external onlyOwner {
-        _validateMaxStrategyDuration(newMaxStrategyDuration);
+        if (
+            newMaxStrategyDuration > ABSOLUTE_MAX_STRATEGY_DURATION
+                || newMaxStrategyDuration < _params.minStrategyDuration
+        ) {
+            revert InvalidStrategyDurationBounds();
+        }
         uint256 old = _params.maxStrategyDuration;
         _params.maxStrategyDuration = newMaxStrategyDuration;
         emit MaxStrategyDurationUpdated(old, newMaxStrategyDuration);
@@ -369,11 +504,32 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         emit CooldownPeriodUpdated(old, newCooldownPeriod);
     }
 
+    /// @inheritdoc ISyndicateGovernor
+    function setCollaborationWindow(uint256 newCollaborationWindow) external onlyOwner {
+        if (newCollaborationWindow < MIN_COLLABORATION_WINDOW || newCollaborationWindow > MAX_COLLABORATION_WINDOW) {
+            revert InvalidCollaborationWindow();
+        }
+        uint256 old = _params.collaborationWindow;
+        _params.collaborationWindow = newCollaborationWindow;
+        emit CollaborationWindowUpdated(old, newCollaborationWindow);
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    function setMaxCoProposers(uint256 newMaxCoProposers) external onlyOwner {
+        if (newMaxCoProposers == 0 || newMaxCoProposers > ABSOLUTE_MAX_CO_PROPOSERS) {
+            revert InvalidMaxCoProposers();
+        }
+        uint256 old = _params.maxCoProposers;
+        _params.maxCoProposers = newMaxCoProposers;
+        emit MaxCoProposersUpdated(old, newMaxCoProposers);
+    }
+
     // ==================== VIEWS ====================
 
     /// @inheritdoc ISyndicateGovernor
-    function getProposal(uint256 proposalId) external view returns (StrategyProposal memory) {
-        return _proposals[proposalId];
+    function getProposal(uint256 proposalId) external view returns (StrategyProposal memory p) {
+        p = _proposals[proposalId];
+        p.state = _resolveStateView(_proposals[proposalId]);
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -433,9 +589,91 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         return _registeredVaults.contains(vault);
     }
 
+    /// @inheritdoc ISyndicateGovernor
+    function getCoProposers(uint256 proposalId) external view returns (CoProposer[] memory) {
+        return _coProposers[proposalId];
+    }
+
     // ==================== INTERNAL ====================
 
-    /// @dev Try pre-committed unwind calls first. If they revert, run the fallback calls.
+    /// @dev Store proposal calls separately for gas efficiency
+    function _storeCalls(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) internal {
+        for (uint256 i = 0; i < calls.length; i++) {
+            _proposalCalls[proposalId].push(calls[i]);
+        }
+    }
+
+    /// @dev Emit ProposalCreated event (reads from storage to avoid stack-too-deep in propose())
+    function _emitProposalCreated(uint256 proposalId, uint256 callCount, string calldata metadataURI) internal {
+        StrategyProposal storage p = _proposals[proposalId];
+        emit ProposalCreated(
+            proposalId,
+            p.proposer,
+            p.vault,
+            p.performanceFeeBps,
+            p.strategyDuration,
+            p.splitIndex,
+            callCount,
+            metadataURI
+        );
+    }
+
+    /// @dev Verify caller is a co-proposer on the given proposal
+    function _requireCoProposer(uint256 proposalId) internal view {
+        CoProposer[] storage coProps = _coProposers[proposalId];
+        for (uint256 i = 0; i < coProps.length; i++) {
+            if (coProps[i].agent == msg.sender) return;
+        }
+        revert NotCoProposer();
+    }
+
+    /// @dev Store co-proposers, set deadline, emit event
+    function _storeCoProposers(uint256 proposalId, CoProposer[] calldata coProposers) internal {
+        for (uint256 i = 0; i < coProposers.length; i++) {
+            _coProposers[proposalId].push(coProposers[i]);
+        }
+        collaborationDeadline[proposalId] = block.timestamp + _params.collaborationWindow;
+
+        address[] memory coAddrs = new address[](coProposers.length);
+        uint256[] memory splits = new uint256[](coProposers.length);
+        for (uint256 i = 0; i < coProposers.length; i++) {
+            coAddrs[i] = coProposers[i].agent;
+            splits[i] = coProposers[i].splitBps;
+        }
+        emit CollaborativeProposalCreated(proposalId, msg.sender, coAddrs, splits);
+    }
+
+    /// @dev Validate co-proposer array: registered agents, no duplicates, valid splits
+    function _validateCoProposers(address vault, CoProposer[] calldata coProposers) internal view {
+        if (coProposers.length > _params.maxCoProposers) revert TooManyCoProposers();
+
+        uint256 totalCoSplitBps = 0;
+        for (uint256 i = 0; i < coProposers.length; i++) {
+            address coAgent = coProposers[i].agent;
+            uint256 splitBps = coProposers[i].splitBps;
+
+            // Must be registered agent
+            if (!ISyndicateVault(vault).isAgent(coAgent)) revert NotRegisteredAgent();
+
+            // Cannot be the lead proposer
+            if (coAgent == msg.sender) revert DuplicateCoProposer();
+
+            // Minimum split
+            if (splitBps < MIN_SPLIT_BPS) revert SplitTooLow();
+
+            // Check for duplicates within co-proposers array
+            for (uint256 j = 0; j < i; j++) {
+                if (coProposers[j].agent == coAgent) revert DuplicateCoProposer();
+            }
+
+            totalCoSplitBps += splitBps;
+        }
+
+        // Lead split = 10000 - totalCoSplitBps (must be >= 10%)
+        if (totalCoSplitBps > 9000) revert LeadSplitTooLow();
+    }
+
+    /// @dev Try pre-committed unwind calls first. If they revert, run fallback calls or bubble original error.
     function _tryPrecommittedThenFallback(
         uint256 proposalId,
         StrategyProposal storage proposal,
@@ -443,67 +681,117 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     ) internal {
         // Build pre-committed settle calls
         BatchExecutorLib.Call[] storage storedCalls = _proposalCalls[proposalId];
-        uint256 splitIndex = proposal.splitIndex;
+        uint256 splitIdx = proposal.splitIndex;
         uint256 totalCalls = storedCalls.length;
 
-        BatchExecutorLib.Call[] memory settleCalls = new BatchExecutorLib.Call[](totalCalls - splitIndex);
-        for (uint256 i = splitIndex; i < totalCalls; i++) {
-            settleCalls[i - splitIndex] = storedCalls[i];
+        BatchExecutorLib.Call[] memory settleCalls = new BatchExecutorLib.Call[](totalCalls - splitIdx);
+        for (uint256 i = splitIdx; i < totalCalls; i++) {
+            settleCalls[i - splitIdx] = storedCalls[i];
         }
 
         // Try pre-committed calls first
         try ISyndicateVault(proposal.vault).executeGovernorBatch(settleCalls) {
         // Pre-committed calls succeeded — done
         }
-        catch {
+        catch (bytes memory reason) {
             // Pre-committed calls failed — run fallback calls
-            if (fallbackCalls.length > 0) {
-                ISyndicateVault(proposal.vault).executeGovernorBatch(fallbackCalls);
+            if (fallbackCalls.length == 0) {
+                assembly {
+                    revert(add(reason, 32), mload(reason))
+                }
             }
+
+            ISyndicateVault(proposal.vault).executeGovernorBatch(fallbackCalls);
         }
     }
 
     function _resolveState(StrategyProposal storage proposal) internal returns (ProposalState) {
-        if (proposal.state != ProposalState.Pending) return proposal.state;
-        if (block.timestamp <= proposal.voteEnd) return ProposalState.Pending;
+        ProposalState stored = proposal.state;
 
-        // Voting ended — determine outcome
-        uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotTimestamp);
-        uint256 quorumRequired = (pastTotalSupply * _params.quorumBps) / 10000;
-
-        if (totalVotes < quorumRequired || proposal.votesFor <= proposal.votesAgainst) {
-            proposal.state = ProposalState.Rejected;
-            return ProposalState.Rejected;
+        // Draft → Expired when collaboration deadline passes
+        if (stored == ProposalState.Draft) {
+            if (block.timestamp > collaborationDeadline[proposal.id]) {
+                proposal.state = ProposalState.Expired;
+                emit CollaborationDeadlineExpired(proposal.id);
+                return ProposalState.Expired;
+            }
+            return ProposalState.Draft;
         }
 
-        if (block.timestamp > proposal.executeBy) {
-            proposal.state = ProposalState.Expired;
-            return ProposalState.Expired;
+        // Pending → Approved/Rejected/Expired when voting ends
+        if (stored == ProposalState.Pending) {
+            if (block.timestamp <= proposal.voteEnd) return ProposalState.Pending;
+
+            // Voting ended — determine outcome
+            // Abstain votes count toward quorum but not for/against
+            uint256 totalVotes = proposal.votesFor + proposal.votesAgainst + proposal.votesAbstain;
+            uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotTimestamp);
+            uint256 quorumRequired = (pastTotalSupply * _params.quorumBps) / 10000;
+
+            if (totalVotes < quorumRequired || proposal.votesFor <= proposal.votesAgainst) {
+                proposal.state = ProposalState.Rejected;
+                return ProposalState.Rejected;
+            }
+
+            if (block.timestamp > proposal.executeBy) {
+                proposal.state = ProposalState.Expired;
+                return ProposalState.Expired;
+            }
+
+            proposal.state = ProposalState.Approved;
+            return ProposalState.Approved;
         }
 
-        proposal.state = ProposalState.Approved;
-        return ProposalState.Approved;
+        // Approved → Expired when execution window passes
+        if (stored == ProposalState.Approved) {
+            if (block.timestamp > proposal.executeBy) {
+                proposal.state = ProposalState.Expired;
+                return ProposalState.Expired;
+            }
+            return ProposalState.Approved;
+        }
+
+        // Executed, Settled, Cancelled, Rejected, Expired — terminal states
+        return stored;
     }
 
     /// @dev View-only version of state resolution (doesn't modify storage)
     function _resolveStateView(StrategyProposal storage proposal) internal view returns (ProposalState) {
-        if (proposal.state != ProposalState.Pending) return proposal.state;
-        if (block.timestamp <= proposal.voteEnd) return ProposalState.Pending;
+        ProposalState stored = proposal.state;
 
-        uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotTimestamp);
-        uint256 quorumRequired = (pastTotalSupply * _params.quorumBps) / 10000;
-
-        if (totalVotes < quorumRequired || proposal.votesFor <= proposal.votesAgainst) {
-            return ProposalState.Rejected;
+        if (stored == ProposalState.Draft) {
+            if (block.timestamp > collaborationDeadline[proposal.id]) {
+                return ProposalState.Expired;
+            }
+            return ProposalState.Draft;
         }
 
-        if (block.timestamp > proposal.executeBy) {
-            return ProposalState.Expired;
+        if (stored == ProposalState.Pending) {
+            if (block.timestamp <= proposal.voteEnd) return ProposalState.Pending;
+
+            uint256 totalVotes = proposal.votesFor + proposal.votesAgainst + proposal.votesAbstain;
+            uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotTimestamp);
+            uint256 quorumRequired = (pastTotalSupply * _params.quorumBps) / 10000;
+
+            if (totalVotes < quorumRequired || proposal.votesFor <= proposal.votesAgainst) {
+                return ProposalState.Rejected;
+            }
+
+            if (block.timestamp > proposal.executeBy) {
+                return ProposalState.Expired;
+            }
+
+            return ProposalState.Approved;
         }
 
-        return ProposalState.Approved;
+        if (stored == ProposalState.Approved) {
+            if (block.timestamp > proposal.executeBy) {
+                return ProposalState.Expired;
+            }
+            return ProposalState.Approved;
+        }
+
+        return stored;
     }
 
     function _finishSettlement(uint256 proposalId, StrategyProposal storage proposal)
@@ -522,6 +810,11 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         // Distribute fees on profit
         agentFee = 0;
         uint256 mgmtFee = 0;
+        // Finalize state before external transfers to avoid reentrancy on stale state.
+        _activeProposal[vault] = 0;
+        _lastSettledAt[vault] = block.timestamp;
+        proposal.state = ProposalState.Settled;
+
         if (pnl > 0) {
             // forge-lint: disable-next-line(unsafe-typecast)
             uint256 profit = uint256(pnl);
@@ -529,23 +822,33 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             mgmtFee = ((profit - agentFee) * ISyndicateVault(vault).managementFeeBps()) / 10000;
 
             if (agentFee > 0) {
-                ISyndicateVault(vault).transferPerformanceFee(asset, proposal.proposer, agentFee);
+                CoProposer[] storage coProps = _coProposers[proposalId];
+                if (coProps.length > 0) {
+                    // Distribute to co-proposers first, lead gets remainder
+                    // Deregistered co-proposers are skipped — their share goes to the lead
+                    uint256 distributed = 0;
+                    for (uint256 i = 0; i < coProps.length; i++) {
+                        uint256 share = (agentFee * coProps[i].splitBps) / 10000;
+                        if (share > 0 && ISyndicateVault(vault).isAgent(coProps[i].agent)) {
+                            ISyndicateVault(vault).transferPerformanceFee(asset, coProps[i].agent, share);
+                            distributed += share;
+                        }
+                    }
+                    // Lead proposer gets remainder (handles rounding)
+                    uint256 leadShare = agentFee - distributed;
+                    if (leadShare > 0) {
+                        ISyndicateVault(vault).transferPerformanceFee(asset, proposal.proposer, leadShare);
+                    }
+                } else {
+                    // Solo proposal — all to proposer
+                    ISyndicateVault(vault).transferPerformanceFee(asset, proposal.proposer, agentFee);
+                }
             }
             if (mgmtFee > 0) {
                 address vaultOwner = OwnableUpgradeable(vault).owner();
                 ISyndicateVault(vault).transferPerformanceFee(asset, vaultOwner, mgmtFee);
             }
         }
-
-        // Unlock redemptions
-        ISyndicateVault(vault).unlockRedemptions();
-
-        // Clear active proposal
-        _activeProposal[vault] = 0;
-        _lastSettledAt[vault] = block.timestamp;
-
-        // Update state
-        proposal.state = ProposalState.Settled;
 
         uint256 duration = block.timestamp - proposal.executedAt;
         emit ProposalSettled(proposalId, vault, pnl, agentFee + mgmtFee, duration);
@@ -567,10 +870,6 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
     function _validateMaxPerformanceFeeBps(uint256 value) internal pure {
         if (value > MAX_PERFORMANCE_FEE_CAP) revert InvalidMaxPerformanceFeeBps();
-    }
-
-    function _validateMaxStrategyDuration(uint256 value) internal pure {
-        if (value < MIN_STRATEGY_DURATION || value > MAX_STRATEGY_DURATION_CAP) revert InvalidMaxStrategyDuration();
     }
 
     function _validateCooldownPeriod(uint256 value) internal pure {

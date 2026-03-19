@@ -8,8 +8,22 @@ import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
+
+contract AssertActiveProposalOnExecute {
+    function assertActive(address governor, address vault, uint256 proposalId) external view {
+        uint256 active = ISyndicateGovernor(governor).getActiveProposal(vault);
+        require(active == proposalId, "active proposal not set");
+    }
+}
+
+contract RevertingTarget {
+    function fail() external pure {
+        revert("expected revert");
+    }
+}
 
 contract SyndicateGovernorTest is Test {
     SyndicateGovernor public governor;
@@ -31,16 +45,19 @@ contract SyndicateGovernorTest is Test {
     uint256 constant EXECUTION_WINDOW = 1 days;
     uint256 constant QUORUM_BPS = 4000; // 40%
     uint256 constant MAX_PERF_FEE_BPS = 3000; // 30%
-    uint256 constant MAX_STRATEGY_DURATION = 30 days;
     uint256 constant COOLDOWN_PERIOD = 1 days;
 
     // ── A simple target contract for testing batch execution ──
     ERC20Mock public targetToken;
+    AssertActiveProposalOnExecute public activeAssertTarget;
+    RevertingTarget public revertingTarget;
 
     function setUp() public {
         // Deploy tokens
         usdc = new ERC20Mock("USD Coin", "USDC", 6);
         targetToken = new ERC20Mock("Target", "TGT", 18);
+        activeAssertTarget = new AssertActiveProposalOnExecute();
+        revertingTarget = new RevertingTarget();
 
         // Deploy shared executor lib
         executorLib = new BatchExecutorLib();
@@ -49,7 +66,26 @@ contract SyndicateGovernorTest is Test {
         agentRegistry = new MockAgentRegistry();
         agentNftId = agentRegistry.mint(agent);
 
-        // Deploy vault
+        // Deploy governor first (vault requires governor at init)
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        bytes memory govInit = abi.encodeCall(
+            SyndicateGovernor.initialize,
+            (ISyndicateGovernor.InitParams({
+                    owner: owner,
+                    votingPeriod: VOTING_PERIOD,
+                    executionWindow: EXECUTION_WINDOW,
+                    quorumBps: QUORUM_BPS,
+                    maxPerformanceFeeBps: MAX_PERF_FEE_BPS,
+                    cooldownPeriod: COOLDOWN_PERIOD,
+                    collaborationWindow: 48 hours,
+                    maxCoProposers: 5,
+                    minStrategyDuration: 1 days,
+                    maxStrategyDuration: 7 days
+                }))
+        );
+        governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
+
+        // Deploy vault with governor set
         SyndicateVault vaultImpl = new SyndicateVault();
         bytes memory vaultInit = abi.encodeCall(
             SyndicateVault.initialize,
@@ -61,7 +97,7 @@ contract SyndicateGovernorTest is Test {
                     executorImpl: address(executorLib),
                     openDeposits: true,
                     agentRegistry: address(agentRegistry),
-                    governor: address(0),
+                    governor: address(governor),
                     managementFeeBps: 50
                 }))
         );
@@ -71,27 +107,9 @@ contract SyndicateGovernorTest is Test {
         vm.prank(owner);
         vault.registerAgent(agentNftId, agent);
 
-        // Deploy governor
-        SyndicateGovernor govImpl = new SyndicateGovernor();
-        bytes memory govInit = abi.encodeCall(
-            SyndicateGovernor.initialize,
-            (
-                owner,
-                VOTING_PERIOD,
-                EXECUTION_WINDOW,
-                QUORUM_BPS,
-                MAX_PERF_FEE_BPS,
-                MAX_STRATEGY_DURATION,
-                COOLDOWN_PERIOD
-            )
-        );
-        governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
-
-        // Wire up: set governor on vault, register vault on governor
-        vm.startPrank(owner);
-        vault.setGovernor(address(governor));
+        // Register vault on governor
+        vm.prank(owner);
         governor.addVault(address(vault));
-        vm.stopPrank();
 
         // Fund LPs
         usdc.mint(lp1, 100_000e6);
@@ -114,6 +132,25 @@ contract SyndicateGovernorTest is Test {
 
     // ==================== HELPERS ====================
 
+    function _emptyCoProposers() internal pure returns (ISyndicateGovernor.CoProposer[] memory) {
+        return new ISyndicateGovernor.CoProposer[](0);
+    }
+
+    function _defaultInitParams() internal view returns (ISyndicateGovernor.InitParams memory) {
+        return ISyndicateGovernor.InitParams({
+            owner: owner,
+            votingPeriod: VOTING_PERIOD,
+            executionWindow: EXECUTION_WINDOW,
+            quorumBps: QUORUM_BPS,
+            maxPerformanceFeeBps: MAX_PERF_FEE_BPS,
+            cooldownPeriod: COOLDOWN_PERIOD,
+            collaborationWindow: 48 hours,
+            maxCoProposers: 5,
+            minStrategyDuration: 1 days,
+            maxStrategyDuration: 7 days
+        });
+    }
+
     /// @dev Create a simple proposal: "approve USDC to target" as execute, "approve 0" as settle
     function _createSimpleProposal(uint256 perfFeeBps, uint256 duration)
         internal
@@ -130,7 +167,8 @@ contract SyndicateGovernorTest is Test {
         });
 
         vm.prank(agent);
-        proposalId = governor.propose(address(vault), "ipfs://test", perfFeeBps, duration, calls, 1);
+        proposalId =
+            governor.propose(address(vault), "ipfs://test", perfFeeBps, duration, calls, 1, _emptyCoProposers());
 
         // Mine a block so the snapshot block is in the past for voting
         vm.warp(block.timestamp + 1);
@@ -142,9 +180,9 @@ contract SyndicateGovernorTest is Test {
 
         // Both LPs vote FOR
         vm.prank(lp1);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
         vm.prank(lp2);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         // Warp past voting period
         vm.warp(block.timestamp + VOTING_PERIOD + 1);
@@ -173,10 +211,52 @@ contract SyndicateGovernorTest is Test {
         assertEq(params.executionWindow, EXECUTION_WINDOW);
         assertEq(params.quorumBps, QUORUM_BPS);
         assertEq(params.maxPerformanceFeeBps, MAX_PERF_FEE_BPS);
-        assertEq(params.maxStrategyDuration, MAX_STRATEGY_DURATION);
         assertEq(params.cooldownPeriod, COOLDOWN_PERIOD);
+        assertEq(governor.getGovernorParams().minStrategyDuration, 1 days);
+        assertEq(governor.getGovernorParams().maxStrategyDuration, 7 days);
         assertEq(governor.proposalCount(), 0);
         assertTrue(governor.isRegisteredVault(address(vault)));
+    }
+
+    function test_initialize_zeroOwner_reverts() public {
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        ISyndicateGovernor.InitParams memory p = _defaultInitParams();
+        p.owner = address(0);
+
+        bytes memory initData = abi.encodeCall(SyndicateGovernor.initialize, (p));
+        vm.expectRevert(ISyndicateGovernor.ZeroAddress.selector);
+        new ERC1967Proxy(address(govImpl), initData);
+    }
+
+    function test_initialize_invalidStrategyDurationBounds_reverts() public {
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        ISyndicateGovernor.InitParams memory p = _defaultInitParams();
+        p.minStrategyDuration = 8 days;
+        p.maxStrategyDuration = 7 days;
+
+        bytes memory initData = abi.encodeCall(SyndicateGovernor.initialize, (p));
+        vm.expectRevert(ISyndicateGovernor.InvalidStrategyDurationBounds.selector);
+        new ERC1967Proxy(address(govImpl), initData);
+    }
+
+    function test_initialize_invalidCollaborationWindow_reverts() public {
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        ISyndicateGovernor.InitParams memory p = _defaultInitParams();
+        p.collaborationWindow = 30 minutes;
+
+        bytes memory initData = abi.encodeCall(SyndicateGovernor.initialize, (p));
+        vm.expectRevert(ISyndicateGovernor.InvalidCollaborationWindow.selector);
+        new ERC1967Proxy(address(govImpl), initData);
+    }
+
+    function test_initialize_invalidMaxCoProposers_reverts() public {
+        SyndicateGovernor govImpl = new SyndicateGovernor();
+        ISyndicateGovernor.InitParams memory p = _defaultInitParams();
+        p.maxCoProposers = 0;
+
+        bytes memory initData = abi.encodeCall(SyndicateGovernor.initialize, (p));
+        vm.expectRevert(ISyndicateGovernor.InvalidMaxCoProposers.selector);
+        new ERC1967Proxy(address(govImpl), initData);
     }
 
     // ==================== PROPOSE ====================
@@ -206,7 +286,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(random);
         vm.expectRevert(ISyndicateGovernor.NotRegisteredAgent.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1);
+        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
     }
 
     function test_propose_vaultNotRegistered_reverts() public {
@@ -216,7 +296,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.VaultNotRegistered.selector);
-        governor.propose(makeAddr("fakeVault"), "ipfs://test", 1500, 7 days, calls, 1);
+        governor.propose(makeAddr("fakeVault"), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
     }
 
     function test_propose_performanceFeeTooHigh_reverts() public {
@@ -226,7 +306,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.PerformanceFeeTooHigh.selector);
-        governor.propose(address(vault), "ipfs://test", MAX_PERF_FEE_BPS + 1, 7 days, calls, 1);
+        governor.propose(address(vault), "ipfs://test", MAX_PERF_FEE_BPS + 1, 7 days, calls, 1, _emptyCoProposers());
     }
 
     function test_propose_strategyDurationTooLong_reverts() public {
@@ -236,7 +316,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.StrategyDurationTooLong.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, MAX_STRATEGY_DURATION + 1, calls, 1);
+        governor.propose(address(vault), "ipfs://test", 1500, 8 days, calls, 1, _emptyCoProposers());
     }
 
     function test_propose_strategyDurationTooShort_reverts() public {
@@ -246,7 +326,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.StrategyDurationTooShort.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, 30 minutes, calls, 1);
+        governor.propose(address(vault), "ipfs://test", 1500, 12 hours, calls, 1, _emptyCoProposers());
     }
 
     function test_propose_invalidSplitIndex_reverts() public {
@@ -257,12 +337,12 @@ contract SyndicateGovernorTest is Test {
         // splitIndex = 0 (no execute calls)
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.InvalidSplitIndex.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 0);
+        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 0, _emptyCoProposers());
 
         // splitIndex = calls.length (no settle calls)
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.InvalidSplitIndex.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 2);
+        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 2, _emptyCoProposers());
     }
 
     function test_propose_emptyCalls_reverts() public {
@@ -270,7 +350,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.EmptyCalls.selector);
-        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1);
+        governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
     }
 
     // ==================== VOTING ====================
@@ -279,10 +359,10 @@ contract SyndicateGovernorTest is Test {
         (uint256 proposalId,) = _createSimpleProposal(1500, 7 days);
 
         vm.prank(lp1);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         vm.prank(lp2);
-        governor.vote(proposalId, false);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.Against);
 
         assertTrue(governor.hasVoted(proposalId, lp1));
         assertTrue(governor.hasVoted(proposalId, lp2));
@@ -297,11 +377,11 @@ contract SyndicateGovernorTest is Test {
         (uint256 proposalId,) = _createSimpleProposal(1500, 7 days);
 
         vm.prank(lp1);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         vm.prank(lp1);
         vm.expectRevert(ISyndicateGovernor.AlreadyVoted.selector);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
     }
 
     function test_vote_noShares_reverts() public {
@@ -309,7 +389,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(random);
         vm.expectRevert(ISyndicateGovernor.NoVotingPower.selector);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
     }
 
     function test_vote_afterVotingPeriod_reverts() public {
@@ -319,7 +399,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(lp1);
         vm.expectRevert(ISyndicateGovernor.NotWithinVotingPeriod.selector);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
     }
 
     function test_vote_snapshotPreventsTransferVoting() public {
@@ -327,7 +407,7 @@ contract SyndicateGovernorTest is Test {
 
         // LP1 votes first
         vm.prank(lp1);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         uint256 lp1Weight = governor.getVoteWeight(proposalId, lp1);
         assertEq(lp1Weight, vault.balanceOf(lp1));
@@ -340,12 +420,12 @@ contract SyndicateGovernorTest is Test {
         // LP1 can't vote again even though they transferred
         vm.prank(lp1);
         vm.expectRevert(ISyndicateGovernor.AlreadyVoted.selector);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         // Random cannot vote because they had no balance at snapshot block
         vm.prank(random);
         vm.expectRevert(ISyndicateGovernor.NoVotingPower.selector);
-        governor.vote(proposalId, false);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.Against);
 
         ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
         assertEq(p.votesFor, lp1Weight); // LP1's original balance
@@ -372,9 +452,22 @@ contract SyndicateGovernorTest is Test {
         (uint256 proposalId,) = _createSimpleProposal(1500, 7 days);
 
         vm.prank(lp1);
-        governor.vote(proposalId, false); // 60k against
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.Against); // 60k against
         vm.prank(lp2);
-        governor.vote(proposalId, true); // 40k for
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For); // 40k for
+
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+        assertEq(uint256(governor.getProposalState(proposalId)), uint256(ISyndicateGovernor.ProposalState.Rejected));
+    }
+
+    function test_proposalState_rejected_abstainOnly() public {
+        (uint256 proposalId,) = _createSimpleProposal(1500, 7 days);
+
+        // Both LPs abstain — meets quorum but votesFor (0) <= votesAgainst (0) → rejected
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.Abstain);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.Abstain);
 
         vm.warp(block.timestamp + VOTING_PERIOD + 1);
         assertEq(uint256(governor.getProposalState(proposalId)), uint256(ISyndicateGovernor.ProposalState.Rejected));
@@ -403,6 +496,32 @@ contract SyndicateGovernorTest is Test {
         assertEq(governor.getCapitalSnapshot(proposalId), 100_000e6); // 60k + 40k
     }
 
+    function test_executeProposal_setsActiveBeforeExternalCalls() public {
+        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](2);
+        calls[0] = BatchExecutorLib.Call({
+            target: address(activeAssertTarget),
+            data: abi.encodeCall(activeAssertTarget.assertActive, (address(governor), address(vault), 1)),
+            value: 0
+        });
+        calls[1] = BatchExecutorLib.Call({
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
+        });
+
+        vm.prank(agent);
+        uint256 proposalId =
+            governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
+        vm.warp(block.timestamp + 1);
+
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+
+        governor.executeProposal(proposalId);
+        assertEq(governor.getActiveProposal(address(vault)), proposalId);
+    }
+
     function test_executeProposal_notApproved_reverts() public {
         (uint256 proposalId,) = _createSimpleProposal(1500, 7 days);
 
@@ -417,9 +536,9 @@ contract SyndicateGovernorTest is Test {
         // Create proposal and vote it through
         (uint256 proposalId,) = _createSimpleProposal(1500, 7 days);
         vm.prank(lp1);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
         vm.prank(lp2);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         // Warp past voting period
         vm.warp(block.timestamp + VOTING_PERIOD + 1);
@@ -458,9 +577,9 @@ contract SyndicateGovernorTest is Test {
         // Create second proposal and vote immediately
         (uint256 proposalId2,) = _createSimpleProposal(1500, 7 days);
         vm.prank(lp1);
-        governor.vote(proposalId2, true);
+        governor.vote(proposalId2, ISyndicateGovernor.VoteType.For);
         vm.prank(lp2);
-        governor.vote(proposalId2, true);
+        governor.vote(proposalId2, ISyndicateGovernor.VoteType.For);
 
         // Warp past voting period (1 day) — but cooldown is 3 days from settlement
         vm.warp(block.timestamp + VOTING_PERIOD + 1);
@@ -509,6 +628,35 @@ contract SyndicateGovernorTest is Test {
         vm.prank(random);
         vm.expectRevert(ISyndicateGovernor.NotProposer.selector);
         governor.settleByAgent(proposalId, _simpleSettleCalls());
+    }
+
+    function test_settleByAgent_precommittedFailWithoutFallback_reverts() public {
+        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](2);
+        calls[0] = BatchExecutorLib.Call({
+            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 50_000e6)), value: 0
+        });
+        calls[1] = BatchExecutorLib.Call({
+            target: address(revertingTarget), data: abi.encodeCall(revertingTarget.fail, ()), value: 0
+        });
+
+        vm.prank(agent);
+        uint256 proposalId =
+            governor.propose(address(vault), "ipfs://test", 1500, 7 days, calls, 1, _emptyCoProposers());
+        vm.warp(block.timestamp + 1);
+
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+        governor.executeProposal(proposalId);
+        vm.warp(block.timestamp + 7 days);
+
+        vm.prank(agent);
+        vm.expectRevert(bytes("expected revert"));
+        governor.settleByAgent(proposalId, new BatchExecutorLib.Call[](0));
+
+        assertEq(uint256(governor.getProposalState(proposalId)), uint256(ISyndicateGovernor.ProposalState.Executed));
     }
 
     function test_settleByAgent_causedLoss_reverts() public {
@@ -788,9 +936,16 @@ contract SyndicateGovernorTest is Test {
 
     function test_setMaxStrategyDuration() public {
         vm.prank(owner);
-        governor.setMaxStrategyDuration(60 days);
+        governor.setMaxStrategyDuration(14 days);
 
-        assertEq(governor.getGovernorParams().maxStrategyDuration, 60 days);
+        assertEq(governor.getGovernorParams().maxStrategyDuration, 14 days);
+    }
+
+    function test_setMinStrategyDuration() public {
+        vm.prank(owner);
+        governor.setMinStrategyDuration(2 hours);
+
+        assertEq(governor.getGovernorParams().minStrategyDuration, 2 hours);
     }
 
     function test_setCooldownPeriod() public {
@@ -802,17 +957,19 @@ contract SyndicateGovernorTest is Test {
 
     function test_setters_notOwner_reverts() public {
         vm.startPrank(random);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setVotingPeriod(2 days);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setExecutionWindow(2 days);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setQuorumBps(5000);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setMaxPerformanceFeeBps(2000);
-        vm.expectRevert();
-        governor.setMaxStrategyDuration(60 days);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
+        governor.setMaxStrategyDuration(14 days);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
+        governor.setMinStrategyDuration(2 hours);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, random));
         governor.setCooldownPeriod(2 days);
         vm.stopPrank();
     }
@@ -832,6 +989,25 @@ contract SyndicateGovernorTest is Test {
         governor.addVault(address(vault));
     }
 
+    function test_addVault_notAuthorized_reverts() public {
+        vm.prank(random);
+        vm.expectRevert(ISyndicateGovernor.NotAuthorized.selector);
+        governor.addVault(makeAddr("newVault"));
+    }
+
+    function test_addVault_factoryAuthorized_succeeds() public {
+        address factory_ = makeAddr("factory");
+        address newVault = makeAddr("newVault");
+
+        vm.prank(owner);
+        governor.setFactory(factory_);
+
+        vm.prank(factory_);
+        governor.addVault(newVault);
+
+        assertTrue(governor.isRegisteredVault(newVault));
+    }
+
     function test_removeVault() public {
         vm.prank(owner);
         governor.removeVault(address(vault));
@@ -846,14 +1022,8 @@ contract SyndicateGovernorTest is Test {
 
     // ==================== GOVERNOR ON VAULT ====================
 
-    function test_setGovernor_onVault() public view {
+    function test_governorSetAtInit() public view {
         assertEq(vault.governor(), address(governor));
-    }
-
-    function test_lockRedemptions_notGovernor_reverts() public {
-        vm.prank(random);
-        vm.expectRevert(ISyndicateVault.NotGovernor.selector);
-        vault.lockRedemptions();
     }
 
     function test_executeGovernorBatch_notGovernor_reverts() public {
@@ -904,11 +1074,11 @@ contract SyndicateGovernorTest is Test {
         assertGt(vault.balanceOf(random), 0);
         vm.prank(random);
         vm.expectRevert(ISyndicateGovernor.NoVotingPower.selector);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         // Original LPs can still vote normally
         vm.prank(lp1);
-        governor.vote(proposalId, true);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
 
         uint256 lp1Weight = governor.getVoteWeight(proposalId, lp1);
         assertEq(lp1Weight, 60_000e6);
@@ -970,7 +1140,7 @@ contract SyndicateGovernorTest is Test {
 
         vm.prank(agent);
         vm.expectRevert(ISyndicateGovernor.VaultNotRegistered.selector);
-        governor.propose(address(vault), "ipfs://new", 1500, 7 days, calls, 1);
+        governor.propose(address(vault), "ipfs://new", 1500, 7 days, calls, 1, _emptyCoProposers());
     }
 
     function test_multipleVaults_interleavedProposals() public {
@@ -1037,30 +1207,32 @@ contract SyndicateGovernorTest is Test {
 
         // Propose on vault1
         vm.prank(agent);
-        uint256 pid1 = governor.propose(address(vault), "ipfs://v1-strategy", 1500, 7 days, calls1, 1);
+        uint256 pid1 =
+            governor.propose(address(vault), "ipfs://v1-strategy", 1500, 7 days, calls1, 1, _emptyCoProposers());
 
         // Propose on vault2
         vm.prank(agent2);
-        uint256 pid2 = governor.propose(address(vault2), "ipfs://v2-strategy", 2000, 5 days, calls2, 1);
+        uint256 pid2 =
+            governor.propose(address(vault2), "ipfs://v2-strategy", 2000, 5 days, calls2, 1, _emptyCoProposers());
 
         vm.warp(block.timestamp + 1);
 
         // Vault1 LPs vote on pid1 only
         vm.prank(lp1);
-        governor.vote(pid1, true);
+        governor.vote(pid1, ISyndicateGovernor.VoteType.For);
         vm.prank(lp2);
-        governor.vote(pid1, true);
+        governor.vote(pid1, ISyndicateGovernor.VoteType.For);
 
         // Vault2 LPs vote on pid2 only
         vm.prank(lp3);
-        governor.vote(pid2, true);
+        governor.vote(pid2, ISyndicateGovernor.VoteType.For);
         vm.prank(lp4);
-        governor.vote(pid2, true);
+        governor.vote(pid2, ISyndicateGovernor.VoteType.For);
 
         // Vault1 LP cannot vote on vault2 proposal (no shares at snapshot)
         vm.prank(lp1);
         vm.expectRevert(ISyndicateGovernor.NoVotingPower.selector);
-        governor.vote(pid2, true);
+        governor.vote(pid2, ISyndicateGovernor.VoteType.For);
 
         // Warp past voting
         vm.warp(block.timestamp + VOTING_PERIOD + 1);

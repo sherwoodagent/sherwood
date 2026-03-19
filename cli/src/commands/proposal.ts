@@ -36,6 +36,8 @@ import {
   getCapitalSnapshot,
   parseDuration,
   PROPOSAL_STATES,
+  PROPOSAL_STATE,
+  VOTE_TYPE,
 } from "../lib/governor.js";
 import type { BatchCall } from "../lib/governor.js";
 import { formatDurationShort as formatDuration, formatShares, formatUSDC, parseBigIntArg } from "../lib/format.js";
@@ -162,7 +164,7 @@ export function registerProposalCommands(program: Command): void {
     .command("list")
     .description("List proposals")
     .option("--vault <address>", "Filter by vault")
-    .option("--state <filter>", "Filter by state: pending, approved, executed, settled, all", "all")
+    .option("--state <filter>", "Filter by state: draft, pending, approved, executed, settled, all", "all")
     .action(async (opts) => {
       const spinner = ora("Loading proposals...").start();
       try {
@@ -296,9 +298,10 @@ export function registerProposalCommands(program: Command): void {
         console.log(LABEL("  Votes"));
         console.log(W(`  For:              ${formatShares(p.votesFor)}`));
         console.log(W(`  Against:          ${formatShares(p.votesAgainst)}`));
+        console.log(W(`  Abstain:          ${formatShares(p.votesAbstain)}`));
         console.log(W(`  Quorum:           ${quorumNeeded}`));
 
-        if (state === 4 /* Executed */ || state === 5 /* Settled */) {
+        if (state === PROPOSAL_STATE.Executed || state === PROPOSAL_STATE.Settled) {
           try {
             const cap = await getCapitalSnapshot(id);
             console.log();
@@ -330,18 +333,29 @@ export function registerProposalCommands(program: Command): void {
     .command("vote")
     .description("Cast a vote on a pending proposal")
     .requiredOption("--id <proposalId>", "Proposal ID")
-    .requiredOption("--support <yes|no>", "Vote direction: yes or no")
+    .requiredOption("--support <for|against|abstain>", "Vote direction: for, against, or abstain")
     .action(async (opts) => {
       try {
         const proposalId = parseBigIntArg(opts.id, "proposal ID");
-        const support = opts.support.toLowerCase() === "yes";
+        const supportRaw = String(opts.support).toLowerCase();
+        const support = supportRaw === "yes" || supportRaw === "for"
+          ? VOTE_TYPE.For
+          : supportRaw === "no" || supportRaw === "against"
+            ? VOTE_TYPE.Against
+            : supportRaw === "abstain"
+              ? VOTE_TYPE.Abstain
+              : null;
+        if (support === null) {
+          console.error(chalk.red(`Invalid support value "${opts.support}". Use for|against|abstain.`));
+          process.exit(1);
+        }
         const account = getAccount();
 
         const spinner = ora("Loading proposal...").start();
         const p = await getProposal(proposalId);
         const state = await getProposalState(proposalId);
 
-        if (state !== 0) {
+        if (state !== PROPOSAL_STATE.Pending) {
           spinner.fail(`Proposal is ${PROPOSAL_STATES[state] || "Unknown"}, not Pending`);
           process.exit(1);
         }
@@ -360,7 +374,13 @@ export function registerProposalCommands(program: Command): void {
         SEP();
         console.log(W(`  Proposal:  #${proposalId}`));
         console.log(W(`  Vault:     ${G(p.vault)}`));
-        console.log(W(`  Support:   ${support ? G("YES") : chalk.red("NO")}`));
+        console.log(W(
+          `  Support:   ${
+            support === VOTE_TYPE.For ? G("FOR")
+              : support === VOTE_TYPE.Against ? chalk.red("AGAINST")
+                : DIM("ABSTAIN")
+          }`,
+        ));
         console.log(W(`  Weight:    ${formatShares(weight)} shares`));
         SEP();
 
@@ -388,7 +408,7 @@ export function registerProposalCommands(program: Command): void {
         const spinner = ora("Loading proposal...").start();
         const state = await getProposalState(proposalId);
 
-        if (state !== 1) {
+        if (state !== PROPOSAL_STATE.Approved) {
           spinner.fail(`Proposal is ${PROPOSAL_STATES[state] || "Unknown"}, not Approved`);
           process.exit(1);
         }
@@ -427,7 +447,7 @@ export function registerProposalCommands(program: Command): void {
         const p = await getProposal(proposalId);
         const state = await getProposalState(proposalId);
 
-        if (state !== 4) {
+        if (state !== PROPOSAL_STATE.Executed) {
           spinner.fail(`Proposal is ${PROPOSAL_STATES[state] || "Unknown"}, not Executed`);
           process.exit(1);
         }
@@ -482,7 +502,7 @@ export function registerProposalCommands(program: Command): void {
         const spinner = ora("Loading proposal...").start();
         const state = await getProposalState(proposalId);
 
-        if (state === 5 || state === 6) {
+        if (state === PROPOSAL_STATE.Settled || state === PROPOSAL_STATE.Cancelled) {
           spinner.fail(`Proposal is already ${PROPOSAL_STATES[state]}`);
           process.exit(1);
         }
@@ -494,7 +514,7 @@ export function registerProposalCommands(program: Command): void {
           hash = await emergencyCancel(proposalId);
           spinner.succeed(G("Emergency cancelled"));
         } else {
-          if (state !== 0 && state !== 1) {
+          if (state !== PROPOSAL_STATE.Draft && state !== PROPOSAL_STATE.Pending) {
             spinner.fail(`Proposal is ${PROPOSAL_STATES[state] || "Unknown"} — use --emergency for non-pending/approved`);
             process.exit(1);
           }

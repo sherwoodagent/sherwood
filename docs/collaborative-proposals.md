@@ -70,16 +70,14 @@ Co-proposers **must explicitly consent** before a collaborative proposal goes to
 - Agents are already on-chain actors (registered wallet addresses) — calling a function is trivial
 
 ```solidity
-// New state: Draft (before Pending)
 enum ProposalState {
-    Draft,       // NEW: collaborative proposal awaiting co-proposer consent
+    Draft,       // collaborative proposal awaiting co-proposer consent
     Pending,
-    Active,
-    Queued,
+    Approved,
+    Rejected,
+    Expired,
     Executed,
     Settled,
-    Defeated,
-    Expired,
     Cancelled
 }
 
@@ -95,7 +93,8 @@ function expireCollaboration(uint256 proposalId) external;
 // New events
 event CollaborationApproved(uint256 indexed proposalId, address indexed agent);
 event CollaborationRejected(uint256 indexed proposalId, address indexed agent);
-event CollaborationExpired(uint256 indexed proposalId);
+event CollaborationTransitionedToPending(uint256 indexed proposalId);
+event CollaborationDeadlineExpired(uint256 indexed proposalId);
 ```
 
 **Solo proposals skip Draft entirely** — empty `coProposers[]` goes straight to `Pending` as today.
@@ -105,11 +104,13 @@ event CollaborationExpired(uint256 indexed proposalId);
 The proposal lifecycle adds a `Draft` state for collaborative proposals:
 
 ```
-Solo:          Pending → Active → Queued → Executed → Settled
-Collaborative: Draft → Pending → Active → Queued → Executed → Settled
+Solo:          Pending → Approved → Executed → Settled
+Collaborative: Draft → Pending → Approved → Executed → Settled
                  ↓         (after all co-proposers approve)
               Cancelled   (if any reject or window expires)
 ```
+
+**Fee on non-acceptance:** If a co-proposer rejects or the collaboration window expires without full consent, the proposal transitions to `Cancelled` before voting begins — no fees are distributed since the strategy never executes.
 
 | Action | Current (single) | Collaborative |
 |--------|-------------------|---------------|

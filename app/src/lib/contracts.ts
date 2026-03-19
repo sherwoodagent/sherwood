@@ -424,6 +424,7 @@ export const SYNDICATE_GOVERNOR_ABI = [
           { name: "strategyDuration", type: "uint256" },
           { name: "votesFor", type: "uint256" },
           { name: "votesAgainst", type: "uint256" },
+          { name: "votesAbstain", type: "uint256" },
           { name: "snapshotTimestamp", type: "uint256" },
           { name: "voteEnd", type: "uint256" },
           { name: "executeBy", type: "uint256" },
@@ -461,8 +462,11 @@ export const SYNDICATE_GOVERNOR_ABI = [
           { name: "executionWindow", type: "uint256" },
           { name: "quorumBps", type: "uint256" },
           { name: "maxPerformanceFeeBps", type: "uint256" },
-          { name: "maxStrategyDuration", type: "uint256" },
           { name: "cooldownPeriod", type: "uint256" },
+          { name: "collaborationWindow", type: "uint256" },
+          { name: "maxCoProposers", type: "uint256" },
+          { name: "minStrategyDuration", type: "uint256" },
+          { name: "maxStrategyDuration", type: "uint256" },
         ],
       },
     ],
@@ -507,9 +511,32 @@ export const SYNDICATE_GOVERNOR_ABI = [
     stateMutability: "nonpayable",
     inputs: [
       { name: "proposalId", type: "uint256" },
-      { name: "support", type: "bool" },
+      { name: "support", type: "uint8" },
     ],
     outputs: [],
+  },
+  {
+    name: "getCoProposers",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "proposalId", type: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "agent", type: "address" },
+          { name: "splitBps", type: "uint256" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "isRegisteredVault",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "vault", type: "address" }],
+    outputs: [{ name: "", type: "bool" }],
   },
 ] as const;
 

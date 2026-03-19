@@ -18,8 +18,11 @@ export interface GovernorParams {
   executionWindow: bigint;
   quorumBps: bigint;
   maxPerformanceFeeBps: bigint;
-  maxStrategyDuration: bigint;
   cooldownPeriod: bigint;
+  collaborationWindow: bigint;
+  maxCoProposers: bigint;
+  minStrategyDuration: bigint;
+  maxStrategyDuration: bigint;
 }
 
 export interface StrategyProposal {
@@ -32,11 +35,17 @@ export interface StrategyProposal {
   strategyDuration: bigint;
   votesFor: bigint;
   votesAgainst: bigint;
+  votesAbstain: bigint;
   snapshotTimestamp: bigint;
   voteEnd: bigint;
   executeBy: bigint;
   executedAt: bigint;
   state: number;
+}
+
+export interface CoProposer {
+  agent: Address;
+  splitBps: bigint;
 }
 
 export interface BatchCall {
@@ -46,6 +55,7 @@ export interface BatchCall {
 }
 
 export const PROPOSAL_STATES = [
+  "Draft",
   "Pending",
   "Approved",
   "Rejected",
@@ -54,6 +64,23 @@ export const PROPOSAL_STATES = [
   "Settled",
   "Cancelled",
 ] as const;
+
+export const PROPOSAL_STATE = {
+  Draft: 0,
+  Pending: 1,
+  Approved: 2,
+  Rejected: 3,
+  Expired: 4,
+  Executed: 5,
+  Settled: 6,
+  Cancelled: 7,
+} as const;
+
+export const VOTE_TYPE = {
+  For: 0,
+  Against: 1,
+  Abstain: 2,
+} as const;
 
 // ── Duration parser ──
 
@@ -95,8 +122,11 @@ export async function getGovernorParams(): Promise<GovernorParams> {
     executionWindow: bigint;
     quorumBps: bigint;
     maxPerformanceFeeBps: bigint;
-    maxStrategyDuration: bigint;
     cooldownPeriod: bigint;
+    collaborationWindow: bigint;
+    maxCoProposers: bigint;
+    minStrategyDuration: bigint;
+    maxStrategyDuration: bigint;
   };
   return result;
 }
@@ -118,6 +148,7 @@ export async function getProposal(id: bigint): Promise<StrategyProposal> {
     strategyDuration: bigint;
     votesFor: bigint;
     votesAgainst: bigint;
+    votesAbstain: bigint;
     snapshotTimestamp: bigint;
     voteEnd: bigint;
     executeBy: bigint;
@@ -235,6 +266,7 @@ export async function propose(
   strategyDuration: bigint,
   calls: BatchCall[],
   splitIndex: bigint,
+  coProposers: CoProposer[] = [],
 ): Promise<{ hash: Hex; proposalId: bigint }> {
   const wallet = getWalletClient();
   const client = getPublicClient();
@@ -245,7 +277,7 @@ export async function propose(
     address: getGovernorAddress(),
     abi: SYNDICATE_GOVERNOR_ABI,
     functionName: "propose",
-    args: [vault, metadataURI, performanceFeeBps, strategyDuration, calls, splitIndex],
+    args: [vault, metadataURI, performanceFeeBps, strategyDuration, calls, splitIndex, coProposers],
   });
 
   const receipt = await client.waitForTransactionReceipt({ hash });
@@ -261,7 +293,7 @@ export async function propose(
   return { hash: receipt.transactionHash, proposalId };
 }
 
-export async function vote(proposalId: bigint, support: boolean): Promise<Hex> {
+export async function vote(proposalId: bigint, support: number): Promise<Hex> {
   const wallet = getWalletClient();
   const client = getPublicClient();
 

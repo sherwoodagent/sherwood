@@ -53,11 +53,12 @@ jobs:
 
   integration-tests:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     defaults:
       run:
         working-directory: cli
     env:
+      ENABLE_TESTNET: "true"
       BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
       VAULT_ADDRESS_TESTNET: ${{ secrets.VAULT_ADDRESS_TESTNET }}
       FACTORY_ADDRESS_TESTNET: ${{ secrets.FACTORY_ADDRESS_TESTNET }}

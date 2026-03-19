@@ -54,7 +54,7 @@ export default function VoteButton({
 
   const busy = isPending || isConfirming;
 
-  function castVote(support: boolean) {
+  function castVote(support: number) {
     // Re-check at click time to prevent submitting after deadline
     if (voteEnd <= BigInt(Math.floor(Date.now() / 1000))) {
       setVotingEnded(true);
@@ -160,7 +160,7 @@ export default function VoteButton({
       )}
       <div style={{ display: "flex", gap: "0.5rem" }}>
         <button
-          onClick={() => castVote(true)}
+          onClick={() => castVote(0)}
           disabled={busy}
           style={{
             ...btnBase,
@@ -173,7 +173,7 @@ export default function VoteButton({
           {busy ? "..." : "Vote FOR"}
         </button>
         <button
-          onClick={() => castVote(false)}
+          onClick={() => castVote(1)}
           disabled={busy}
           style={{
             ...btnBase,

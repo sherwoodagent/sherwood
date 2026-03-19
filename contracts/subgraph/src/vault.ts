@@ -8,9 +8,6 @@ import {
   DepositorApproved,
   DepositorRemoved,
   OpenDepositsUpdated,
-  GovernorUpdated,
-  RedemptionsLockedEvent,
-  RedemptionsUnlockedEvent,
 } from "../generated/templates/SyndicateVault/SyndicateVault";
 import {
   Syndicate,
@@ -167,28 +164,4 @@ export function handleDepositorRemoved(event: DepositorRemoved): void {
 
 export function handleOpenDepositsUpdated(event: OpenDepositsUpdated): void {
   // Open deposits toggle — indexed for event filtering.
-}
-
-// ── Governor Integration ──
-
-export function handleGovernorUpdated(event: GovernorUpdated): void {
-  // Governor address change — indexed for event filtering.
-}
-
-export function handleRedemptionsLocked(event: RedemptionsLockedEvent): void {
-  let syndicateId = getSyndicateId();
-  let syndicate = Syndicate.load(syndicateId);
-  if (syndicate == null) return;
-
-  syndicate.redemptionsLocked = true;
-  syndicate.save();
-}
-
-export function handleRedemptionsUnlocked(event: RedemptionsUnlockedEvent): void {
-  let syndicateId = getSyndicateId();
-  let syndicate = Syndicate.load(syndicateId);
-  if (syndicate == null) return;
-
-  syndicate.redemptionsLocked = false;
-  syndicate.save();
 }

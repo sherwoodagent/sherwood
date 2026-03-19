@@ -135,7 +135,7 @@ type Vote @entity(immutable: true) {
   id: ID! # proposalId-voter
   proposal: Proposal!
   voter: Bytes!
-  support: Boolean!
+  support: String!
   weight: BigInt!
   timestamp: BigInt!
   txHash: Bytes!
