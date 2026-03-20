@@ -114,6 +114,8 @@ contract AerodromeLPStrategy is BaseStrategy {
         if (p.tokenA == address(0) || p.tokenB == address(0)) revert ZeroAddress();
         if (p.router == address(0) || p.lpToken == address(0)) revert ZeroAddress();
         if (p.amountADesired == 0 && p.amountBDesired == 0) revert InvalidAmount();
+        // Require at least one settlement slippage param to prevent sandwich attacks
+        if (p.minAmountAOut == 0 && p.minAmountBOut == 0) revert InvalidAmount();
 
         // If gauge is set, verify its staking token matches the LP
         if (p.gauge != address(0)) {
@@ -146,17 +148,18 @@ contract AerodromeLPStrategy is BaseStrategy {
         IERC20(tokenB).forceApprove(router, amountBDesired);
 
         // Add liquidity — LP tokens minted to this contract
-        (,, uint256 liquidity) = IAeroRouter(router).addLiquidity(
-            tokenA,
-            tokenB,
-            stable,
-            amountADesired,
-            amountBDesired,
-            amountAMin,
-            amountBMin,
-            address(this), // LP tokens to strategy
-            block.timestamp // deadline = now (called atomically)
-        );
+        (,, uint256 liquidity) = IAeroRouter(router)
+            .addLiquidity(
+                tokenA,
+                tokenB,
+                stable,
+                amountADesired,
+                amountBDesired,
+                amountAMin,
+                amountBMin,
+                address(this), // LP tokens to strategy
+                block.timestamp // deadline = now (called atomically)
+            );
 
         // Stake LP in gauge if configured
         if (gauge != address(0) && liquidity > 0) {
@@ -191,16 +194,17 @@ contract AerodromeLPStrategy is BaseStrategy {
             IERC20(lpToken).forceApprove(router, lpBalance);
 
             // Remove liquidity
-            IAeroRouter(router).removeLiquidity(
-                tokenA,
-                tokenB,
-                stable,
-                lpBalance,
-                minAmountAOut,
-                minAmountBOut,
-                address(this), // tokens to strategy
-                block.timestamp
-            );
+            IAeroRouter(router)
+                .removeLiquidity(
+                    tokenA,
+                    tokenB,
+                    stable,
+                    lpBalance,
+                    minAmountAOut,
+                    minAmountBOut,
+                    address(this), // tokens to strategy
+                    block.timestamp
+                );
         }
 
         // Push everything back to vault

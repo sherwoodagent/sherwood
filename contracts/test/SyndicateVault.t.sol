@@ -503,7 +503,7 @@ contract SyndicateVaultTest is Test {
         uint256 balBefore = recipient.balance;
 
         vm.prank(owner);
-        vault.rescueEth(recipient, 1 ether);
+        vault.rescueEth(payable(recipient), 1 ether);
 
         assertEq(recipient.balance, balBefore + 1 ether);
         assertEq(address(vault).balance, 1 ether);
@@ -514,7 +514,7 @@ contract SyndicateVaultTest is Test {
 
         vm.prank(lp1);
         vm.expectRevert();
-        vault.rescueEth(lp1, 1 ether);
+        vault.rescueEth(payable(lp1), 1 ether);
     }
 
     // ==================== RESCUE ERC721 ====================

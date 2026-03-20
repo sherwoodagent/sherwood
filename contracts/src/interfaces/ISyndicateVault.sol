@@ -81,7 +81,7 @@ interface ISyndicateVault {
     function managementFeeBps() external view returns (uint256);
 
     // ── Rescue ──
-    function rescueEth(address to, uint256 amount) external;
+    function rescueEth(address payable to, uint256 amount) external;
     function rescueERC721(address token, uint256 tokenId, address to) external;
 
     // ── Admin (syndicate creator) ──

@@ -38,14 +38,14 @@ contract SyndicateFactoryTest is Test {
         bytes memory factoryInit = abi.encodeCall(
             SyndicateFactory.initialize,
             (SyndicateFactory.InitParams({
-                owner: owner,
-                executorImpl: address(executorLib),
-                vaultImpl: address(vaultImpl),
-                ensRegistrar: address(ensRegistrar),
-                agentRegistry: address(agentRegistry),
-                governor: governorAddr,
-                managementFeeBps: 50
-            }))
+                    owner: owner,
+                    executorImpl: address(executorLib),
+                    vaultImpl: address(vaultImpl),
+                    ensRegistrar: address(ensRegistrar),
+                    agentRegistry: address(agentRegistry),
+                    governor: governorAddr,
+                    managementFeeBps: 50
+                }))
         );
         factory = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInit)));
 

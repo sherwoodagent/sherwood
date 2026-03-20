@@ -78,17 +78,16 @@ contract DeployTestnet is Script {
         bytes memory factoryInitData = abi.encodeCall(
             SyndicateFactory.initialize,
             (SyndicateFactory.InitParams({
-                owner: deployer,
-                executorImpl: address(executorLib),
-                vaultImpl: address(vaultImpl),
-                ensRegistrar: L2_REGISTRAR,
-                agentRegistry: AGENT_REGISTRY,
-                governor: governorProxy,
-                managementFeeBps: 50
-            }))
+                    owner: deployer,
+                    executorImpl: address(executorLib),
+                    vaultImpl: address(vaultImpl),
+                    ensRegistrar: L2_REGISTRAR,
+                    agentRegistry: AGENT_REGISTRY,
+                    governor: governorProxy,
+                    managementFeeBps: 50
+                }))
         );
-        SyndicateFactory factory =
-            SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInitData)));
+        SyndicateFactory factory = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInitData)));
         console.log("SyndicateFactory:", address(factory));
 
         vm.stopBroadcast();

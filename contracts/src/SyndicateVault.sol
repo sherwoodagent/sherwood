@@ -15,6 +15,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ERC721Holder} from "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 /**
@@ -379,10 +380,9 @@ contract SyndicateVault is
     /// @notice Rescue ETH accidentally sent to the vault
     /// @param to Recipient address
     /// @param amount Amount of ETH to rescue
-    function rescueEth(address to, uint256 amount) external onlyOwner {
+    function rescueEth(address payable to, uint256 amount) external onlyOwner {
         if (to == address(0)) revert InvalidAgentAddress();
-        (bool success,) = to.call{value: amount}("");
-        if (!success) revert TransferFailed();
+        Address.sendValue(to, amount);
     }
 
     /// @notice Rescue ERC721 tokens accidentally sent to the vault
