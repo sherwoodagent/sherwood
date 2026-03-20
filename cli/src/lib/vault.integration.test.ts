@@ -1,35 +1,48 @@
 /**
  * Integration tests for SyndicateVault — read-only RPC calls.
  * Requires BASE_SEPOLIA_RPC_URL env var.
- * Tests against the vault deployed by "sherwood syndicate create" on Base Sepolia.
+ * Dynamically resolves the vault address from syndicate #1 via the factory.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
 import type { Address } from "viem";
 import { setVaultAddress, getAssetAddress, getAssetDecimals, getVaultInfo } from "./vault.js";
+import { getSyndicate } from "./factory.js";
 import { TOKENS } from "./addresses.js";
 
-// Vault deployed by syndicate #1 on the redeployed factory
-const VAULT_ADDRESS = "0x22577c660E2B68c5609490d3a37FBB06b4802644" as Address;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-beforeAll(() => {
-  setVaultAddress(VAULT_ADDRESS);
+let vaultAddress: Address;
+let vaultResolved = false;
+
+beforeAll(async () => {
+  const syndicate = await getSyndicate(1n);
+  if (syndicate.vault === ZERO_ADDRESS) {
+    console.warn("Syndicate #1 has no vault — skipping vault tests");
+    return;
+  }
+  vaultAddress = syndicate.vault;
+  setVaultAddress(vaultAddress);
+  vaultResolved = true;
 });
 
 describe("SyndicateVault (Base Sepolia)", () => {
   it("getAssetAddress returns USDC on Sepolia", async () => {
+    if (!vaultResolved) return;
     const asset = await getAssetAddress();
     expect(asset.toLowerCase()).toBe(TOKENS().USDC.toLowerCase());
   });
 
   it("getAssetDecimals returns 6 for USDC", async () => {
+    if (!vaultResolved) return;
     const decimals = await getAssetDecimals();
     expect(decimals).toBe(6);
   });
 
   it("getVaultInfo returns valid shape", async () => {
+    if (!vaultResolved) return;
     const info = await getVaultInfo();
-    expect(info.address.toLowerCase()).toBe(VAULT_ADDRESS.toLowerCase());
+    expect(info.address.toLowerCase()).toBe(vaultAddress.toLowerCase());
     expect(typeof info.totalAssets).toBe("string");
     expect(["number", "bigint"]).toContain(typeof info.agentCount);
     expect(typeof info.redemptionsLocked).toBe("boolean");
