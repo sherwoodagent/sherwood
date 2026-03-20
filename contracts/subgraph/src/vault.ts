@@ -8,6 +8,9 @@ import {
   DepositorApproved,
   DepositorRemoved,
   OpenDepositsUpdated,
+  GovernorUpdated,
+  RedemptionsLockedEvent,
+  RedemptionsUnlockedEvent,
 } from "../generated/templates/SyndicateVault/SyndicateVault";
 import {
   Syndicate,
@@ -36,12 +39,13 @@ function getSyndicateId(): string {
 export function handleAgentRegistered(event: AgentRegistered): void {
   let syndicateId = getSyndicateId();
 
-  let id = event.address.toHexString() + "-" + event.params.agentAddress.toHexString();
+  let id = event.address.toHexString() + "-" + event.params.pkpAddress.toHexString();
   let agent = new Agent(id);
 
   agent.syndicate = syndicateId;
   agent.agentId = event.params.agentId;
-  agent.agentAddress = event.params.agentAddress;
+  agent.pkpAddress = event.params.pkpAddress;
+  agent.operatorEOA = event.params.operatorEOA;
   agent.active = true;
   agent.registeredAt = event.block.timestamp;
   agent.totalBatches = BigInt.zero();
@@ -51,7 +55,7 @@ export function handleAgentRegistered(event: AgentRegistered): void {
 }
 
 export function handleAgentRemoved(event: AgentRemoved): void {
-  let id = event.address.toHexString() + "-" + event.params.agentAddress.toHexString();
+  let id = event.address.toHexString() + "-" + event.params.pkpAddress.toHexString();
   let agent = Agent.load(id);
   if (agent == null) return;
 
@@ -164,4 +168,28 @@ export function handleDepositorRemoved(event: DepositorRemoved): void {
 
 export function handleOpenDepositsUpdated(event: OpenDepositsUpdated): void {
   // Open deposits toggle — indexed for event filtering.
+}
+
+// ── Governor Integration ──
+
+export function handleGovernorUpdated(event: GovernorUpdated): void {
+  // Governor address change — indexed for event filtering.
+}
+
+export function handleRedemptionsLocked(event: RedemptionsLockedEvent): void {
+  let syndicateId = getSyndicateId();
+  let syndicate = Syndicate.load(syndicateId);
+  if (syndicate == null) return;
+
+  syndicate.redemptionsLocked = true;
+  syndicate.save();
+}
+
+export function handleRedemptionsUnlocked(event: RedemptionsUnlockedEvent): void {
+  let syndicateId = getSyndicateId();
+  let syndicate = Syndicate.load(syndicateId);
+  if (syndicate == null) return;
+
+  syndicate.redemptionsLocked = false;
+  syndicate.save();
 }

@@ -7,13 +7,15 @@ interface ISyndicateVault {
     // ── Errors ──
     error InvalidOwner();
     error InvalidExecutorImpl();
+    error NoShares();
     error NotActiveAgent();
     error SimulationFailed();
     error InvalidDepositor();
     error DepositorAlreadyApproved();
     error DepositorNotApproved();
     error NotApprovedDepositor();
-    error InvalidAgentAddress();
+    error InvalidPKPAddress();
+    error InvalidOperatorEOA();
     error AgentAlreadyRegistered();
     error AgentNotActive();
     error InvalidAgentRegistry();
@@ -21,6 +23,8 @@ interface ISyndicateVault {
     error NotGovernor();
     error RedemptionsLocked();
     error InvalidGovernor();
+    error InvalidAgentAddress();
+    error TransferFailed();
 
     // ── Init Params ──
     struct InitParams {
@@ -38,9 +42,13 @@ interface ISyndicateVault {
     // ── Per-Agent Config ──
     struct AgentConfig {
         uint256 agentId; // ERC-8004 identity token ID
-        address agentAddress; // Agent wallet address (the executor)
+        address pkpAddress; // Lit PKP wallet address (the executor)
+        address operatorEOA; // Agent's own wallet (the identity)
         bool active;
     }
+
+    // ── LP Functions ──
+    function ragequit(address receiver) external returns (uint256 assets);
 
     // ── Owner Functions ──
     function executeBatch(BatchExecutorLib.Call[] calldata calls) external;
@@ -55,29 +63,41 @@ interface ISyndicateVault {
     function openDeposits() external view returns (bool);
 
     // ── Views ──
-    function getAgentConfig(address agentAddress) external view returns (AgentConfig memory);
+    function getAgentConfig(address pkpAddress) external view returns (AgentConfig memory);
     function getAgentCount() external view returns (uint256);
-    function isAgent(address agentAddress) external view returns (bool);
+    function isAgent(address pkpAddress) external view returns (bool);
     function getExecutorImpl() external view returns (address);
-    function getAgentAddresses() external view returns (address[] memory);
+    function totalDeposited() external view returns (uint256);
+    function getAgentOperators() external view returns (address[] memory);
 
     // ── Governor ──
+    function setGovernor(address governor_) external;
+    function lockRedemptions() external;
+    function unlockRedemptions() external;
     function executeGovernorBatch(BatchExecutorLib.Call[] calldata calls) external;
     function transferPerformanceFee(address asset, address to, uint256 amount) external;
     function governor() external view returns (address);
     function redemptionsLocked() external view returns (bool);
     function managementFeeBps() external view returns (uint256);
 
+    // ── Rescue ──
+    function rescueEth(address to, uint256 amount) external;
+    function rescueERC721(address token, uint256 tokenId, address to) external;
+
     // ── Admin (syndicate creator) ──
-    function registerAgent(uint256 agentId, address agentAddress) external;
-    function removeAgent(address agentAddress) external;
+    function registerAgent(uint256 agentId, address pkpAddress, address operatorEOA) external;
+    function removeAgent(address pkpAddress) external;
     function pause() external;
     function unpause() external;
 
     // ── Events ──
-    event AgentRegistered(uint256 indexed agentId, address indexed agentAddress);
-    event AgentRemoved(address indexed agentAddress);
+    event AgentRegistered(uint256 indexed agentId, address indexed pkpAddress, address indexed operatorEOA);
+    event AgentRemoved(address indexed pkpAddress);
+    event Ragequit(address indexed lp, uint256 shares, uint256 assets);
     event DepositorApproved(address indexed depositor);
     event DepositorRemoved(address indexed depositor);
     event OpenDepositsUpdated(bool open);
+    event GovernorUpdated(address indexed oldGovernor, address indexed newGovernor);
+    event RedemptionsLockedEvent();
+    event RedemptionsUnlockedEvent();
 }

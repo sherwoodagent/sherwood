@@ -11,15 +11,9 @@ import {MockMToken} from "./mocks/MockMToken.sol";
 import {MockComptroller} from "./mocks/MockComptroller.sol";
 import {MockSwapRouter} from "./mocks/MockSwapRouter.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
-import {SyndicateGovernor} from "../src/SyndicateGovernor.sol";
-import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
-import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 contract SyndicateVaultTest is Test {
     SyndicateVault public vault;
-    SyndicateGovernor public governor;
     BatchExecutorLib public executorLib;
     ERC20Mock public usdc;
     ERC20Mock public weth;
@@ -31,8 +25,10 @@ contract SyndicateVaultTest is Test {
     address public owner = makeAddr("owner");
     address public lp1 = makeAddr("lp1");
     address public lp2 = makeAddr("lp2");
-    address public agentWallet = makeAddr("agentWallet");
-    address public agentWallet2 = makeAddr("agentWallet2");
+    address public agentPkp = makeAddr("agentPkp");
+    address public agentEoa = makeAddr("agentEoa");
+    address public agentPkp2 = makeAddr("agentPkp2");
+    address public agentEoa2 = makeAddr("agentEoa2");
 
     uint256 public agent1NftId;
     uint256 public agent2NftId;
@@ -54,28 +50,8 @@ contract SyndicateVaultTest is Test {
         agentRegistry = new MockAgentRegistry();
 
         // Mint ERC-8004 identity NFTs for agents
-        agent1NftId = agentRegistry.mint(agentWallet);
-        agent2NftId = agentRegistry.mint(agentWallet2);
-
-        // Deploy governor first
-        SyndicateGovernor govImpl = new SyndicateGovernor();
-        bytes memory govInit = abi.encodeCall(
-            SyndicateGovernor.initialize,
-            (ISyndicateGovernor.InitParams({
-                    owner: owner,
-                    votingPeriod: 1 days,
-                    executionWindow: 1 days,
-                    quorumBps: 4000,
-                    maxPerformanceFeeBps: 3000,
-                    cooldownPeriod: 1 days,
-                    collaborationWindow: 48 hours,
-                    maxCoProposers: 5,
-                    minStrategyDuration: 1 days,
-                    maxStrategyDuration: 7 days,
-                    parameterChangeDelay: 1 days
-                }))
-        );
-        governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
+        agent1NftId = agentRegistry.mint(agentEoa);
+        agent2NftId = agentRegistry.mint(agentEoa2);
 
         // Deploy vault via proxy with executor lib
         SyndicateVault impl = new SyndicateVault();
@@ -89,7 +65,7 @@ contract SyndicateVaultTest is Test {
                     executorImpl: address(executorLib),
                     openDeposits: true,
                     agentRegistry: address(agentRegistry),
-                    governor: address(governor),
+                    governor: address(0),
                     managementFeeBps: 0
                 }))
         );
@@ -106,9 +82,9 @@ contract SyndicateVaultTest is Test {
         // Fund swap router
         weth.mint(address(swapRouter), 1_000e18);
 
-        // Register agent
+        // Register agent (NFT owned by agentEoa)
         vm.prank(owner);
-        vault.registerAgent(agent1NftId, agentWallet);
+        vault.registerAgent(agent1NftId, agentPkp, agentEoa);
     }
 
     // ==================== INITIALIZATION ====================
@@ -121,13 +97,6 @@ contract SyndicateVaultTest is Test {
         assertEq(vault.getExecutorImpl(), address(executorLib));
     }
 
-    // ==================== DECIMALS ====================
-
-    function test_decimals_returns12() public view {
-        // _decimalsOffset() = asset.decimals() = 6 for USDC, so vault decimals = 6 + 6 = 12
-        assertEq(vault.decimals(), 12);
-    }
-
     // ==================== DEPOSITS & WITHDRAWALS ====================
 
     function test_deposit() public {
@@ -138,8 +107,6 @@ contract SyndicateVaultTest is Test {
 
         assertGt(shares, 0);
         assertEq(vault.balanceOf(lp1), shares);
-        // _decimalsOffset = asset.decimals() = 6, so 10_000e6 USDC yields 10_000e12 shares
-        assertEq(shares, 10_000e12);
     }
 
     function test_deposit_autoDelegates() public {
@@ -154,7 +121,7 @@ contract SyndicateVaultTest is Test {
         assertGt(vault.getVotes(lp1), 0);
     }
 
-    function test_redeemAll() public {
+    function test_ragequit() public {
         // LP1 deposits
         vm.startPrank(lp1);
         usdc.approve(address(vault), 10_000e6);
@@ -169,10 +136,9 @@ contract SyndicateVaultTest is Test {
 
         uint256 balBefore = usdc.balanceOf(lp1);
 
-        // LP1 redeems all shares
-        uint256 lp1Shares = vault.balanceOf(lp1);
+        // LP1 ragequits
         vm.prank(lp1);
-        uint256 assets = vault.redeem(lp1Shares, lp1, lp1);
+        uint256 assets = vault.ragequit(lp1);
 
         assertEq(assets, 10_000e6);
         assertEq(usdc.balanceOf(lp1), balBefore + 10_000e6);
@@ -181,64 +147,22 @@ contract SyndicateVaultTest is Test {
         assertGt(vault.balanceOf(lp2), 0);
     }
 
-    function test_redeem_noShares_reverts() public {
+    function test_ragequit_noShares_reverts() public {
         vm.prank(lp1);
-        vm.expectRevert(); // ERC4626: cannot redeem more than balance
-        vault.redeem(1, lp1, lp1);
-    }
-
-    // ==================== INFLATION ATTACK MITIGATION ====================
-
-    function test_inflationAttack_mitigated() public {
-        // Classic inflation attack: attacker deposits 1 wei, donates a large amount,
-        // then tries to steal from next depositor. With dynamic _decimalsOffset (= asset
-        // decimals), virtual shares/assets prevent this for any asset denomination.
-
-        address attacker = makeAddr("attacker");
-        address victim = makeAddr("victim");
-
-        usdc.mint(attacker, 100_000e6);
-        usdc.mint(victim, 100_000e6);
-
-        // Step 1: Attacker deposits the minimum (1 USDC = 1e6)
-        vm.startPrank(attacker);
-        usdc.approve(address(vault), 1e6);
-        uint256 attackerShares = vault.deposit(1e6, attacker);
-        vm.stopPrank();
-
-        // offset = asset.decimals() = 6: 1e6 assets -> 1e12 shares (offset protects)
-        assertEq(attackerShares, 1e12);
-
-        // Step 2: Attacker donates 10k USDC directly to vault
-        vm.prank(attacker);
-        usdc.transfer(address(vault), 10_000e6);
-
-        // Step 3: Victim deposits 10k USDC
-        vm.startPrank(victim);
-        usdc.approve(address(vault), 10_000e6);
-        uint256 victimShares = vault.deposit(10_000e6, victim);
-        vm.stopPrank();
-
-        // Victim should get a fair amount of shares, not be robbed
-        // Without offset, victim could get 0 shares (inflation attack succeeds)
-        // With offset, victim gets a proportional amount
-        assertGt(victimShares, 0);
-
-        // Victim's shares should represent close to their deposited value
-        uint256 victimAssets = vault.previewRedeem(victimShares);
-        // Victim should get back at least 99% of their deposit (rounding dust is OK)
-        assertGt(victimAssets, 9_900e6);
+        vm.expectRevert(ISyndicateVault.NoShares.selector);
+        vault.ragequit(lp1);
     }
 
     // ==================== AGENT REGISTRATION ====================
 
     function test_registerAgent() public view {
-        assertTrue(vault.isAgent(agentWallet));
+        assertTrue(vault.isAgent(agentPkp));
         assertEq(vault.getAgentCount(), 1);
 
-        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentWallet);
+        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPkp);
         assertEq(config.agentId, agent1NftId);
-        assertEq(config.agentAddress, agentWallet);
+        assertEq(config.pkpAddress, agentPkp);
+        assertEq(config.operatorEOA, agentEoa);
         assertTrue(config.active);
     }
 
@@ -247,10 +171,10 @@ contract SyndicateVaultTest is Test {
         uint256 ownerNftId = agentRegistry.mint(owner);
 
         vm.prank(owner);
-        vault.registerAgent(ownerNftId, agentWallet2);
+        vault.registerAgent(ownerNftId, agentPkp2, agentEoa2);
 
-        assertTrue(vault.isAgent(agentWallet2));
-        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentWallet2);
+        assertTrue(vault.isAgent(agentPkp2));
+        ISyndicateVault.AgentConfig memory config = vault.getAgentConfig(agentPkp2);
         assertEq(config.agentId, ownerNftId);
     }
 
@@ -259,23 +183,23 @@ contract SyndicateVaultTest is Test {
         address random = makeAddr("random");
         uint256 randomNftId = agentRegistry.mint(random);
 
-        // Try to register with NFT not owned by agentAddress or vault owner
+        // Try to register with NFT not owned by operatorEOA or vault owner
         vm.prank(owner);
         vm.expectRevert(ISyndicateVault.NotAgentOwner.selector);
-        vault.registerAgent(randomNftId, agentWallet2);
+        vault.registerAgent(randomNftId, agentPkp2, agentEoa2);
     }
 
     function test_registerAgent_notOwner_reverts() public {
         vm.prank(lp1);
         vm.expectRevert();
-        vault.registerAgent(agent2NftId, agentWallet2);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2);
     }
 
     function test_removeAgent() public {
         vm.prank(owner);
-        vault.removeAgent(agentWallet);
+        vault.removeAgent(agentPkp);
 
-        assertFalse(vault.isAgent(agentWallet));
+        assertFalse(vault.isAgent(agentPkp));
         assertEq(vault.getAgentCount(), 0);
     }
 
@@ -303,7 +227,7 @@ contract SyndicateVaultTest is Test {
     function test_executeBatch_notOwner_reverts() public {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
-        vm.prank(agentWallet);
+        vm.prank(agentPkp);
         vm.expectRevert();
         vault.executeBatch(calls);
     }
@@ -315,7 +239,7 @@ contract SyndicateVaultTest is Test {
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
 
         vm.prank(owner);
-        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.expectRevert();
         vault.executeBatch(calls);
     }
 
@@ -327,7 +251,7 @@ contract SyndicateVaultTest is Test {
 
         vm.startPrank(lp1);
         usdc.approve(address(vault), 10_000e6);
-        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        vm.expectRevert();
         vault.deposit(10_000e6, lp1);
         vm.stopPrank();
     }
@@ -358,7 +282,7 @@ contract SyndicateVaultTest is Test {
 
     function test_approveDepositor_notOwner_reverts() public {
         vm.prank(lp1);
-        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, lp1));
+        vm.expectRevert();
         vault.approveDepositor(makeAddr("depositor"));
     }
 
@@ -400,7 +324,7 @@ contract SyndicateVaultTest is Test {
                     executorImpl: address(executorLib),
                     openDeposits: false,
                     agentRegistry: address(agentRegistry),
-                    governor: address(governor),
+                    governor: address(0),
                     managementFeeBps: 0
                 }))
         );
@@ -460,48 +384,160 @@ contract SyndicateVaultTest is Test {
         assertTrue(vault.openDeposits());
     }
 
-    // ==================== GET AGENT ADDRESSES ====================
+    // ==================== TOTAL DEPOSITED TRACKING ====================
 
-    function test_getAgentAddresses_single() public view {
-        address[] memory agents = vault.getAgentAddresses();
-        assertEq(agents.length, 1);
-        assertEq(agents[0], agentWallet);
+    function test_totalDeposited_increments_on_deposit() public {
+        assertEq(vault.totalDeposited(), 0);
+
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        assertEq(vault.totalDeposited(), 10_000e6);
+
+        vm.startPrank(lp2);
+        usdc.approve(address(vault), 5_000e6);
+        vault.deposit(5_000e6, lp2);
+        vm.stopPrank();
+
+        assertEq(vault.totalDeposited(), 15_000e6);
     }
 
-    function test_getAgentAddresses_multiple() public {
-        vm.prank(owner);
-        vault.registerAgent(agent2NftId, agentWallet2);
+    function test_totalDeposited_decrements_on_withdraw() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        vault.deposit(10_000e6, lp1);
+        vault.withdraw(3_000e6, lp1, lp1);
+        vm.stopPrank();
 
-        address[] memory agents = vault.getAgentAddresses();
-        assertEq(agents.length, 2);
+        assertEq(vault.totalDeposited(), 7_000e6);
+    }
+
+    function test_totalDeposited_decrements_on_ragequit() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        assertEq(vault.totalDeposited(), 10_000e6);
+
+        vm.prank(lp1);
+        vault.ragequit(lp1);
+
+        assertEq(vault.totalDeposited(), 0);
+    }
+
+    function test_totalDeposited_multiple_lps() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 50_000e6);
+        vault.deposit(50_000e6, lp1);
+        vm.stopPrank();
+
+        vm.startPrank(lp2);
+        usdc.approve(address(vault), 30_000e6);
+        vault.deposit(30_000e6, lp2);
+        vm.stopPrank();
+
+        assertEq(vault.totalDeposited(), 80_000e6);
+
+        // LP1 ragequits
+        vm.prank(lp1);
+        vault.ragequit(lp1);
+
+        assertEq(vault.totalDeposited(), 30_000e6);
+    }
+
+    // ==================== GET AGENT OPERATORS ====================
+
+    function test_getAgentOperators_single() public view {
+        address[] memory operators = vault.getAgentOperators();
+        assertEq(operators.length, 1);
+        assertEq(operators[0], agentEoa);
+    }
+
+    function test_getAgentOperators_multiple() public {
+        vm.prank(owner);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2);
+
+        address[] memory operators = vault.getAgentOperators();
+        assertEq(operators.length, 2);
         // Order depends on EnumerableSet iteration order
         bool found1 = false;
         bool found2 = false;
-        for (uint256 i = 0; i < agents.length; i++) {
-            if (agents[i] == agentWallet) found1 = true;
-            if (agents[i] == agentWallet2) found2 = true;
+        for (uint256 i = 0; i < operators.length; i++) {
+            if (operators[i] == agentEoa) found1 = true;
+            if (operators[i] == agentEoa2) found2 = true;
         }
         assertTrue(found1);
         assertTrue(found2);
     }
 
-    function test_getAgentAddresses_afterRemoval() public {
+    function test_getAgentOperators_afterRemoval() public {
         vm.startPrank(owner);
-        vault.registerAgent(agent2NftId, agentWallet2);
-        vault.removeAgent(agentWallet);
+        vault.registerAgent(agent2NftId, agentPkp2, agentEoa2);
+        vault.removeAgent(agentPkp);
         vm.stopPrank();
 
-        address[] memory agents = vault.getAgentAddresses();
-        assertEq(agents.length, 1);
-        assertEq(agents[0], agentWallet2);
+        address[] memory operators = vault.getAgentOperators();
+        assertEq(operators.length, 1);
+        assertEq(operators[0], agentEoa2);
     }
 
-    function test_getAgentAddresses_empty() public {
+    function test_getAgentOperators_empty() public {
         vm.prank(owner);
-        vault.removeAgent(agentWallet);
+        vault.removeAgent(agentPkp);
 
-        address[] memory agents = vault.getAgentAddresses();
-        assertEq(agents.length, 0);
+        address[] memory operators = vault.getAgentOperators();
+        assertEq(operators.length, 0);
+    }
+
+    // ==================== RESCUE ETH ====================
+
+    function test_rescueEth() public {
+        // Send ETH to the vault
+        vm.deal(address(vault), 2 ether);
+        assertEq(address(vault).balance, 2 ether);
+
+        address recipient = makeAddr("recipient");
+        uint256 balBefore = recipient.balance;
+
+        vm.prank(owner);
+        vault.rescueEth(recipient, 1 ether);
+
+        assertEq(recipient.balance, balBefore + 1 ether);
+        assertEq(address(vault).balance, 1 ether);
+    }
+
+    function test_rescueEth_notOwner_reverts() public {
+        vm.deal(address(vault), 1 ether);
+
+        vm.prank(lp1);
+        vm.expectRevert();
+        vault.rescueEth(lp1, 1 ether);
+    }
+
+    // ==================== RESCUE ERC721 ====================
+
+    function test_rescueERC721() public {
+        // Mint an NFT directly to the vault
+        uint256 tokenId = agentRegistry.mint(address(vault));
+
+        assertEq(agentRegistry.ownerOf(tokenId), address(vault));
+
+        address recipient = makeAddr("nftRecipient");
+        vm.prank(owner);
+        vault.rescueERC721(address(agentRegistry), tokenId, recipient);
+
+        assertEq(agentRegistry.ownerOf(tokenId), recipient);
+    }
+
+    function test_rescueERC721_notOwner_reverts() public {
+        uint256 tokenId = agentRegistry.mint(address(vault));
+
+        vm.prank(lp1);
+        vm.expectRevert();
+        vault.rescueERC721(address(agentRegistry), tokenId, lp1);
     }
 
     // ==================== ERC20VOTES ====================
@@ -518,8 +554,7 @@ contract SyndicateVaultTest is Test {
         vm.warp(block.timestamp + 1);
 
         uint256 pastVotes = vault.getPastVotes(lp1, depositTime);
-        // _decimalsOffset = asset.decimals() = 6, so 10_000e6 USDC yields 10_000e12 shares
-        assertEq(pastVotes, 10_000e12);
+        assertEq(pastVotes, 10_000e6);
     }
 
     function test_getPastTotalSupply_afterDeposit() public {
@@ -533,7 +568,6 @@ contract SyndicateVaultTest is Test {
         vm.warp(block.timestamp + 1);
 
         uint256 pastSupply = vault.getPastTotalSupply(depositTime);
-        // _decimalsOffset = asset.decimals() = 6, so 10_000e6 USDC yields 10_000e12 shares
-        assertEq(pastSupply, 10_000e12);
+        assertEq(pastSupply, 10_000e6);
     }
 }

@@ -7,7 +7,7 @@ pragma solidity 0.8.28;
  *
  *   When a vault delegatecalls into this contract:
  *     - `address(this)` = vault address (positions live on the vault)
- *     - `msg.sender` = original caller (the agent wallet)
+ *     - `msg.sender` = original caller (the agent PKP)
  *     - All calls to DeFi protocols happen FROM the vault
  *
  *   This contract has NO state and NO access control. The calling vault must

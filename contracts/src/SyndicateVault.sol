@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
-import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
 import {BatchExecutorLib} from "./BatchExecutorLib.sol";
 import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {
@@ -11,10 +10,8 @@ import {
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ERC721Holder} from "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -34,7 +31,10 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
  *   Inherits ERC20VotesUpgradeable to provide proper vote checkpointing for
  *   the governor's snapshot-based voting system.
  *
- *   LPs can redeem at any time for their pro-rata share.
+ *   LPs can ragequit at any time for their pro-rata share.
+ *
+ *   Deployed as an ERC-1967 proxy for gas-efficient cloning but NOT upgradeable.
+ *   There is no `upgradeTo` — the implementation is locked at deploy time.
  */
 contract SyndicateVault is
     ISyndicateVault,
@@ -43,19 +43,17 @@ contract SyndicateVault is
     ERC20VotesUpgradeable,
     OwnableUpgradeable,
     PausableUpgradeable,
-    UUPSUpgradeable,
     ERC721Holder
 {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 
     // ==================== STORAGE ====================
-    // WARNING: Never reorder existing slots. Append-only for UUPS safety.
 
-    /// @notice Agent wallet address => agent config
+    /// @notice PKP address => agent config
     mapping(address => AgentConfig) private _agents;
 
-    /// @notice Set of all registered agent addresses
+    /// @notice Set of all registered PKP addresses
     EnumerableSet.AddressSet private _agentSet;
 
     // ── New storage (appended after existing slots) ──
@@ -72,16 +70,19 @@ contract SyndicateVault is
     /// @notice ERC-8004 agent identity registry (ERC-721)
     IERC721 private _agentRegistry;
 
-    // ── Governor storage (appended — UUPS safe) ──
+    /// @notice Cumulative deposits for profit calculation
+    uint256 private _totalDeposited;
+
+    // ── Governor storage ──
 
     /// @notice Trusted governor contract
     address private _governor;
 
+    /// @notice True when a strategy is live (redemptions blocked)
+    bool private _redemptionsLocked;
+
     /// @notice Vault owner's management fee on strategy profits (basis points, set at init)
     uint256 private _managementFeeBps;
-
-    /// @dev Reserved storage for future upgrades. Decrease by 1 for each new slot added.
-    uint256[40] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -91,8 +92,7 @@ contract SyndicateVault is
     function initialize(InitParams memory p) external initializer {
         if (p.owner == address(0)) revert InvalidOwner();
         if (p.executorImpl == address(0)) revert InvalidExecutorImpl();
-        if (p.governor == address(0)) revert InvalidGovernor();
-        // agentRegistry may be address(0) on chains without ERC-8004
+        if (p.agentRegistry == address(0)) revert InvalidAgentRegistry();
 
         __ERC4626_init(IERC20(p.asset));
         __ERC20_init(p.name, p.symbol);
@@ -105,6 +105,18 @@ contract SyndicateVault is
         _agentRegistry = IERC721(p.agentRegistry);
         _governor = p.governor;
         _managementFeeBps = p.managementFeeBps;
+    }
+
+    // ==================== LP FUNCTIONS ====================
+
+    /// @inheritdoc ISyndicateVault
+    function ragequit(address receiver) external whenNotPaused returns (uint256 assets) {
+        uint256 shares = balanceOf(msg.sender);
+        if (shares == 0) revert NoShares();
+
+        assets = redeem(shares, receiver, msg.sender);
+
+        emit Ragequit(msg.sender, shares, assets);
     }
 
     // ==================== BATCH EXECUTION ====================
@@ -170,8 +182,8 @@ contract SyndicateVault is
     // ==================== VIEWS ====================
 
     /// @inheritdoc ISyndicateVault
-    function getAgentConfig(address agentAddress) external view returns (AgentConfig memory) {
-        return _agents[agentAddress];
+    function getAgentConfig(address pkpAddress) external view returns (AgentConfig memory) {
+        return _agents[pkpAddress];
     }
 
     /// @inheritdoc ISyndicateVault
@@ -180,8 +192,8 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
-    function isAgent(address agentAddress) external view returns (bool) {
-        return _agents[agentAddress].active;
+    function isAgent(address pkpAddress) external view returns (bool) {
+        return _agents[pkpAddress].active;
     }
 
     /// @inheritdoc ISyndicateVault
@@ -190,38 +202,48 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
-    function getAgentAddresses() external view returns (address[] memory) {
-        return _agentSet.values();
+    function totalDeposited() external view returns (uint256) {
+        return _totalDeposited;
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function getAgentOperators() external view returns (address[] memory) {
+        uint256 len = _agentSet.length();
+        address[] memory operators = new address[](len);
+        for (uint256 i = 0; i < len; i++) {
+            operators[i] = _agents[_agentSet.at(i)].operatorEOA;
+        }
+        return operators;
     }
 
     // ==================== ADMIN ====================
 
     /// @inheritdoc ISyndicateVault
-    function registerAgent(uint256 agentId, address agentAddress) external onlyOwner {
-        if (agentAddress == address(0)) revert InvalidAgentAddress();
-        if (_agents[agentAddress].active) revert AgentAlreadyRegistered();
+    function registerAgent(uint256 agentId, address pkpAddress, address operatorEOA) external onlyOwner {
+        if (pkpAddress == address(0)) revert InvalidPKPAddress();
+        if (operatorEOA == address(0)) revert InvalidOperatorEOA();
+        if (_agents[pkpAddress].active) revert AgentAlreadyRegistered();
 
-        // Verify ERC-8004 identity (skipped on chains without agent registry)
-        if (address(_agentRegistry) != address(0)) {
-            address nftOwner = _agentRegistry.ownerOf(agentId);
-            if (nftOwner != agentAddress && nftOwner != owner()) revert NotAgentOwner();
-        }
+        // Verify ERC-8004 identity: NFT must be owned by operatorEOA or vault owner (syndicate creator)
+        address nftOwner = _agentRegistry.ownerOf(agentId);
+        if (nftOwner != operatorEOA && nftOwner != owner()) revert NotAgentOwner();
 
-        _agents[agentAddress] = AgentConfig({agentId: agentId, agentAddress: agentAddress, active: true});
+        _agents[pkpAddress] =
+            AgentConfig({agentId: agentId, pkpAddress: pkpAddress, operatorEOA: operatorEOA, active: true});
 
-        _agentSet.add(agentAddress);
+        _agentSet.add(pkpAddress);
 
-        emit AgentRegistered(agentId, agentAddress);
+        emit AgentRegistered(agentId, pkpAddress, operatorEOA);
     }
 
     /// @inheritdoc ISyndicateVault
-    function removeAgent(address agentAddress) external onlyOwner {
-        if (!_agents[agentAddress].active) revert AgentNotActive();
+    function removeAgent(address pkpAddress) external onlyOwner {
+        if (!_agents[pkpAddress].active) revert AgentNotActive();
 
-        _agents[agentAddress].active = false;
-        _agentSet.remove(agentAddress);
+        _agents[pkpAddress].active = false;
+        _agentSet.remove(pkpAddress);
 
-        emit AgentRemoved(agentAddress);
+        emit AgentRemoved(pkpAddress);
     }
 
     /// @inheritdoc ISyndicateVault
@@ -237,8 +259,31 @@ contract SyndicateVault is
     // ==================== GOVERNOR ====================
 
     modifier onlyGovernor() {
-        if (msg.sender != _governor) revert NotGovernor();
+        _onlyGovernor();
         _;
+    }
+
+    function _onlyGovernor() internal view {
+        if (msg.sender != _governor) revert NotGovernor();
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function setGovernor(address governor_) external onlyOwner {
+        address old = _governor;
+        _governor = governor_;
+        emit GovernorUpdated(old, governor_);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function lockRedemptions() external onlyGovernor {
+        _redemptionsLocked = true;
+        emit RedemptionsLockedEvent();
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function unlockRedemptions() external onlyGovernor {
+        _redemptionsLocked = false;
+        emit RedemptionsUnlockedEvent();
     }
 
     /// @inheritdoc ISyndicateVault
@@ -264,7 +309,7 @@ contract SyndicateVault is
 
     /// @inheritdoc ISyndicateVault
     function redemptionsLocked() external view returns (bool) {
-        return ISyndicateGovernor(_governor).getActiveProposal(address(this)) != 0;
+        return _redemptionsLocked;
     }
 
     /// @inheritdoc ISyndicateVault
@@ -298,7 +343,7 @@ contract SyndicateVault is
         return super.decimals();
     }
 
-    /// @dev Block deposits when paused or depositor not approved.
+    /// @dev Block deposits when paused or depositor not approved. Track totalDeposited.
     ///      Auto-delegate to self on first deposit so shareholders get voting power.
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares)
         internal
@@ -306,6 +351,7 @@ contract SyndicateVault is
         whenNotPaused
     {
         if (!_openDeposits && !_approvedDepositors.contains(receiver)) revert NotApprovedDepositor();
+        _totalDeposited += assets;
         super._deposit(caller, receiver, assets, shares);
 
         // Auto-delegate: if receiver has no delegate, delegate to self
@@ -319,13 +365,34 @@ contract SyndicateVault is
         override
         whenNotPaused
     {
-        if (ISyndicateGovernor(_governor).getActiveProposal(address(this)) != 0) revert RedemptionsLocked();
+        if (_redemptionsLocked) revert RedemptionsLocked();
+        if (assets > _totalDeposited) {
+            _totalDeposited = 0;
+        } else {
+            _totalDeposited -= assets;
+        }
         super._withdraw(caller, receiver, _owner, assets, shares);
     }
 
-    // ==================== UUPS ====================
+    // ==================== RESCUE ====================
 
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    /// @notice Rescue ETH accidentally sent to the vault
+    /// @param to Recipient address
+    /// @param amount Amount of ETH to rescue
+    function rescueEth(address to, uint256 amount) external onlyOwner {
+        if (to == address(0)) revert InvalidAgentAddress();
+        (bool success,) = to.call{value: amount}("");
+        if (!success) revert TransferFailed();
+    }
+
+    /// @notice Rescue ERC721 tokens accidentally sent to the vault
+    /// @param token ERC721 token contract address
+    /// @param tokenId Token ID to rescue
+    /// @param to Recipient address
+    function rescueERC721(address token, uint256 tokenId, address to) external onlyOwner {
+        if (to == address(0)) revert InvalidAgentAddress();
+        IERC721(token).safeTransferFrom(address(this), to, tokenId);
+    }
 
     // ==================== RECEIVE ====================
 

@@ -61,13 +61,7 @@ export function handleVoteCast(event: VoteCast): void {
 
   vote.proposal = proposalId;
   vote.voter = event.params.voter;
-  if (event.params.support == 0) {
-    vote.support = "FOR";
-  } else if (event.params.support == 1) {
-    vote.support = "AGAINST";
-  } else {
-    vote.support = "ABSTAIN";
-  }
+  vote.support = event.params.support;
   vote.weight = event.params.weight;
   vote.timestamp = event.block.timestamp;
   vote.txHash = event.transaction.hash;
