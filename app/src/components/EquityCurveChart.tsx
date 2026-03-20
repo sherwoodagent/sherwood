@@ -29,7 +29,7 @@ interface EquityCurveChartProps {
 export default function EquityCurveChart({ data, hwm }: EquityCurveChartProps) {
   const chartRef = useRef<ChartJS<"line">>(null);
   const [gradient, setGradient] = useState<CanvasGradient | string>(
-    "rgba(45, 212, 45, 0.1)"
+    "rgba(46, 230, 166, 0.1)"
   );
 
   useEffect(() => {
@@ -37,8 +37,8 @@ export default function EquityCurveChart({ data, hwm }: EquityCurveChartProps) {
     if (!chart) return;
     const ctx = chart.ctx;
     const g = ctx.createLinearGradient(0, 0, 0, 300);
-    g.addColorStop(0, "rgba(45, 212, 45, 0.15)");
-    g.addColorStop(1, "rgba(45, 212, 45, 0)");
+    g.addColorStop(0, "rgba(46, 230, 166, 0.15)");
+    g.addColorStop(1, "rgba(46, 230, 166, 0)");
     setGradient(g);
   }, []);
 
@@ -46,7 +46,7 @@ export default function EquityCurveChart({ data, hwm }: EquityCurveChartProps) {
 
   return (
     <div className="chart-container">
-      <div className="panel-title font-[family-name:var(--font-jetbrains-mono)]">
+      <div className="panel-title font-[family-name:var(--font-plus-jakarta)]">
         <span>Equity Curve (30D)</span>
         <span style={{ color: "var(--color-accent)" }}>HWM: {hwm}</span>
       </div>
@@ -59,7 +59,7 @@ export default function EquityCurveChart({ data, hwm }: EquityCurveChartProps) {
               {
                 label: "Portfolio Value",
                 data,
-                borderColor: "#2dd42d",
+                borderColor: "#2EE6A6",
                 borderWidth: 2,
                 fill: true,
                 backgroundColor: gradient,
@@ -78,7 +78,7 @@ export default function EquityCurveChart({ data, hwm }: EquityCurveChartProps) {
                 grid: { color: "rgba(255,255,255,0.05)" },
                 ticks: {
                   color: "rgba(255,255,255,0.3)",
-                  font: { size: 10, family: "JetBrains Mono" },
+                  font: { size: 10, family: "Plus Jakarta Sans" },
                 },
               },
             },

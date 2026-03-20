@@ -62,7 +62,7 @@ export default function TorusKnotBackground({
         q
       );
       const material = new THREE.MeshPhongMaterial({
-        color: 0x2dd42d,
+        color: 0x2ee6a6,
         wireframe: true,
         transparent: true,
         opacity,
@@ -70,7 +70,7 @@ export default function TorusKnotBackground({
       const torus = new THREE.Mesh(geometry, material);
       scene.add(torus);
 
-      const light = new THREE.PointLight(0x2dd42d, 1, 100);
+      const light = new THREE.PointLight(0x2ee6a6, 1, 100);
       light.position.set(10, 10, 10);
       scene.add(light);
 

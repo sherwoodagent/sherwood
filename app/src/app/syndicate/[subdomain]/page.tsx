@@ -226,8 +226,8 @@ export default async function SyndicateDetailPage({
       </div>
 
       <SiteFooter
-        left="&copy; 2025 Sherwood Protocol // Syndicate Dashboard"
-        right="Live Feed // API Docs // Governance"
+        left="sherwood // Autonomous Syndicates"
+        right="Docs // X"
       />
     </>
   );

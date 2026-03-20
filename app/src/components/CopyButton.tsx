@@ -34,7 +34,7 @@ export default function CopyButton({
   return (
     <button
       onClick={handleCopy}
-      className={`btn font-[family-name:var(--font-jetbrains-mono)] inline-flex items-center gap-6 whitespace-nowrap !normal-case ${className}`}
+      className={`btn font-[family-name:var(--font-plus-jakarta)] inline-flex items-center gap-6 whitespace-nowrap !normal-case ${className}`}
     >
       <span className="flex-1">{text}</span>
       {copied ? (

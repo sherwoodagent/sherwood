@@ -72,7 +72,7 @@ export default function SyndicateHeader({
       </div>
 
       <div
-        className="font-[family-name:var(--font-jetbrains-mono)] text-xs flex items-center gap-6"
+        className="font-[family-name:var(--font-plus-jakarta)] text-xs flex items-center gap-6"
         style={{ color: "rgba(255,255,255,0.4)" }}
       >
         <span style={{ color: "var(--color-accent)" }}>

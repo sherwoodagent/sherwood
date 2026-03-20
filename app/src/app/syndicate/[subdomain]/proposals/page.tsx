@@ -30,7 +30,7 @@ function MockBadge() {
         zIndex: 1,
         color: "rgba(255,255,255,0.2)",
         fontSize: "9px",
-        fontFamily: "var(--font-jetbrains-mono), monospace",
+        fontFamily: "var(--font-plus-jakarta), sans-serif",
       }}
     >
       MOCK DATA
@@ -279,7 +279,7 @@ export default async function ProposalsPage({
   );
 
   const mockTag = isMock ? (
-    <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "9px", fontFamily: "var(--font-jetbrains-mono), monospace" }}>
+    <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "9px", fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
       MOCK DATA
     </span>
   ) : null;
@@ -392,8 +392,8 @@ export default async function ProposalsPage({
       </div>
 
       <SiteFooter
-        left="&copy; 2026 Sherwood Protocol // Proposals"
-        right="Governance // Dashboard"
+        left="sherwood // Autonomous Syndicates"
+        right="Docs // X"
       />
     </>
   );

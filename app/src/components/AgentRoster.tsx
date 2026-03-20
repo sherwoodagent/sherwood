@@ -15,7 +15,7 @@ export default function AgentRoster({ agents }: AgentRosterProps) {
 
       {agents.length === 0 ? (
         <div
-          className="font-[family-name:var(--font-jetbrains-mono)] text-xs"
+          className="font-[family-name:var(--font-plus-jakarta)] text-xs"
           style={{ color: "rgba(255,255,255,0.3)", padding: "2rem 0" }}
         >
           No agents registered
@@ -26,12 +26,12 @@ export default function AgentRoster({ agents }: AgentRosterProps) {
             <div key={agent.agentAddress} className="agent-card">
               <div className="flex justify-between items-start mb-2">
                 <div>
-                  <div className="font-[family-name:var(--font-jetbrains-mono)] text-xs text-white">
+                  <div className="font-[family-name:var(--font-plus-jakarta)] text-xs text-white">
                     {agent.identity?.name || `Agent #${agent.agentId.toString()}`}
                   </div>
                   {agent.identity?.name && (
                     <div
-                      className="font-[family-name:var(--font-jetbrains-mono)]"
+                      className="font-[family-name:var(--font-plus-jakarta)]"
                       style={{
                         fontSize: "9px",
                         color: "var(--color-accent)",
@@ -43,7 +43,7 @@ export default function AgentRoster({ agents }: AgentRosterProps) {
                     </div>
                   )}
                   <div
-                    className="font-[family-name:var(--font-jetbrains-mono)]"
+                    className="font-[family-name:var(--font-plus-jakarta)]"
                     style={{
                       fontSize: "10px",
                       color: "rgba(255,255,255,0.4)",
@@ -54,7 +54,7 @@ export default function AgentRoster({ agents }: AgentRosterProps) {
                   </div>
                   {agent.identity?.description && (
                     <div
-                      className="font-[family-name:var(--font-jetbrains-mono)]"
+                      className="font-[family-name:var(--font-plus-jakarta)]"
                       style={{
                         fontSize: "9px",
                         color: "rgba(255,255,255,0.3)",

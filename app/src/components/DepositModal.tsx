@@ -185,7 +185,7 @@ export default function DepositModal({
         </div>
 
         <div
-          className="font-[family-name:var(--font-jetbrains-mono)]"
+          className="font-[family-name:var(--font-plus-jakarta)]"
           style={{
             fontSize: "10px",
             color: "rgba(255,255,255,0.4)",
@@ -208,7 +208,7 @@ export default function DepositModal({
         {step === "success" ? (
           <div style={{ textAlign: "center", padding: "2rem 0" }}>
             <div
-              className="font-[family-name:var(--font-jetbrains-mono)] text-lg"
+              className="font-[family-name:var(--font-plus-jakarta)] text-lg"
               style={{ color: "var(--color-accent)", marginBottom: "1rem" }}
             >
               Deposited {amount} USDC
@@ -228,7 +228,7 @@ export default function DepositModal({
         ) : step === "error" ? (
           <div style={{ textAlign: "center", padding: "2rem 0" }}>
             <div
-              className="font-[family-name:var(--font-jetbrains-mono)] text-sm"
+              className="font-[family-name:var(--font-plus-jakarta)] text-sm"
               style={{ color: "#ff4d4d", marginBottom: "1rem" }}
             >
               Transaction failed
@@ -256,7 +256,7 @@ export default function DepositModal({
           <>
             {/* Balance */}
             <div
-              className="flex justify-between font-[family-name:var(--font-jetbrains-mono)]"
+              className="flex justify-between font-[family-name:var(--font-plus-jakarta)]"
               style={{
                 fontSize: "11px",
                 color: "rgba(255,255,255,0.5)",

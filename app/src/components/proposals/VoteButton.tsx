@@ -69,7 +69,7 @@ export default function VoteButton({
   }
 
   const btnBase: React.CSSProperties = {
-    fontFamily: "var(--font-jetbrains-mono), monospace",
+    fontFamily: "var(--font-plus-jakarta), sans-serif",
     fontSize: "11px",
     fontWeight: 700,
     textTransform: "uppercase",
@@ -86,7 +86,7 @@ export default function VoteButton({
         style={{
           fontSize: "11px",
           color: "rgba(255,255,255,0.4)",
-          fontFamily: "var(--font-jetbrains-mono), monospace",
+          fontFamily: "var(--font-plus-jakarta), sans-serif",
           border: "1px solid rgba(255,255,255,0.15)",
           display: "inline-block",
           padding: "0.4rem 0.8rem",
@@ -105,7 +105,7 @@ export default function VoteButton({
         style={{
           fontSize: "11px",
           color: "rgba(255,255,255,0.3)",
-          fontFamily: "var(--font-jetbrains-mono), monospace",
+          fontFamily: "var(--font-plus-jakarta), sans-serif",
           padding: "0.5rem 0",
         }}
       >
@@ -120,7 +120,7 @@ export default function VoteButton({
         style={{
           fontSize: "11px",
           color: "var(--color-accent)",
-          fontFamily: "var(--font-jetbrains-mono), monospace",
+          fontFamily: "var(--font-plus-jakarta), sans-serif",
           padding: "0.5rem 0",
         }}
       >
@@ -135,7 +135,7 @@ export default function VoteButton({
         style={{
           fontSize: "11px",
           color: "rgba(255,255,255,0.3)",
-          fontFamily: "var(--font-jetbrains-mono), monospace",
+          fontFamily: "var(--font-plus-jakarta), sans-serif",
           padding: "0.5rem 0",
         }}
       >
@@ -151,7 +151,7 @@ export default function VoteButton({
           style={{
             fontSize: "10px",
             color: "rgba(255,255,255,0.4)",
-            fontFamily: "var(--font-jetbrains-mono), monospace",
+            fontFamily: "var(--font-plus-jakarta), sans-serif",
             marginBottom: "0.5rem",
           }}
         >
@@ -164,7 +164,7 @@ export default function VoteButton({
           disabled={busy}
           style={{
             ...btnBase,
-            background: busy ? "transparent" : "rgba(45, 212, 45, 0.15)",
+            background: busy ? "transparent" : "rgba(46, 230, 166, 0.15)",
             color: "var(--color-accent)",
             borderColor: "var(--color-accent)",
             opacity: busy ? 0.5 : 1,
