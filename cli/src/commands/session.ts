@@ -395,4 +395,56 @@ export function registerSessionCommands(program: Command): void {
         await handleReset(name, opts.sinceBlock, opts.full);
       },
     );
+
+  session
+    .command("cron <name>")
+    .description("Manage participation crons (OpenClaw agents)")
+    .option("--remove", "Remove participation crons", false)
+    .option("--status", "Show cron status", false)
+    .action(async (name: string, opts: { remove: boolean; status: boolean }) => {
+      const { isOpenClaw, registerSyndicateCrons, unregisterSyndicateCrons, getSyndicateCronStatus } =
+        await import("../lib/cron.js");
+      const { isTestnet } = await import("../lib/network.js");
+      const { getNotifyTo } = await import("../lib/config.js");
+
+      if (!isOpenClaw()) {
+        console.log(chalk.yellow("Not running on OpenClaw — cron commands unavailable"));
+        console.log(chalk.dim(`  Set up your own scheduler: sherwood session check ${name} --stream`));
+        return;
+      }
+
+      if (opts.status) {
+        const status = getSyndicateCronStatus(name, isTestnet());
+        if (status.crons.length === 0) {
+          console.log(chalk.dim("No participation crons found for " + name));
+          return;
+        }
+        console.log();
+        console.log(chalk.bold(`Participation Crons — ${name}`));
+        console.log(chalk.dim("─".repeat(50)));
+        for (const cron of status.crons) {
+          console.log(`  ${chalk.green(cron.name)}  every ${cron.every}${cron.lastRun ? `  last: ${cron.lastRun}` : ""}`);
+        }
+        console.log();
+        return;
+      }
+
+      if (opts.remove) {
+        const result = unregisterSyndicateCrons(name, isTestnet());
+        if (result.removed) {
+          console.log(chalk.green("Participation crons removed"));
+        } else {
+          console.log(chalk.dim("No crons found to remove"));
+        }
+        return;
+      }
+
+      // Register/update
+      const result = registerSyndicateCrons(name, isTestnet(), getNotifyTo());
+      if (result.registered) {
+        console.log(chalk.green("Participation crons registered: " + result.cronNames.join(", ")));
+      } else {
+        console.log(chalk.dim("Crons already registered"));
+      }
+    });
 }

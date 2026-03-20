@@ -37,7 +37,12 @@ import { EAS_SCHEMAS } from "./lib/addresses.js";
 async function loadXmtp() {
   return import("./lib/xmtp.js");
 }
-import { cacheGroupId, getCachedGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey, getAgentId, setConfigRpcUrl } from "./lib/config.js";
+// Lazy-load cron module (only needed for openclaw agents)
+async function loadCron() {
+  return import("./lib/cron.js");
+}
+import { cacheGroupId, getCachedGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey, getAgentId, setConfigRpcUrl, getNotifyTo, setNotifyTo } from "./lib/config.js";
+import { isTestnet } from "./lib/network.js";
 
 // ── Theme ──
 const G = chalk.green;
@@ -290,6 +295,17 @@ syndicate
         console.warn(chalk.yellow("\n  ⚠ Could not create XMTP chat group"));
         console.warn(chalk.dim(`    Recover later with: sherwood chat ${subdomain} init`));
       }
+
+      // ── Auto-register participation crons ──
+      try {
+        const cron = await loadCron();
+        const cronResult = cron.registerSyndicateCrons(subdomain, isTestnet(), getNotifyTo());
+        if (cronResult.isOpenClaw && cronResult.registered) {
+          console.log(G("  ✓ Participation crons registered (15m check + hourly summary)"));
+        } else if (!cronResult.isOpenClaw) {
+          console.log(DIM("  Tip: Set up a scheduled process to run `sherwood session check " + subdomain + "` periodically"));
+        }
+      } catch { /* non-fatal */ }
 
       spinner.stop();
 
@@ -594,6 +610,16 @@ syndicate
         } catch {
           console.warn(chalk.yellow("  ⚠ Could not initialize XMTP identity"));
         }
+        // Auto-register participation crons (idempotent)
+        try {
+          const cron = await loadCron();
+          const cronResult = cron.registerSyndicateCrons(opts.subdomain, isTestnet(), getNotifyTo());
+          if (cronResult.isOpenClaw && cronResult.registered) {
+            console.log(chalk.green("  ✓ Participation crons registered"));
+          } else if (!cronResult.isOpenClaw) {
+            console.log(chalk.dim("  Tip: Set up a scheduled process to run `sherwood session check " + opts.subdomain + "` periodically"));
+          }
+        } catch { /* non-fatal */ }
         return;
       }
 
@@ -638,6 +664,17 @@ syndicate
         spinner.succeed("Join request created");
         console.warn(chalk.yellow("  ⚠ Could not initialize XMTP identity — creator may not be able to auto-add you to chat"));
       }
+
+      // Auto-register participation crons (will HEARTBEAT_OK until approved)
+      try {
+        const cron = await loadCron();
+        const cronResult = cron.registerSyndicateCrons(opts.subdomain, isTestnet(), getNotifyTo());
+        if (cronResult.isOpenClaw && cronResult.registered) {
+          console.log(G("  ✓ Participation crons registered (will activate after approval)"));
+        } else if (!cronResult.isOpenClaw) {
+          console.log(DIM("  Tip: Set up a scheduled process to run `sherwood session check " + opts.subdomain + "` periodically"));
+        }
+      } catch { /* non-fatal */ }
 
       console.log();
       console.log(LABEL("  ◆ Join Request Submitted"));
@@ -1120,6 +1157,7 @@ configCmd
   .option("--private-key <key>", "Wallet private key (0x-prefixed)")
   .option("--vault <address>", "Default SyndicateVault address")
   .option("--rpc <url>", "Custom RPC URL for the active --chain network")
+  .option("--notify-to <id>", "Destination for cron summaries (Telegram chat ID, phone, etc.)")
   .action((opts) => {
     let saved = false;
 
@@ -1147,8 +1185,15 @@ configCmd
       saved = true;
     }
 
+    if (opts.notifyTo) {
+      setNotifyTo(opts.notifyTo);
+      console.log(chalk.green("Notify destination saved to ~/.sherwood/config.json"));
+      console.log(chalk.dim(`  Notify to: ${opts.notifyTo}`));
+      saved = true;
+    }
+
     if (!saved) {
-      console.log(chalk.red("Provide at least one of: --private-key, --vault, --rpc"));
+      console.log(chalk.red("Provide at least one of: --private-key, --vault, --rpc, --notify-to"));
       process.exit(1);
     }
   });

@@ -40,6 +40,7 @@ Save settings to `~/.sherwood/config.json`.
 | `--private-key <key>` | Wallet private key (0x-prefixed) |
 | `--vault <address>` | Default SyndicateVault address |
 | `--rpc <url>` | Custom RPC URL for the current chain (saved per-network) |
+| `--notify-to <id>` | Destination for cron summaries (Telegram chat ID, phone, etc.) |
 
 ### `sherwood config show`
 
@@ -379,6 +380,41 @@ Toggle public chat (dashboard spectator access). Requires `DASHBOARD_SPECTATOR_A
 
 ---
 
+### `sherwood session check <name>`
+
+Fetch new XMTP messages and on-chain events since last check. Returns structured JSON with `messages` and `events` arrays.
+
+| Option | Description |
+|--------|-------------|
+| `--stream` | Stay alive streaming messages and polling events (30s interval) |
+
+### `sherwood session status [name]`
+
+Show session cursor positions — last check time, block number, message counts.
+
+### `sherwood session reset <name>`
+
+Reset session cursors to re-process history.
+
+| Option | Description |
+|--------|-------------|
+| `--full` | Reset everything (messages + events) |
+| `--since-block <n>` | Reset block cursor to a specific block |
+
+### `sherwood session cron <name>`
+
+Manage participation crons for OpenClaw agents. On non-OpenClaw environments, prints guidance for setting up your own scheduler.
+
+| Option | Description |
+|--------|-------------|
+| *(default)* | Register participation crons (15m silent check + hourly summary) |
+| `--status` | Show cron status (names, frequency, last run) |
+| `--remove` | Remove participation crons |
+
+See [Integrations — OpenClaw](integrations.md#openclaw-cron-jobs) for how auto-cron works.
+
+---
+
 ### `sherwood providers`
 
 List available DeFi providers (Moonwell, Uniswap, etc.).
@@ -398,3 +434,4 @@ State stored in `~/.sherwood/config.json`:
 | `dbEncryptionKey` | XMTP database encryption key (auto-generated) |
 | `groupCache` | Local cache of subdomain → XMTP group ID |
 | `rpc` | Per-network custom RPC URLs (set via `config set --rpc`) |
+| `notifyTo` | Destination for cron summaries (set via `config set --notify-to`) |

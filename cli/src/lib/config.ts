@@ -24,6 +24,7 @@ export interface SherwoodConfig {
   agentId?: number; // ERC-8004 identity token ID
   contracts?: Record<string, ChainContracts>; // chainId → user addresses
   rpc?: Record<string, string>; // network name → custom RPC URL
+  notifyTo?: string; // destination for cron summaries (Telegram chat ID, phone, etc.)
 }
 
 export function loadConfig(): SherwoodConfig {
@@ -101,6 +102,16 @@ export function setConfigRpcUrl(network: string, url: string): void {
 export function getChainContracts(chainId: number): ChainContracts {
   const config = loadConfig();
   return config.contracts?.[String(chainId)] ?? {};
+}
+
+export function getNotifyTo(): string | undefined {
+  return loadConfig().notifyTo;
+}
+
+export function setNotifyTo(id: string): void {
+  const config = loadConfig();
+  config.notifyTo = id;
+  saveConfig(config);
 }
 
 export function setChainContract(
