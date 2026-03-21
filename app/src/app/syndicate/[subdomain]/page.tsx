@@ -126,6 +126,7 @@ export default async function SyndicateDetailPage({
               paused={data.paused}
               redemptionsLocked={data.redemptionsLocked}
               managementFeeBps={data.managementFeeBps}
+              assetDecimals={data.assetDecimals}
             />
 
             {/* Top-right: Agent Roster */}

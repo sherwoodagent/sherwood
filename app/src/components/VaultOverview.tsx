@@ -1,4 +1,4 @@
-import { formatBps } from "@/lib/contracts";
+import { formatBps, formatShares } from "@/lib/contracts";
 
 interface VaultOverviewProps {
   openDeposits: boolean;
@@ -6,6 +6,7 @@ interface VaultOverviewProps {
   paused: boolean;
   redemptionsLocked: boolean;
   managementFeeBps: bigint;
+  assetDecimals: number;
 }
 
 export default function VaultOverview({
@@ -14,6 +15,7 @@ export default function VaultOverview({
   paused,
   redemptionsLocked,
   managementFeeBps,
+  assetDecimals,
 }: VaultOverviewProps) {
   return (
     <div className="panel">
@@ -57,7 +59,7 @@ export default function VaultOverview({
         <div className="param-row">
           <span className="param-key">Total Shares</span>
           <span className="param-val">
-            {(Number(totalSupply) / 1e6).toLocaleString()}
+            {formatShares(totalSupply, assetDecimals * 2)}
           </span>
         </div>
       </div>
