@@ -10,6 +10,7 @@ type Syndicate @entity(immutable: false) {
   createdAt: BigInt!
   active: Boolean!
   redemptionsLocked: Boolean!
+  assetDecimals: Int!
 
   # Aggregated stats
   totalDeposits: BigDecimal!

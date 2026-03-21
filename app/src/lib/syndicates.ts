@@ -148,13 +148,64 @@ async function fetchViaSubgraph(
 
   if (!data?.syndicates?.length) return [];
 
+  const client = getPublicClient(chainId);
+
+  // Multicall totalAssets + asset for each vault to get real TVL
+  const vaultCalls = data.syndicates.flatMap((s) => [
+    {
+      address: s.vault as Address,
+      abi: SYNDICATE_VAULT_ABI,
+      functionName: "totalAssets" as const,
+    },
+    {
+      address: s.vault as Address,
+      abi: SYNDICATE_VAULT_ABI,
+      functionName: "asset" as const,
+    },
+  ]);
+
+  const vaultResults = await client.multicall({ contracts: vaultCalls });
+
+  // Collect unique asset addresses for decimals + symbol lookup
+  const assetAddresses = new Set<Address>();
+  for (let i = 0; i < data.syndicates.length; i++) {
+    const assetResult = vaultResults[i * 2 + 1];
+    if (assetResult.status === "success" && assetResult.result) {
+      assetAddresses.add(assetResult.result as Address);
+    }
+  }
+
+  const assetList = [...assetAddresses];
+  const assetInfoCalls = assetList.flatMap((addr) => [
+    { address: addr, abi: ERC20_ABI, functionName: "decimals" as const },
+    { address: addr, abi: ERC20_ABI, functionName: "symbol" as const },
+  ]);
+
+  const assetInfoResults =
+    assetList.length > 0
+      ? await client.multicall({ contracts: assetInfoCalls })
+      : [];
+
+  const assetInfo: Record<string, { decimals: number; symbol: string }> = {};
+  for (let i = 0; i < assetList.length; i++) {
+    const decimals = assetInfoResults[i * 2]?.result as number | undefined;
+    const symbol = assetInfoResults[i * 2 + 1]?.result as string | undefined;
+    assetInfo[assetList[i].toLowerCase()] = {
+      decimals: decimals ?? 18,
+      symbol: symbol ?? "ETH",
+    };
+  }
+
   return Promise.all(
-    data.syndicates.map(async (s) => {
+    data.syndicates.map(async (s, i) => {
       const metadata = await fetchMetadata(s.metadataURI);
 
-      const totalDeposits = parseFloat(s.totalDeposits) || 0;
-      const totalWithdrawals = parseFloat(s.totalWithdrawals) || 0;
-      const tvl = totalDeposits - totalWithdrawals;
+      const totalAssets = (vaultResults[i * 2]?.result as bigint) ?? 0n;
+      const assetAddr = (vaultResults[i * 2 + 1]?.result as Address) ?? "";
+      const info = assetInfo[assetAddr.toLowerCase()] ?? {
+        decimals: 18,
+        symbol: "ETH",
+      };
       const agentCount = s.agents?.length || 0;
 
       const strategy =
@@ -164,8 +215,14 @@ async function fetchViaSubgraph(
 
       let status: SyndicateDisplay["status"] = "NO_AGENTS";
       if (agentCount > 0) {
-        status = tvl > 0 ? "EXECUTING" : "IDLE";
+        status = totalAssets > 0n ? "EXECUTING" : "IDLE";
       }
+
+      const tvlFormatted = formatAsset(
+        totalAssets,
+        info.decimals,
+        info.symbol === "USDC" ? "USD" : undefined,
+      );
 
       return {
         id: s.id,
@@ -173,7 +230,7 @@ async function fetchViaSubgraph(
         subdomain: s.subdomain,
         name: metadata?.name || `Syndicate #${s.id}`,
         strategy,
-        tvl: `$${tvl.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
+        tvl: info.symbol === "USDC" ? tvlFormatted : `${tvlFormatted} ${info.symbol}`,
         agentCount,
         status,
         chainId,

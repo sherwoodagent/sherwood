@@ -4,6 +4,8 @@ import {
   MetadataUpdated,
   SyndicateDeactivated,
 } from "../generated/SyndicateFactory/SyndicateFactory";
+import { SyndicateVault } from "../generated/templates/SyndicateVault/SyndicateVault";
+import { ERC20 } from "../generated/SyndicateFactory/ERC20";
 import { SyndicateVault as SyndicateVaultTemplate } from "../generated/templates";
 import { Syndicate, VaultLookup } from "../generated/schema";
 
@@ -19,6 +21,19 @@ export function handleSyndicateCreated(event: SyndicateCreated): void {
   syndicate.redemptionsLocked = false;
   syndicate.totalDeposits = BigDecimal.zero();
   syndicate.totalWithdrawals = BigDecimal.zero();
+
+  // Read asset decimals from vault → asset → decimals (default 18)
+  let vaultContract = SyndicateVault.bind(event.params.vault);
+  let assetResult = vaultContract.try_asset();
+  let decimals = 18;
+  if (!assetResult.reverted) {
+    let erc20 = ERC20.bind(assetResult.value);
+    let decimalsResult = erc20.try_decimals();
+    if (!decimalsResult.reverted) {
+      decimals = decimalsResult.value;
+    }
+  }
+  syndicate.assetDecimals = decimals;
 
   syndicate.save();
 

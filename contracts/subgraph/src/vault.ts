@@ -16,9 +16,6 @@ import {
   Depositor,
 } from "../generated/schema";
 
-// USDC has 6 decimals
-let USDC_DECIMALS = 6;
-
 function toDecimal(value: BigInt, decimals: i32): BigDecimal {
   let factor = BigInt.fromI32(10).pow(decimals as u8).toBigDecimal();
   return value.toBigDecimal().div(factor);
@@ -80,7 +77,7 @@ export function handleDeposit(event: DepositEvent): void {
   let syndicate = Syndicate.load(syndicateId);
   if (syndicate != null) {
     syndicate.totalDeposits = syndicate.totalDeposits.plus(
-      toDecimal(event.params.assets, USDC_DECIMALS)
+      toDecimal(event.params.assets, syndicate.assetDecimals as i32)
     );
     syndicate.save();
   }
@@ -108,7 +105,7 @@ export function handleWithdraw(event: WithdrawEvent): void {
   let syndicate = Syndicate.load(syndicateId);
   if (syndicate != null) {
     syndicate.totalWithdrawals = syndicate.totalWithdrawals.plus(
-      toDecimal(event.params.assets, USDC_DECIMALS)
+      toDecimal(event.params.assets, syndicate.assetDecimals as i32)
     );
     syndicate.save();
   }

@@ -23,6 +23,8 @@ dataSources:
           file: ../out/SyndicateFactory.sol/SyndicateFactory.json
         - name: SyndicateVault
           file: ../out/SyndicateVault.sol/SyndicateVault.json
+        - name: ERC20
+          file: ../out/ERC20.sol/ERC20.json
       eventHandlers:
         - event: SyndicateCreated(indexed uint256,indexed address,indexed
             address,string,string)
@@ -86,6 +88,8 @@ templates:
       abis:
         - name: SyndicateVault
           file: ../out/SyndicateVault.sol/SyndicateVault.json
+        - name: ERC20
+          file: ../out/ERC20.sol/ERC20.json
       eventHandlers:
         - event: AgentRegistered(indexed uint256,indexed address)
           handler: handleAgentRegistered
