@@ -94,7 +94,7 @@ const BASE_ADDRESSES: ChainAddresses = {
 };
 
 const BASE_SEPOLIA_ADDRESSES: ChainAddresses = {
-  factory: "0x60bf54dDce61ece85BE5e66CBaA17cC312DEa6C8",
+  factory: "0x2efD194ADb3Db40E0e6faAe06c4e602c7a3D9199",
   usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
   l2Registry: "0x06eb7b85b59bc3e50fe4837be776cdd26de602cf",
   identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
@@ -111,7 +111,7 @@ const BASE_SEPOLIA_ADDRESSES: ChainAddresses = {
 };
 
 const ROBINHOOD_TESTNET_ADDRESSES: ChainAddresses = {
-  factory: "0xD348524c66e209DfcC76b9a3208a05B82F6948D6",
+  factory: "0x72981ce06d9c183953F6a8Cc587a8C28C785670e",
   usdc: ZERO,
   l2Registry: ZERO,
   identityRegistry: ZERO,
@@ -221,7 +221,7 @@ export const SYNDICATE_FACTORY_ABI = [
     outputs: [{ name: "", type: "uint256" }],
   },
   {
-    name: "getActiveSyndicates",
+    name: "getAllActiveSyndicates",
     type: "function",
     stateMutability: "view",
     inputs: [],
@@ -296,14 +296,6 @@ export const SYNDICATE_VAULT_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
-  },
-  // Ragequit
-  {
-    name: "ragequit",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [{ name: "receiver", type: "address" }],
-    outputs: [{ name: "assets", type: "uint256" }],
   },
   // Views
   {

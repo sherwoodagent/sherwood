@@ -203,7 +203,7 @@ async function fetchViaOnChain(
     rawSyndicates = (await client.readContract({
       address: entry.addresses.factory,
       abi: SYNDICATE_FACTORY_ABI,
-      functionName: "getActiveSyndicates",
+      functionName: "getAllActiveSyndicates",
     })) as typeof rawSyndicates;
   } catch {
     return [];
