@@ -649,4 +649,99 @@ contract SyndicateGovernorTest is Test {
         vm.expectRevert(ISyndicateVault.NotGovernor.selector);
         vault.executeGovernorBatch(calls);
     }
+
+    // ==================== VETO ON EXECUTED PROPOSAL ====================
+
+    function test_vetoProposal_executed_reverts() public {
+        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotCancellable.selector);
+        governor.vetoProposal(proposalId);
+    }
+
+    // ==================== SETTLEMENT FEE EDGE CASES ====================
+
+    function test_settlement_smallProfit_feeMath() public {
+        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
+        // 1 unit of USDC profit (0.000001 USDC)
+        usdc.mint(address(vault), 1);
+        uint256 agentBalBefore = usdc.balanceOf(agent);
+        uint256 ownerBalBefore = usdc.balanceOf(owner);
+        vm.prank(agent);
+        governor.settleProposal(proposalId);
+        // Protocol fee: 2% of 1 = 0 (rounds down). Net profit = 1.
+        // Agent fee: 15% of 1 = 0. Mgmt fee: 0.5% of 1 = 0.
+        // All fees round to zero — no transfers.
+        assertEq(usdc.balanceOf(agent), agentBalBefore);
+        assertEq(usdc.balanceOf(owner), ownerBalBefore);
+    }
+
+    function test_settlement_zeroPerformanceFee_noAgentPayout() public {
+        uint256 proposalId = _createAndExecuteProposal(0, 7 days);
+        usdc.mint(address(vault), 10_000e6);
+        uint256 agentBalBefore = usdc.balanceOf(agent);
+        uint256 ownerBalBefore = usdc.balanceOf(owner);
+        vm.prank(agent);
+        governor.settleProposal(proposalId);
+        // Protocol fee: 2% of 10k = 200. Agent fee: 0% of 9800 = 0.
+        // Mgmt fee: 0.5% of 9800 = 49.
+        assertEq(usdc.balanceOf(agent), agentBalBefore);
+        assertEq(usdc.balanceOf(owner), ownerBalBefore + 200e6 + 49e6);
+    }
+
+    // ==================== COOLDOWN BLOCKS RE-EXECUTION ====================
+
+    function test_cooldown_blocksExecution() public {
+        // Execute proposal 1
+        uint256 proposalId1 = _createAndExecuteProposal(1500, 7 days);
+
+        // While proposal 1 is active, create proposal 2 and let it reach voting
+        uint256 proposalId2 = _createSimpleProposal(1500, 7 days);
+        // Vote to approve proposal 2
+        vm.prank(lp1);
+        governor.vote(proposalId2, ISyndicateGovernor.VoteType.For);
+        vm.prank(lp2);
+        governor.vote(proposalId2, ISyndicateGovernor.VoteType.For);
+        // Warp past voting period for proposal 2
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+
+        // Settle proposal 1 (proposer can settle anytime)
+        vm.prank(agent);
+        governor.settleProposal(proposalId1);
+
+        // Immediately try to execute proposal 2 — cooldown should block it
+        vm.expectRevert(ISyndicateGovernor.CooldownNotElapsed.selector);
+        governor.executeProposal(proposalId2);
+    }
+
+    // ==================== CANCEL PARAMETER CHANGE ====================
+
+    function test_cancelParameterChange() public {
+        bytes32 key = governor.PARAM_VOTING_PERIOD();
+        vm.prank(owner);
+        governor.setVotingPeriod(2 days);
+        // Verify the change is pending
+        ISyndicateGovernor.PendingChange memory pending = governor.getPendingChange(key);
+        assertTrue(pending.exists);
+        // Cancel it
+        vm.prank(owner);
+        governor.cancelParameterChange(key);
+        // Verify cancelled — finalizing should revert
+        vm.warp(block.timestamp + PARAM_CHANGE_DELAY + 1);
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.NoChangePending.selector);
+        governor.finalizeParameterChange(key);
+        // Original value unchanged
+        assertEq(governor.getGovernorParams().votingPeriod, VOTING_PERIOD);
+    }
+
+    function test_prematureFinalization_reverts() public {
+        bytes32 key = governor.PARAM_VOTING_PERIOD();
+        vm.prank(owner);
+        governor.setVotingPeriod(2 days);
+        // Immediately try to finalize — delay not elapsed
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ChangeNotReady.selector);
+        governor.finalizeParameterChange(key);
+    }
 }

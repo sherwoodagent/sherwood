@@ -82,6 +82,9 @@ contract SyndicateVaultTest is Test {
         // Register agent (NFT owned by agent)
         vm.prank(owner);
         vault.registerAgent(agent1NftId, agentAddr);
+
+        // Mock factory.governor() so redemptionsLocked() works (factory = address(this))
+        vm.mockCall(address(this), abi.encodeWithSignature("governor()"), abi.encode(address(0)));
     }
 
     // ==================== INITIALIZATION ====================
@@ -424,5 +427,77 @@ contract SyndicateVaultTest is Test {
 
         uint256 pastSupply = vault.getPastTotalSupply(depositTime);
         assertEq(pastSupply, 10_000e6);
+    }
+
+    // ==================== ZERO DEPOSIT ====================
+
+    function test_deposit_zeroAmount_mintsZeroShares() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 0);
+        uint256 shares = vault.deposit(0, lp1);
+        vm.stopPrank();
+        assertEq(shares, 0);
+        assertEq(vault.balanceOf(lp1), 0);
+    }
+
+    // ==================== BASIC REDEEM ====================
+
+    function test_redeem_returnsCorrectAssets() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        uint256 shares = vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        uint256 usdcBefore = usdc.balanceOf(lp1);
+        uint256 sharesBefore = vault.balanceOf(lp1);
+
+        vm.prank(lp1);
+        uint256 assets = vault.redeem(shares, lp1, lp1);
+
+        assertEq(assets, 10_000e6);
+        assertEq(usdc.balanceOf(lp1), usdcBefore + 10_000e6);
+        assertEq(vault.balanceOf(lp1), sharesBefore - shares);
+    }
+
+    // ==================== PAUSE / UNPAUSE CYCLE ====================
+
+    function test_pause_blocksDeposits_unpause_allows() public {
+        vm.prank(owner);
+        vault.pause();
+
+        // Deposits blocked
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        vm.expectRevert();
+        vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        // Unpause
+        vm.prank(owner);
+        vault.unpause();
+
+        // Deposits work again
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        uint256 shares = vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+        assertGt(shares, 0);
+    }
+
+    function test_pause_blocksWithdrawals() public {
+        // Deposit first while unpaused
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 10_000e6);
+        uint256 shares = vault.deposit(10_000e6, lp1);
+        vm.stopPrank();
+
+        // Pause the vault
+        vm.prank(owner);
+        vault.pause();
+
+        // Withdrawals are also blocked when paused
+        vm.prank(lp1);
+        vm.expectRevert();
+        vault.redeem(shares, lp1, lp1);
     }
 }
