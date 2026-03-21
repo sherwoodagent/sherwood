@@ -9,8 +9,13 @@ dataSources:
     network: base
     source:
       abi: SyndicateFactory
+<<<<<<< HEAD
       address: "0xd5C4eE2E4c5B606b9401E69A3B3FeE169037C284"
       startBlock: 43678780
+=======
+      address: "0x8776F4C9b181C3AC14eB3271B69D297627d79cee"
+      startBlock: 43638807
+>>>>>>> 4d2f2d3 (subgraph; logos greyed out)
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -39,8 +44,13 @@ dataSources:
     network: base
     source:
       abi: SyndicateGovernor
+<<<<<<< HEAD
       address: "0x358AD8B492BcC710BE0D7c902D8702164c35DC34"
       startBlock: 43678780
+=======
+      address: "0x4eC24F423c79cc94624c6f555071FF49989910bD"
+      startBlock: 43638807
+>>>>>>> 4d2f2d3 (subgraph; logos greyed out)
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
