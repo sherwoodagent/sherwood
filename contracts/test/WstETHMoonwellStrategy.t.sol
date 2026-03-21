@@ -3,7 +3,8 @@ pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
-import {WstETHMoonwellStrategy, ICToken, IAeroRouter} from "../src/strategies/WstETHMoonwellStrategy.sol";
+import {WstETHMoonwellStrategy, IAeroRouter} from "../src/strategies/WstETHMoonwellStrategy.sol";
+import {ICToken} from "../src/interfaces/ICToken.sol";
 import {BaseStrategy} from "../src/strategies/BaseStrategy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
@@ -120,6 +121,7 @@ contract WstETHMoonwellStrategyTest is Test {
     uint256 constant MIN_WSTETH_OUT = 20e18;
     // Settle: ~21.25 wstETH → ~25 WETH
     uint256 constant MIN_WETH_OUT = 24e18;
+    uint256 constant DEADLINE_OFFSET = 300;
 
     // Mock rates (scaled by 1e18)
     // WETH → wstETH: 1 WETH = 0.85 wstETH
@@ -157,7 +159,8 @@ contract WstETHMoonwellStrategyTest is Test {
             aeroFactory: aeroFactory,
             supplyAmount: SUPPLY_AMOUNT,
             minWstethOut: MIN_WSTETH_OUT,
-            minWethOut: MIN_WETH_OUT
+            minWethOut: MIN_WETH_OUT,
+            deadlineOffset: DEADLINE_OFFSET
         });
         strategy.initialize(vault, proposer, abi.encode(params));
     }
@@ -175,8 +178,18 @@ contract WstETHMoonwellStrategyTest is Test {
         assertEq(strategy.supplyAmount(), SUPPLY_AMOUNT);
         assertEq(strategy.minWstethOut(), MIN_WSTETH_OUT);
         assertEq(strategy.minWethOut(), MIN_WETH_OUT);
+        assertEq(strategy.deadlineOffset(), DEADLINE_OFFSET);
         assertEq(uint256(strategy.state()), uint256(BaseStrategy.State.Pending));
         assertEq(strategy.name(), "wstETH Moonwell Yield");
+    }
+
+    function test_initialize_defaultDeadlineOffset() public {
+        address clone = Clones.clone(address(template));
+        WstETHMoonwellStrategy s = WstETHMoonwellStrategy(clone);
+        WstETHMoonwellStrategy.InitParams memory params = _defaultParams();
+        params.deadlineOffset = 0; // should default to 300
+        s.initialize(vault, proposer, abi.encode(params));
+        assertEq(s.deadlineOffset(), 300);
     }
 
     function test_initialize_twice_reverts() public {
@@ -350,16 +363,52 @@ contract WstETHMoonwellStrategyTest is Test {
         s.execute();
     }
 
+    function test_settle_redeemFailed_reverts() public {
+        // Deploy a strategy with MockFailingRedeem as mwsteth
+        MockFailingRedeem failingRedeem = new MockFailingRedeem();
+        WstETHMoonwellStrategy.InitParams memory params = _defaultParams();
+        params.mwsteth = address(failingRedeem);
+
+        address clone = Clones.clone(address(template));
+        WstETHMoonwellStrategy s = WstETHMoonwellStrategy(clone);
+        s.initialize(vault, proposer, abi.encode(params));
+
+        // Execute: vault approves and calls execute
+        // MockFailingRedeem.mint succeeds (returns 0) and tracks balance
+        vm.prank(vault);
+        wethToken.approve(address(s), SUPPLY_AMOUNT);
+
+        // The execute will swap WETH→wstETH, then try to mint on failingRedeem
+        // failingRedeem.mint doesn't consume wstETH (no transferFrom), so we need
+        // to give it a balance. Actually, MockFailingRedeem.mint just increments balanceOf
+        // but doesn't transferFrom. The strategy calls forceApprove then ICToken.mint
+        // which tries to call mint(wstethReceived). MockFailingRedeem.mint returns 0
+        // (success) and sets balanceOf[msg.sender] += mintAmount. But it doesn't
+        // actually take the wstETH. That's fine — the strategy will have wstETH dust
+        // that gets pushed back. The key is that balanceOf > 0 so redeem is attempted.
+        vm.prank(vault);
+        s.execute();
+
+        // Verify failingRedeem has balance recorded for the strategy
+        assertGt(failingRedeem.balanceOf(address(s)), 0);
+
+        // Now settle should fail because redeem returns 1
+        vm.prank(vault);
+        vm.expectRevert(WstETHMoonwellStrategy.RedeemFailed.selector);
+        s.settle();
+    }
+
     // ==================== PARAM UPDATES ====================
 
     function test_updateParams() public {
         _executeStrategy();
 
         vm.prank(proposer);
-        strategy.updateParams(abi.encode(uint256(22e18), uint256(18e18)));
+        strategy.updateParams(abi.encode(uint256(22e18), uint256(18e18), uint256(600)));
 
         assertEq(strategy.minWethOut(), 22e18);
         assertEq(strategy.minWstethOut(), 18e18);
+        assertEq(strategy.deadlineOffset(), 600);
     }
 
     function test_updateParams_keepCurrent() public {
@@ -367,14 +416,15 @@ contract WstETHMoonwellStrategyTest is Test {
 
         // Pass 0 to keep current values
         vm.prank(proposer);
-        strategy.updateParams(abi.encode(uint256(0), uint256(0)));
+        strategy.updateParams(abi.encode(uint256(0), uint256(0), uint256(0)));
 
         assertEq(strategy.minWethOut(), MIN_WETH_OUT);
         assertEq(strategy.minWstethOut(), MIN_WSTETH_OUT);
+        assertEq(strategy.deadlineOffset(), DEADLINE_OFFSET);
     }
 
     function test_updateParams_onlyWhenExecuted() public {
-        bytes memory newParams = abi.encode(uint256(22e18), uint256(18e18));
+        bytes memory newParams = abi.encode(uint256(22e18), uint256(18e18), uint256(600));
 
         // Can't update in Pending state
         vm.prank(proposer);
@@ -387,7 +437,7 @@ contract WstETHMoonwellStrategyTest is Test {
 
         vm.prank(makeAddr("attacker"));
         vm.expectRevert(BaseStrategy.NotProposer.selector);
-        strategy.updateParams(abi.encode(uint256(22e18), uint256(18e18)));
+        strategy.updateParams(abi.encode(uint256(22e18), uint256(18e18), uint256(600)));
     }
 
     function test_updateParams_afterSettled_reverts() public {
@@ -398,7 +448,7 @@ contract WstETHMoonwellStrategyTest is Test {
 
         vm.prank(proposer);
         vm.expectRevert(BaseStrategy.NotExecuted.selector);
-        strategy.updateParams(abi.encode(uint256(22e18), uint256(18e18)));
+        strategy.updateParams(abi.encode(uint256(22e18), uint256(18e18), uint256(600)));
     }
 
     // ==================== FULL LIFECYCLE ====================
@@ -412,7 +462,7 @@ contract WstETHMoonwellStrategyTest is Test {
 
         // 3. Proposer updates slippage
         vm.prank(proposer);
-        strategy.updateParams(abi.encode(uint256(24e18), uint256(0)));
+        strategy.updateParams(abi.encode(uint256(24e18), uint256(0), uint256(0)));
 
         // 4. Settle
         vm.prank(vault);
@@ -459,7 +509,98 @@ contract WstETHMoonwellStrategyTest is Test {
             aeroFactory: aeroFactory,
             supplyAmount: SUPPLY_AMOUNT,
             minWstethOut: MIN_WSTETH_OUT,
-            minWethOut: MIN_WETH_OUT
+            minWethOut: MIN_WETH_OUT,
+            deadlineOffset: DEADLINE_OFFSET
         });
+    }
+}
+
+// ==================== FORK TEST ====================
+
+contract WstETHMoonwellStrategyForkTest is Test {
+    // Real Base mainnet addresses
+    address constant WETH = 0x4200000000000000000000000000000000000006;
+    address constant WSTETH = 0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452;
+    address constant MWSTETH = 0x627Fe393Bc6EdDA28e99AE648fD6fF362514304b;
+    address constant AERO_ROUTER = 0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43;
+    address constant AERO_FACTORY = 0x420DD381b31aEf6683db6B902084cB0FFECe40Da;
+
+    WstETHMoonwellStrategy public template;
+    WstETHMoonwellStrategy public strategy;
+
+    address public vault = makeAddr("forkVault");
+    address public proposer = makeAddr("forkProposer");
+
+    uint256 constant SUPPLY_AMOUNT = 0.01e18; // 0.01 WETH (pool has low liquidity)
+
+    uint256 forkId;
+
+    function setUp() public {
+        // Try to create fork; skip if RPC unavailable
+        try vm.createSelectFork("https://mainnet.base.org") returns (uint256 id) {
+            forkId = id;
+        } catch {
+            vm.skip(true);
+        }
+
+        // Fund vault with WETH via deal
+        deal(WETH, vault, 10e18);
+
+        // Deploy template and clone
+        template = new WstETHMoonwellStrategy();
+        address clone = Clones.clone(address(template));
+        strategy = WstETHMoonwellStrategy(clone);
+
+        // Initialize with conservative slippage (5%)
+        WstETHMoonwellStrategy.InitParams memory params = WstETHMoonwellStrategy.InitParams({
+            weth: WETH,
+            wsteth: WSTETH,
+            mwsteth: MWSTETH,
+            aeroRouter: AERO_ROUTER,
+            aeroFactory: AERO_FACTORY,
+            supplyAmount: SUPPLY_AMOUNT,
+            minWstethOut: (SUPPLY_AMOUNT * 80) / 100, // 20% slippage tolerance for fork
+            minWethOut: (SUPPLY_AMOUNT * 80) / 100, // 20% slippage tolerance for fork
+            deadlineOffset: 300
+        });
+        strategy.initialize(vault, proposer, abi.encode(params));
+    }
+
+    function test_fork_fullLifecycle() public {
+        // Execute: vault approves and calls execute
+        vm.prank(vault);
+        IERC20(WETH).approve(address(strategy), SUPPLY_AMOUNT);
+
+        vm.prank(vault);
+        strategy.execute();
+
+        // Verify state
+        assertEq(uint256(strategy.state()), uint256(BaseStrategy.State.Executed));
+
+        // Verify mwstETH was minted
+        assertGt(IERC20(MWSTETH).balanceOf(address(strategy)), 0);
+
+        // Verify no WETH/wstETH dust on strategy
+        assertEq(IERC20(WETH).balanceOf(address(strategy)), 0);
+        assertEq(IERC20(WSTETH).balanceOf(address(strategy)), 0);
+
+        // Settle
+        uint256 vaultWethBefore = IERC20(WETH).balanceOf(vault);
+
+        vm.prank(vault);
+        strategy.settle();
+
+        uint256 vaultWethAfter = IERC20(WETH).balanceOf(vault);
+        uint256 returned = vaultWethAfter - vaultWethBefore;
+
+        // Verify WETH returned (at least 80% due to slippage tolerance)
+        assertGt(returned, (SUPPLY_AMOUNT * 80) / 100);
+
+        // Verify final state
+        assertEq(uint256(strategy.state()), uint256(BaseStrategy.State.Settled));
+
+        // No tokens left on strategy
+        assertEq(IERC20(WETH).balanceOf(address(strategy)), 0);
+        assertEq(IERC20(WSTETH).balanceOf(address(strategy)), 0);
     }
 }

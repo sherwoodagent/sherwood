@@ -3,15 +3,9 @@ pragma solidity 0.8.28;
 
 import {BaseStrategy} from "./BaseStrategy.sol";
 import {IStrategy} from "../interfaces/IStrategy.sol";
+import {ICToken} from "../interfaces/ICToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
-/// @notice Minimal Compound/Moonwell cToken interface
-interface ICToken {
-    function mint(uint256 mintAmount) external returns (uint256);
-    function redeem(uint256 redeemTokens) external returns (uint256);
-    function balanceOf(address owner) external view returns (uint256);
-}
 
 /// @notice Aerodrome Router swap interface
 interface IAeroRouter {
@@ -46,6 +40,7 @@ interface IAeroRouter {
  *   Tunable params (updatable by proposer between execution and settlement):
  *     - minWethOut: minimum WETH to accept on final settle swap (slippage)
  *     - minWstethOut: minimum wstETH to accept on execute swap (slippage)
+ *     - deadlineOffset: seconds added to block.timestamp for swap deadlines
  */
 contract WstETHMoonwellStrategy is BaseStrategy {
     using SafeERC20 for IERC20;
@@ -66,6 +61,7 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         uint256 supplyAmount;
         uint256 minWstethOut; // slippage: min wstETH from WETH→wstETH swap (execute)
         uint256 minWethOut; // slippage: min WETH from wstETH→WETH swap (settle)
+        uint256 deadlineOffset; // seconds added to block.timestamp for swap deadlines
     }
 
     // ── Storage (per-clone) ──
@@ -78,6 +74,7 @@ contract WstETHMoonwellStrategy is BaseStrategy {
     uint256 public supplyAmount;
     uint256 public minWstethOut;
     uint256 public minWethOut;
+    uint256 public deadlineOffset;
 
     /// @inheritdoc IStrategy
     function name() external pure returns (string memory) {
@@ -101,6 +98,7 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         supplyAmount = p.supplyAmount;
         minWstethOut = p.minWstethOut;
         minWethOut = p.minWethOut;
+        deadlineOffset = p.deadlineOffset == 0 ? 300 : p.deadlineOffset;
     }
 
     /// @notice Pull WETH → swap to wstETH → supply to Moonwell
@@ -113,7 +111,9 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         IAeroRouter.Route[] memory routes = new IAeroRouter.Route[](1);
         routes[0] = IAeroRouter.Route({from: weth, to: wsteth, stable: true, factory: aeroFactory});
         uint256[] memory amounts = IAeroRouter(aeroRouter)
-            .swapExactTokensForTokens(supplyAmount, minWstethOut, routes, address(this), block.timestamp);
+            .swapExactTokensForTokens(
+                supplyAmount, minWstethOut, routes, address(this), block.timestamp + deadlineOffset
+            );
         uint256 wstethReceived = amounts[amounts.length - 1];
         if (wstethReceived == 0) revert SwapFailed();
 
@@ -143,7 +143,9 @@ contract WstETHMoonwellStrategy is BaseStrategy {
             IAeroRouter.Route[] memory routes = new IAeroRouter.Route[](1);
             routes[0] = IAeroRouter.Route({from: wsteth, to: weth, stable: true, factory: aeroFactory});
             IAeroRouter(aeroRouter)
-                .swapExactTokensForTokens(wstethBalance, minWethOut, routes, address(this), block.timestamp);
+                .swapExactTokensForTokens(
+                    wstethBalance, minWethOut, routes, address(this), block.timestamp + deadlineOffset
+                );
         }
 
         // 3. Push all WETH back to vault
@@ -157,12 +159,14 @@ contract WstETHMoonwellStrategy is BaseStrategy {
 
     /**
      * @notice Update settlement slippage params
-     * @dev Decode: (uint256 newMinWethOut, uint256 newMinWstethOut)
+     * @dev Decode: (uint256 newMinWethOut, uint256 newMinWstethOut, uint256 newDeadlineOffset)
      *      Pass 0 to keep current value. Only proposer, only while Executed.
      */
     function _updateParams(bytes calldata data) internal override {
-        (uint256 newMinWethOut, uint256 newMinWstethOut) = abi.decode(data, (uint256, uint256));
+        (uint256 newMinWethOut, uint256 newMinWstethOut, uint256 newDeadlineOffset) =
+            abi.decode(data, (uint256, uint256, uint256));
         if (newMinWethOut > 0) minWethOut = newMinWethOut;
         if (newMinWstethOut > 0) minWstethOut = newMinWstethOut;
+        if (newDeadlineOffset > 0) deadlineOffset = newDeadlineOffset;
     }
 }
