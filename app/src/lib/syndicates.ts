@@ -32,6 +32,7 @@ interface SubgraphSyndicate {
   totalDeposits: string;
   totalWithdrawals: string;
   agents: { id: string; agentAddress: string; agentId: string; active: boolean }[];
+  proposals: { proposer: string; finalPnl: string | null; state: string }[];
 }
 
 interface SyndicateMetadata {
@@ -51,6 +52,9 @@ interface SyndicateMetadata {
 export interface AgentDisplay {
   agentAddress: string;
   agentId: string;
+  proposalCount: number;
+  totalPnl: string; // formatted P&L string
+  totalPnlRaw: number; // raw number for sorting
 }
 
 export interface SyndicateDisplay {
@@ -150,6 +154,11 @@ async function fetchViaSubgraph(
           agentId
           active
         }
+        proposals(where: { state: "Settled" }) {
+          proposer
+          finalPnl
+          state
+        }
       }
     }`,
   );
@@ -232,6 +241,18 @@ async function fetchViaSubgraph(
         info.symbol === "USDC" ? "USD" : undefined,
       );
 
+      // Aggregate P&L per agent from settled proposals
+      const isUSD = info.symbol === "USDC" || info.symbol === "USDT";
+      const agentPnl: Record<string, { count: number; pnl: bigint }> = {};
+      for (const p of s.proposals || []) {
+        const key = p.proposer.toLowerCase();
+        if (!agentPnl[key]) agentPnl[key] = { count: 0, pnl: 0n };
+        agentPnl[key].count++;
+        if (p.finalPnl != null) {
+          agentPnl[key].pnl += BigInt(p.finalPnl);
+        }
+      }
+
       return {
         id: s.id,
         vault: s.vault,
@@ -240,10 +261,20 @@ async function fetchViaSubgraph(
         strategy,
         tvl: info.symbol === "USDC" ? tvlFormatted : `${tvlFormatted} ${info.symbol}`,
         agentCount,
-        agents: (s.agents || []).map((a) => ({
-          agentAddress: a.agentAddress,
-          agentId: a.agentId,
-        })),
+        agents: (s.agents || []).map((a) => {
+          const stats = agentPnl[a.agentAddress.toLowerCase()] ?? { count: 0, pnl: 0n };
+          const pnlAbs = stats.pnl < 0n ? -stats.pnl : stats.pnl;
+          const pnlFormatted = formatAsset(pnlAbs, info.decimals, isUSD ? "USD" : undefined);
+          const sign = stats.pnl > 0n ? "+" : stats.pnl < 0n ? "-" : "";
+          const pnlDisplay = isUSD ? `${sign}${pnlFormatted}` : `${sign}${pnlFormatted} ${info.symbol}`;
+          return {
+            agentAddress: a.agentAddress,
+            agentId: a.agentId,
+            proposalCount: stats.count,
+            totalPnl: stats.count > 0 ? pnlDisplay : "—",
+            totalPnlRaw: Number(stats.pnl) / 10 ** info.decimals,
+          };
+        }),
         status,
         chainId,
       };
@@ -374,6 +405,9 @@ async function fetchViaOnChain(
         agentsByVault[vaultKey].push({
           agentAddress: addr,
           agentId: cfg.agentId.toString(),
+          proposalCount: 0,
+          totalPnl: "—",
+          totalPnlRaw: 0,
         });
       }
     }

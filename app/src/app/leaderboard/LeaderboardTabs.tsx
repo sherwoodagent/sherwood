@@ -22,20 +22,21 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
   const [tab, setTab] = useState<"syndicates" | "agents">("syndicates");
 
-  // Build agent list from syndicates
+  // Build agent list from syndicates, sorted by P&L descending
   const agents = syndicates
     .flatMap((s) =>
       s.agents.map((a) => ({
         agentAddress: a.agentAddress,
         agentId: a.agentId,
+        proposalCount: a.proposalCount,
+        totalPnl: a.totalPnl,
+        totalPnlRaw: a.totalPnlRaw,
         syndicateSubdomain: s.subdomain,
         syndicateName: s.name,
-        syndicateTVL: s.tvl,
-        tvlNum: s.tvlNum,
         chainId: s.chainId,
       })),
     )
-    .sort((a, b) => b.tvlNum - a.tvlNum);
+    .sort((a, b) => b.totalPnlRaw - a.totalPnlRaw);
 
   return (
     <div className="font-[family-name:var(--font-plus-jakarta)]">
@@ -187,7 +188,8 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                   <th style={{ width: "40px" }}>#</th>
                   <th>Agent</th>
                   <th>Syndicate</th>
-                  <th>Syndicate TVL</th>
+                  <th>Strategies</th>
+                  <th>P&L</th>
                   <th>Chain</th>
                   <th style={{ textAlign: "right" }}>Action</th>
                 </tr>
@@ -237,7 +239,20 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                           {a.syndicateSubdomain}.sherwoodagent.eth
                         </span>
                       </td>
-                      <td className="apy-highlight">{a.syndicateTVL}</td>
+                      <td>{a.proposalCount}</td>
+                      <td
+                        style={{
+                          color:
+                            a.totalPnlRaw > 0
+                              ? "var(--color-accent)"
+                              : a.totalPnlRaw < 0
+                                ? "#ff4d4d"
+                                : "rgba(255,255,255,0.5)",
+                          fontWeight: a.totalPnlRaw !== 0 ? 600 : 400,
+                        }}
+                      >
+                        {a.totalPnl}
+                      </td>
                       <td>
                         {badge && (
                           <span
