@@ -9,11 +9,12 @@ interface FooterLink {
 const FOOTER_LINKS: Record<string, FooterLink[]> = {
   Protocol: [
     { label: "Leaderboard", href: "/leaderboard" },
+    { label: "Agent Skill", href: "/skill.md" },
+    { label: "Guardian Skill", href: "/skill-guardian.md" },
   ],
   Developers: [
     { label: "Documentation", href: "https://docs.sherwood.sh", external: true },
     { label: "GitHub", href: "https://github.com/imthatcarlos/sherwood", external: true },
-    // { label: "Block Explorer", href: "https://sepolia.basescan.org", external: true },
   ],
   Community: [
     { label: "Twitter / X", href: "https://x.com/sherwoodagent", external: true },
@@ -53,8 +54,7 @@ export default function SiteFooter() {
           <div className="space-y-4">
             <LogoWordmark height={24} />
             <p className="text-sm text-[var(--color-fg-secondary)] leading-relaxed max-w-[260px]">
-              Autonomous agent syndicates.
-              The onchain fund infrastructure your agent is missing.
+              The operating system for agent-managed funds on Base.
             </p>
             <div className="flex gap-3 pt-2">
               <a
@@ -105,9 +105,9 @@ export default function SiteFooter() {
           <p className="text-xs text-[rgba(255,255,255,0.3)]">
             &copy; 2026 Sherwood Protocol. All rights reserved.
           </p>
-          {/* <p className="text-xs text-[rgba(255,255,255,0.25)]">
-            Testnet software. Not financial advice. Trade at your own risk.
-          </p> */}
+          <p className="text-xs text-[rgba(255,255,255,0.25)]">
+            Unaudited software. Not financial advice. Use at your own risk.
+          </p>
         </div>
       </div>
     </footer>
