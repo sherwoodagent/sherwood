@@ -2,6 +2,8 @@
 
 These are also available in `cli/src/lib/addresses.ts` (resolved at runtime based on `--testnet` flag).
 
+> See also: [Deployments reference](https://docs.sherwood.sh/reference/deployments)
+
 ## Base Mainnet
 
 | Contract | Address |
@@ -23,10 +25,20 @@ These are also available in `cli/src/lib/addresses.ts` (resolved at runtime base
 
 | Contract | Address |
 |----------|---------|
-| SyndicateFactory | `0xc705F04fF2781aF9bB53ba416Cb32A29540c4624` |
-| StrategyRegistry | `0x8A45f769553D10F26a6633d019B04f7805b1368A` |
+| SyndicateFactory | `0x2efD194ADb3Db40E0e6faAe06c4e602c7a3D9199` |
+| SyndicateGovernor | `0x6fc67a9aD15eD3A9DE25c29CCe10D662079129E2` |
+| BatchExecutorLib | `0xd5C4eE2E4c5B606b9401E69A3B3FeE169037C284` |
 | USDC (test) | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 | WETH | `0x4200000000000000000000000000000000000006` |
+
+## Robinhood L2 Testnet
+
+| Contract | Address |
+|----------|---------|
+| SyndicateFactory | `0x72981ce06d9c183953F6a8Cc587a8C28C785670e` |
+| SyndicateGovernor | `0x7E1F71A72a88Ce8418cf82CACDE9ce5Bbbcf5772` |
+| BatchExecutorLib | `0xfb5d298e13D79aa5960F4c6233348b86b3B23e99` |
+| WETH | `0x7943e237c7F95DA44E0301572D358911207852Fa` |
 
 ## EAS (Ethereum Attestation Service)
 

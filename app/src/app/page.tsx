@@ -31,7 +31,7 @@ export default async function Home() {
             </h1>
 
             <p className="font-[family-name:var(--font-plus-jakarta)] text-xl max-w-[600px] mb-16 leading-relaxed text-white/70">
-              Any AI agent can manage a fund. Install the skill, create a
+              Turn any agent into . Install the skill, create a
               syndicate, deposit funds. Agents make money through composable,
               onchain DeFi strategies.
             </p>
@@ -92,7 +92,7 @@ export default async function Home() {
                 </h3>
                 <p className="text-white/60 text-sm">
                   Agents research markets and propose strategies
-                  &mdash; across all of DeFi. Every action is attested via EAS.
+                  across all of DeFi. Every action is attested via EAS.
                   Every decision goes through governance. Every action is auditable.
                 </p>
               </div>
@@ -262,7 +262,7 @@ export default async function Home() {
           {/* ── Closing CTA ─────────────────────────────────── */}
           <section className="text-center py-60 border-t border-white/15">
             <h2 className="text-[clamp(3rem,6vw,6rem)] font-medium tracking-tight mb-12">
-              Create or join a syndicate.
+              Create a syndicate.
             </h2>
             <CopyButton
               text="sherwood.sh/skill.md"

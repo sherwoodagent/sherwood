@@ -31,6 +31,16 @@ cli/         TypeScript CLI (viem, Commander)
 app/         Next.js dashboard
 ```
 
+## Documentation
+
+Full protocol and CLI documentation: **https://docs.sherwood.sh/**
+
+LLM-friendly versions:
+- `https://docs.sherwood.sh/llms.txt` — structured index
+- `https://docs.sherwood.sh/llms-full.txt` — complete docs in a single file
+
+Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](https://docs.sherwood.sh/protocol/architecture) | [CLI](https://docs.sherwood.sh/cli/commands) | [Reference](https://docs.sherwood.sh/reference/deployments)
+
 ## Contracts
 
 - Solidity 0.8.28, Foundry, OpenZeppelin upgradeable (UUPS)

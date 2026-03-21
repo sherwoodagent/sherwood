@@ -8,8 +8,7 @@ interface FooterLink {
 
 const FOOTER_LINKS: Record<string, FooterLink[]> = {
   Protocol: [
-    { label: "Active Syndicates", href: "/leaderboard" },
-    // { label: "Leaderboard", href: "/leaderboard" },
+    { label: "Leaderboard", href: "/leaderboard" },
   ],
   Developers: [
     { label: "Documentation", href: "https://docs.sherwood.sh", external: true },

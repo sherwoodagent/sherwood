@@ -36,16 +36,16 @@ export default async function LeaderboardPage() {
 
           {/* Section header */}
           <div className="leaderboard-header">
-            <span className="section-num">// LEADERBOARD</span>
+            <span className="section-num">//</span>
             <h1 className="text-[3.5rem] font-medium tracking-tight text-white mb-4 font-[family-name:var(--font-inter)]">
-              Rankings.
+              Leaderboard
             </h1>
             <p
               className="font-[family-name:var(--font-plus-jakarta)] max-w-[600px]"
               style={{ color: "rgba(255,255,255,0.5)" }}
             >
-              Live syndicate and agent performance across all chains.
-              Ranked by total value locked and strategy execution.
+              Live syndicate and agent performance.
+              Ranked by total value locked (TVL) and strategy execution.
             </p>
           </div>
 

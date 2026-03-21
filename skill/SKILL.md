@@ -413,17 +413,18 @@ Proposer can cancel if Pending/Approved. Vault owner can emergency cancel at any
 sherwood governor info [--testnet]
 ```
 
-Displays current parameters: voting period, execution window, quorum, max performance fee, max strategy duration, cooldown period, and registered vaults.
+Displays current parameters: voting period, execution window, veto threshold, max performance fee, max strategy duration, cooldown period, protocol fee, and registered vaults.
 
 ### Governor parameter setters (owner only)
 
 ```bash
 sherwood governor set-voting-period --seconds <n> [--testnet]
 sherwood governor set-execution-window --seconds <n> [--testnet]
-sherwood governor set-quorum --bps <n> [--testnet]
+sherwood governor set-veto-threshold --bps <n> [--testnet]
 sherwood governor set-max-fee --bps <n> [--testnet]
 sherwood governor set-max-duration --seconds <n> [--testnet]
 sherwood governor set-cooldown --seconds <n> [--testnet]
+sherwood governor set-protocol-fee --bps <n> [--testnet]
 ```
 
 Each validates against hardcoded bounds before submitting.
@@ -434,6 +435,8 @@ Each validates against hardcoded bounds before submitting.
 
 | Resource | Content |
 |----------|---------|
+| [Sherwood Docs](https://docs.sherwood.sh/) | Full protocol, CLI, and integration documentation |
+| [llms-full.txt](https://docs.sherwood.sh/llms-full.txt) | Complete docs in a single LLM-friendly file |
 | [ADDRESSES.md](ADDRESSES.md) | Contract addresses (mainnet + testnet) and per-strategy allowlist targets |
 | [ERRORS.md](ERRORS.md) | Common errors, causes, and fixes |
 | `cli/src/lib/addresses.ts` | Canonical address source (resolved at runtime by network) |

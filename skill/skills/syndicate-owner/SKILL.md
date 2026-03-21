@@ -366,6 +366,19 @@ When evaluating proposal call targets, verify against known protocol addresses *
 
 | Protocol | Address | Notes |
 |----------|---------|-------|
-| *(Addresses TBD after deployment)* | | |
+| WETH | `0x7943e237c7F95DA44E0301572D358911207852Fa` | Wrapped ETH |
+| SyndicateFactory | `0x72981ce06d9c183953F6a8Cc587a8C28C785670e` | Sherwood |
+| SyndicateGovernor | `0x7E1F71A72a88Ce8418cf82CACDE9ce5Bbbcf5772` | Sherwood |
+
+> No Moonwell, Uniswap, or Aerodrome on Robinhood L2. Only Sherwood contracts and WETH are deployed.
 
 Calls to addresses NOT in the known list for your chain require extra scrutiny. Verify the contract on the appropriate block explorer before allowing.
+
+---
+
+## Further Reading
+
+- [Governance Overview](https://docs.sherwood.sh/protocol/governance/overview) — Optimistic governance model and proposal lifecycle
+- [Settlement](https://docs.sherwood.sh/protocol/governance/settlement) — Settlement paths, emergency actions, P&L calculation
+- [Economics](https://docs.sherwood.sh/protocol/governance/economics) — Fee structure and distribution
+- [Deployments](https://docs.sherwood.sh/reference/deployments) — Contract addresses by chain

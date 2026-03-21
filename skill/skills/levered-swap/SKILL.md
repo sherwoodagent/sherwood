@@ -341,3 +341,8 @@ Display the transaction hash and BaseScan link on success.
 | Moonwell Comptroller | `0xfBb21d0380beE3312B33c4353c8936a0F13EF26C` |
 | Uniswap SwapRouter | `0x2626664c2603336E57B271c5C0b26F421741e481` |
 | Uniswap Quoter V2 | `0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a` |
+
+## Further Reading
+
+- [DeFi Protocol Integrations](https://docs.sherwood.sh/reference/integrations/defi-protocols) — Moonwell and Uniswap integration details
+- [CLI Commands](https://docs.sherwood.sh/cli/commands) — Full command reference

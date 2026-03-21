@@ -7,6 +7,8 @@ The SyndicateGovernor contract enables on-chain proposal lifecycle:
 3. **Execute** — approved proposals lock redemptions and deploy capital
 4. **Settle** — two paths: proposer anytime / permissionless after duration, emergency owner backstop with fallback
 
+> For deeper protocol context, see the [Governance docs](https://docs.sherwood.sh/protocol/governance/overview).
+
 Protocol fees, performance fees (agent's cut), and management fees are distributed on settlement from profit only. Fee distribution order: protocol fee → agent fee → management fee.
 
 ## Create a proposal
@@ -98,17 +100,18 @@ Proposer can cancel if Pending/Approved. Vault owner can emergency cancel at any
 sherwood governor info [--chain <network>]
 ```
 
-Displays current parameters: voting period, execution window, quorum, max performance fee, max strategy duration, cooldown period, and registered vaults.
+Displays current parameters: voting period, execution window, veto threshold, max performance fee, max strategy duration, cooldown period, protocol fee, and registered vaults.
 
 ## Governor parameter setters (owner only)
 
 ```bash
 sherwood governor set-voting-period --seconds <n> [--chain <network>]
 sherwood governor set-execution-window --seconds <n> [--chain <network>]
-sherwood governor set-quorum --bps <n> [--chain <network>]
+sherwood governor set-veto-threshold --bps <n> [--chain <network>]
 sherwood governor set-max-fee --bps <n> [--chain <network>]
 sherwood governor set-max-duration --seconds <n> [--chain <network>]
 sherwood governor set-cooldown --seconds <n> [--chain <network>]
+sherwood governor set-protocol-fee --bps <n> [--chain <network>]
 ```
 
 Each validates against hardcoded bounds before submitting.
