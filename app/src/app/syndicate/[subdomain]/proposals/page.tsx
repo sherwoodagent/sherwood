@@ -224,7 +224,7 @@ function buildMockData(vault: Address): GovernorData {
     params: {
       votingPeriod: 3n * DAY,
       executionWindow: DAY,
-      quorumBps: 2000n,  // 20%
+      vetoThresholdBps: 2000n,  // 20%
       maxPerformanceFeeBps: 3000n, // 30%
       cooldownPeriod: DAY,
       collaborationWindow: 48n * 3600n,
@@ -323,9 +323,9 @@ export default async function ProposalsPage({
               </div>
             </div>
             <div className="stat-item">
-              <div className="stat-label">Quorum</div>
+              <div className="stat-label">Veto Threshold</div>
               <div className="stat-value" style={{ fontSize: "1.2rem" }}>
-                {formatBps(governor.params.quorumBps)}
+                {formatBps(governor.params.vetoThresholdBps)}
               </div>
             </div>
             <div className="stat-item">

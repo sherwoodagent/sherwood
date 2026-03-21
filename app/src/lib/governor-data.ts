@@ -68,7 +68,7 @@ export interface ProposalData {
 export interface GovernorParams {
   votingPeriod: bigint;
   executionWindow: bigint;
-  quorumBps: bigint;
+  vetoThresholdBps: bigint;
   maxPerformanceFeeBps: bigint;
   cooldownPeriod: bigint;
   collaborationWindow: bigint;
@@ -187,7 +187,7 @@ export async function fetchGovernorData(
   const params: GovernorParams = paramsRaw ?? {
     votingPeriod: 0n,
     executionWindow: 0n,
-    quorumBps: 0n,
+    vetoThresholdBps: 0n,
     maxPerformanceFeeBps: 0n,
     cooldownPeriod: 0n,
     collaborationWindow: 0n,
