@@ -10,6 +10,7 @@ type Syndicate @entity(immutable: false) {
   createdAt: BigInt!
   active: Boolean!
   redemptionsLocked: Boolean!
+  openDeposits: Boolean!
   assetDecimals: Int!
 
   # Aggregated stats
@@ -43,10 +44,6 @@ type Agent @entity(immutable: false) {
   agentAddress: Bytes!
   active: Boolean!
   registeredAt: BigInt!
-
-  # Aggregated stats
-  totalBatches: BigInt!
-  totalAssetAmount: BigInt!
 }
 
 """

@@ -67,6 +67,8 @@ dataSources:
           handler: handleProposalCancelled
         - event: EmergencySettled(indexed uint256,indexed address,int256,uint256)
           handler: handleEmergencySettled
+        - event: ProposalVetoed(indexed uint256,indexed address)
+          handler: handleProposalVetoed
       file: ./src/governor.ts
 templates:
   - kind: ethereum

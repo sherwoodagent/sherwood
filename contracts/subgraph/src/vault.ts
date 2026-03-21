@@ -39,8 +39,6 @@ export function handleAgentRegistered(event: AgentRegistered): void {
   agent.agentAddress = event.params.agentAddress;
   agent.active = true;
   agent.registeredAt = event.block.timestamp;
-  agent.totalBatches = BigInt.zero();
-  agent.totalAssetAmount = BigInt.zero();
 
   agent.save();
 }
@@ -139,7 +137,11 @@ export function handleDepositorRemoved(event: DepositorRemoved): void {
 // ── Config Changes ──
 
 export function handleOpenDepositsUpdated(event: OpenDepositsUpdated): void {
-  // Open deposits toggle — indexed for event filtering.
+  let syndicateId = getSyndicateId();
+  let syndicate = Syndicate.load(syndicateId);
+  if (syndicate == null) return;
+  syndicate.openDeposits = event.params.open;
+  syndicate.save();
 }
 
 

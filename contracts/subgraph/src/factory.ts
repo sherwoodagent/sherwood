@@ -19,6 +19,7 @@ export function handleSyndicateCreated(event: SyndicateCreated): void {
   syndicate.createdAt = event.block.timestamp;
   syndicate.active = true;
   syndicate.redemptionsLocked = false;
+  syndicate.openDeposits = false;
   syndicate.totalDeposits = BigDecimal.zero();
   syndicate.totalWithdrawals = BigDecimal.zero();
 

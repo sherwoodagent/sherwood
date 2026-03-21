@@ -6,8 +6,9 @@ import {
   ProposalSettled,
   ProposalCancelled,
   EmergencySettled,
+  ProposalVetoed,
 } from "../generated/SyndicateGovernor/SyndicateGovernor";
-import { Proposal, Vote, VaultLookup } from "../generated/schema";
+import { Proposal, Vote, Syndicate, VaultLookup } from "../generated/schema";
 
 /**
  * Resolve syndicateId from a vault address using the VaultLookup entity
@@ -78,6 +79,17 @@ export function handleProposalExecuted(event: ProposalExecuted): void {
   proposal.executedAt = event.block.timestamp;
 
   proposal.save();
+
+  // Lock redemptions while proposal is active
+  let vaultAddress = proposal.vault.toHexString();
+  let lookup = VaultLookup.load(vaultAddress);
+  if (lookup != null) {
+    let syndicate = Syndicate.load(lookup.syndicate);
+    if (syndicate != null) {
+      syndicate.redemptionsLocked = true;
+      syndicate.save();
+    }
+  }
 }
 
 export function handleProposalSettled(event: ProposalSettled): void {
@@ -91,6 +103,17 @@ export function handleProposalSettled(event: ProposalSettled): void {
   proposal.settledAt = event.block.timestamp;
 
   proposal.save();
+
+  // Unlock redemptions after settlement
+  let vaultAddress = proposal.vault.toHexString();
+  let lookup = VaultLookup.load(vaultAddress);
+  if (lookup != null) {
+    let syndicate = Syndicate.load(lookup.syndicate);
+    if (syndicate != null) {
+      syndicate.redemptionsLocked = false;
+      syndicate.save();
+    }
+  }
 }
 
 export function handleProposalCancelled(event: ProposalCancelled): void {
@@ -101,6 +124,17 @@ export function handleProposalCancelled(event: ProposalCancelled): void {
   proposal.state = "Cancelled";
 
   proposal.save();
+
+  // Unlock redemptions after cancellation
+  let vaultAddress = proposal.vault.toHexString();
+  let lookup = VaultLookup.load(vaultAddress);
+  if (lookup != null) {
+    let syndicate = Syndicate.load(lookup.syndicate);
+    if (syndicate != null) {
+      syndicate.redemptionsLocked = false;
+      syndicate.save();
+    }
+  }
 }
 
 export function handleEmergencySettled(event: EmergencySettled): void {
@@ -110,7 +144,26 @@ export function handleEmergencySettled(event: EmergencySettled): void {
 
   proposal.state = "Settled";
   proposal.finalPnl = event.params.pnl;
+  proposal.performanceFee = BigInt.zero();
   proposal.settledAt = event.block.timestamp;
 
+  proposal.save();
+
+  // Unlock redemptions after emergency settlement
+  let vaultAddress = proposal.vault.toHexString();
+  let lookup = VaultLookup.load(vaultAddress);
+  if (lookup != null) {
+    let syndicate = Syndicate.load(lookup.syndicate);
+    if (syndicate != null) {
+      syndicate.redemptionsLocked = false;
+      syndicate.save();
+    }
+  }
+}
+
+export function handleProposalVetoed(event: ProposalVetoed): void {
+  let proposal = Proposal.load(event.params.proposalId.toString());
+  if (proposal == null) return;
+  proposal.state = "Rejected";
   proposal.save();
 }
