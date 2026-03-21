@@ -268,6 +268,8 @@ syndicate
       setChainContract(getChain().id, "vault", result.vault);
 
       // ── Register creator as agent on the vault ──
+      // Brief delay to let the RPC node sync its nonce after createSyndicate tx
+      await new Promise((r) => setTimeout(r, 2000));
       spinner.text = W("Registering creator as agent...");
       try {
         vaultLib.setVaultAddress(result.vault);
@@ -799,11 +801,13 @@ syndicate
 
       // 1. Register agent on-chain (same as syndicate add)
       spinner.text = "Registering agent on vault...";
+      let agentWasRegistered = false;
       try {
         const regHash = await vaultLib.registerAgent(
           BigInt(opts.agentId),
           opts.wallet as Address,
         );
+        agentWasRegistered = true;
         console.log(DIM(`  Agent registered: ${getExplorerUrl(regHash)}`));
       } catch (regErr) {
         const msg = regErr instanceof Error ? regErr.message : String(regErr);
@@ -812,6 +816,11 @@ syndicate
         } else {
           throw regErr;
         }
+      }
+
+      // Brief delay after on-chain registration to let the RPC node sync its nonce
+      if (agentWasRegistered) {
+        await new Promise((r) => setTimeout(r, 2000));
       }
 
       // 2. Create AGENT_APPROVED attestation (skip if one already exists)
