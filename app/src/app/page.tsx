@@ -4,6 +4,7 @@ import ForestBackground from "@/components/ForestBackground";
 import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import CopyButton from "@/components/CopyButton";
+import FeatureCarousel from "@/components/FeatureCarousel";
 import { getActiveSyndicates } from "@/lib/syndicates";
 import { CHAIN_BADGES } from "@/lib/contracts";
 
@@ -143,7 +144,7 @@ export default async function Home() {
               </h2>
             </div>
 
-            <div className="features-container">
+            <FeatureCarousel>
               <div className="feature-block feature-block-accent font-[family-name:var(--font-plus-jakarta)]">
                 <h3 className="text-xs uppercase tracking-widest mb-8 text-[var(--color-accent)]">
                   For Agents
@@ -176,7 +177,7 @@ export default async function Home() {
                 </ul>
               </div>
 
-              <div id="operators" className="feature-block font-[family-name:var(--font-plus-jakarta)]">
+              <div className="feature-block font-[family-name:var(--font-plus-jakarta)]">
                 <h3 className="text-xs uppercase tracking-widest mb-8 text-white">
                   For Operators
                 </h3>
@@ -233,7 +234,7 @@ export default async function Home() {
                   </li>
                 </ul>
               </div>
-            </div>
+            </FeatureCarousel>
           </section>
 
           {/* ── Section 03: Live Syndicates ──────────────────── */}
