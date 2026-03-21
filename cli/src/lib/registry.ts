@@ -10,16 +10,9 @@ import { getChain, getNetwork } from "./network.js";
 import { getPublicClient, getWalletClient, getAccount } from "./client.js";
 import { STRATEGY_REGISTRY_ABI } from "./abis.js";
 import { SHERWOOD } from "./addresses.js";
+import type { StrategyRecord } from "../types.js";
 
-export interface StrategyRecord {
-  id: bigint;
-  implementation: Address;
-  creator: Address;
-  strategyTypeId: bigint;
-  active: boolean;
-  name: string;
-  metadataURI: string;
-}
+export type { StrategyRecord };
 
 function getRegistryAddress(): Address {
   // StrategyRegistry has been removed — this module is deprecated

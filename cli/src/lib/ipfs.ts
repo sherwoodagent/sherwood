@@ -31,18 +31,27 @@ export interface SyndicateMetadata {
   };
 }
 
-// Bundled Pinata credentials — used by all CLI users for syndicate metadata.
-// Override with PINATA_API_KEY / PINATA_GATEWAY env vars if needed.
-const BUNDLED_PINATA_JWT =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI2NDQ0MGViOC1hYTYyLTQzY2EtOGYwNC04MDZjZmNjY2Y4YTUiLCJlbWFpbCI6ImltdGhhdGNhcmxvc0BnbWFpbC5jb20iLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwicGluX3BvbGljeSI6eyJyZWdpb25zIjpbeyJkZXNpcmVkUmVwbGljYXRpb25Db3VudCI6MSwiaWQiOiJGUkExIn1dLCJ2ZXJzaW9uIjoxfSwibWZhX2VuYWJsZWQiOmZhbHNlLCJzdGF0dXMiOiJBQ1RJVkUifSwiYXV0aGVudGljYXRpb25UeXBlIjoic2NvcGVkS2V5Iiwic2NvcGVkS2V5S2V5IjoiMWJhZWFmMzQwODM3MGQ0NGZkZWEiLCJzY29wZWRLZXlTZWNyZXQiOiIzNDcxMmU5MTkyYTgxNWFhMGRmNjUyYjYyMDQzODQ1MDJjMmU0YWE0MDhkZTJmOTU2NWYwOTk3YTNlY2U3NGU3IiwiZXhwIjoxODAxMjc2ODExfQ.7OMJiOATpqkSwe7Orrpt2b8H_-czH-W61vBm4AHtqfA";
-const BUNDLED_PINATA_GATEWAY = "https://sherwood.mypinata.cloud";
+const DEFAULT_PINATA_GATEWAY = "https://sherwood.mypinata.cloud";
 
-function getPinataApiKey(): string {
-  return process.env.PINATA_API_KEY || BUNDLED_PINATA_JWT;
+function getPinataJwt(): string {
+  const envJwt = process.env.PINATA_JWT ?? process.env.PINATA_API_KEY;
+  if (envJwt) return envJwt;
+
+  // Check config file
+  try {
+    const { loadConfig } = require("./config");
+    const config = loadConfig();
+    if (config.pinataJwt) return config.pinataJwt;
+  } catch {}
+
+  throw new Error(
+    "PINATA_JWT environment variable is required for IPFS uploads. " +
+      "Get a free API key at https://app.pinata.cloud/developers/api-keys",
+  );
 }
 
 function getPinataGateway(): string {
-  return process.env.PINATA_GATEWAY || BUNDLED_PINATA_GATEWAY;
+  return process.env.PINATA_GATEWAY || DEFAULT_PINATA_GATEWAY;
 }
 
 /**
@@ -51,13 +60,13 @@ function getPinataGateway(): string {
  * Returns the IPFS URI (ipfs://Qm...).
  */
 export async function pinJSON(content: Record<string, unknown>, name: string): Promise<string> {
-  const apiKey = getPinataApiKey();
+  const jwt = getPinataJwt();
 
   const response = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${jwt}`,
     },
     body: JSON.stringify({
       pinataContent: content,
@@ -79,13 +88,13 @@ export async function pinJSON(content: Record<string, unknown>, name: string): P
  * Returns the IPFS URI (ipfs://Qm...).
  */
 export async function uploadMetadata(metadata: SyndicateMetadata): Promise<string> {
-  const apiKey = getPinataApiKey();
+  const jwt = getPinataJwt();
 
   const response = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${jwt}`,
     },
     body: JSON.stringify({
       pinataContent: metadata,

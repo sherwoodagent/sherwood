@@ -104,11 +104,5 @@ export interface StrategyRecord {
 }
 
 // ── Config ──
-
-export interface SherwoodConfig {
-  rpcUrl: string;
-  chain: "base" | "base-sepolia";
-  registryAddress: Address;
-  vaultAddress?: Address;
-  privateKey?: `0x${string}`;
-}
+// SherwoodConfig is defined in lib/config.ts (the canonical version).
+// Do not duplicate it here.

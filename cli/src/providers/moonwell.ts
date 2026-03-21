@@ -1,3 +1,6 @@
+// TODO: Not yet implemented. All methods throw "Not implemented".
+// This provider is registered but non-functional.
+
 import type { Address, Chain } from "viem";
 import { base, baseSepolia } from "viem/chains";
 import type { LendingProvider, ProviderInfo, DepositParams, BorrowParams, RepayParams, WithdrawParams, TxResult, LendingPosition } from "../types.js";

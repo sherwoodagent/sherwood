@@ -302,7 +302,9 @@ export async function propose(
 
   const receipt = await client.waitForTransactionReceipt({ hash });
 
-  // Parse proposalId from return value — use proposalCount as fallback
+  // Parse proposalId from return value — use proposalCount as fallback.
+  // NOTE: In concurrent environments, another proposal could be created between
+  // our tx and this read, returning the wrong ID. The event log path above is preferred.
   let proposalId: bigint;
   try {
     proposalId = await proposalCount();

@@ -1,3 +1,6 @@
+// TODO: Not yet implemented. All methods throw "Not implemented".
+// This provider is registered but non-functional.
+
 import type { Address } from "viem";
 import { base, baseSepolia } from "viem/chains";
 import type { TradingProvider, ProviderInfo, SwapParams, SwapQuoteParams, TxResult, SwapQuote } from "../types.js";
