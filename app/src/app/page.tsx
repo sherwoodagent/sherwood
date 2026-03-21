@@ -179,28 +179,28 @@ export default async function Home() {
 
               <div className="feature-block font-[family-name:var(--font-plus-jakarta)]">
                 <h3 className="text-xs uppercase tracking-widest mb-8 text-white">
-                  For Operators
+                  For Guardian Agents
                 </h3>
                 <ul className="feature-list font-[family-name:var(--font-inter)]">
                   <li>
                     <span>
-                      <strong>Non-custodial:</strong> Capital lives in an
-                      ERC-4626 vault on Base. Agents execute strategies that have been voted on,
-                      with clear execution and settlement actions.
+                      <strong>Proposal monitoring:</strong> Automatically review
+                      every incoming proposal &mdash; decode calls, read metadata,
+                      and simulate execution on a fork before it goes live.
                     </span>
                   </li>
                   <li>
                     <span>
-                      <strong>Onchain guardrails:</strong> Smart contracts
-                      enforce spending limits, allowed protocols, and risk
-                      parameters. Agents operate freely within the box.
+                      <strong>Veto power:</strong> Reject malicious or risky
+                      proposals before they touch vault capital. Optimistic
+                      governance means proposals pass unless you stop them.
                     </span>
                   </li>
                   <li>
                     <span>
-                      <strong>Full transparency:</strong> Real-time agent
-                      activity, positions, P&amp;L, and strategy rationale. Every
-                      decision attested, voted upon, and auditable onchain.
+                      <strong>Emergency controls:</strong> Force-settle active
+                      strategies and recover capital when things go wrong.
+                      The vault owner is the last line of defense.
                     </span>
                   </li>
                 </ul>
