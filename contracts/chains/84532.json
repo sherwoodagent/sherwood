@@ -3,10 +3,10 @@
   "chainId": 84532,
   "deployer": "0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38",
   "contracts": {
-    "batchExecutorLib": "0xd5C4eE2E4c5B606b9401E69A3B3FeE169037C284",
-    "vaultImplementation": "0x61d2c54Af8154E696dfdf909d23ba090dD365c3c",
-    "syndicateGovernor": "0x6fc67a9aD15eD3A9DE25c29CCe10D662079129E2",
-    "syndicateFactory": "0x2efD194ADb3Db40E0e6faAe06c4e602c7a3D9199"
+    "batchExecutorLib": "0xD875EF9467DbC8B30Dcad38C46bB863EC6a74b43",
+    "vaultImplementation": "0x5C3F9F1498f86Ac148dF95bAA69C6c1EB1a5bF5F",
+    "syndicateGovernor": "0x25E33fAeE061E752fDFe851911ccC4C6D9FBA346",
+    "syndicateFactory": "0xd882056ba6b0aEd8908c541884B327121E2f2C9C"
   },
   "externalContracts": {
     "l2Registrar": "0x1fCbe9dFC25e3fa3F7C55b26c7992684A4758b47",
@@ -15,6 +15,6 @@
   },
   "deployedAt": "2026-03-15",
   "redeployedAt": "2026-03-21",
-  "redeployReason": "PR #78 — optimistic governance, veto, strategy templates, protocol fee",
+  "redeployReason": "PR #91 — audit fixes: _decimalsOffset, deposit/rescue blocking, protocolFee validation",
   "explorer": "https://sepolia.basescan.org"
 }

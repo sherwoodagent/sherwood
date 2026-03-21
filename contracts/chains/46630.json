@@ -3,16 +3,17 @@
   "chainId": 46630,
   "deployer": "0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38",
   "contracts": {
-    "batchExecutorLib": "0x70d0E510454eE246BFCFD53F2204f2487B19a137",
-    "vaultImplementation": "0x9a0C8BB6744058Aaf36690EAA9f3fC1d7619F169",
-    "syndicateGovernor": "0x5cBE8269CfF68D52329B8E0F9174F893627AFf0f",
-    "syndicateFactory": "0xea644E2Bc0215fC73B11f52CB16a87334B0922E6"
+    "batchExecutorLib": "0xE4db02408A164F1b1e7Af8A8CB7F45931ee76F66",
+    "vaultImplementation": "0xB478cdb99260F46191C9e5Da405F7E70eEA23dE4",
+    "syndicateGovernor": "0x7eAbBbccdBf511c91ebBfd1353201758C62B725B",
+    "syndicateFactory": "0xc31B426683C124D3Cb328B0C8396e5caf821B1C5"
   },
   "externalContracts": {
     "l2Registrar": "0x0000000000000000000000000000000000000000",
     "identityRegistry": "0x0000000000000000000000000000000000000000",
     "reputationRegistry": "0x0000000000000000000000000000000000000000"
   },
-  "deployedAt": "2026-03-20",
+  "deployedAt": "2026-03-21",
+  "redeployReason": "PR #91 — audit fixes: _decimalsOffset, deposit/rescue blocking, protocolFee validation",
   "explorer": "https://explorer.testnet.chain.robinhood.com"
 }
