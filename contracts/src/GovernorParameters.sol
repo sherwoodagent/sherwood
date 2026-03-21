@@ -282,6 +282,7 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
             }
         } else if (paramKey == PARAM_PROTOCOL_FEE_BPS) {
             if (newValue > MAX_PROTOCOL_FEE_BPS) revert InvalidProtocolFeeBps();
+            if (newValue > 0 && _getProtocolFeeRecipient() == address(0)) revert InvalidProtocolFeeRecipient();
         }
     }
 

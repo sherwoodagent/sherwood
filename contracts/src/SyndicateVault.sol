@@ -355,8 +355,10 @@ contract SyndicateVault is
         IERC20(token).safeTransfer(to, amount);
     }
 
-    /// @notice Rescue ERC-721 tokens accidentally sent to the vault
+    /// @notice Rescue ERC-721 tokens accidentally sent to the vault.
+    ///         Blocked during active proposals to protect strategy position NFTs (e.g., Uniswap V3 LP).
     function rescueERC721(address token, uint256 tokenId, address to) external onlyOwner {
+        if (redemptionsLocked()) revert RedemptionsLocked();
         if (to == address(0)) revert ZeroAddress();
         IERC721(token).safeTransferFrom(address(this), to, tokenId);
     }

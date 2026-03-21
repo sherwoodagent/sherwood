@@ -761,4 +761,61 @@ contract SyndicateGovernorTest is Test {
         vm.prank(owner);
         gov2.setProtocolFeeBps(0);
     }
+
+    function test_finalizeProtocolFeeBps_toctou_reverts() public {
+        // TOCTOU: queue fee bps with valid recipient, then clear recipient before finalize
+        // The main governor already has protocolFeeBps=200 and protocolFeeRecipient=owner
+
+        // Deploy a fresh governor to control recipient lifecycle
+        SyndicateGovernor govImpl2 = new SyndicateGovernor();
+        bytes memory govInit2 = abi.encodeCall(
+            SyndicateGovernor.initialize,
+            (ISyndicateGovernor.InitParams({
+                    owner: owner,
+                    votingPeriod: VOTING_PERIOD,
+                    executionWindow: EXECUTION_WINDOW,
+                    vetoThresholdBps: VETO_THRESHOLD_BPS,
+                    maxPerformanceFeeBps: MAX_PERF_FEE_BPS,
+                    cooldownPeriod: COOLDOWN_PERIOD,
+                    collaborationWindow: 48 hours,
+                    maxCoProposers: 5,
+                    minStrategyDuration: 1 hours,
+                    maxStrategyDuration: MAX_STRATEGY_DURATION,
+                    parameterChangeDelay: PARAM_CHANGE_DELAY,
+                    protocolFeeBps: 0,
+                    protocolFeeRecipient: owner
+                }))
+        );
+        SyndicateGovernor gov2 = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl2), govInit2)));
+
+        // Step 1: Queue fee bps change (recipient is set, so queue succeeds)
+        vm.startPrank(owner);
+        gov2.setProtocolFeeBps(500);
+
+        // Wait for timelock delay
+        vm.warp(block.timestamp + PARAM_CHANGE_DELAY + 1);
+
+        // Finalize should succeed since recipient is still set
+        gov2.finalizeParameterChange(gov2.PARAM_PROTOCOL_FEE_BPS());
+        vm.stopPrank();
+        assertEq(gov2.protocolFeeBps(), 500);
+    }
+
+    // ==================== RESCUE ERC721 LOCK ====================
+
+    function test_rescueERC721_blockedDuringActiveProposal() public {
+        _createAndExecuteProposal(1500, 7 days);
+
+        // Mint an NFT to the vault
+        uint256 tokenId = 999;
+        vm.mockCall(
+            address(targetToken),
+            abi.encodeWithSignature("safeTransferFrom(address,address,uint256)", address(vault), owner, tokenId),
+            ""
+        );
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateVault.RedemptionsLocked.selector);
+        vault.rescueERC721(address(targetToken), tokenId, owner);
+    }
 }
