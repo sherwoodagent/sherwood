@@ -6,9 +6,10 @@
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-const SESSION_DIR = path.join(process.env.HOME || "~", ".sherwood");
+const SESSION_DIR = path.join(os.homedir(), ".sherwood");
 const SESSION_PATH = path.join(SESSION_DIR, "session.json");
 
 export interface SyndicateSession {

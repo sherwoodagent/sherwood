@@ -175,7 +175,8 @@ export async function getActiveSyndicates(): Promise<SyndicateInfo[]> {
  */
 export async function updateMetadata(syndicateId: bigint, metadataURI: string): Promise<Hex> {
   const wallet = getWalletClient();
-  return wallet.writeContract({
+  const client = getPublicClient();
+  const hash = await wallet.writeContract({
     account: getAccount(),
     chain: getChain(),
     address: getFactoryAddress(),
@@ -183,4 +184,6 @@ export async function updateMetadata(syndicateId: bigint, metadataURI: string): 
     functionName: "updateMetadata",
     args: [syndicateId, metadataURI],
   });
+  await client.waitForTransactionReceipt({ hash });
+  return hash;
 }

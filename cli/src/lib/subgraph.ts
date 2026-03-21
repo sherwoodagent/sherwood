@@ -86,13 +86,28 @@ async function query<T>(graphql: string, variables?: Record<string, unknown>): P
 export async function getActiveSyndicates(
   creator?: string,
 ): Promise<SubgraphSyndicate[]> {
-  const where = creator
-    ? `where: { active: true, creator: "${creator.toLowerCase()}" }`
-    : `where: { active: true }`;
+  if (creator) {
+    const data = await query<{ syndicates: SubgraphSyndicate[] }>(
+      `query($creator: String!) {
+        syndicates(where: { active: true, creator: $creator }, orderBy: createdAt, orderDirection: desc, first: 100) {
+          id
+          vault
+          creator
+          metadataURI
+          createdAt
+          active
+          totalDeposits
+          totalWithdrawals
+        }
+      }`,
+      { creator: creator.toLowerCase() },
+    );
+    return data.syndicates;
+  }
 
   const data = await query<{ syndicates: SubgraphSyndicate[] }>(`
     {
-      syndicates(${where}, orderBy: createdAt, orderDirection: desc, first: 100) {
+      syndicates(where: { active: true }, orderBy: createdAt, orderDirection: desc, first: 100) {
         id
         vault
         creator
@@ -114,9 +129,9 @@ export async function getActiveSyndicates(
 export async function getSyndicateDetails(
   syndicateId: string,
 ): Promise<SyndicateDetails | null> {
-  const data = await query<{ syndicate: SyndicateDetails | null }>(`
-    {
-      syndicate(id: "${syndicateId}") {
+  const data = await query<{ syndicate: SyndicateDetails | null }>(
+    `query($id: ID!) {
+      syndicate(id: $id) {
         id
         vault
         creator
@@ -143,8 +158,9 @@ export async function getSyndicateDetails(
           txHash
         }
       }
-    }
-  `);
+    }`,
+    { id: syndicateId },
+  );
 
   return data.syndicate;
 }
@@ -160,9 +176,9 @@ export async function getDepositorHistory(
   const data = await query<{
     deposits: SubgraphDeposit[];
     withdrawals: SubgraphDeposit[];
-  }>(`
-    {
-      deposits(where: { owner: "${addr}" }, orderBy: timestamp, orderDirection: desc, first: 50) {
+  }>(
+    `query($owner: String!) {
+      deposits(where: { owner: $owner }, orderBy: timestamp, orderDirection: desc, first: 50) {
         id
         sender
         owner
@@ -171,7 +187,7 @@ export async function getDepositorHistory(
         timestamp
         txHash
       }
-      withdrawals: withdrawals(where: { owner: "${addr}" }, orderBy: timestamp, orderDirection: desc, first: 50) {
+      withdrawals: withdrawals(where: { owner: $owner }, orderBy: timestamp, orderDirection: desc, first: 50) {
         id
         sender
         owner
@@ -180,8 +196,9 @@ export async function getDepositorHistory(
         timestamp
         txHash
       }
-    }
-  `);
+    }`,
+    { owner: addr },
+  );
 
   return { deposits: data.deposits, withdrawals: data.withdrawals };
 }

@@ -3,7 +3,7 @@
 import { config as loadDotenv } from "dotenv";
 try { loadDotenv(); } catch {};
 import { Command, Option } from "commander";
-import { parseUnits } from "viem";
+import { parseUnits, isAddress } from "viem";
 import type { Address } from "viem";
 import chalk from "chalk";
 import ora from "ora";
@@ -52,10 +52,18 @@ const BOLD = chalk.white.bold;
 const LABEL = chalk.green.bold;
 const SEP = () => console.log(DIM("─".repeat(60)));
 
+function validateAddress(value: string, name: string): Address {
+  if (!isAddress(value)) {
+    console.error(chalk.red(`Invalid ${name} address: ${value}`));
+    process.exit(1);
+  }
+  return value as Address;
+}
+
 /** Set vault address from --vault flag or fall back to config. */
 function resolveVault(opts: { vault?: string }) {
   if (opts.vault) {
-    vaultLib.setVaultAddress(opts.vault as Address);
+    vaultLib.setVaultAddress(validateAddress(opts.vault, "vault"));
   }
   // If no --vault flag, getVaultAddress() in vault.ts reads from config
 }
@@ -76,6 +84,7 @@ program
     const opts = thisCommand.optsWithGlobals();
     let network: string = opts.chain;
     if (opts.testnet) {
+      process.env.ENABLE_TESTNET = "true";
       if (network !== "base") {
         console.warn(
           chalk.yellow("[warn] --testnet ignored, --chain takes precedence"),
@@ -496,7 +505,8 @@ syndicate
     resolveVault(opts);
     const spinner = ora("Approving depositor...").start();
     try {
-      const hash = await vaultLib.approveDepositor(opts.depositor as Address);
+      const depositor = validateAddress(opts.depositor, "depositor");
+      const hash = await vaultLib.approveDepositor(depositor);
       spinner.succeed(`Depositor approved: ${hash}`);
       console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
@@ -515,7 +525,8 @@ syndicate
     resolveVault(opts);
     const spinner = ora("Removing depositor...").start();
     try {
-      const hash = await vaultLib.removeDepositor(opts.depositor as Address);
+      const depositor = validateAddress(opts.depositor, "depositor");
+      const hash = await vaultLib.removeDepositor(depositor);
       spinner.succeed(`Depositor removed: ${hash}`);
       console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
@@ -546,10 +557,11 @@ syndicate
         process.exit(1);
       }
 
+      const agentWallet = validateAddress(opts.wallet, "wallet");
       spinner.text = "Registering agent...";
       const hash = await vaultLib.registerAgent(
         BigInt(opts.agentId),
-        opts.wallet as Address,
+        agentWallet,
       );
       spinner.succeed(`Agent registered: ${hash}`);
       console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
@@ -791,6 +803,8 @@ syndicate
       }
       const vaultAddress = vaultLib.getVaultAddress();
 
+      const agentWallet = validateAddress(opts.wallet, "wallet");
+
       // Verify caller is creator
       const { creator, subdomain, id: syndicateId } = await resolveVaultSyndicate(vaultAddress);
       const callerAddress = getAccount().address.toLowerCase();
@@ -805,7 +819,7 @@ syndicate
       try {
         const regHash = await vaultLib.registerAgent(
           BigInt(opts.agentId),
-          opts.wallet as Address,
+          agentWallet,
         );
         agentWasRegistered = true;
         console.log(DIM(`  Agent registered: ${getExplorerUrl(regHash)}`));
@@ -840,7 +854,7 @@ syndicate
           syndicateId,
           BigInt(opts.agentId),
           vaultAddress,
-          opts.wallet as Address,
+          agentWallet,
         );
         approvalUid = result.uid;
       }

@@ -86,7 +86,7 @@ export async function deposit(amount: bigint): Promise<Hex> {
   await client.waitForTransactionReceipt({ hash: approveHash });
 
   // Deposit
-  return wallet.writeContract({
+  const depositHash = await wallet.writeContract({
     account: getAccount(),
     chain: getChain(),
     address: vaultAddress,
@@ -94,6 +94,8 @@ export async function deposit(amount: bigint): Promise<Hex> {
     functionName: "deposit",
     args: [amount, account.address],
   });
+  await client.waitForTransactionReceipt({ hash: depositHash });
+  return depositHash;
 }
 
 // ── Batch Execution ──
@@ -105,8 +107,9 @@ export async function deposit(amount: bigint): Promise<Hex> {
  */
 export async function executeBatch(calls: BatchCall[]): Promise<Hex> {
   const wallet = getWalletClient();
+  const client = getPublicClient();
 
-  return wallet.writeContract({
+  const hash = await wallet.writeContract({
     account: getAccount(),
     chain: getChain(),
     address: getVaultAddress(),
@@ -120,6 +123,8 @@ export async function executeBatch(calls: BatchCall[]): Promise<Hex> {
       })),
     ],
   });
+  await client.waitForTransactionReceipt({ hash });
+  return hash;
 }
 
 // ── Depositor Management ──
@@ -129,7 +134,8 @@ export async function executeBatch(calls: BatchCall[]): Promise<Hex> {
  */
 export async function approveDepositor(depositor: Address): Promise<Hex> {
   const wallet = getWalletClient();
-  return wallet.writeContract({
+  const client = getPublicClient();
+  const hash = await wallet.writeContract({
     account: getAccount(),
     chain: getChain(),
     address: getVaultAddress(),
@@ -137,6 +143,8 @@ export async function approveDepositor(depositor: Address): Promise<Hex> {
     functionName: "approveDepositor",
     args: [depositor],
   });
+  await client.waitForTransactionReceipt({ hash });
+  return hash;
 }
 
 /**
@@ -144,7 +152,8 @@ export async function approveDepositor(depositor: Address): Promise<Hex> {
  */
 export async function removeDepositor(depositor: Address): Promise<Hex> {
   const wallet = getWalletClient();
-  return wallet.writeContract({
+  const client = getPublicClient();
+  const hash = await wallet.writeContract({
     account: getAccount(),
     chain: getChain(),
     address: getVaultAddress(),
@@ -152,6 +161,8 @@ export async function removeDepositor(depositor: Address): Promise<Hex> {
     functionName: "removeDepositor",
     args: [depositor],
   });
+  await client.waitForTransactionReceipt({ hash });
+  return hash;
 }
 
 /**
@@ -159,7 +170,8 @@ export async function removeDepositor(depositor: Address): Promise<Hex> {
  */
 export async function approveDepositors(depositors: Address[]): Promise<Hex> {
   const wallet = getWalletClient();
-  return wallet.writeContract({
+  const client = getPublicClient();
+  const hash = await wallet.writeContract({
     account: getAccount(),
     chain: getChain(),
     address: getVaultAddress(),
@@ -167,6 +179,8 @@ export async function approveDepositors(depositors: Address[]): Promise<Hex> {
     functionName: "approveDepositors",
     args: [depositors],
   });
+  await client.waitForTransactionReceipt({ hash });
+  return hash;
 }
 
 /**

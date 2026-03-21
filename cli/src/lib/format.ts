@@ -20,9 +20,9 @@ export function formatDurationLong(seconds: bigint): string {
   return `${s}s`;
 }
 
-/** Format raw 6-decimal share amounts to human-readable (e.g. 124000000000 → "124,000") */
-export function formatShares(raw: bigint): string {
-  const num = Number(raw) / 1e6;
+/** Format raw share amounts to human-readable (e.g. 124000000000 → "124,000") */
+export function formatShares(raw: bigint, decimals: number = 6): string {
+  const num = Number(raw) / 10 ** decimals;
   return num.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 

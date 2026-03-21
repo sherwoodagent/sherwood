@@ -24,7 +24,7 @@ const VAULT_EVENTS = [
 
 const GOVERNOR_EVENTS = [
   parseAbiItem("event ProposalCreated(uint256 indexed proposalId, address indexed proposer, address indexed vault, uint256 performanceFeeBps, uint256 strategyDuration, uint256 executeCallCount, uint256 settlementCallCount, string metadataURI)"),
-  parseAbiItem("event VoteCast(uint256 indexed proposalId, address indexed voter, bool support, uint256 weight)"),
+  parseAbiItem("event VoteCast(uint256 indexed proposalId, address indexed voter, uint8 support, uint256 weight)"),
   parseAbiItem("event ProposalExecuted(uint256 indexed proposalId, address indexed vault, uint256 capitalSnapshot)"),
   parseAbiItem("event ProposalSettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 performanceFee, uint256 duration)"),
   parseAbiItem("event ProposalCancelled(uint256 indexed proposalId, address indexed cancelledBy)"),

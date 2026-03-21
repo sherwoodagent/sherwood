@@ -305,6 +305,7 @@ export function registerProposalCommands(program: Command): void {
             const cap = await getCapitalSnapshot(id);
             console.log();
             console.log(LABEL("  Capital"));
+            // TODO: formatUSDC hardcodes 6 decimals — should use the vault's actual asset decimals
             console.log(W(`  Snapshot:         ${formatUSDC(cap)}`));
           } catch { /* no snapshot */ }
         }
@@ -427,6 +428,7 @@ export function registerProposalCommands(program: Command): void {
 
         try {
           const cap = await getCapitalSnapshot(proposalId);
+          // TODO: formatUSDC hardcodes 6 decimals — should use the vault's actual asset decimals
           console.log(DIM(`  Capital snapshot: ${formatUSDC(cap)}`));
         } catch { /* no snapshot yet */ }
 

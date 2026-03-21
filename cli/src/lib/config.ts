@@ -5,9 +5,10 @@
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-const CONFIG_DIR = path.join(process.env.HOME || "~", ".sherwood");
+const CONFIG_DIR = path.join(os.homedir(), ".sherwood");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 
 /** Per-chain user-specific addresses (stored by chainId). */
@@ -32,15 +33,12 @@ export function loadConfig(): SherwoodConfig {
     return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
   }
 
-  const config: SherwoodConfig = { groupCache: {} };
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
-  return config;
+  return { groupCache: {} };
 }
 
 export function saveConfig(config: SherwoodConfig): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 export function cacheGroupId(subdomain: string, groupId: string): void {

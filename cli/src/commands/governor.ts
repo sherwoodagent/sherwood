@@ -87,7 +87,7 @@ export function registerGovernorCommands(program: Command): void {
       const spinner = ora("Setting voting period...").start();
       try {
         const hash = await setVotingPeriod(parseBigIntArg(opts.seconds, "seconds"));
-        spinner.succeed(G(`Voting period updated to ${opts.seconds}s`));
+        spinner.succeed(G(`Voting period change queued (${opts.seconds}s). Finalize after the timelock delay with \`sherwood governor finalize-param\`.`));
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set voting period");
@@ -106,7 +106,7 @@ export function registerGovernorCommands(program: Command): void {
       const spinner = ora("Setting execution window...").start();
       try {
         const hash = await setExecutionWindow(parseBigIntArg(opts.seconds, "seconds"));
-        spinner.succeed(G(`Execution window updated to ${opts.seconds}s`));
+        spinner.succeed(G(`Execution window change queued (${opts.seconds}s). Finalize after the timelock delay with \`sherwood governor finalize-param\`.`));
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set execution window");
@@ -125,7 +125,7 @@ export function registerGovernorCommands(program: Command): void {
       const spinner = ora("Setting veto threshold...").start();
       try {
         const hash = await setVetoThresholdBps(parseBigIntArg(opts.bps, "bps"));
-        spinner.succeed(G(`Veto threshold updated to ${Number(opts.bps) / 100}%`));
+        spinner.succeed(G(`Veto threshold change queued (${Number(opts.bps) / 100}%). Finalize after the timelock delay with \`sherwood governor finalize-param\`.`));
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set veto threshold");
@@ -144,7 +144,7 @@ export function registerGovernorCommands(program: Command): void {
       const spinner = ora("Setting max fee...").start();
       try {
         const hash = await setMaxPerformanceFeeBps(parseBigIntArg(opts.bps, "bps"));
-        spinner.succeed(G(`Max performance fee updated to ${Number(opts.bps) / 100}%`));
+        spinner.succeed(G(`Max performance fee change queued (${Number(opts.bps) / 100}%). Finalize after the timelock delay with \`sherwood governor finalize-param\`.`));
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set max fee");
@@ -163,7 +163,7 @@ export function registerGovernorCommands(program: Command): void {
       const spinner = ora("Setting max duration...").start();
       try {
         const hash = await setMaxStrategyDuration(parseBigIntArg(opts.seconds, "seconds"));
-        spinner.succeed(G(`Max strategy duration updated to ${opts.seconds}s`));
+        spinner.succeed(G(`Max strategy duration change queued (${opts.seconds}s). Finalize after the timelock delay with \`sherwood governor finalize-param\`.`));
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set max duration");
@@ -182,7 +182,7 @@ export function registerGovernorCommands(program: Command): void {
       const spinner = ora("Setting cooldown...").start();
       try {
         const hash = await setCooldownPeriod(parseBigIntArg(opts.seconds, "seconds"));
-        spinner.succeed(G(`Cooldown period updated to ${opts.seconds}s`));
+        spinner.succeed(G(`Cooldown period change queued (${opts.seconds}s). Finalize after the timelock delay with \`sherwood governor finalize-param\`.`));
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set cooldown");
@@ -201,7 +201,7 @@ export function registerGovernorCommands(program: Command): void {
       const spinner = ora("Setting protocol fee...").start();
       try {
         const hash = await setProtocolFeeBps(parseBigIntArg(opts.bps, "bps"));
-        spinner.succeed(G(`Protocol fee updated to ${Number(opts.bps) / 100}%`));
+        spinner.succeed(G(`Protocol fee change queued (${Number(opts.bps) / 100}%). Finalize after the timelock delay with \`sherwood governor finalize-param\`.`));
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set protocol fee");
