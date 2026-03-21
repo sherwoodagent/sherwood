@@ -210,9 +210,12 @@ const ROBINHOOD_TESTNET_EAS = {
 // ── EAS Schema UIDs (populated after running scripts/register-eas-schemas.ts) ──
 
 const BASE_EAS_SCHEMAS = {
-  SYNDICATE_JOIN_REQUEST: ZERO_BYTES32,
-  AGENT_APPROVED: ZERO_BYTES32,
-  X402_RESEARCH: ZERO_BYTES32,
+  SYNDICATE_JOIN_REQUEST:
+    "0x1e7ce17b16233977ba913b156033e98f52029f4bee273a4abefe6c15ce11d5ef" as `0x${string}`,
+  AGENT_APPROVED:
+    "0x1013f7b38f433b2a93fc5ac162482813081c64edd67cea9b5a90698531ddb607" as `0x${string}`,
+  X402_RESEARCH:
+    "0x86c67f0a59acb3093ecbeb6c4d1d4352e4a48143672e92ef9dd2fdfc8a9ca708" as `0x${string}`,
 } as const;
 
 const BASE_SEPOLIA_EAS_SCHEMAS = {

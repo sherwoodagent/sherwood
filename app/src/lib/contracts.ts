@@ -88,8 +88,10 @@ const BASE_ADDRESSES: ChainAddresses = {
   eas: "0x4200000000000000000000000000000000000021",
   schemaRegistry: "0x4200000000000000000000000000000000000020",
   easSchemas: {
-    joinRequest: ZERO_BYTES32,
-    agentApproved: ZERO_BYTES32,
+    joinRequest:
+      "0x1e7ce17b16233977ba913b156033e98f52029f4bee273a4abefe6c15ce11d5ef",
+    agentApproved:
+      "0x1013f7b38f433b2a93fc5ac162482813081c64edd67cea9b5a90698531ddb607",
   },
   blockExplorer: "https://basescan.org",
   easExplorer: "https://base.easscan.org",
