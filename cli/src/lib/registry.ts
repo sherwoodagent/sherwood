@@ -22,7 +22,8 @@ export interface StrategyRecord {
 }
 
 function getRegistryAddress(): Address {
-  return SHERWOOD().STRATEGY_REGISTRY;
+  // StrategyRegistry has been removed — this module is deprecated
+  return "0x0000000000000000000000000000000000000000" as Address;
 }
 
 /**

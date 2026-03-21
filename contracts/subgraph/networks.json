@@ -1,12 +1,20 @@
 {
   "base-sepolia": {
     "SyndicateFactory": {
-      "address": "0xc705F04fF2781aF9bB53ba416Cb32A29540c4624",
-      "startBlock": 38921771
+      "address": "0x2efD194ADb3Db40E0e6faAe06c4e602c7a3D9199",
+      "startBlock": 39036984
+    },
+    "SyndicateGovernor": {
+      "address": "0x6fc67a9aD15eD3A9DE25c29CCe10D662079129E2",
+      "startBlock": 39036984
     }
   },
   "base": {
     "SyndicateFactory": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 0
+    },
+    "SyndicateGovernor": {
       "address": "0x0000000000000000000000000000000000000000",
       "startBlock": 0
     }

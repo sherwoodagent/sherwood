@@ -117,9 +117,6 @@ describe("addresses", () => {
       expect(SHERWOOD().FACTORY).toBe(
         "0x60bf54dDce61ece85BE5e66CBaA17cC312DEa6C8",
       );
-      expect(SHERWOOD().STRATEGY_REGISTRY).toBe(
-        "0xf1e6E9bd1a735B54F383b18ad6603Ddd566C71cE",
-      );
     });
   });
 

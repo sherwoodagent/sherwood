@@ -5,8 +5,8 @@
   "scripts": {
     "codegen": "graph codegen",
     "build": "graph codegen && graph build",
-    "deploy": "graph deploy sherwood",
-    "deploy:sepolia": "graph deploy sherwood-sepolia",
+    "deploy": "graph deploy sherwood --network base",
+    "deploy:sepolia": "graph deploy sherwood-sepolia --network base-sepolia",
     "create-local": "graph create --node http://localhost:8020/ sherwood-subgraph",
     "remove-local": "graph remove --node http://localhost:8020/ sherwood-subgraph",
     "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 sherwood-subgraph"

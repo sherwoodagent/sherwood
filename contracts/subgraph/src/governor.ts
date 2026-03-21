@@ -5,7 +5,6 @@ import {
   ProposalExecuted,
   ProposalSettled,
   ProposalCancelled,
-  AgentSettled,
   EmergencySettled,
 } from "../generated/SyndicateGovernor/SyndicateGovernor";
 import { Proposal, Vote, VaultLookup } from "../generated/schema";
@@ -37,8 +36,8 @@ export function handleProposalCreated(event: ProposalCreated): void {
   proposal.proposer = event.params.proposer;
   proposal.performanceFeeBps = event.params.performanceFeeBps;
   proposal.strategyDuration = event.params.strategyDuration;
-  proposal.splitIndex = event.params.splitIndex;
-  proposal.callCount = event.params.callCount;
+  proposal.executeCallCount = event.params.executeCallCount;
+  proposal.settlementCallCount = event.params.settlementCallCount;
   proposal.metadataURI = event.params.metadataURI;
   proposal.state = "Pending";
   proposal.capitalSnapshot = null;
@@ -100,19 +99,6 @@ export function handleProposalCancelled(event: ProposalCancelled): void {
   if (proposal == null) return;
 
   proposal.state = "Cancelled";
-
-  proposal.save();
-}
-
-export function handleAgentSettled(event: AgentSettled): void {
-  let proposalId = event.params.proposalId.toString();
-  let proposal = Proposal.load(proposalId);
-  if (proposal == null) return;
-
-  proposal.state = "Settled";
-  proposal.finalPnl = event.params.pnl;
-  proposal.performanceFee = event.params.performanceFee;
-  proposal.settledAt = event.block.timestamp;
 
   proposal.save();
 }

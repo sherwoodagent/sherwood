@@ -19,3 +19,4 @@ exclude_lints = ["screaming-snake-case-immutable", "mixed-case-variable"]
 [rpc_endpoints]
 base = "${BASE_RPC_URL}"
 base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
+robinhood_testnet = "${ROBINHOOD_TESTNET_RPC_URL}"

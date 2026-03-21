@@ -1,4 +1,94 @@
+"""
+Syndicate — top-level entity created by the factory.
+"""
+type Syndicate @entity(immutable: false) {
+  id: ID! # syndicateId from factory
+  vault: Bytes! # vault proxy address
+  creator: Bytes!
+  metadataURI: String!
+  subdomain: String!
+  createdAt: BigInt!
+  active: Boolean!
+  redemptionsLocked: Boolean!
 
+  # Aggregated stats
+  totalDeposits: BigDecimal!
+  totalWithdrawals: BigDecimal!
+
+  # Relations
+  agents: [Agent!]! @derivedFrom(field: "syndicate")
+  deposits: [Deposit!]! @derivedFrom(field: "syndicate")
+  withdrawals: [Withdrawal!]! @derivedFrom(field: "syndicate")
+  depositors: [Depositor!]! @derivedFrom(field: "syndicate")
+  proposals: [Proposal!]! @derivedFrom(field: "syndicate")
+}
+
+"""
+VaultLookup — reverse mapping from vault address to syndicate.
+Used by governor handlers to resolve syndicate from vault address.
+"""
+type VaultLookup @entity(immutable: true) {
+  id: ID! # vault address (lowercase hex)
+  syndicate: Syndicate!
+}
+
+"""
+Agent — a registered agent wallet that can execute strategies.
+"""
+type Agent @entity(immutable: false) {
+  id: ID! # vault-agentAddress
+  syndicate: Syndicate!
+  agentId: BigInt!
+  agentAddress: Bytes!
+  active: Boolean!
+  registeredAt: BigInt!
+
+  # Aggregated stats
+  totalBatches: BigInt!
+  totalAssetAmount: BigInt!
+}
+
+"""
+Deposit — LP deposits into a vault.
+"""
+type Deposit @entity(immutable: true) {
+  id: ID! # tx hash - log index
+  syndicate: Syndicate!
+  sender: Bytes!
+  owner: Bytes!
+  assets: BigInt!
+  shares: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  txHash: Bytes!
+}
+
+"""
+Withdrawal — LP withdraws from a vault.
+"""
+type Withdrawal @entity(immutable: true) {
+  id: ID! # tx hash - log index
+  syndicate: Syndicate!
+  sender: Bytes!
+  receiver: Bytes!
+  owner: Bytes!
+  assets: BigInt!
+  shares: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  txHash: Bytes!
+}
+
+"""
+Depositor — an address approved to deposit into a vault.
+"""
+type Depositor @entity(immutable: false) {
+  id: ID! # vault-depositorAddress
+  syndicate: Syndicate!
+  address: Bytes!
+  approved: Boolean!
+  approvedAt: BigInt!
+}
 
 """
 Proposal — an agent's strategy proposal submitted to the governor.
@@ -11,9 +101,9 @@ type Proposal @entity(immutable: false) {
   metadataURI: String!
   performanceFeeBps: BigInt!
   strategyDuration: BigInt!
-  splitIndex: BigInt!
-  callCount: BigInt!
-  state: String! # Pending, Approved, Rejected, Expired, Executed, Settled, Cancelled
+  executeCallCount: BigInt!
+  settlementCallCount: BigInt!
+  state: String! # Draft, Pending, Approved, Rejected, Expired, Executed, Settled, Cancelled
   capitalSnapshot: BigInt
   finalPnl: BigInt
   performanceFee: BigInt

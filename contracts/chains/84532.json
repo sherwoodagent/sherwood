@@ -1,15 +1,12 @@
 {
   "network": "base-sepolia",
   "chainId": 84532,
-  "deployer": "0x5A00afAecE9CF61A768E2AE2713084C8d354DF94",
-  "agentId": 1936,
-  "agentOwner": "0x5A00afAecE9CF61A768E2AE2713084C8d354DF94",
+  "deployer": "0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38",
   "contracts": {
-    "batchExecutorLib": "0xE8407989908372be35DE6B1db5d32f895270EF00",
-    "vaultImplementation": "0x4327e93565A890aeA8eF7E5Fa925A3655e93faf7",
-    "syndicateGovernor": "0xB478cdb99260F46191C9e5Da405F7E70eEA23dE4",
-    "syndicateFactory": "0x60bf54dDce61ece85BE5e66CBaA17cC312DEa6C8",
-    "strategyRegistry": "0xf1e6E9bd1a735B54F383b18ad6603Ddd566C71cE"
+    "batchExecutorLib": "0xd5C4eE2E4c5B606b9401E69A3B3FeE169037C284",
+    "vaultImplementation": "0x61d2c54Af8154E696dfdf909d23ba090dD365c3c",
+    "syndicateGovernor": "0x6fc67a9aD15eD3A9DE25c29CCe10D662079129E2",
+    "syndicateFactory": "0x2efD194ADb3Db40E0e6faAe06c4e602c7a3D9199"
   },
   "externalContracts": {
     "l2Registrar": "0x1fCbe9dFC25e3fa3F7C55b26c7992684A4758b47",
@@ -17,7 +14,7 @@
     "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713"
   },
   "deployedAt": "2026-03-15",
-  "redeployedAt": "2026-03-18",
-  "redeployReason": "SyndicateGovernor — proposal lifecycle, voting, settlement, management fee",
+  "redeployedAt": "2026-03-21",
+  "redeployReason": "PR #78 — optimistic governance, veto, strategy templates, protocol fee",
   "explorer": "https://sepolia.basescan.org"
 }
