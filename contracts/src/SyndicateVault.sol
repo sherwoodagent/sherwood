@@ -329,19 +329,22 @@ contract SyndicateVault is
     // ==================== RESCUE ====================
 
     /// @notice Rescue ETH accidentally sent to the vault
-    /// @param to Recipient address
-    /// @param amount Amount of ETH to rescue
     function rescueEth(address payable to, uint256 amount) external onlyOwner {
-        if (to == address(0)) revert InvalidAgentAddress();
+        if (to == address(0)) revert ZeroAddress();
         Address.sendValue(to, amount);
     }
 
-    /// @notice Rescue ERC721 tokens accidentally sent to the vault
-    /// @param token ERC721 token contract address
-    /// @param tokenId Token ID to rescue
-    /// @param to Recipient address
+    /// @notice Rescue ERC-20 tokens accidentally sent to the vault (not the vault asset)
+    function rescueERC20(address token, address to, uint256 amount) external onlyOwner {
+        if (to == address(0)) revert ZeroAddress();
+        address asset = asset();
+        if (token == asset) revert CannotRescueAsset();
+        IERC20(token).safeTransfer(to, amount);
+    }
+
+    /// @notice Rescue ERC-721 tokens accidentally sent to the vault
     function rescueERC721(address token, uint256 tokenId, address to) external onlyOwner {
-        if (to == address(0)) revert InvalidAgentAddress();
+        if (to == address(0)) revert ZeroAddress();
         IERC721(token).safeTransferFrom(address(this), to, tokenId);
     }
 

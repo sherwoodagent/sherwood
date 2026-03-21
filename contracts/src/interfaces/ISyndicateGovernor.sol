@@ -109,6 +109,8 @@ interface ISyndicateGovernor {
 
     event ProposalVetoed(uint256 indexed proposalId, address indexed vetoedBy);
 
+    event FeeTransferFailed(uint256 indexed proposalId, address indexed recipient, uint256 amount);
+
     event EmergencySettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 customCallCount);
 
     event VaultAdded(address indexed vault);

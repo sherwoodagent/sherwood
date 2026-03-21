@@ -310,7 +310,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
 
-        ProposalState currentState = _resolveState(proposal);
+        ProposalState currentState = _resolveStateView(proposal);
         if (currentState != ProposalState.Pending && currentState != ProposalState.Approved) {
             revert ProposalNotCancellable();
         }
@@ -576,7 +576,10 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             if (_protocolFeeBps > 0 && _protocolFeeRecipient != address(0)) {
                 protocolFee = (profit * _protocolFeeBps) / 10000;
                 if (protocolFee > 0) {
-                    ISyndicateVault(vault).transferPerformanceFee(asset, _protocolFeeRecipient, protocolFee);
+                    try ISyndicateVault(vault).transferPerformanceFee(asset, _protocolFeeRecipient, protocolFee) {}
+                    catch {
+                        emit FeeTransferFailed(proposalId, _protocolFeeRecipient, protocolFee);
+                    }
                 }
             }
 
@@ -589,11 +592,17 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             mgmtFee = ((netProfit - agentFee) * ISyndicateVault(vault).managementFeeBps()) / 10000;
 
             if (agentFee > 0) {
-                ISyndicateVault(vault).transferPerformanceFee(asset, proposal.proposer, agentFee);
+                try ISyndicateVault(vault).transferPerformanceFee(asset, proposal.proposer, agentFee) {}
+                catch {
+                    emit FeeTransferFailed(proposalId, proposal.proposer, agentFee);
+                }
             }
             if (mgmtFee > 0) {
                 address vaultOwner = OwnableUpgradeable(vault).owner();
-                ISyndicateVault(vault).transferPerformanceFee(asset, vaultOwner, mgmtFee);
+                try ISyndicateVault(vault).transferPerformanceFee(asset, vaultOwner, mgmtFee) {}
+                catch {
+                    emit FeeTransferFailed(proposalId, vaultOwner, mgmtFee);
+                }
             }
         }
 

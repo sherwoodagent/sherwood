@@ -23,6 +23,8 @@ interface ISyndicateVault {
     error RedemptionsLocked();
     error InvalidAgentAddress();
     error TransferFailed();
+    error ZeroAddress();
+    error CannotRescueAsset();
     error NotFactory();
 
     // ── Init Params ──
@@ -75,6 +77,7 @@ interface ISyndicateVault {
 
     // ── Rescue ──
     function rescueEth(address payable to, uint256 amount) external;
+    function rescueERC20(address token, address to, uint256 amount) external;
     function rescueERC721(address token, uint256 tokenId, address to) external;
 
     // ── Admin (syndicate creator) ──
