@@ -5,9 +5,9 @@ The SyndicateGovernor contract enables on-chain proposal lifecycle:
 1. **Propose** — agents submit strategy proposals with pre-committed execute + settle calls
 2. **Vote** — vault shareholders vote weighted by deposit shares (ERC20Votes)
 3. **Execute** — approved proposals lock redemptions and deploy capital
-4. **Settle** — three paths: agent early close, permissionless after duration, emergency owner backstop
+4. **Settle** — two paths: proposer anytime / permissionless after duration, emergency owner backstop with fallback
 
-Performance fees (agent's cut, capped at 30%) and management fees (0.5% to vault owner) are distributed on settlement, calculated on profit only.
+Protocol fees, performance fees (agent's cut), and management fees are distributed on settlement from profit only. Fee distribution order: protocol fee → agent fee → management fee.
 
 ## Create a proposal
 
@@ -20,8 +20,8 @@ sherwood proposal create \
   --description "Supply USDC to Moonwell for 7 days" \
   --performance-fee 1500 \
   --duration 7d \
-  --calls ./calls.json \
-  --split-index 2
+  --execute-calls ./execute-calls.json \
+  --settle-calls ./settle-calls.json
 ```
 
 | Flag | Required | Description |
@@ -31,11 +31,11 @@ sherwood proposal create \
 | `--description` | yes* | Strategy rationale and risk summary (skipped if `--metadata-uri`) |
 | `--performance-fee` | yes | Agent fee in bps (e.g. 1500 = 15%, capped by governor) |
 | `--duration` | yes | Strategy duration. Accepts seconds or human format (`7d`, `24h`, `1h`) |
-| `--calls` | yes | Path to JSON file with Call[] array (`[{ target, data, value }]`) |
-| `--split-index` | yes | Index where execute calls end and settle calls begin |
+| `--execute-calls` | yes | Path to JSON file with execute Call[] array (open positions) |
+| `--settle-calls` | yes | Path to JSON file with settlement Call[] array (close positions) |
 | `--metadata-uri` | no | Override — skip IPFS upload and use this URI directly |
 
-Calls before `splitIndex` run at execution time (open positions). Calls from `splitIndex` onward run at settlement (close positions).
+Execute calls run at proposal execution (open positions). Settlement calls run at proposal settlement (close positions). Each file is a JSON array of `[{ target, data, value }]`.
 
 If `--metadata-uri` is not provided, the CLI pins metadata to IPFS via Pinata (`PINATA_API_KEY` env var).
 
@@ -58,7 +58,7 @@ Displays metadata, state, timestamps, vote breakdown, decoded calls, capital sna
 ## Vote on a proposal
 
 ```bash
-sherwood proposal vote --id <proposalId> --support <yes|no> [--chain <network>]
+sherwood proposal vote --id <proposalId> --support <for|against|abstain> [--chain <network>]
 ```
 
 Caller must have voting power (vault shares at snapshot). Displays vote weight before confirming.
@@ -78,9 +78,9 @@ sherwood proposal settle --id <proposalId> [--calls <path-to-json>] [--chain <ne
 ```
 
 Auto-routes to the correct settlement path:
-- **Agent (proposer):** `settleByAgent` — requires `--calls` for close positions
-- **Duration elapsed:** `settleProposal` — permissionless, no calls needed
-- **Vault owner emergency:** `emergencySettle` — with custom calls
+- **Proposer:** `settleProposal` — proposer can call anytime after execution
+- **Duration elapsed:** `settleProposal` — permissionless, anyone can call after strategy duration
+- **Vault owner emergency:** `emergencySettle` — tries pre-committed calls first, falls back to custom `--calls`
 
 Output: P&L, fees distributed, redemptions unlocked.
 

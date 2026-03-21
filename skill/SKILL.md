@@ -327,8 +327,8 @@ sherwood proposal create \
   --description "Supply USDC to Moonwell for 7 days" \
   --performance-fee 1500 \
   --duration 7d \
-  --calls ./calls.json \
-  --split-index 2
+  --execute-calls ./execute-calls.json \
+  --settle-calls ./settle-calls.json
 ```
 
 | Flag | Required | Description |
@@ -338,11 +338,11 @@ sherwood proposal create \
 | `--description` | yes* | Strategy rationale and risk summary (skipped if `--metadata-uri`) |
 | `--performance-fee` | yes | Agent fee in bps (e.g. 1500 = 15%, capped by governor) |
 | `--duration` | yes | Strategy duration. Accepts seconds or human format (`7d`, `24h`, `1h`) |
-| `--calls` | yes | Path to JSON file with Call[] array (`[{ target, data, value }]`) |
-| `--split-index` | yes | Index where execute calls end and settle calls begin |
+| `--execute-calls` | yes | Path to JSON file with execute Call[] array (open positions) |
+| `--settle-calls` | yes | Path to JSON file with settlement Call[] array (close positions) |
 | `--metadata-uri` | no | Override — skip IPFS upload and use this URI directly |
 
-Calls before `splitIndex` run at execution time (open positions). Calls from `splitIndex` onward run at settlement (close positions).
+Execute calls run at proposal execution (open positions). Settlement calls run at proposal settlement (close positions). Each file is a JSON array of `[{ target, data, value }]`.
 
 If `--metadata-uri` is not provided, the CLI pins metadata to IPFS via Pinata (`PINATA_API_KEY` env var).
 
@@ -365,7 +365,7 @@ Displays metadata, state, timestamps, vote breakdown, decoded calls, capital sna
 ### Vote on a proposal
 
 ```bash
-sherwood proposal vote --id <proposalId> --support <yes|no> [--testnet]
+sherwood proposal vote --id <proposalId> --support <for|against|abstain> [--testnet]
 ```
 
 Caller must have voting power (vault shares at snapshot). Displays vote weight before confirming.
@@ -385,9 +385,9 @@ sherwood proposal settle --id <proposalId> [--calls <path-to-json>] [--testnet]
 ```
 
 Auto-routes to the correct settlement path:
-- **Agent (proposer):** `settleByAgent` — requires `--calls` for close positions
-- **Duration elapsed:** `settleProposal` — permissionless, no calls needed
-- **Vault owner emergency:** `emergencySettle` — with custom calls
+- **Proposer:** `settleProposal` — proposer can call anytime after execution
+- **Duration elapsed:** `settleProposal` — permissionless, anyone can call after strategy duration
+- **Vault owner emergency:** `emergencySettle` — tries pre-committed calls first, falls back to custom `--calls`
 
 Output: P&L, fees distributed, redemptions unlocked.
 
@@ -466,8 +466,8 @@ User wants to...
 ├── Use strategy template → Phase 4: clone template, initialize, include in proposal batch
 ├── Supply to lending  → Phase 4: MoonwellSupplyStrategy template
 ├── Provide LP         → Phase 4: AerodromeLPStrategy template (+ optional gauge staking)
-├── Propose strategy   → Governance: proposal create (calls JSON + split-index)
-├── Vote on proposal   → Governance: proposal vote --id <id> --support yes|no
+├── Propose strategy   → Governance: proposal create (execute-calls + settle-calls JSON)
+├── Vote on proposal   → Governance: proposal vote --id <id> --support for|against|abstain
 ├── Veto proposal      → Governance: proposal veto --id <id> (vault owner)
 ├── Execute proposal   → Governance: proposal execute --id <id>
 ├── Settle / close     → Governance: proposal settle --id <id> [--calls]

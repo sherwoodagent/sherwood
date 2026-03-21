@@ -39,14 +39,6 @@ export const SYNDICATE_VAULT_ABI = [
     inputs: [{ name: "account", type: "address" }],
     outputs: [{ name: "", type: "uint256" }],
   },
-  // LP
-  {
-    name: "ragequit",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [{ name: "receiver", type: "address" }],
-    outputs: [{ name: "assets", type: "uint256" }],
-  },
   // Batch execution (owner-only, via delegatecall to shared executor lib)
   {
     name: "executeBatch",
@@ -64,32 +56,6 @@ export const SYNDICATE_VAULT_ABI = [
       },
     ],
     outputs: [],
-  },
-  {
-    name: "simulateBatch",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      {
-        name: "calls",
-        type: "tuple[]",
-        components: [
-          { name: "target", type: "address" },
-          { name: "data", type: "bytes" },
-          { name: "value", type: "uint256" },
-        ],
-      },
-    ],
-    outputs: [
-      {
-        name: "results",
-        type: "tuple[]",
-        components: [
-          { name: "success", type: "bool" },
-          { name: "returnData", type: "bytes" },
-        ],
-      },
-    ],
   },
   // Agent management
   {
@@ -256,15 +222,6 @@ export const SYNDICATE_VAULT_ABI = [
     inputs: [{ name: "agentAddress", type: "address", indexed: true }],
   },
   {
-    name: "Ragequit",
-    type: "event",
-    inputs: [
-      { name: "lp", type: "address", indexed: true },
-      { name: "shares", type: "uint256", indexed: false },
-      { name: "assets", type: "uint256", indexed: false },
-    ],
-  },
-  {
     name: "DepositorApproved",
     type: "event",
     inputs: [{ name: "depositor", type: "address", indexed: true }],
@@ -273,16 +230,6 @@ export const SYNDICATE_VAULT_ABI = [
     name: "DepositorRemoved",
     type: "event",
     inputs: [{ name: "depositor", type: "address", indexed: true }],
-  },
-  {
-    name: "RedemptionsLockedEvent",
-    type: "event",
-    inputs: [],
-  },
-  {
-    name: "RedemptionsUnlockedEvent",
-    type: "event",
-    inputs: [],
   },
   // Governor integration
   {
@@ -305,13 +252,6 @@ export const SYNDICATE_VAULT_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
-  },
-  {
-    name: "setGovernor",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [{ name: "governor_", type: "address" }],
-    outputs: [],
   },
 ] as const;
 
@@ -838,7 +778,7 @@ export const SYNDICATE_GOVERNOR_ABI = [
       { name: "performanceFeeBps", type: "uint256" },
       { name: "strategyDuration", type: "uint256" },
       {
-        name: "calls",
+        name: "executeCalls",
         type: "tuple[]",
         components: [
           { name: "target", type: "address" },
@@ -846,7 +786,15 @@ export const SYNDICATE_GOVERNOR_ABI = [
           { name: "value", type: "uint256" },
         ],
       },
-      { name: "splitIndex", type: "uint256" },
+      {
+        name: "settlementCalls",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "data", type: "bytes" },
+          { name: "value", type: "uint256" },
+        ],
+      },
       {
         name: "coProposers",
         type: "tuple[]",
@@ -880,24 +828,6 @@ export const SYNDICATE_GOVERNOR_ABI = [
     type: "function",
     stateMutability: "nonpayable",
     inputs: [{ name: "proposalId", type: "uint256" }],
-    outputs: [],
-  },
-  {
-    name: "settleByAgent",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "proposalId", type: "uint256" },
-      {
-        name: "calls",
-        type: "tuple[]",
-        components: [
-          { name: "target", type: "address" },
-          { name: "data", type: "bytes" },
-          { name: "value", type: "uint256" },
-        ],
-      },
-    ],
     outputs: [],
   },
   {
@@ -948,7 +878,6 @@ export const SYNDICATE_GOVERNOR_ABI = [
           { name: "vault", type: "address" },
           { name: "metadataURI", type: "string" },
           { name: "performanceFeeBps", type: "uint256" },
-          { name: "splitIndex", type: "uint256" },
           { name: "strategyDuration", type: "uint256" },
           { name: "votesFor", type: "uint256" },
           { name: "votesAgainst", type: "uint256" },
@@ -1025,7 +954,7 @@ export const SYNDICATE_GOVERNOR_ABI = [
         components: [
           { name: "votingPeriod", type: "uint256" },
           { name: "executionWindow", type: "uint256" },
-          { name: "quorumBps", type: "uint256" },
+          { name: "vetoThresholdBps", type: "uint256" },
           { name: "maxPerformanceFeeBps", type: "uint256" },
           { name: "cooldownPeriod", type: "uint256" },
           { name: "collaborationWindow", type: "uint256" },
@@ -1096,8 +1025,8 @@ export const SYNDICATE_GOVERNOR_ABI = [
       { name: "vault", type: "address", indexed: true },
       { name: "performanceFeeBps", type: "uint256", indexed: false },
       { name: "strategyDuration", type: "uint256", indexed: false },
-      { name: "splitIndex", type: "uint256", indexed: false },
-      { name: "callCount", type: "uint256", indexed: false },
+      { name: "executeCallCount", type: "uint256", indexed: false },
+      { name: "settlementCallCount", type: "uint256", indexed: false },
       { name: "metadataURI", type: "string", indexed: false },
     ],
   },
@@ -1155,10 +1084,10 @@ export const SYNDICATE_GOVERNOR_ABI = [
     outputs: [],
   },
   {
-    name: "setQuorumBps",
+    name: "setVetoThresholdBps",
     type: "function",
     stateMutability: "nonpayable",
-    inputs: [{ name: "newQuorumBps", type: "uint256" }],
+    inputs: [{ name: "newVetoThresholdBps", type: "uint256" }],
     outputs: [],
   },
   {
@@ -1181,6 +1110,54 @@ export const SYNDICATE_GOVERNOR_ABI = [
     stateMutability: "nonpayable",
     inputs: [{ name: "newCooldownPeriod", type: "uint256" }],
     outputs: [],
+  },
+  {
+    name: "vetoProposal",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "proposalId", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    name: "setProtocolFeeBps",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "newProtocolFeeBps", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    name: "getExecuteCalls",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "proposalId", type: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "data", type: "bytes" },
+          { name: "value", type: "uint256" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "getSettlementCalls",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "proposalId", type: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "data", type: "bytes" },
+          { name: "value", type: "uint256" },
+        ],
+      },
+    ],
   },
 ] as const;
 

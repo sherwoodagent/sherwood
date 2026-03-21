@@ -16,7 +16,7 @@ import { TOKENS, VENICE } from "../lib/addresses.js";
 import { SYNDICATE_VAULT_ABI, ERC20_ABI, VENICE_STAKING_ABI } from "../lib/abis.js";
 import { getQuote, getMultiHopQuote, encodeSwapPath, applySlippage } from "../lib/quote.js";
 import { formatBatch } from "../lib/batch.js";
-import { executeBatch, simulateBatch } from "../lib/vault.js";
+import { executeBatch } from "../lib/vault.js";
 import { buildFundBatch, type VeniceFundConfig } from "../strategies/venice-fund.js";
 import { provisionApiKey, checkApiKeyValid } from "../lib/venice.js";
 import { getVeniceApiKey } from "../lib/config.js";
@@ -172,30 +172,6 @@ export function registerVeniceCommands(program: Command): void {
       console.log(chalk.bold(`Batch calls (${calls.length}):`));
       console.log(formatBatch(calls));
       console.log();
-
-      // ── Simulate ──
-
-      const simSpinner = ora("Simulating via vault...").start();
-      try {
-        const results = await simulateBatch(calls);
-        const allSucceeded = results.every((r) => r.success);
-        if (allSucceeded) {
-          simSpinner.succeed("Simulation passed");
-        } else {
-          simSpinner.fail("Simulation: some calls failed");
-          for (let i = 0; i < results.length; i++) {
-            const status = results[i].success ? "ok" : "FAIL";
-            console.log(`  ${status} Call ${i + 1}`);
-          }
-          if (!opts.execute) process.exit(1);
-          console.log(chalk.yellow("Continuing to execution despite simulation failure..."));
-        }
-      } catch (err) {
-        simSpinner.fail("Simulation failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
-        if (!opts.execute) process.exit(1);
-        console.log(chalk.yellow("Continuing to execution despite simulation failure..."));
-      }
 
       // ── Execute ──
 

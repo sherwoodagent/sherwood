@@ -238,7 +238,6 @@ syndicate
             chain: getChain().name,
             strategies: [],
             terms: {
-              ragequitEnabled: true,
               feeModel: "none",
             },
             links: {},
@@ -468,7 +467,7 @@ syndicate
           description,
           chain: getChain().name,
           strategies: [],
-          terms: { ragequitEnabled: true },
+          terms: {},
           links: {},
         };
         metadataURI = await uploadMetadata(metadata);
@@ -911,24 +910,6 @@ vaultCmd
       console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Deposit failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
-      process.exit(1);
-    }
-  });
-
-vaultCmd
-  .command("ragequit")
-  .description("Withdraw all shares from a vault")
-  .option("--vault <address>", "Vault address (default: from config)")
-  .action(async (opts) => {
-    resolveVault(opts);
-    const spinner = ora("Ragequitting...").start();
-    try {
-      const hash = await vaultLib.ragequit();
-      spinner.succeed(`Ragequit: ${hash}`);
-      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
-    } catch (err) {
-      spinner.fail("Ragequit failed");
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
       process.exit(1);
     }

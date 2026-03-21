@@ -16,7 +16,7 @@ import { SYNDICATE_GOVERNOR_ABI } from "./abis.js";
 export interface GovernorParams {
   votingPeriod: bigint;
   executionWindow: bigint;
-  quorumBps: bigint;
+  vetoThresholdBps: bigint;
   maxPerformanceFeeBps: bigint;
   cooldownPeriod: bigint;
   collaborationWindow: bigint;
@@ -31,7 +31,6 @@ export interface StrategyProposal {
   vault: Address;
   metadataURI: string;
   performanceFeeBps: bigint;
-  splitIndex: bigint;
   strategyDuration: bigint;
   votesFor: bigint;
   votesAgainst: bigint;
@@ -120,7 +119,7 @@ export async function getGovernorParams(): Promise<GovernorParams> {
   }) as {
     votingPeriod: bigint;
     executionWindow: bigint;
-    quorumBps: bigint;
+    vetoThresholdBps: bigint;
     maxPerformanceFeeBps: bigint;
     cooldownPeriod: bigint;
     collaborationWindow: bigint;
@@ -144,7 +143,6 @@ export async function getProposal(id: bigint): Promise<StrategyProposal> {
     vault: Address;
     metadataURI: string;
     performanceFeeBps: bigint;
-    splitIndex: bigint;
     strategyDuration: bigint;
     votesFor: bigint;
     votesAgainst: bigint;
@@ -208,6 +206,28 @@ export async function getProposalCalls(proposalId: bigint): Promise<BatchCall[]>
   return result.map((c) => ({ target: c.target, data: c.data, value: c.value }));
 }
 
+export async function getExecuteCalls(proposalId: bigint): Promise<BatchCall[]> {
+  const client = getPublicClient();
+  const result = await client.readContract({
+    address: getGovernorAddress(),
+    abi: SYNDICATE_GOVERNOR_ABI,
+    functionName: "getExecuteCalls",
+    args: [proposalId],
+  }) as { target: Address; data: Hex; value: bigint }[];
+  return result.map((c) => ({ target: c.target, data: c.data, value: c.value }));
+}
+
+export async function getSettlementCalls(proposalId: bigint): Promise<BatchCall[]> {
+  const client = getPublicClient();
+  const result = await client.readContract({
+    address: getGovernorAddress(),
+    abi: SYNDICATE_GOVERNOR_ABI,
+    functionName: "getSettlementCalls",
+    args: [proposalId],
+  }) as { target: Address; data: Hex; value: bigint }[];
+  return result.map((c) => ({ target: c.target, data: c.data, value: c.value }));
+}
+
 export async function getRegisteredVaults(): Promise<Address[]> {
   const client = getPublicClient();
   return client.readContract({
@@ -264,8 +284,8 @@ export async function propose(
   metadataURI: string,
   performanceFeeBps: bigint,
   strategyDuration: bigint,
-  calls: BatchCall[],
-  splitIndex: bigint,
+  executeCalls: BatchCall[],
+  settlementCalls: BatchCall[],
   coProposers: CoProposer[] = [],
 ): Promise<{ hash: Hex; proposalId: bigint }> {
   const wallet = getWalletClient();
@@ -277,7 +297,7 @@ export async function propose(
     address: getGovernorAddress(),
     abi: SYNDICATE_GOVERNOR_ABI,
     functionName: "propose",
-    args: [vault, metadataURI, performanceFeeBps, strategyDuration, calls, splitIndex, coProposers],
+    args: [vault, metadataURI, performanceFeeBps, strategyDuration, executeCalls, settlementCalls, coProposers],
   });
 
   const receipt = await client.waitForTransactionReceipt({ hash });
@@ -338,23 +358,6 @@ export async function settleProposal(proposalId: bigint): Promise<Hex> {
     abi: SYNDICATE_GOVERNOR_ABI,
     functionName: "settleProposal",
     args: [proposalId],
-  });
-
-  const receipt = await client.waitForTransactionReceipt({ hash });
-  return receipt.transactionHash;
-}
-
-export async function settleByAgent(proposalId: bigint, calls: BatchCall[]): Promise<Hex> {
-  const wallet = getWalletClient();
-  const client = getPublicClient();
-
-  const hash = await wallet.writeContract({
-    account: getAccount(),
-    chain: getChain(),
-    address: getGovernorAddress(),
-    abi: SYNDICATE_GOVERNOR_ABI,
-    functionName: "settleByAgent",
-    args: [proposalId, calls],
   });
 
   const receipt = await client.waitForTransactionReceipt({ hash });
@@ -444,7 +447,7 @@ export async function setExecutionWindow(seconds: bigint): Promise<Hex> {
   return receipt.transactionHash;
 }
 
-export async function setQuorumBps(bps: bigint): Promise<Hex> {
+export async function setVetoThresholdBps(bps: bigint): Promise<Hex> {
   const wallet = getWalletClient();
   const client = getPublicClient();
   const hash = await wallet.writeContract({
@@ -452,7 +455,7 @@ export async function setQuorumBps(bps: bigint): Promise<Hex> {
     chain: getChain(),
     address: getGovernorAddress(),
     abi: SYNDICATE_GOVERNOR_ABI,
-    functionName: "setQuorumBps",
+    functionName: "setVetoThresholdBps",
     args: [bps],
   });
   const receipt = await client.waitForTransactionReceipt({ hash });
@@ -499,6 +502,36 @@ export async function setCooldownPeriod(seconds: bigint): Promise<Hex> {
     abi: SYNDICATE_GOVERNOR_ABI,
     functionName: "setCooldownPeriod",
     args: [seconds],
+  });
+  const receipt = await client.waitForTransactionReceipt({ hash });
+  return receipt.transactionHash;
+}
+
+export async function vetoProposal(proposalId: bigint): Promise<Hex> {
+  const wallet = getWalletClient();
+  const client = getPublicClient();
+  const hash = await wallet.writeContract({
+    account: getAccount(),
+    chain: getChain(),
+    address: getGovernorAddress(),
+    abi: SYNDICATE_GOVERNOR_ABI,
+    functionName: "vetoProposal",
+    args: [proposalId],
+  });
+  const receipt = await client.waitForTransactionReceipt({ hash });
+  return receipt.transactionHash;
+}
+
+export async function setProtocolFeeBps(bps: bigint): Promise<Hex> {
+  const wallet = getWalletClient();
+  const client = getPublicClient();
+  const hash = await wallet.writeContract({
+    account: getAccount(),
+    chain: getChain(),
+    address: getGovernorAddress(),
+    abi: SYNDICATE_GOVERNOR_ABI,
+    functionName: "setProtocolFeeBps",
+    args: [bps],
   });
   const receipt = await client.waitForTransactionReceipt({ hash });
   return receipt.transactionHash;

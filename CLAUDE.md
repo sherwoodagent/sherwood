@@ -43,17 +43,21 @@ app/         Next.js dashboard
 ### Architecture
 
 - **SyndicateVault** — ERC-4626 vault with ERC20Votes for governance. Standard `redeem()`/`withdraw()` for LP exits (no custom ragequit). Dynamic `_decimalsOffset()` = `asset.decimals()` for first-depositor inflation protection.
-- **SyndicateGovernor** — Proposal lifecycle, voting, execution, settlement, collaborative proposals. Inherits `GovernorParameters` (abstract) for all parameter setters, validation, and timelock logic.
-- **GovernorParameters** — Abstract contract with constants, bounds, 9 parameter setters (all timelock-gated: queue → delay → finalize), and validation helpers. Extracted to reduce governor bytecode.
-- **SyndicateFactory** — UUPS upgradeable factory. Deploys vault + registers it with the governor. Owner-configurable: `setExecutorImpl`, `setVaultImpl`, `setEnsRegistrar`, `setAgentRegistry`, `setGovernor`.
+- **SyndicateGovernor** — Proposal lifecycle, optimistic voting, execution, settlement, collaborative proposals. Inherits `GovernorParameters` (abstract) for all parameter setters, validation, and timelock logic.
+- **GovernorParameters** — Abstract contract with constants, bounds, 10 parameter setters (all timelock-gated: queue → delay → finalize), and validation helpers. Extracted to reduce governor bytecode.
+- **SyndicateFactory** — UUPS upgradeable factory. Deploys vault + registers it with the governor. Creation fee, vault upgrades, paginated queries. Owner-configurable: `setVaultImpl`, `setGovernor`, `setCreationFee`, `setManagementFeeBps`, `setUpgradesEnabled`.
 - **BatchExecutorLib** — Stateless library for `delegatecall`-based batch execution.
+- **Strategy Templates** — `BaseStrategy` (abstract) + `MoonwellSupplyStrategy` + `AerodromeLPStrategy`. ERC-1167 clonable. Vault calls `execute()`/`settle()` via batch.
 
 ### Governor Key Concepts
 
+- **Optimistic governance** — Proposals pass by default after voting period ends. Only rejected if AGAINST votes reach `vetoThresholdBps`. Vault owner can also `vetoProposal()` to reject Pending/Approved proposals.
+- **VoteType enum** — `For`, `Against`, `Abstain` (replaces boolean vote).
 - **Separate `executeCalls` / `settlementCalls`** — Proposals store opening and closing calls in two distinct arrays. No `splitIndex`.
 - **Parameter timelock** — All governance parameter changes are queued with a configurable delay (6h–7d). Owner calls the setter (queues), waits, then calls `finalizeParameterChange(paramKey)`. Parameters are re-validated at finalize time. Owner can `cancelParameterChange(paramKey)` at any time.
-- **`minSettlementBalance`** — Optional proposer-committed floor for vault balance after settlement. Enforced only in `settleByAgent()` (escape hatches `settleProposal`/`emergencySettle` are exempt). This is an absolute value, not relative to capital snapshot — voters must evaluate it in context.
-- **Three settlement paths**: (1) `settleByAgent` — agent settles, enforces no-loss + minSettlement; (2) `settleProposal` — permissionless after strategy duration; (3) `emergencySettle` — vault owner after duration, with custom calls.
+- **Protocol fee** — `protocolFeeBps` + `protocolFeeRecipient` taken from gross profit before agent and management fees. Timelocked. Max 10%.
+- **Two settlement paths**: (1) `settleProposal` — proposer can call anytime, anyone else after strategy duration; (2) `emergencySettle` — vault owner after duration, tries pre-committed calls first then falls back to custom calls.
+- **Vault reads governor from factory** — no `setGovernor` on vault, no lock/unlock storage. `redemptionsLocked()` checks `governor.getActiveProposal()` directly.
 
 ## CLI
 

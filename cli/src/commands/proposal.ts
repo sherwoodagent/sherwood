@@ -26,13 +26,13 @@ import {
   vote,
   executeProposal,
   settleProposal,
-  settleByAgent,
   emergencySettle,
+  getExecuteCalls,
+  getSettlementCalls,
   cancelProposal,
   emergencyCancel,
   getVoteWeight,
   hasVoted,
-  getProposalCalls,
   getCapitalSnapshot,
   parseDuration,
   PROPOSAL_STATES,
@@ -77,8 +77,8 @@ export function registerProposalCommands(program: Command): void {
     .requiredOption("--description <text>", "Strategy rationale and risk summary")
     .requiredOption("--performance-fee <bps>", "Agent fee in bps (e.g. 1500 = 15%)")
     .requiredOption("--duration <duration>", "Strategy duration (e.g. 7d, 24h, 3600)")
-    .requiredOption("--calls <path>", "Path to JSON file with Call[] array")
-    .requiredOption("--split-index <n>", "Index where execute calls end and settle calls begin")
+    .requiredOption("--execute-calls <path>", "Path to JSON file with execute Call[] array")
+    .requiredOption("--settle-calls <path>", "Path to JSON file with settlement Call[] array")
     .option("--metadata-uri <uri>", "Override — skip IPFS upload and use this URI directly")
     .action(async (opts) => {
       try {
@@ -90,8 +90,8 @@ export function registerProposalCommands(program: Command): void {
 
         const performanceFeeBps = parseBigIntArg(opts.performanceFee, "performance-fee");
         const strategyDuration = parseDuration(opts.duration);
-        const splitIndex = parseBigIntArg(opts.splitIndex, "split-index");
-        const calls = parseCallsFile(opts.calls);
+        const executeCalls = parseCallsFile(opts.executeCalls);
+        const settleCalls = parseCallsFile(opts.settleCalls);
 
         // ── Pin metadata ──
         let metadataURI = opts.metadataUri || "";
@@ -106,7 +106,7 @@ export function registerProposalCommands(program: Command): void {
               description: opts.description,
               chain: getNetwork(),
               strategies: [],
-              terms: { ragequitEnabled: true },
+              terms: {},
               links: {},
             };
             // Attach proposal-specific fields
@@ -136,13 +136,13 @@ export function registerProposalCommands(program: Command): void {
         console.log(W(`  Vault:            ${G(vault)}`));
         console.log(W(`  Performance Fee:  ${Number(performanceFeeBps) / 100}%`));
         console.log(W(`  Duration:         ${formatDuration(strategyDuration)}`));
-        console.log(W(`  Calls:            ${calls.length} (split at ${splitIndex})`));
+        console.log(W(`  Calls:            ${executeCalls.length} execute + ${settleCalls.length} settle`));
         console.log(W(`  Metadata:         ${DIM(metadataURI.length > 50 ? metadataURI.slice(0, 50) + "..." : metadataURI)}`));
         SEP();
 
         // ── Submit ──
         const spinner = ora({ text: W("Submitting proposal..."), color: "green" }).start();
-        const result = await propose(vault, metadataURI, performanceFeeBps, strategyDuration, calls, splitIndex);
+        const result = await propose(vault, metadataURI, performanceFeeBps, strategyDuration, executeCalls, settleCalls);
         spinner.succeed(G("Proposal submitted"));
 
         console.log();
@@ -255,14 +255,13 @@ export function registerProposalCommands(program: Command): void {
         const id = parseBigIntArg(idStr, "proposal ID");
         const p = await getProposal(id);
         const state = await getProposalState(id);
-        const calls = await getProposalCalls(id);
         const params = await getGovernorParams();
 
         spinner.stop();
 
         const stateLabel = PROPOSAL_STATES[state] || "Unknown";
         const totalVotes = p.votesFor + p.votesAgainst;
-        const quorumNeeded = totalVotes > 0n ? `${Number(params.quorumBps) / 100}%` : "—";
+        const quorumNeeded = totalVotes > 0n ? `${Number(params.vetoThresholdBps) / 100}%` : "—";
 
         console.log();
         console.log(LABEL(`  ◆ Proposal #${p.id}`));
@@ -299,7 +298,7 @@ export function registerProposalCommands(program: Command): void {
         console.log(W(`  For:              ${formatShares(p.votesFor)}`));
         console.log(W(`  Against:          ${formatShares(p.votesAgainst)}`));
         console.log(W(`  Abstain:          ${formatShares(p.votesAbstain)}`));
-        console.log(W(`  Quorum:           ${quorumNeeded}`));
+        console.log(W(`  Veto Threshold:   ${quorumNeeded}`));
 
         if (state === PROPOSAL_STATE.Executed || state === PROPOSAL_STATE.Settled) {
           try {
@@ -310,12 +309,19 @@ export function registerProposalCommands(program: Command): void {
           } catch { /* no snapshot */ }
         }
 
+        const execCalls = await getExecuteCalls(id);
+        const settlCalls = await getSettlementCalls(id);
+
         console.log();
-        console.log(LABEL(`  Calls (${calls.length}, split at ${p.splitIndex})`));
-        for (let i = 0; i < calls.length; i++) {
-          const phase = BigInt(i) < p.splitIndex ? "execute" : "settle";
-          console.log(DIM(`  [${i}] (${phase}) target=${calls[i].target}`));
-          console.log(DIM(`       data=${calls[i].data.slice(0, 20)}...  value=${calls[i].value}`));
+        console.log(LABEL(`  Execute Calls (${execCalls.length})`));
+        for (let i = 0; i < execCalls.length; i++) {
+          console.log(DIM(`  [${i}] target=${execCalls[i].target}`));
+          console.log(DIM(`       data=${execCalls[i].data.slice(0, 20)}...  value=${execCalls[i].value}`));
+        }
+        console.log(LABEL(`  Settlement Calls (${settlCalls.length})`));
+        for (let i = 0; i < settlCalls.length; i++) {
+          console.log(DIM(`  [${i}] target=${settlCalls[i].target}`));
+          console.log(DIM(`       data=${settlCalls[i].data.slice(0, 20)}...  value=${settlCalls[i].value}`));
         }
 
         SEP();
@@ -458,14 +464,13 @@ export function registerProposalCommands(program: Command): void {
 
         let hash: Hex;
 
-        if (isProposer && opts.calls) {
-          // Agent settle — proposer provides custom calls
-          spinner.text = W("Settling by agent...");
-          const calls = parseCallsFile(opts.calls);
-          hash = await settleByAgent(proposalId, calls);
-          spinner.succeed(G("Settled by agent"));
+        if (isProposer && !durationElapsed) {
+          // Proposer can settle anytime
+          spinner.text = W("Settling (proposer)...");
+          hash = await settleProposal(proposalId);
+          spinner.succeed(G("Settled by proposer"));
         } else if (durationElapsed && !opts.calls) {
-          // Permissionless settle — anyone can call after duration
+          // Permissionless settle after duration
           spinner.text = W("Settling (permissionless)...");
           hash = await settleProposal(proposalId);
           spinner.succeed(G("Settled (permissionless)"));
@@ -476,7 +481,7 @@ export function registerProposalCommands(program: Command): void {
           hash = await emergencySettle(proposalId, calls);
           spinner.succeed(G("Emergency settled"));
         } else {
-          spinner.fail("Cannot settle: duration not elapsed. If you are the proposer, provide --calls.");
+          spinner.fail("Cannot settle: duration not elapsed and you are not the proposer.");
           process.exit(1);
         }
 
