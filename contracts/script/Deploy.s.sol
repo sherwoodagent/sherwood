@@ -8,6 +8,7 @@ import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../src/SyndicateFactory.sol";
 import {SyndicateGovernor} from "../src/SyndicateGovernor.sol";
+import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
 
 /**
  * @notice Deploy Sherwood infrastructure to Base:
@@ -70,17 +71,21 @@ contract Deploy is Script {
         SyndicateGovernor govImpl = new SyndicateGovernor();
         bytes memory govInitData = abi.encodeCall(
             SyndicateGovernor.initialize,
-            (
-                deployer, // owner
-                1 days, // votingPeriod
-                1 days, // executionWindow
-                4000, // quorumBps (40%)
-                3000, // maxPerformanceFeeBps (30%)
-                30 days, // maxStrategyDuration
-                1 days, // cooldownPeriod
-                200, // protocolFeeBps (2%)
-                deployer // protocolFeeRecipient
-            )
+            (ISyndicateGovernor.InitParams({
+                    owner: deployer,
+                    votingPeriod: 1 days,
+                    executionWindow: 1 days,
+                    vetoThresholdBps: 4000,
+                    maxPerformanceFeeBps: 3000,
+                    cooldownPeriod: 1 days,
+                    collaborationWindow: 48 hours,
+                    maxCoProposers: 5,
+                    minStrategyDuration: 1 hours,
+                    maxStrategyDuration: 30 days,
+                    parameterChangeDelay: 1 days,
+                    protocolFeeBps: 200,
+                    protocolFeeRecipient: deployer
+                }))
         );
         address governorProxy = address(new ERC1967Proxy(address(govImpl), govInitData));
         console.log("SyndicateGovernor:", governorProxy);
@@ -119,7 +124,7 @@ contract Deploy is Script {
             );
             console.log("Syndicate #%d vault:", syndicateId, vaultProxy);
 
-            SyndicateVault(payable(vaultProxy)).registerAgent(creatorAgentId, deployer, deployer);
+            SyndicateVault(payable(vaultProxy)).registerAgent(creatorAgentId, deployer);
             console.log("Registered deployer as agent");
 
             console.log("\n=== Deployment Summary ===");
