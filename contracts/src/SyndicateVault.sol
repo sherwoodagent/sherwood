@@ -15,6 +15,7 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ERC721Holder} from "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -304,6 +305,12 @@ contract SyndicateVault is
         return super.decimals();
     }
 
+    /// @dev Virtual shares offset = asset decimals → mitigates ERC-4626 inflation/donation attack.
+    ///      With USDC (6 decimals) this gives 12-decimal shares, making the attack economically infeasible.
+    function _decimalsOffset() internal view virtual override returns (uint8) {
+        return uint8(IERC20Metadata(asset()).decimals());
+    }
+
     /// @dev Block deposits when paused or depositor not approved.
     ///      Auto-delegate to self on first deposit so shareholders get voting power.
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares)
@@ -311,6 +318,7 @@ contract SyndicateVault is
         override
         whenNotPaused
     {
+        if (redemptionsLocked()) revert DepositsLocked();
         if (!_openDeposits && !_approvedDepositors.contains(receiver)) revert NotApprovedDepositor();
         super._deposit(caller, receiver, assets, shares);
 
@@ -337,8 +345,10 @@ contract SyndicateVault is
         Address.sendValue(to, amount);
     }
 
-    /// @notice Rescue ERC-20 tokens accidentally sent to the vault (not the vault asset)
+    /// @notice Rescue ERC-20 tokens accidentally sent to the vault (not the vault asset).
+    ///         Blocked during active proposals to protect strategy position tokens.
     function rescueERC20(address token, address to, uint256 amount) external onlyOwner {
+        if (redemptionsLocked()) revert RedemptionsLocked();
         if (to == address(0)) revert ZeroAddress();
         address asset = asset();
         if (token == asset) revert CannotRescueAsset();

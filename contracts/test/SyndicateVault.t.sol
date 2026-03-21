@@ -82,6 +82,9 @@ contract SyndicateVaultTest is Test {
         // Register agent (NFT owned by agent)
         vm.prank(owner);
         vault.registerAgent(agent1NftId, agentAddr);
+
+        // Mock factory.governor() to return address(0) (no governor = deposits allowed)
+        vm.mockCall(address(this), abi.encodeWithSignature("governor()"), abi.encode(address(0)));
     }
 
     // ==================== INITIALIZATION ====================
@@ -409,7 +412,8 @@ contract SyndicateVaultTest is Test {
         vm.warp(block.timestamp + 1);
 
         uint256 pastVotes = vault.getPastVotes(lp1, depositTime);
-        assertEq(pastVotes, 10_000e6);
+        // With _decimalsOffset() = 6, shares have 12 decimals for USDC
+        assertEq(pastVotes, 10_000e12);
     }
 
     function test_getPastTotalSupply_afterDeposit() public {
@@ -423,6 +427,53 @@ contract SyndicateVaultTest is Test {
         vm.warp(block.timestamp + 1);
 
         uint256 pastSupply = vault.getPastTotalSupply(depositTime);
-        assertEq(pastSupply, 10_000e6);
+        // With _decimalsOffset() = 6, shares have 12 decimals for USDC
+        assertEq(pastSupply, 10_000e12);
+    }
+
+    // ==================== DECIMALS OFFSET (INFLATION PROTECTION) ====================
+
+    function test_decimalsOffset_matchesAssetDecimals() public view {
+        // USDC has 6 decimals, so offset should be 6 → shares have 12 decimals
+        assertEq(vault.decimals(), 12);
+    }
+
+    function test_inflationAttack_mitigated() public {
+        // Classic ERC-4626 inflation attack:
+        // 1. Attacker deposits 1 wei, gets shares
+        // 2. Attacker donates large amount directly to vault
+        // 3. Next depositor's shares round to 0
+        // With _decimalsOffset() = 6, virtual shares make this infeasible
+
+        address attacker = makeAddr("attacker");
+        address victim = makeAddr("victim");
+
+        usdc.mint(attacker, 20_000e6);
+        usdc.mint(victim, 10_000e6);
+
+        // Step 1: Attacker deposits 1 wei of USDC
+        vm.startPrank(attacker);
+        usdc.approve(address(vault), 1);
+        vault.deposit(1, attacker);
+        vm.stopPrank();
+
+        // Step 2: Attacker donates 10_000 USDC directly (not via deposit)
+        vm.prank(attacker);
+        usdc.transfer(address(vault), 10_000e6);
+
+        // Step 3: Victim deposits 10_000 USDC — should still get meaningful shares
+        vm.startPrank(victim);
+        usdc.approve(address(vault), 10_000e6);
+        uint256 victimShares = vault.deposit(10_000e6, victim);
+        vm.stopPrank();
+
+        // Victim should have non-trivial shares (attack is economically infeasible)
+        assertGt(victimShares, 0);
+
+        // Victim can redeem most of their deposit back
+        vm.prank(victim);
+        uint256 redeemed = vault.redeem(victimShares, victim, victim);
+        // Should get back at least 99% of deposit (rounding loss, not attack loss)
+        assertGt(redeemed, 9_900e6);
     }
 }

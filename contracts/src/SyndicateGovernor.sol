@@ -167,6 +167,10 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         return _pendingChanges;
     }
 
+    function _getProtocolFeeRecipient() internal view override returns (address) {
+        return _protocolFeeRecipient;
+    }
+
     // ==================== PROPOSAL LIFECYCLE ====================
 
     /// @inheritdoc ISyndicateGovernor

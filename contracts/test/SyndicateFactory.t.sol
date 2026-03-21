@@ -52,6 +52,9 @@ contract SyndicateFactoryTest is Test {
         // Mint ERC-8004 identity NFTs for creators
         creator1AgentId = agentRegistry.mint(creator1);
         creator2AgentId = agentRegistry.mint(creator2);
+
+        // Mock governor.getActiveProposal() so vault deposits work (no active proposals)
+        vm.mockCall(governorAddr, abi.encodeWithSignature("getActiveProposal(address)"), abi.encode(uint256(0)));
     }
 
     function _defaultConfig() internal view returns (SyndicateFactory.SyndicateConfig memory) {

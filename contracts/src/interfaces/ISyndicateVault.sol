@@ -19,6 +19,7 @@ interface ISyndicateVault {
     error NotAgentOwner();
     error NotGovernor();
     error RedemptionsLocked();
+    error DepositsLocked();
     error InvalidAgentAddress();
     error TransferFailed();
     error ZeroAddress();

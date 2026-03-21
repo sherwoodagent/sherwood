@@ -484,9 +484,11 @@ contract SyndicateGovernorTest is Test {
         uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
         vm.prank(agent);
         governor.settleProposal(proposalId);
+
+        uint256 balBefore = usdc.balanceOf(lp1);
         vm.prank(lp1);
-        uint256 assets = vault.withdraw(1_000e6, lp1, lp1);
-        assertEq(assets, 1_000e6);
+        vault.withdraw(1_000e6, lp1, lp1);
+        assertEq(usdc.balanceOf(lp1), balBefore + 1_000e6);
     }
 
     // ==================== CANCEL ====================
@@ -648,5 +650,115 @@ contract SyndicateGovernorTest is Test {
         vm.prank(random);
         vm.expectRevert(ISyndicateVault.NotGovernor.selector);
         vault.executeGovernorBatch(calls);
+    }
+
+    // ==================== DEPOSIT LOCK DURING ACTIVE PROPOSAL ====================
+
+    function test_deposit_blockedDuringActiveProposal() public {
+        _createAndExecuteProposal(1500, 7 days);
+
+        usdc.mint(random, 10_000e6);
+        vm.startPrank(random);
+        usdc.approve(address(vault), 10_000e6);
+        vm.expectRevert(ISyndicateVault.DepositsLocked.selector);
+        vault.deposit(10_000e6, random);
+        vm.stopPrank();
+    }
+
+    function test_deposit_succeedsAfterSettlement() public {
+        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
+        vm.prank(agent);
+        governor.settleProposal(proposalId);
+
+        usdc.mint(random, 10_000e6);
+        vm.startPrank(random);
+        usdc.approve(address(vault), 10_000e6);
+        uint256 shares = vault.deposit(10_000e6, random);
+        vm.stopPrank();
+        assertGt(shares, 0);
+    }
+
+    // ==================== RESCUE LOCK DURING ACTIVE PROPOSAL ====================
+
+    function test_rescueERC20_blockedDuringActiveProposal() public {
+        _createAndExecuteProposal(1500, 7 days);
+
+        // Send some non-asset tokens to vault
+        targetToken.mint(address(vault), 1_000e18);
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateVault.RedemptionsLocked.selector);
+        vault.rescueERC20(address(targetToken), owner, 1_000e18);
+    }
+
+    function test_rescueERC20_succeedsAfterSettlement() public {
+        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
+        vm.prank(agent);
+        governor.settleProposal(proposalId);
+
+        targetToken.mint(address(vault), 1_000e18);
+
+        vm.prank(owner);
+        vault.rescueERC20(address(targetToken), owner, 1_000e18);
+        assertEq(targetToken.balanceOf(owner), 1_000e18);
+    }
+
+    // ==================== PROTOCOL FEE RECIPIENT CHECK ====================
+
+    function test_setProtocolFeeBps_noRecipient_reverts() public {
+        // Deploy a governor with protocolFeeBps=0 and recipient=address(0)
+        SyndicateGovernor govImpl2 = new SyndicateGovernor();
+        bytes memory govInit2 = abi.encodeCall(
+            SyndicateGovernor.initialize,
+            (ISyndicateGovernor.InitParams({
+                    owner: owner,
+                    votingPeriod: VOTING_PERIOD,
+                    executionWindow: EXECUTION_WINDOW,
+                    vetoThresholdBps: VETO_THRESHOLD_BPS,
+                    maxPerformanceFeeBps: MAX_PERF_FEE_BPS,
+                    cooldownPeriod: COOLDOWN_PERIOD,
+                    collaborationWindow: 48 hours,
+                    maxCoProposers: 5,
+                    minStrategyDuration: 1 hours,
+                    maxStrategyDuration: MAX_STRATEGY_DURATION,
+                    parameterChangeDelay: PARAM_CHANGE_DELAY,
+                    protocolFeeBps: 0,
+                    protocolFeeRecipient: address(0)
+                }))
+        );
+        SyndicateGovernor gov2 = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl2), govInit2)));
+
+        // Try to set fee > 0 without a recipient — should revert
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.InvalidProtocolFeeRecipient.selector);
+        gov2.setProtocolFeeBps(200);
+    }
+
+    function test_setProtocolFeeBps_zeroWithNoRecipient_succeeds() public {
+        // Deploy a governor with protocolFeeBps=0 and recipient=address(0)
+        SyndicateGovernor govImpl2 = new SyndicateGovernor();
+        bytes memory govInit2 = abi.encodeCall(
+            SyndicateGovernor.initialize,
+            (ISyndicateGovernor.InitParams({
+                    owner: owner,
+                    votingPeriod: VOTING_PERIOD,
+                    executionWindow: EXECUTION_WINDOW,
+                    vetoThresholdBps: VETO_THRESHOLD_BPS,
+                    maxPerformanceFeeBps: MAX_PERF_FEE_BPS,
+                    cooldownPeriod: COOLDOWN_PERIOD,
+                    collaborationWindow: 48 hours,
+                    maxCoProposers: 5,
+                    minStrategyDuration: 1 hours,
+                    maxStrategyDuration: MAX_STRATEGY_DURATION,
+                    parameterChangeDelay: PARAM_CHANGE_DELAY,
+                    protocolFeeBps: 0,
+                    protocolFeeRecipient: address(0)
+                }))
+        );
+        SyndicateGovernor gov2 = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl2), govInit2)));
+
+        // Setting fee to 0 with no recipient should succeed (no-op)
+        vm.prank(owner);
+        gov2.setProtocolFeeBps(0);
     }
 }

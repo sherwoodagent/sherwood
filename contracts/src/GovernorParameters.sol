@@ -61,6 +61,7 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     function _getParams() internal view virtual returns (GovernorParams storage);
     function _getParameterChangeDelay() internal view virtual returns (uint256);
     function _getPendingChanges() internal view virtual returns (mapping(bytes32 => PendingChange) storage);
+    function _getProtocolFeeRecipient() internal view virtual returns (address);
 
     // ── Parameter setters (queue-based) ──
 
@@ -137,6 +138,7 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     /// @inheritdoc ISyndicateGovernor
     function setProtocolFeeBps(uint256 newProtocolFeeBps) external onlyOwner {
         if (newProtocolFeeBps > MAX_PROTOCOL_FEE_BPS) revert InvalidProtocolFeeBps();
+        if (newProtocolFeeBps > 0 && _getProtocolFeeRecipient() == address(0)) revert InvalidProtocolFeeRecipient();
         _queueChange(PARAM_PROTOCOL_FEE_BPS, newProtocolFeeBps);
     }
 
