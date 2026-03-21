@@ -9,8 +9,8 @@ interface ISyndicateGovernor {
     enum ProposalState {
         Draft, // collaborative proposal awaiting co-proposer consent
         Pending, // voting active
-        Approved, // voting ended, quorum met, majority FOR
-        Rejected, // voting ended, failed quorum or majority
+        Approved, // voting ended, not vetoed (optimistic governance)
+        Rejected, // voting ended, veto threshold reached
         Expired, // execution window passed without execution
         Executed, // strategy is live
         Settled, // P&L calculated, fee distributed
@@ -29,20 +29,22 @@ interface ISyndicateGovernor {
         address owner;
         uint256 votingPeriod;
         uint256 executionWindow;
-        uint256 quorumBps;
+        uint256 vetoThresholdBps;
         uint256 maxPerformanceFeeBps;
         uint256 cooldownPeriod;
         uint256 collaborationWindow;
         uint256 maxCoProposers;
         uint256 minStrategyDuration;
         uint256 maxStrategyDuration;
-        uint256 parameterChangeDelay; // NEW: Change A
+        uint256 parameterChangeDelay;
+        uint256 protocolFeeBps;
+        address protocolFeeRecipient;
     }
 
     struct GovernorParams {
         uint256 votingPeriod;
         uint256 executionWindow;
-        uint256 quorumBps;
+        uint256 vetoThresholdBps;
         uint256 maxPerformanceFeeBps;
         uint256 cooldownPeriod;
         uint256 collaborationWindow;
@@ -102,16 +104,16 @@ interface ISyndicateGovernor {
     error NotProposer();
     error InvalidVotingPeriod();
     error InvalidExecutionWindow();
-    error InvalidQuorumBps();
+    error InvalidVetoThresholdBps();
     error InvalidMaxPerformanceFeeBps();
     error InvalidStrategyDurationBounds();
     error InvalidCooldownPeriod();
     error InvalidVault();
     error ZeroAddress();
     error NotVaultOwner();
-    error SettlementCausedLoss();
-    error SettlementBelowMinimum();
     error StrategyDurationNotElapsed();
+    error InvalidProtocolFeeBps();
+    error InvalidProtocolFeeRecipient();
 
     // ── Collaborative proposal errors ──
     error NotCoProposer();
@@ -145,7 +147,6 @@ interface ISyndicateGovernor {
         uint256 strategyDuration,
         uint256 executeCallCount,
         uint256 settlementCallCount,
-        uint256 minSettlementBalance,
         string metadataURI
     );
 
@@ -159,7 +160,7 @@ interface ISyndicateGovernor {
 
     event ProposalCancelled(uint256 indexed proposalId, address indexed cancelledBy);
 
-    event AgentSettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 performanceFee);
+    event ProposalVetoed(uint256 indexed proposalId, address indexed vetoedBy);
 
     event EmergencySettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 customCallCount);
 
@@ -169,11 +170,13 @@ interface ISyndicateGovernor {
 
     event VotingPeriodUpdated(uint256 oldValue, uint256 newValue);
     event ExecutionWindowUpdated(uint256 oldValue, uint256 newValue);
-    event QuorumBpsUpdated(uint256 oldValue, uint256 newValue);
+    event VetoThresholdBpsUpdated(uint256 oldValue, uint256 newValue);
     event MaxPerformanceFeeBpsUpdated(uint256 oldValue, uint256 newValue);
     event MinStrategyDurationUpdated(uint256 oldValue, uint256 newValue);
     event MaxStrategyDurationUpdated(uint256 oldValue, uint256 newValue);
     event CooldownPeriodUpdated(uint256 oldValue, uint256 newValue);
+    event ProtocolFeeBpsUpdated(uint256 oldValue, uint256 newValue);
+    event ProtocolFeeRecipientUpdated(address oldRecipient, address newRecipient);
 
     // ── Collaborative proposal events ──
     event CollaborativeProposalCreated(
@@ -200,15 +203,12 @@ interface ISyndicateGovernor {
         uint256 strategyDuration,
         BatchExecutorLib.Call[] calldata executeCalls,
         BatchExecutorLib.Call[] calldata settlementCalls,
-        CoProposer[] calldata coProposers,
-        uint256 minSettlementBalance
+        CoProposer[] calldata coProposers
     ) external returns (uint256 proposalId);
 
     function vote(uint256 proposalId, VoteType support) external;
 
     function executeProposal(uint256 proposalId) external;
-
-    function settleByAgent(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external;
 
     function settleProposal(uint256 proposalId) external;
 
@@ -217,6 +217,9 @@ interface ISyndicateGovernor {
     function cancelProposal(uint256 proposalId) external;
 
     function emergencyCancel(uint256 proposalId) external;
+
+    /// @notice Vault owner vetoes a pending or approved proposal, setting it to Rejected.
+    function vetoProposal(uint256 proposalId) external;
 
     // ── Collaborative proposal functions ──
 
@@ -230,13 +233,15 @@ interface ISyndicateGovernor {
     function setFactory(address factory_) external;
     function setVotingPeriod(uint256 newVotingPeriod) external;
     function setExecutionWindow(uint256 newExecutionWindow) external;
-    function setQuorumBps(uint256 newQuorumBps) external;
+    function setVetoThresholdBps(uint256 newVetoThresholdBps) external;
     function setMaxPerformanceFeeBps(uint256 newMaxPerformanceFeeBps) external;
     function setMinStrategyDuration(uint256 newMinStrategyDuration) external;
     function setMaxStrategyDuration(uint256 newMaxStrategyDuration) external;
     function setCooldownPeriod(uint256 newCooldownPeriod) external;
     function setCollaborationWindow(uint256 newCollaborationWindow) external;
     function setMaxCoProposers(uint256 newMaxCoProposers) external;
+    function setProtocolFeeBps(uint256 newProtocolFeeBps) external;
+    function setProtocolFeeRecipient(address newRecipient) external;
 
     // ── Timelock functions ──
 
@@ -260,6 +265,7 @@ interface ISyndicateGovernor {
     function getCapitalSnapshot(uint256 proposalId) external view returns (uint256);
     function isRegisteredVault(address vault) external view returns (bool);
     function getCoProposers(uint256 proposalId) external view returns (CoProposer[] memory);
-    function getMinSettlementBalance(uint256 proposalId) external view returns (uint256);
     function getPendingChange(bytes32 paramKey) external view returns (PendingChange memory);
+    function protocolFeeBps() external view returns (uint256);
+    function protocolFeeRecipient() external view returns (address);
 }

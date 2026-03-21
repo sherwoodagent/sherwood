@@ -8,18 +8,17 @@ import {BatchExecutorLib} from "../../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../../src/SyndicateFactory.sol";
 import {SyndicateGovernor} from "../../src/SyndicateGovernor.sol";
 import {ISyndicateGovernor} from "../../src/interfaces/ISyndicateGovernor.sol";
-import {StrategyRegistry} from "../../src/StrategyRegistry.sol";
 
 /**
  * @notice Deploy Sherwood protocol infrastructure to Base Sepolia (testnet).
  *         This script deploys only the shared infrastructure contracts:
  *         1. BatchExecutorLib (shared, stateless)
  *         2. SyndicateVault implementation
- *         3. SyndicateFactory (registers both)
- *         4. StrategyRegistry (UUPS proxy)
+ *         3. SyndicateGovernor (UUPS proxy)
+ *         4. SyndicateFactory (registers both)
  *
- *         Syndicate creation, agent registration, and strategy registration
- *         are handled via the CLI after deployment:
+ *         Syndicate creation and agent registration are handled via the CLI
+ *         after deployment:
  *           sherwood identity mint
  *           sherwood syndicate create --agent-id <id> ...
  *           sherwood syndicate add --vault <addr> ...
@@ -64,14 +63,16 @@ contract DeployTestnet is Script {
                     owner: deployer,
                     votingPeriod: 1 days,
                     executionWindow: 1 days,
-                    quorumBps: 4000,
+                    vetoThresholdBps: 4000,
                     maxPerformanceFeeBps: 3000,
                     cooldownPeriod: 1 days,
                     collaborationWindow: 48 hours,
                     maxCoProposers: 5,
-                    minStrategyDuration: 1 days,
-                    maxStrategyDuration: 7 days,
-                    parameterChangeDelay: 1 days
+                    minStrategyDuration: 1 hours,
+                    maxStrategyDuration: 30 days,
+                    parameterChangeDelay: 1 days,
+                    protocolFeeBps: 200,
+                    protocolFeeRecipient: deployer
                 }))
         );
         address governorProxy = address(new ERC1967Proxy(address(govImpl), govInitData));
@@ -81,26 +82,24 @@ contract DeployTestnet is Script {
         SyndicateFactory factoryImpl = new SyndicateFactory();
         bytes memory factoryInitData = abi.encodeCall(
             SyndicateFactory.initialize,
-            (deployer, address(executorLib), address(vaultImpl), L2_REGISTRAR, AGENT_REGISTRY, governorProxy)
+            (SyndicateFactory.InitParams({
+                    owner: deployer,
+                    executorImpl: address(executorLib),
+                    vaultImpl: address(vaultImpl),
+                    ensRegistrar: L2_REGISTRAR,
+                    agentRegistry: AGENT_REGISTRY,
+                    governor: governorProxy,
+                    managementFeeBps: 50
+                }))
         );
         SyndicateFactory factory = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInitData)));
         console.log("SyndicateFactory:", address(factory));
-
-        // Authorize factory to register new vaults on governor
-        ISyndicateGovernor(governorProxy).setFactory(address(factory));
-
-        // 4. Deploy StrategyRegistry (UUPS proxy)
-        StrategyRegistry registryImpl = new StrategyRegistry();
-        bytes memory registryInitData = abi.encodeCall(StrategyRegistry.initialize, (deployer, deployer));
-        address registryProxy = address(new ERC1967Proxy(address(registryImpl), registryInitData));
-        console.log("StrategyRegistry:", registryProxy);
 
         vm.stopBroadcast();
 
         // Summary
         console.log("\n=== Testnet Deployment Summary ===");
         console.log("FACTORY_ADDRESS_TESTNET=%s", address(factory));
-        console.log("REGISTRY_ADDRESS_TESTNET=%s", registryProxy);
         console.log("EXECUTOR_LIB_ADDRESS=%s", address(executorLib));
         console.log("\nCopy the above to cli/.env");
         console.log("\nNext steps:");

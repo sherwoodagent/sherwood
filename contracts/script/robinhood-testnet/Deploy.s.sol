@@ -8,7 +8,6 @@ import {BatchExecutorLib} from "../../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../../src/SyndicateFactory.sol";
 import {SyndicateGovernor} from "../../src/SyndicateGovernor.sol";
 import {ISyndicateGovernor} from "../../src/interfaces/ISyndicateGovernor.sol";
-import {StrategyRegistry} from "../../src/StrategyRegistry.sol";
 
 /**
  * @notice Deploy Sherwood protocol infrastructure to Robinhood L2 testnet.
@@ -52,14 +51,16 @@ contract DeployRobinhoodTestnet is Script {
                     owner: deployer,
                     votingPeriod: 1 days,
                     executionWindow: 1 days,
-                    quorumBps: 4000,
+                    vetoThresholdBps: 4000,
                     maxPerformanceFeeBps: 3000,
                     cooldownPeriod: 1 days,
                     collaborationWindow: 48 hours,
                     maxCoProposers: 5,
-                    minStrategyDuration: 1 days,
+                    minStrategyDuration: 1 hours,
                     maxStrategyDuration: 7 days,
-                    parameterChangeDelay: 1 days
+                    parameterChangeDelay: 1 days,
+                    protocolFeeBps: 200,
+                    protocolFeeRecipient: deployer
                 }))
         );
         address governorProxy = address(new ERC1967Proxy(address(govImpl), govInitData));
@@ -69,24 +70,24 @@ contract DeployRobinhoodTestnet is Script {
         SyndicateFactory factoryImpl = new SyndicateFactory();
         bytes memory factoryInitData = abi.encodeCall(
             SyndicateFactory.initialize,
-            (deployer, address(executorLib), address(vaultImpl), L2_REGISTRAR, AGENT_REGISTRY, governorProxy)
+            (SyndicateFactory.InitParams({
+                    owner: deployer,
+                    executorImpl: address(executorLib),
+                    vaultImpl: address(vaultImpl),
+                    ensRegistrar: L2_REGISTRAR,
+                    agentRegistry: AGENT_REGISTRY,
+                    governor: governorProxy,
+                    managementFeeBps: 50
+                }))
         );
         SyndicateFactory factory = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInitData)));
         console.log("SyndicateFactory:", address(factory));
-        ISyndicateGovernor(governorProxy).setFactory(address(factory));
-
-        // 5. Deploy StrategyRegistry (UUPS proxy)
-        StrategyRegistry registryImpl = new StrategyRegistry();
-        bytes memory registryInitData = abi.encodeCall(StrategyRegistry.initialize, (deployer, deployer));
-        address registryProxy = address(new ERC1967Proxy(address(registryImpl), registryInitData));
-        console.log("StrategyRegistry:", registryProxy);
 
         vm.stopBroadcast();
 
         // Summary
         console.log("\n=== Robinhood L2 Testnet Deployment Summary ===");
         console.log("FACTORY_ADDRESS=%s", address(factory));
-        console.log("REGISTRY_ADDRESS=%s", registryProxy);
         console.log("GOVERNOR_ADDRESS=%s", governorProxy);
         console.log("EXECUTOR_LIB_ADDRESS=%s", address(executorLib));
         console.log("\nNote: No ENS or ERC-8004 on this chain.");

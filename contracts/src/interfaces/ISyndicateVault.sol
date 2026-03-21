@@ -13,14 +13,17 @@ interface ISyndicateVault {
     error DepositorAlreadyApproved();
     error DepositorNotApproved();
     error NotApprovedDepositor();
-    error InvalidAgentAddress();
     error AgentAlreadyRegistered();
     error AgentNotActive();
     error InvalidAgentRegistry();
     error NotAgentOwner();
     error NotGovernor();
     error RedemptionsLocked();
-    error InvalidGovernor();
+    error InvalidAgentAddress();
+    error TransferFailed();
+    error ZeroAddress();
+    error CannotRescueAsset();
+    error NotFactory();
 
     // ── Init Params ──
     struct InitParams {
@@ -31,14 +34,13 @@ interface ISyndicateVault {
         address executorImpl;
         bool openDeposits;
         address agentRegistry;
-        address governor;
         uint256 managementFeeBps;
     }
 
     // ── Per-Agent Config ──
     struct AgentConfig {
         uint256 agentId; // ERC-8004 identity token ID
-        address agentAddress; // Agent wallet address (the executor)
+        address agentAddress; // Agent wallet address
         bool active;
     }
 
@@ -59,7 +61,9 @@ interface ISyndicateVault {
     function getAgentCount() external view returns (uint256);
     function isAgent(address agentAddress) external view returns (bool);
     function getExecutorImpl() external view returns (address);
-    function getAgentAddresses() external view returns (address[] memory);
+
+    // ── Factory ──
+    function factory() external view returns (address);
 
     // ── Governor ──
     function executeGovernorBatch(BatchExecutorLib.Call[] calldata calls) external;
@@ -67,6 +71,11 @@ interface ISyndicateVault {
     function governor() external view returns (address);
     function redemptionsLocked() external view returns (bool);
     function managementFeeBps() external view returns (uint256);
+
+    // ── Rescue ──
+    function rescueEth(address payable to, uint256 amount) external;
+    function rescueERC20(address token, address to, uint256 amount) external;
+    function rescueERC721(address token, uint256 tokenId, address to) external;
 
     // ── Admin (syndicate creator) ──
     function registerAgent(uint256 agentId, address agentAddress) external;
