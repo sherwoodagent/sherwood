@@ -69,6 +69,14 @@ dataSources:
           handler: handleEmergencySettled
         - event: ProposalVetoed(indexed uint256,indexed address)
           handler: handleProposalVetoed
+        - event: CollaborativeProposalCreated(indexed uint256,indexed address,address[],uint256[])
+          handler: handleCollaborativeProposalCreated
+        - event: CollaborationApproved(indexed uint256,indexed address)
+          handler: handleCollaborationApproved
+        - event: CollaborationRejected(indexed uint256,indexed address)
+          handler: handleCollaborationRejected
+        - event: CollaborationTransitionedToPending(indexed uint256)
+          handler: handleCollaborationTransitionedToPending
       file: ./src/governor.ts
 templates:
   - kind: ethereum

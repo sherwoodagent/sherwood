@@ -7,6 +7,10 @@ import {
   ProposalCancelled,
   EmergencySettled,
   ProposalVetoed,
+  CollaborativeProposalCreated,
+  CollaborationApproved,
+  CollaborationRejected,
+  CollaborationTransitionedToPending,
 } from "../generated/SyndicateGovernor/SyndicateGovernor";
 import { Proposal, Vote, Syndicate, VaultLookup } from "../generated/schema";
 
@@ -165,5 +169,32 @@ export function handleProposalVetoed(event: ProposalVetoed): void {
   let proposal = Proposal.load(event.params.proposalId.toString());
   if (proposal == null) return;
   proposal.state = "Rejected";
+  proposal.save();
+}
+
+// ── Collaborative Proposals ──
+
+export function handleCollaborativeProposalCreated(event: CollaborativeProposalCreated): void {
+  let proposal = Proposal.load(event.params.proposalId.toString());
+  if (proposal == null) return;
+  proposal.state = "Draft";
+  proposal.save();
+}
+
+export function handleCollaborationApproved(event: CollaborationApproved): void {
+  // Co-proposer approved — no state change needed, just indexed for queries
+}
+
+export function handleCollaborationRejected(event: CollaborationRejected): void {
+  let proposal = Proposal.load(event.params.proposalId.toString());
+  if (proposal == null) return;
+  proposal.state = "Cancelled";
+  proposal.save();
+}
+
+export function handleCollaborationTransitionedToPending(event: CollaborationTransitionedToPending): void {
+  let proposal = Proposal.load(event.params.proposalId.toString());
+  if (proposal == null) return;
+  proposal.state = "Pending";
   proposal.save();
 }
