@@ -115,7 +115,10 @@ process.on("SIGINT", shutdown);
 // Start the XMTP agent (connects + streams)
 try {
   await agent.start();
-  console.log("Agent stream setup complete — server keepalive active");
+  // syncAll processes MLS welcome messages for new group invitations
+  await agent.client.conversations.syncAll();
+  const convos = await agent.client.conversations.list();
+  console.log(`Agent stream setup complete — ${convos.length} groups synced`);
 } catch (err) {
   console.error("Agent failed to start:", err);
 }

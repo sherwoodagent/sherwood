@@ -63,7 +63,7 @@ const GROUPS_CACHE_TTL = 60_000; // 60 seconds
 async function getGroups(agent: Agent): Promise<GroupInfo[]> {
   if (Date.now() - groupsCacheTime < GROUPS_CACHE_TTL) return groupsCache;
 
-  await agent.client.conversations.sync();
+  await agent.client.conversations.syncAll();
   const conversations = await agent.client.conversations.list();
 
   groupsCache = await Promise.all(
