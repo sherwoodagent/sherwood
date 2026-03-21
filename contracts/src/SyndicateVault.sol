@@ -9,6 +9,7 @@ import {
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -32,10 +33,7 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
  *   Inherits ERC20VotesUpgradeable to provide proper vote checkpointing for
  *   the governor's snapshot-based voting system.
  *
- *   LPs can ragequit at any time for their pro-rata share.
- *
- *   Deployed as an ERC-1967 proxy for gas-efficient cloning but NOT upgradeable.
- *   There is no `upgradeTo` — the implementation is locked at deploy time.
+ *   Deployed as ERC-1967 UUPS proxy. Upgradeable only via the factory when upgrades are enabled.
  */
 contract SyndicateVault is
     ISyndicateVault,
@@ -44,6 +42,7 @@ contract SyndicateVault is
     ERC20VotesUpgradeable,
     OwnableUpgradeable,
     PausableUpgradeable,
+    UUPSUpgradeable,
     ERC721Holder
 {
     using SafeERC20 for IERC20;
@@ -71,9 +70,6 @@ contract SyndicateVault is
     /// @notice ERC-8004 agent identity registry (ERC-721)
     IERC721 private _agentRegistry;
 
-    /// @notice Cumulative deposits for profit calculation
-    uint256 private _totalDeposited;
-
     // ── Governor storage ──
 
     /// @notice Trusted governor contract
@@ -84,6 +80,9 @@ contract SyndicateVault is
 
     /// @notice Vault owner's management fee on strategy profits (basis points, set at init)
     uint256 private _managementFeeBps;
+
+    /// @notice Factory that deployed this vault (controls upgrades)
+    address private _factory;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -106,18 +105,7 @@ contract SyndicateVault is
         _agentRegistry = IERC721(p.agentRegistry);
         _governor = p.governor;
         _managementFeeBps = p.managementFeeBps;
-    }
-
-    // ==================== LP FUNCTIONS ====================
-
-    /// @inheritdoc ISyndicateVault
-    function ragequit(address receiver) external whenNotPaused returns (uint256 assets) {
-        uint256 shares = balanceOf(msg.sender);
-        if (shares == 0) revert NoShares();
-
-        assets = redeem(shares, receiver, msg.sender);
-
-        emit Ragequit(msg.sender, shares, assets);
+        _factory = msg.sender;
     }
 
     // ==================== BATCH EXECUTION ====================
@@ -203,18 +191,8 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
-    function totalDeposited() external view returns (uint256) {
-        return _totalDeposited;
-    }
-
-    /// @inheritdoc ISyndicateVault
-    function getAgentOperators() external view returns (address[] memory) {
-        uint256 len = _agentSet.length();
-        address[] memory operators = new address[](len);
-        for (uint256 i = 0; i < len; i++) {
-            operators[i] = _agents[_agentSet.at(i)].operatorEOA;
-        }
-        return operators;
+    function factory() external view returns (address) {
+        return _factory;
     }
 
     // ==================== ADMIN ====================
@@ -344,7 +322,7 @@ contract SyndicateVault is
         return super.decimals();
     }
 
-    /// @dev Block deposits when paused or depositor not approved. Track totalDeposited.
+    /// @dev Block deposits when paused or depositor not approved.
     ///      Auto-delegate to self on first deposit so shareholders get voting power.
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares)
         internal
@@ -352,7 +330,6 @@ contract SyndicateVault is
         whenNotPaused
     {
         if (!_openDeposits && !_approvedDepositors.contains(receiver)) revert NotApprovedDepositor();
-        _totalDeposited += assets;
         super._deposit(caller, receiver, assets, shares);
 
         // Auto-delegate: if receiver has no delegate, delegate to self
@@ -367,11 +344,6 @@ contract SyndicateVault is
         whenNotPaused
     {
         if (_redemptionsLocked) revert RedemptionsLocked();
-        if (assets > _totalDeposited) {
-            _totalDeposited = 0;
-        } else {
-            _totalDeposited -= assets;
-        }
         super._withdraw(caller, receiver, _owner, assets, shares);
     }
 
@@ -392,6 +364,13 @@ contract SyndicateVault is
     function rescueERC721(address token, uint256 tokenId, address to) external onlyOwner {
         if (to == address(0)) revert InvalidAgentAddress();
         IERC721(token).safeTransferFrom(address(this), to, tokenId);
+    }
+
+    // ==================== UUPS ====================
+
+    /// @dev Only the factory can authorize upgrades.
+    function _authorizeUpgrade(address) internal view override {
+        if (msg.sender != _factory) revert NotFactory();
     }
 
     // ==================== RECEIVE ====================

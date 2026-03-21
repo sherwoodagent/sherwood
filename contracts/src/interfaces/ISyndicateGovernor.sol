@@ -16,6 +16,12 @@ interface ISyndicateGovernor {
         Cancelled // proposer or owner cancelled
     }
 
+    enum VoteType {
+        For,
+        Against,
+        Abstain
+    }
+
     // ── Structs ──
 
     struct GovernorParams {
@@ -37,6 +43,7 @@ interface ISyndicateGovernor {
         uint256 strategyDuration;
         uint256 votesFor;
         uint256 votesAgainst;
+        uint256 votesAbstain;
         uint256 snapshotTimestamp;
         uint256 voteEnd;
         uint256 executeBy;
@@ -90,7 +97,7 @@ interface ISyndicateGovernor {
         string metadataURI
     );
 
-    event VoteCast(uint256 indexed proposalId, address indexed voter, bool support, uint256 weight);
+    event VoteCast(uint256 indexed proposalId, address indexed voter, VoteType support, uint256 weight);
 
     event ProposalExecuted(uint256 indexed proposalId, address indexed vault, uint256 capitalSnapshot);
 
@@ -127,7 +134,7 @@ interface ISyndicateGovernor {
         uint256 splitIndex
     ) external returns (uint256 proposalId);
 
-    function vote(uint256 proposalId, bool support) external;
+    function vote(uint256 proposalId, VoteType support) external;
 
     function executeProposal(uint256 proposalId) external;
 

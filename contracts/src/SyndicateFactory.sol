@@ -42,6 +42,8 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     error InsufficientCreationFee();
     error InvalidFeeToken();
     error ManagementFeeTooHigh();
+    error UpgradesDisabled();
+    error VaultNotDeployed();
 
     struct SyndicateConfig {
         string metadataURI; // ipfs://Qm... (name, description, strategies)
@@ -101,6 +103,9 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     /// @notice Recipient of creation fees
     address public creationFeeRecipient;
 
+    /// @notice Whether vault upgrades are enabled (default: false)
+    bool public upgradesEnabled;
+
     // ── Events ──
 
     event SyndicateCreated(
@@ -112,6 +117,8 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     event GovernorUpdated(address oldGovernor, address newGovernor);
     event VaultImplUpdated(address oldImpl, address newImpl);
     event ManagementFeeBpsUpdated(uint256 oldBps, uint256 newBps);
+    event VaultUpgraded(address indexed vault, address indexed newImpl);
+    event UpgradesEnabledUpdated(bool enabled);
 
     struct InitParams {
         address owner;
@@ -258,6 +265,23 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         uint256 old = managementFeeBps;
         managementFeeBps = newBps;
         emit ManagementFeeBpsUpdated(old, newBps);
+    }
+
+    /// @notice Enable or disable vault upgrades (owner only)
+    function setUpgradesEnabled(bool enabled) external onlyOwner {
+        upgradesEnabled = enabled;
+        emit UpgradesEnabledUpdated(enabled);
+    }
+
+    /// @notice Upgrade a vault to a new implementation (only when upgrades enabled)
+    /// @param vault The vault proxy to upgrade
+    /// @param newImpl The new implementation address
+    function upgradeVault(address vault, address newImpl) external onlyOwner {
+        if (!upgradesEnabled) revert UpgradesDisabled();
+        if (vaultToSyndicate[vault] == 0) revert VaultNotDeployed();
+        if (newImpl == address(0)) revert InvalidVaultImpl();
+        UUPSUpgradeable(vault).upgradeToAndCall(newImpl, "");
+        emit VaultUpgraded(vault, newImpl);
     }
 
     // ==================== VIEWS ====================

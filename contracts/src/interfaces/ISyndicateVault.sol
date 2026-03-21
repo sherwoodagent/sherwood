@@ -7,7 +7,6 @@ interface ISyndicateVault {
     // ── Errors ──
     error InvalidOwner();
     error InvalidExecutorImpl();
-    error NoShares();
     error NotActiveAgent();
     error SimulationFailed();
     error InvalidDepositor();
@@ -25,6 +24,7 @@ interface ISyndicateVault {
     error InvalidGovernor();
     error InvalidAgentAddress();
     error TransferFailed();
+    error NotFactory();
 
     // ── Init Params ──
     struct InitParams {
@@ -47,9 +47,6 @@ interface ISyndicateVault {
         bool active;
     }
 
-    // ── LP Functions ──
-    function ragequit(address receiver) external returns (uint256 assets);
-
     // ── Owner Functions ──
     function executeBatch(BatchExecutorLib.Call[] calldata calls) external;
 
@@ -67,8 +64,9 @@ interface ISyndicateVault {
     function getAgentCount() external view returns (uint256);
     function isAgent(address pkpAddress) external view returns (bool);
     function getExecutorImpl() external view returns (address);
-    function totalDeposited() external view returns (uint256);
-    function getAgentOperators() external view returns (address[] memory);
+
+    // ── Factory ──
+    function factory() external view returns (address);
 
     // ── Governor ──
     function setGovernor(address governor_) external;
@@ -93,7 +91,6 @@ interface ISyndicateVault {
     // ── Events ──
     event AgentRegistered(uint256 indexed agentId, address indexed pkpAddress, address indexed operatorEOA);
     event AgentRemoved(address indexed pkpAddress);
-    event Ragequit(address indexed lp, uint256 shares, uint256 assets);
     event DepositorApproved(address indexed depositor);
     event DepositorRemoved(address indexed depositor);
     event OpenDepositsUpdated(bool open);

@@ -151,6 +151,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
             strategyDuration: strategyDuration,
             votesFor: 0,
             votesAgainst: 0,
+            votesAbstain: 0,
             snapshotTimestamp: block.timestamp,
             voteEnd: block.timestamp + _params.votingPeriod,
             executeBy: block.timestamp + _params.votingPeriod + _params.executionWindow,
@@ -169,7 +170,7 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
     }
 
     /// @inheritdoc ISyndicateGovernor
-    function vote(uint256 proposalId, bool support) external {
+    function vote(uint256 proposalId, VoteType support) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (proposal.id == 0) revert ProposalNotApproved(); // proposal doesn't exist
         if (block.timestamp > proposal.voteEnd) revert NotWithinVotingPeriod();
@@ -182,10 +183,12 @@ contract SyndicateGovernor is ISyndicateGovernor, Initializable, OwnableUpgradea
 
         _hasVoted[proposalId][msg.sender] = true;
 
-        if (support) {
+        if (support == VoteType.For) {
             proposal.votesFor += weight;
-        } else {
+        } else if (support == VoteType.Against) {
             proposal.votesAgainst += weight;
+        } else {
+            proposal.votesAbstain += weight;
         }
 
         emit VoteCast(proposalId, msg.sender, support, weight);
