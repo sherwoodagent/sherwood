@@ -4,7 +4,6 @@ import {
   AgentRemoved,
   Deposit as DepositEvent,
   Withdraw as WithdrawEvent,
-  Ragequit as RagequitEvent,
   DepositorApproved,
   DepositorRemoved,
   OpenDepositsUpdated,
@@ -15,7 +14,6 @@ import {
   Deposit,
   Withdrawal,
   Depositor,
-  Ragequit,
 } from "../generated/schema";
 
 // USDC has 6 decimals
@@ -116,25 +114,6 @@ export function handleWithdraw(event: WithdrawEvent): void {
   }
 }
 
-// ── Ragequit ──
-
-export function handleRagequit(event: RagequitEvent): void {
-  let syndicateId = getSyndicateId();
-
-  let id = event.transaction.hash.toHexString() + "-" + event.logIndex.toString();
-  let ragequit = new Ragequit(id);
-
-  ragequit.syndicate = syndicateId;
-  ragequit.lp = event.params.lp;
-  ragequit.shares = event.params.shares;
-  ragequit.assets = event.params.assets;
-  ragequit.timestamp = event.block.timestamp;
-  ragequit.blockNumber = event.block.number;
-  ragequit.txHash = event.transaction.hash;
-
-  ragequit.save();
-}
-
 // ── Depositor Whitelist ──
 
 export function handleDepositorApproved(event: DepositorApproved): void {
@@ -165,3 +144,5 @@ export function handleDepositorRemoved(event: DepositorRemoved): void {
 export function handleOpenDepositsUpdated(event: OpenDepositsUpdated): void {
   // Open deposits toggle — indexed for event filtering.
 }
+
+

@@ -22,7 +22,6 @@ export interface SyndicateMetadata {
     minDeposit?: string;
     minDepositFormatted?: string;
     feeModel?: string;
-    ragequitEnabled: boolean;
     lockPeriod?: number;
   };
   links: {

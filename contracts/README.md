@@ -34,7 +34,7 @@ Solidity smart contracts for agent-managed investment syndicates on Base. Built 
 
 - **Vault is the identity** — all DeFi positions (Moonwell supply/borrow, Uniswap LP, etc.) live on the vault address.
 - **Delegatecall pattern** — vault calls the shared `BatchExecutorLib` via delegatecall. The lib is stateless; execution context is the vault.
-- **Two-layer permissions** — on-chain caps (vault enforces maxPerTx, maxDailyTotal, maxBorrowRatio) + off-chain policies (agent software).
+- **Two-layer permissions** — on-chain caps (vault enforces maxPerTx, maxDailyTotal, maxBorrowRatio) + off-chain policies (Lit Actions).
 - **UUPS upgradeable** — vault implementation can be upgraded. Never reorder storage slots.
 
 ## Quick Start
@@ -53,7 +53,7 @@ forge build
 ### Test
 
 ```bash
-forge test           # Run all tests (70 tests)
+forge test           # Run all tests (66 tests)
 forge test -vvv      # Verbose output with traces
 forge test --match-test test_deposit   # Run specific tests
 ```
@@ -67,7 +67,7 @@ forge fmt --check    # Check formatting without modifying
 
 ### Deploy
 
-Deploy to Base Sepolia:
+Deploy to Base Sepolia (testnet):
 
 ```bash
 forge script script/testnet/Deploy.s.sol:DeployTestnet \
@@ -76,25 +76,13 @@ forge script script/testnet/Deploy.s.sol:DeployTestnet \
   --broadcast
 ```
 
-Deploy to Robinhood L2 testnet (no ENS, no ERC-8004):
+The deploy script:
+1. Deploys `BatchExecutorLib` (shared, stateless)
+2. Deploys `SyndicateVault` implementation
+3. Deploys `SyndicateFactory` (registers executor, vault impl, ENS registrar, agent registry)
+4. Deploys `StrategyRegistry` (UUPS proxy)
 
-```bash
-forge script script/robinhood-testnet/Deploy.s.sol:DeployRobinhoodTestnet \
-  --rpc-url robinhood_testnet \
-  --account sherwood-agent \
-  --broadcast
-```
-
-The deploy scripts:
-1. Deploy `BatchExecutorLib` (shared, stateless)
-2. Deploy `SyndicateVault` implementation
-3. Deploy `SyndicateGovernor` (UUPS proxy)
-4. Deploy `SyndicateFactory` (registers executor, vault impl, ENS registrar, agent registry)
-5. Deploy `StrategyRegistry` (UUPS proxy)
-
-On chains without ENS or ERC-8004 (e.g. Robinhood L2), the factory and vault accept `address(0)` for optional registries and skip identity/ENS checks.
-
-Protocol addresses are resolved at runtime in `cli/src/lib/addresses.ts`.
+Protocol addresses are hardcoded in `cli/src/lib/addresses.ts` (bundled with CLI).
 Deployment records saved in `contracts/chains/{chainId}.json`.
 
 ### Gas Snapshots
@@ -105,19 +93,29 @@ forge snapshot
 
 ## Deployed Addresses
 
-See [docs/deployments.md](../docs/deployments.md) for the full multi-chain address table.
+### Sherwood Contracts (Base Sepolia)
 
-### Sherwood Contracts
+| Contract | Address |
+|----------|---------|
+| SyndicateFactory | `0xc705F04fF2781aF9bB53ba416Cb32A29540c4624` |
+| StrategyRegistry | `0x8A45f769553D10F26a6633d019B04f7805b1368A` |
+| SyndicateVault (impl) | `0x7E1F71A72a88Ce8418cf82CACDE9ce5Bbbcf5772` |
+| BatchExecutorLib | `0x0c63Ea92336eA0324B81eB6D0fD62455eC38091b` |
 
-| Contract | Base Sepolia | Robinhood L2 Testnet |
-|----------|-------------|---------------------|
-| SyndicateFactory | `0x60bf54dDce61ece85BE5e66CBaA17cC312DEa6C8` | `0xD348524c66e209DfcC76b9a3208a05B82F6948D6` |
-| StrategyRegistry | `0xf1e6E9bd1a735B54F383b18ad6603Ddd566C71cE` | `0xC6744E4941f4810fDadB72c795aD3EE7cb55D925` |
-| SyndicateGovernor | `0xB478cdb99260F46191C9e5Da405F7E70eEA23dE4` | `0x866996c808E6244216a3d0df15464FCF5d495394` |
+### External Contracts (Base Mainnet)
+
+| Contract | Address |
+|----------|---------|
+| USDC | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (6 decimals) |
+| WETH | `0x4200000000000000000000000000000000000006` |
+| Moonwell Comptroller | `0xfBb21d0380beE3312B33c4353c8936a0F13EF26C` |
+| Moonwell mUSDC | `0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22` |
+| Uniswap V3 SwapRouter | `0x2626664c2603336E57B271c5C0b26F421741e481` |
+| Multicall3 | `0xcA11bde05977b3631167028862bE2a173976CA11` |
 
 ## Tests
 
-70 tests across 2 test suites:
+66 tests across 2 test suites:
 
 ### SyndicateVault (49 tests)
 
@@ -132,7 +130,7 @@ See [docs/deployments.md](../docs/deployments.md) for the full multi-chain addre
 - Simulation (dry-run via eth_call)
 - Fuzz testing (cap enforcement)
 
-### SyndicateFactory (21 tests)
+### SyndicateFactory (17 tests)
 
 - Syndicate creation with full config + ENS subname registration
 - ERC-8004 agent identity verification on create
@@ -142,7 +140,6 @@ See [docs/deployments.md](../docs/deployments.md) for the full multi-chain addre
 - Depositor gating on factory-created vaults
 - Storage isolation between syndicates
 - Subdomain availability checks
-- No-registry deployment (address(0) for ENS/ERC-8004, e.g. Robinhood L2)
 
 ## Subgraph
 

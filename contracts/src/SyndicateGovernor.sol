@@ -18,18 +18,19 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
  *         shareholders vote, and approved strategies execute via the vault.
  *
  *   - One strategy live per vault at a time
- *   - Redemptions locked during live strategy
  *   - Cooldown window between strategies for depositor exit
  *   - Permissionless settlement after strategy duration ends
  *   - P&L calculated via balance snapshot diffs
  *   - Vote weight from ERC20Votes checkpoints (timestamp-based snapshots)
+ *   - Optimistic governance: proposals pass unless AGAINST votes reach veto threshold
  *   - Collaborative proposals: multiple agents co-submit with fee splits
  *   - Parameter changes require timelock delay
+ *   - Protocol fee taken from profit before agent/management fees
  */
 contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    // ── Storage (existing — DO NOT reorder) ──
+    // ── Storage (existing -- DO NOT reorder) ──
 
     /// @notice Governor parameters
     GovernorParams private _params;
@@ -37,19 +38,19 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     /// @notice Proposal ID counter (1-indexed)
     uint256 private _proposalCount;
 
-    /// @notice Proposal ID → proposal data
+    /// @notice Proposal ID -> proposal data
     mapping(uint256 => StrategyProposal) private _proposals;
 
-    /// @notice Proposal ID → voter → bool
+    /// @notice Proposal ID -> voter -> bool
     mapping(uint256 => mapping(address => bool)) private _hasVoted;
 
-    /// @notice Proposal ID → vault balance at execution time
+    /// @notice Proposal ID -> vault balance at execution time
     mapping(uint256 => uint256) private _capitalSnapshots;
 
-    /// @notice Vault → currently executing proposal ID (0 if none)
+    /// @notice Vault -> currently executing proposal ID (0 if none)
     mapping(address => uint256) private _activeProposal;
 
-    /// @notice Vault → timestamp of last settlement
+    /// @notice Vault -> timestamp of last settlement
     mapping(address => uint256) private _lastSettledAt;
 
     /// @notice Set of registered vault addresses
@@ -57,13 +58,13 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
 
     // ── Collaborative proposal storage ──
 
-    /// @notice Proposal ID → co-proposers array
+    /// @notice Proposal ID -> co-proposers array
     mapping(uint256 => CoProposer[]) private _coProposers;
 
-    /// @notice Proposal ID → co-proposer address → approved
+    /// @notice Proposal ID -> co-proposer address -> approved
     mapping(uint256 => mapping(address => bool)) public coProposerApprovals;
 
-    /// @notice Proposal ID → deadline for co-proposer consent
+    /// @notice Proposal ID -> deadline for co-proposer consent
     mapping(uint256 => uint256) public collaborationDeadline;
 
     /// @notice Authorized factory that can register vaults
@@ -75,25 +76,28 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     uint256 private constant _NOT_ENTERED = 1;
     uint256 private constant _ENTERED = 2;
 
-    // ── New storage (appended — UUPS safe) ──
+    // ── New storage (appended -- UUPS safe) ──
 
-    /// @notice Proposal ID → minimum acceptable vault balance after settlement (Change C)
-    mapping(uint256 => uint256) private _minSettlementBalance;
-
-    /// @notice Proposal ID → execute (opening) calls (Change B)
+    /// @notice Proposal ID -> execute (opening) calls
     mapping(uint256 => BatchExecutorLib.Call[]) private _executeCalls;
 
-    /// @notice Proposal ID → settlement (closing) calls (Change B)
+    /// @notice Proposal ID -> settlement (closing) calls
     mapping(uint256 => BatchExecutorLib.Call[]) private _settlementCalls;
 
-    /// @notice Delay (seconds) before queued parameter changes take effect (Change A)
+    /// @notice Delay (seconds) before queued parameter changes take effect
     uint256 private _parameterChangeDelay;
 
-    /// @notice Parameter key → pending change (Change A)
+    /// @notice Parameter key -> pending change
     mapping(bytes32 => PendingChange) private _pendingChanges;
 
-    /// @dev Reserved storage for future upgrades. Decreased from 40 by 5 (new slots above).
-    uint256[35] private __gap;
+    /// @notice Protocol fee in basis points (taken from profit before agent/management fees)
+    uint256 private _protocolFeeBps;
+
+    /// @notice Recipient of protocol fees
+    address private _protocolFeeRecipient;
+
+    /// @dev Reserved storage for future upgrades
+    uint256[33] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -114,19 +118,21 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         if (p.parameterChangeDelay < MIN_PARAM_CHANGE_DELAY || p.parameterChangeDelay > MAX_PARAM_CHANGE_DELAY) {
             revert InvalidParameterChangeDelay();
         }
+        if (p.protocolFeeBps > MAX_PROTOCOL_FEE_BPS) revert InvalidProtocolFeeBps();
+        if (p.protocolFeeBps > 0 && p.protocolFeeRecipient == address(0)) revert InvalidProtocolFeeRecipient();
 
         __Ownable_init(p.owner);
 
         _validateVotingPeriod(p.votingPeriod);
         _validateExecutionWindow(p.executionWindow);
-        _validateQuorumBps(p.quorumBps);
+        _validateVetoThresholdBps(p.vetoThresholdBps);
         _validateMaxPerformanceFeeBps(p.maxPerformanceFeeBps);
         _validateCooldownPeriod(p.cooldownPeriod);
 
         _params = GovernorParams({
             votingPeriod: p.votingPeriod,
             executionWindow: p.executionWindow,
-            quorumBps: p.quorumBps,
+            vetoThresholdBps: p.vetoThresholdBps,
             maxPerformanceFeeBps: p.maxPerformanceFeeBps,
             cooldownPeriod: p.cooldownPeriod,
             collaborationWindow: p.collaborationWindow,
@@ -135,6 +141,8 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
             maxStrategyDuration: p.maxStrategyDuration
         });
         _parameterChangeDelay = p.parameterChangeDelay;
+        _protocolFeeBps = p.protocolFeeBps;
+        _protocolFeeRecipient = p.protocolFeeRecipient;
         _reentrancyStatus = _NOT_ENTERED;
     }
 
@@ -169,8 +177,7 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         uint256 strategyDuration,
         BatchExecutorLib.Call[] calldata executeCalls,
         BatchExecutorLib.Call[] calldata settlementCalls,
-        CoProposer[] calldata coProposers,
-        uint256 minSettlementBalance
+        CoProposer[] calldata coProposers
     ) external returns (uint256 proposalId) {
         if (!_registeredVaults.contains(vault)) revert VaultNotRegistered();
         if (!ISyndicateVault(vault).isAgent(msg.sender)) revert NotRegisteredAgent();
@@ -210,17 +217,12 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         _storeCalls(_executeCalls, proposalId, executeCalls);
         _storeCalls(_settlementCalls, proposalId, settlementCalls);
 
-        // Store min settlement balance
-        if (minSettlementBalance > 0) {
-            _minSettlementBalance[proposalId] = minSettlementBalance;
-        }
-
         // Store co-proposers and set collaboration deadline
         if (coProposers.length > 0) {
             _storeCoProposers(proposalId, coProposers);
         }
 
-        _emitProposalCreated(proposalId, executeCalls.length, settlementCalls.length, minSettlementBalance);
+        _emitProposalCreated(proposalId, executeCalls.length, settlementCalls.length);
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -230,7 +232,7 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         if (_resolveState(proposal) != ProposalState.Pending) revert NotWithinVotingPeriod();
         if (_hasVoted[proposalId][msg.sender]) revert AlreadyVoted();
 
-        // Get vote weight from ERC20Votes checkpoint at proposal creation block
+        // Get vote weight from ERC20Votes checkpoint at proposal creation
         uint256 weight = IVotes(proposal.vault).getPastVotes(msg.sender, proposal.snapshotTimestamp);
         if (weight == 0) revert NoVotingPower();
 
@@ -251,7 +253,7 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     function executeProposal(uint256 proposalId) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
 
-        // Resolve state (may transition Pending→Approved/Rejected/Expired or Approved→Expired)
+        // Resolve state (may transition Pending->Approved/Rejected/Expired or Approved->Expired)
         ProposalState currentState = _resolveState(proposal);
         if (currentState != ProposalState.Approved) revert ProposalNotApproved();
 
@@ -268,54 +270,29 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         uint256 balanceBefore = IERC20(asset).balanceOf(vault);
         _capitalSnapshots[proposalId] = balanceBefore;
 
-        // Execute the opening calls via the vault
-        BatchExecutorLib.Call[] memory callsToRun = _loadCalls(_executeCalls, proposalId);
-
-        // Update state
+        // Update state BEFORE external call (CEI pattern)
         _activeProposal[vault] = proposalId;
         proposal.state = ProposalState.Executed;
         proposal.executedAt = block.timestamp;
 
-        ISyndicateVault(vault).executeGovernorBatch(callsToRun);
+        // Execute the opening calls via the vault
+        ISyndicateVault(vault).executeGovernorBatch(_loadCalls(_executeCalls, proposalId));
 
         emit ProposalExecuted(proposalId, vault, balanceBefore);
     }
 
     /// @inheritdoc ISyndicateGovernor
-    /// @notice Path 1: Agent settles. Tries pre-committed calls first, falls back to custom calls. Enforces no loss.
-    /// @dev minSettlementBalance is enforced here only (not in settleProposal/emergencySettle escape hatches).
-    ///      It is an absolute floor set by the proposer — voters should evaluate it relative to vault size.
-    ///      NOTE: This is not a complete settlement trust solution. The agent controls the floor value,
-    ///      and timing manipulation is still possible. Follow-up improvements may include settlement
-    ///      delays, oracle/TWAP checks, or depositor challenge windows.
-    function settleByAgent(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external nonReentrant {
-        StrategyProposal storage proposal = _proposals[proposalId];
-        if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
-        if (msg.sender != proposal.proposer) revert NotProposer();
-
-        // Try pre-committed unwind calls first, fall back to agent-provided calls
-        _tryPrecommittedThenFallback(proposalId, proposal, calls);
-
-        // Enforce no loss — agent can only settle if vault balance >= snapshot
-        address asset = IERC4626(proposal.vault).asset();
-        uint256 balanceAfter = IERC20(asset).balanceOf(proposal.vault);
-        if (balanceAfter < _capitalSnapshots[proposalId]) revert SettlementCausedLoss();
-
-        // Enforce min settlement balance if set
-        uint256 minBalance = _minSettlementBalance[proposalId];
-        if (minBalance > 0 && balanceAfter < minBalance) revert SettlementBelowMinimum();
-
-        (int256 pnl, uint256 agentFee) = _finishSettlement(proposalId, proposal);
-
-        emit AgentSettled(proposalId, proposal.vault, pnl, agentFee);
-    }
-
-    /// @inheritdoc ISyndicateGovernor
-    /// @notice Path 2: Permissionless settle using pre-committed calls. After duration.
+    /// @notice Settle a strategy. Proposer can settle at any time; anyone else must wait for duration.
     function settleProposal(uint256 proposalId) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
-        if (block.timestamp < proposal.executedAt + proposal.strategyDuration) revert StrategyDurationNotElapsed();
+
+        // Proposer can settle anytime; everyone else waits for duration
+        if (msg.sender != proposal.proposer) {
+            if (block.timestamp < proposal.executedAt + proposal.strategyDuration) {
+                revert StrategyDurationNotElapsed();
+            }
+        }
 
         // Run the pre-committed settlement calls
         ISyndicateVault(proposal.vault).executeGovernorBatch(_loadCalls(_settlementCalls, proposalId));
@@ -324,7 +301,7 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     }
 
     /// @inheritdoc ISyndicateGovernor
-    /// @notice Path 3: Vault owner settles. Tries pre-committed calls first, falls back to custom. After duration.
+    /// @notice Vault owner settles. Tries pre-committed calls first, falls back to custom. After duration.
     function emergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
@@ -374,6 +351,20 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         emit ProposalCancelled(proposalId, msg.sender);
     }
 
+    /// @inheritdoc ISyndicateGovernor
+    function vetoProposal(uint256 proposalId) external {
+        StrategyProposal storage proposal = _proposals[proposalId];
+        if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
+
+        ProposalState currentState = _resolveState(proposal);
+        if (currentState != ProposalState.Pending && currentState != ProposalState.Approved) {
+            revert ProposalNotCancellable();
+        }
+
+        proposal.state = ProposalState.Rejected;
+        emit ProposalVetoed(proposalId, msg.sender);
+    }
+
     // ==================== COLLABORATIVE PROPOSALS ====================
 
     /// @inheritdoc ISyndicateGovernor
@@ -407,7 +398,7 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         }
 
         if (allApproved) {
-            // Transition to Pending — voting begins
+            // Transition to Pending -- voting begins
             proposal.state = ProposalState.Pending;
             proposal.snapshotTimestamp = block.timestamp;
             proposal.voteEnd = block.timestamp + _params.votingPeriod;
@@ -448,6 +439,16 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     function removeVault(address vault) external onlyOwner {
         if (!_registeredVaults.remove(vault)) revert VaultNotRegistered();
         emit VaultRemoved(vault);
+    }
+
+    // ==================== PROTOCOL FEE SETTERS ====================
+
+    /// @inheritdoc ISyndicateGovernor
+    function setProtocolFeeRecipient(address newRecipient) external onlyOwner {
+        if (newRecipient == address(0)) revert InvalidProtocolFeeRecipient();
+        address old = _protocolFeeRecipient;
+        _protocolFeeRecipient = newRecipient;
+        emit ProtocolFeeRecipientUpdated(old, newRecipient);
     }
 
     // ==================== VIEWS ====================
@@ -536,8 +537,19 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     }
 
     /// @inheritdoc ISyndicateGovernor
-    function getMinSettlementBalance(uint256 proposalId) external view returns (uint256) {
-        return _minSettlementBalance[proposalId];
+    function protocolFeeBps() external view returns (uint256) {
+        return _protocolFeeBps;
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    function protocolFeeRecipient() external view returns (address) {
+        return _protocolFeeRecipient;
+    }
+
+    function _applyProtocolFeeBpsChange(uint256 newValue) internal override returns (uint256 old) {
+        old = _protocolFeeBps;
+        _protocolFeeBps = newValue;
+        emit ProtocolFeeBpsUpdated(old, newValue);
     }
 
     // ==================== INTERNAL ====================
@@ -567,12 +579,7 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     }
 
     /// @dev Emit ProposalCreated event (reads from storage to avoid stack-too-deep in propose())
-    function _emitProposalCreated(
-        uint256 proposalId,
-        uint256 executeCallCount,
-        uint256 settlementCallCount,
-        uint256 minSettlementBalance_
-    ) internal {
+    function _emitProposalCreated(uint256 proposalId, uint256 executeCallCount, uint256 settlementCallCount) internal {
         StrategyProposal storage p = _proposals[proposalId];
         emit ProposalCreated(
             proposalId,
@@ -582,7 +589,6 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
             p.strategyDuration,
             executeCallCount,
             settlementCallCount,
-            minSettlementBalance_,
             p.metadataURI
         );
     }
@@ -650,10 +656,10 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     ) internal {
         // Try pre-committed calls first
         try ISyndicateVault(proposal.vault).executeGovernorBatch(_loadCalls(_settlementCalls, proposalId)) {
-        // Pre-committed calls succeeded — done
+        // Pre-committed calls succeeded
         }
         catch (bytes memory reason) {
-            // Pre-committed calls failed — run fallback calls
+            // Pre-committed calls failed -- run fallback calls
             if (fallbackCalls.length == 0) {
                 assembly {
                     revert(add(reason, 32), mload(reason))
@@ -679,6 +685,7 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     }
 
     /// @dev Pure state resolution logic (view-only, no storage writes).
+    ///      Optimistic governance: proposals pass unless AGAINST votes reach veto threshold.
     function _resolveStateView(StrategyProposal storage proposal) internal view returns (ProposalState) {
         ProposalState stored = proposal.state;
 
@@ -689,13 +696,14 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         if (stored == ProposalState.Pending) {
             if (block.timestamp <= proposal.voteEnd) return ProposalState.Pending;
 
-            uint256 totalVotes = proposal.votesFor + proposal.votesAgainst + proposal.votesAbstain;
+            // Voting ended -- optimistic: approved unless AGAINST votes reach veto threshold
             uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotTimestamp);
-            uint256 quorumRequired = (pastTotalSupply * _params.quorumBps) / 10000;
+            uint256 vetoThreshold = (pastTotalSupply * _params.vetoThresholdBps) / 10000;
 
-            if (totalVotes < quorumRequired || proposal.votesFor <= proposal.votesAgainst) {
+            if (proposal.votesAgainst >= vetoThreshold) {
                 return ProposalState.Rejected;
             }
+
             return block.timestamp > proposal.executeBy ? ProposalState.Expired : ProposalState.Approved;
         }
 
@@ -712,58 +720,87 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     {
         address vault = proposal.vault;
         address asset = IERC4626(vault).asset();
-        uint256 balanceAfter = IERC20(asset).balanceOf(vault);
-        uint256 capitalSnapshot = _capitalSnapshots[proposalId];
 
         // casting to int256 is safe because vault balances won't exceed int256.max
         // forge-lint: disable-next-line(unsafe-typecast)
-        pnl = int256(balanceAfter) - int256(capitalSnapshot);
+        pnl = int256(IERC20(asset).balanceOf(vault)) - int256(_capitalSnapshots[proposalId]);
 
-        // Distribute fees on profit
-        agentFee = 0;
-        uint256 mgmtFee = 0;
-        // Finalize state before external transfers to avoid reentrancy on stale state.
+        // Finalize state before external transfers to prevent reentrancy on stale state
         _activeProposal[vault] = 0;
         _lastSettledAt[vault] = block.timestamp;
         proposal.state = ProposalState.Settled;
 
+        uint256 totalFee = 0;
         if (pnl > 0) {
-            // forge-lint: disable-next-line(unsafe-typecast)
-            uint256 profit = uint256(pnl);
-            agentFee = (profit * proposal.performanceFeeBps) / 10000;
-            mgmtFee = ((profit - agentFee) * ISyndicateVault(vault).managementFeeBps()) / 10000;
+            (agentFee, totalFee) =
+                _distributeFees(proposalId, vault, asset, proposal.proposer, proposal.performanceFeeBps, uint256(pnl));
+        }
 
-            if (agentFee > 0) {
-                CoProposer[] storage coProps = _coProposers[proposalId];
-                if (coProps.length > 0) {
-                    // Distribute to co-proposers first, lead gets remainder
-                    // Deregistered co-proposers are skipped — their share goes to the lead
-                    uint256 distributed = 0;
-                    for (uint256 i = 0; i < coProps.length; i++) {
-                        uint256 share = (agentFee * coProps[i].splitBps) / 10000;
-                        if (share > 0 && ISyndicateVault(vault).isAgent(coProps[i].agent)) {
-                            ISyndicateVault(vault).transferPerformanceFee(asset, coProps[i].agent, share);
-                            distributed += share;
-                        }
-                    }
-                    // Lead proposer gets remainder (handles rounding)
-                    uint256 leadShare = agentFee - distributed;
-                    if (leadShare > 0) {
-                        ISyndicateVault(vault).transferPerformanceFee(asset, proposal.proposer, leadShare);
-                    }
-                } else {
-                    // Solo proposal — all to proposer
-                    ISyndicateVault(vault).transferPerformanceFee(asset, proposal.proposer, agentFee);
-                }
-            }
-            if (mgmtFee > 0) {
-                address vaultOwner = OwnableUpgradeable(vault).owner();
-                ISyndicateVault(vault).transferPerformanceFee(asset, vaultOwner, mgmtFee);
+        emit ProposalSettled(proposalId, vault, pnl, totalFee, block.timestamp - proposal.executedAt);
+    }
+
+    /// @dev Distribute protocol, agent, and management fees. Extracted to avoid stack-too-deep.
+    function _distributeFees(
+        uint256 proposalId,
+        address vault,
+        address asset,
+        address proposer,
+        uint256 perfFeeBps,
+        uint256 profit
+    ) internal returns (uint256 agentFee, uint256 totalFee) {
+        uint256 protocolFee = 0;
+
+        // Protocol fee taken first from gross profit
+        if (_protocolFeeBps > 0 && _protocolFeeRecipient != address(0)) {
+            protocolFee = (profit * _protocolFeeBps) / 10000;
+            if (protocolFee > 0) {
+                ISyndicateVault(vault).transferPerformanceFee(asset, _protocolFeeRecipient, protocolFee);
             }
         }
 
-        uint256 duration = block.timestamp - proposal.executedAt;
-        emit ProposalSettled(proposalId, vault, pnl, agentFee + mgmtFee, duration);
+        uint256 netProfit = profit - protocolFee;
+
+        // Agent performance fee from net profit
+        agentFee = (netProfit * perfFeeBps) / 10000;
+
+        // Management fee from remainder after agent fee
+        uint256 mgmtFee = ((netProfit - agentFee) * ISyndicateVault(vault).managementFeeBps()) / 10000;
+
+        if (agentFee > 0) {
+            _distributeAgentFee(proposalId, vault, asset, proposer, agentFee);
+        }
+        if (mgmtFee > 0) {
+            ISyndicateVault(vault).transferPerformanceFee(asset, OwnableUpgradeable(vault).owner(), mgmtFee);
+        }
+
+        totalFee = protocolFee + agentFee + mgmtFee;
+    }
+
+    /// @dev Distribute agent fee to co-proposers (if any) and lead proposer. Extracted to avoid stack-too-deep.
+    function _distributeAgentFee(uint256 proposalId, address vault, address asset, address proposer, uint256 agentFee)
+        internal
+    {
+        CoProposer[] storage coProps = _coProposers[proposalId];
+        if (coProps.length > 0) {
+            // Distribute to co-proposers first, lead gets remainder
+            // Deregistered co-proposers are skipped -- their share goes to the lead
+            uint256 distributed = 0;
+            for (uint256 i = 0; i < coProps.length; i++) {
+                uint256 share = (agentFee * coProps[i].splitBps) / 10000;
+                if (share > 0 && ISyndicateVault(vault).isAgent(coProps[i].agent)) {
+                    ISyndicateVault(vault).transferPerformanceFee(asset, coProps[i].agent, share);
+                    distributed += share;
+                }
+            }
+            // Lead proposer gets remainder (handles rounding)
+            uint256 leadShare = agentFee - distributed;
+            if (leadShare > 0) {
+                ISyndicateVault(vault).transferPerformanceFee(asset, proposer, leadShare);
+            }
+        } else {
+            // Solo proposal -- all to proposer
+            ISyndicateVault(vault).transferPerformanceFee(asset, proposer, agentFee);
+        }
     }
 
     // ==================== UUPS ====================

@@ -10,7 +10,7 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
  *         and timelock-based parameter changes. Extracted from SyndicateGovernor
  *         to reduce contract size and improve separation of concerns.
  *
- *   - All 9 parameter setters queue changes with a delay
+ *   - All parameter setters queue changes with a delay
  *   - Owner must call finalizeParameterChange() after the delay elapses
  *   - Owner can cancel pending changes at any time
  *   - Parameters are validated at both queue and finalize time
@@ -22,13 +22,14 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     uint256 public constant MAX_VOTING_PERIOD = 30 days;
     uint256 public constant MIN_EXECUTION_WINDOW = 1 hours;
     uint256 public constant MAX_EXECUTION_WINDOW = 7 days;
-    uint256 public constant MIN_QUORUM_BPS = 1000; // 10%
-    uint256 public constant MAX_QUORUM_BPS = 10000; // 100%
+    uint256 public constant MIN_VETO_THRESHOLD_BPS = 1000; // 10%
+    uint256 public constant MAX_VETO_THRESHOLD_BPS = 10000; // 100%
     uint256 public constant MAX_PERFORMANCE_FEE_CAP = 5000; // 50%
     uint256 public constant ABSOLUTE_MIN_STRATEGY_DURATION = 1 hours;
     uint256 public constant ABSOLUTE_MAX_STRATEGY_DURATION = 30 days;
     uint256 public constant MIN_COOLDOWN_PERIOD = 1 hours;
     uint256 public constant MAX_COOLDOWN_PERIOD = 30 days;
+    uint256 public constant MAX_PROTOCOL_FEE_BPS = 1000; // 10% cap on protocol fee
 
     // ── Collaborative proposal constants ──
 
@@ -46,13 +47,14 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
 
     bytes32 public constant PARAM_VOTING_PERIOD = keccak256("votingPeriod");
     bytes32 public constant PARAM_EXECUTION_WINDOW = keccak256("executionWindow");
-    bytes32 public constant PARAM_QUORUM_BPS = keccak256("quorumBps");
+    bytes32 public constant PARAM_VETO_THRESHOLD_BPS = keccak256("vetoThresholdBps");
     bytes32 public constant PARAM_MAX_PERF_FEE = keccak256("maxPerformanceFeeBps");
     bytes32 public constant PARAM_MIN_STRATEGY_DURATION = keccak256("minStrategyDuration");
     bytes32 public constant PARAM_MAX_STRATEGY_DURATION = keccak256("maxStrategyDuration");
     bytes32 public constant PARAM_COOLDOWN = keccak256("cooldownPeriod");
     bytes32 public constant PARAM_COLLAB_WINDOW = keccak256("collaborationWindow");
     bytes32 public constant PARAM_MAX_CO_PROPOSERS = keccak256("maxCoProposers");
+    bytes32 public constant PARAM_PROTOCOL_FEE_BPS = keccak256("protocolFeeBps");
 
     // ── Virtual accessors (implemented by SyndicateGovernor) ──
 
@@ -75,9 +77,9 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     }
 
     /// @inheritdoc ISyndicateGovernor
-    function setQuorumBps(uint256 newQuorumBps) external onlyOwner {
-        _validateQuorumBps(newQuorumBps);
-        _queueChange(PARAM_QUORUM_BPS, newQuorumBps);
+    function setVetoThresholdBps(uint256 newVetoThresholdBps) external onlyOwner {
+        _validateVetoThresholdBps(newVetoThresholdBps);
+        _queueChange(PARAM_VETO_THRESHOLD_BPS, newVetoThresholdBps);
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -130,6 +132,12 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
             revert InvalidMaxCoProposers();
         }
         _queueChange(PARAM_MAX_CO_PROPOSERS, newMaxCoProposers);
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    function setProtocolFeeBps(uint256 newProtocolFeeBps) external onlyOwner {
+        if (newProtocolFeeBps > MAX_PROTOCOL_FEE_BPS) revert InvalidProtocolFeeBps();
+        _queueChange(PARAM_PROTOCOL_FEE_BPS, newProtocolFeeBps);
     }
 
     // ── Timelock functions ──
@@ -197,11 +205,11 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
             params.executionWindow = newValue;
             emit ParameterChangeFinalized(paramKey, old, newValue);
             emit ExecutionWindowUpdated(old, newValue);
-        } else if (paramKey == PARAM_QUORUM_BPS) {
-            uint256 old = params.quorumBps;
-            params.quorumBps = newValue;
+        } else if (paramKey == PARAM_VETO_THRESHOLD_BPS) {
+            uint256 old = params.vetoThresholdBps;
+            params.vetoThresholdBps = newValue;
             emit ParameterChangeFinalized(paramKey, old, newValue);
-            emit QuorumBpsUpdated(old, newValue);
+            emit VetoThresholdBpsUpdated(old, newValue);
         } else if (paramKey == PARAM_MAX_PERF_FEE) {
             uint256 old = params.maxPerformanceFeeBps;
             params.maxPerformanceFeeBps = newValue;
@@ -232,6 +240,9 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
             params.maxCoProposers = newValue;
             emit ParameterChangeFinalized(paramKey, old, newValue);
             emit MaxCoProposersUpdated(old, newValue);
+        } else if (paramKey == PARAM_PROTOCOL_FEE_BPS) {
+            uint256 old = _applyProtocolFeeBpsChange(newValue);
+            emit ParameterChangeFinalized(paramKey, old, newValue);
         } else {
             revert InvalidParameterKey();
         }
@@ -243,8 +254,8 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
             _validateVotingPeriod(newValue);
         } else if (paramKey == PARAM_EXECUTION_WINDOW) {
             _validateExecutionWindow(newValue);
-        } else if (paramKey == PARAM_QUORUM_BPS) {
-            _validateQuorumBps(newValue);
+        } else if (paramKey == PARAM_VETO_THRESHOLD_BPS) {
+            _validateVetoThresholdBps(newValue);
         } else if (paramKey == PARAM_MAX_PERF_FEE) {
             _validateMaxPerformanceFeeBps(newValue);
         } else if (paramKey == PARAM_COOLDOWN) {
@@ -267,8 +278,13 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
             if (newValue == 0 || newValue > ABSOLUTE_MAX_CO_PROPOSERS) {
                 revert InvalidMaxCoProposers();
             }
+        } else if (paramKey == PARAM_PROTOCOL_FEE_BPS) {
+            if (newValue > MAX_PROTOCOL_FEE_BPS) revert InvalidProtocolFeeBps();
         }
     }
+
+    /// @dev Apply protocol fee change — implemented by SyndicateGovernor
+    function _applyProtocolFeeBpsChange(uint256 newValue) internal virtual returns (uint256 old);
 
     // ── Validation helpers ──
 
@@ -280,8 +296,8 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
         if (value < MIN_EXECUTION_WINDOW || value > MAX_EXECUTION_WINDOW) revert InvalidExecutionWindow();
     }
 
-    function _validateQuorumBps(uint256 value) internal pure {
-        if (value < MIN_QUORUM_BPS || value > MAX_QUORUM_BPS) revert InvalidQuorumBps();
+    function _validateVetoThresholdBps(uint256 value) internal pure {
+        if (value < MIN_VETO_THRESHOLD_BPS || value > MAX_VETO_THRESHOLD_BPS) revert InvalidVetoThresholdBps();
     }
 
     function _validateMaxPerformanceFeeBps(uint256 value) internal pure {

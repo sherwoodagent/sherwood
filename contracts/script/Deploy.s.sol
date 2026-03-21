@@ -5,7 +5,6 @@ import {Script, console} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SyndicateVault} from "../src/SyndicateVault.sol";
-import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../src/SyndicateFactory.sol";
 import {SyndicateGovernor} from "../src/SyndicateGovernor.sol";
@@ -76,14 +75,16 @@ contract Deploy is Script {
                     owner: deployer,
                     votingPeriod: 1 days,
                     executionWindow: 1 days,
-                    quorumBps: 4000,
+                    vetoThresholdBps: 4000,
                     maxPerformanceFeeBps: 3000,
                     cooldownPeriod: 1 days,
                     collaborationWindow: 48 hours,
                     maxCoProposers: 5,
-                    minStrategyDuration: 1 days,
-                    maxStrategyDuration: 7 days,
-                    parameterChangeDelay: 1 days
+                    minStrategyDuration: 1 hours,
+                    maxStrategyDuration: 30 days,
+                    parameterChangeDelay: 1 days,
+                    protocolFeeBps: 200,
+                    protocolFeeRecipient: deployer
                 }))
         );
         address governorProxy = address(new ERC1967Proxy(address(govImpl), govInitData));
@@ -93,48 +94,46 @@ contract Deploy is Script {
         SyndicateFactory factoryImpl = new SyndicateFactory();
         bytes memory factoryInitData = abi.encodeCall(
             SyndicateFactory.initialize,
-            (deployer, address(executorLib), address(vaultImpl), L2_REGISTRAR, AGENT_REGISTRY, governorProxy)
+            (SyndicateFactory.InitParams({
+                    owner: deployer,
+                    executorImpl: address(executorLib),
+                    vaultImpl: address(vaultImpl),
+                    ensRegistrar: L2_REGISTRAR,
+                    agentRegistry: AGENT_REGISTRY,
+                    governor: governorProxy,
+                    managementFeeBps: 50
+                }))
         );
         SyndicateFactory factory = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInitData)));
         console.log("SyndicateFactory:", address(factory));
 
-        // Authorize factory to register new vaults on governor
-        ISyndicateGovernor(governorProxy).setFactory(address(factory));
+        // 5. Create first syndicate + register agent
+        {
+            uint256 creatorAgentId = vm.envUint("CREATOR_AGENT_ID");
 
-        // 4. Create first syndicate via factory
-        // NOTE: creatorAgentId must be set to the deployer's ERC-8004 agent ID
-        uint256 creatorAgentId = vm.envUint("CREATOR_AGENT_ID");
-
-        (uint256 syndicateId, address vaultProxy) = factory.createSyndicate(
-            creatorAgentId,
-            SyndicateFactory.SyndicateConfig({
-                metadataURI: "",
-                asset: IERC20(USDC),
-                name: "Sherwood Vault",
-                symbol: "swUSDC",
-                openDeposits: false, // Whitelist-gated deposits
-                subdomain: "sherwood"
-            })
-        );
-        console.log("Syndicate #%d vault:", syndicateId, vaultProxy);
-
-        // 5. Register deployer as agent (dev mode — deployer acts as agent wallet)
-        // NOTE: agentId must be set to the deployer's ERC-8004 agent ID
-        uint256 agentId = creatorAgentId;
-        SyndicateVault(payable(vaultProxy))
-            .registerAgent(
-                agentId, // ERC-8004 identity
-                deployer // agentAddress (in dev, deployer acts as agent)
+            (uint256 syndicateId, address vaultProxy) = factory.createSyndicate(
+                creatorAgentId,
+                SyndicateFactory.SyndicateConfig({
+                    metadataURI: "",
+                    asset: IERC20(USDC),
+                    name: "Sherwood Vault",
+                    symbol: "swUSDC",
+                    openDeposits: false,
+                    subdomain: "sherwood"
+                })
             );
-        console.log("Registered deployer as agent");
+            console.log("Syndicate #%d vault:", syndicateId, vaultProxy);
 
-        vm.stopBroadcast();
+            SyndicateVault(payable(vaultProxy)).registerAgent(creatorAgentId, deployer);
+            console.log("Registered deployer as agent");
 
-        // Summary
-        console.log("\n=== Deployment Summary ===");
-        console.log("VAULT_ADDRESS=%s", vaultProxy);
+            console.log("\n=== Deployment Summary ===");
+            console.log("VAULT_ADDRESS=%s", vaultProxy);
+        }
+
         console.log("FACTORY_ADDRESS=%s", address(factory));
         console.log("EXECUTOR_LIB_ADDRESS=%s", address(executorLib));
-        console.log("\nCopy VAULT_ADDRESS to cli/.env (no more BATCH_EXECUTOR_ADDRESS needed)");
+
+        vm.stopBroadcast();
     }
 }

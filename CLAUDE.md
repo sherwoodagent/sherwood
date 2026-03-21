@@ -6,12 +6,12 @@
 
 1. Create a feature branch: `git checkout -b <type>/<short-description>`
    - Types: `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, `chore/`
-   - Examples: `feat/vault-agent-registry`, `fix/usdc-decimals`, `test/vault-ragequit`
+   - Examples: `feat/vault-agent-registry`, `fix/usdc-decimals`, `test/vault-redeem`
 
 2. Make atomic commits with conventional commit messages:
    - `feat: add syndicate-level caps to vault contract`
    - `fix: account for USDC 6 decimals in deposit math`
-   - `test: vault ragequit returns pro-rata shares`
+   - `test: vault redeem returns pro-rata shares`
    - `docs: update README with vault architecture`
 
 3. Push the branch and create a PR with the template (auto-loaded from `.github/`)
@@ -38,6 +38,26 @@ app/         Next.js dashboard
 - Use SafeERC20 for all token transfers
 - Run `forge build` and `forge test` before every PR
 - Run `forge fmt` before committing
+- SyndicateGovernor is near the EIP-170 bytecode limit (~23.8k / 24.6k) — avoid adding large functions without deduplicating first
+
+### Architecture
+
+- **SyndicateVault** — ERC-4626 vault with ERC20Votes for governance. Standard `redeem()`/`withdraw()` for LP exits (no custom ragequit). Dynamic `_decimalsOffset()` = `asset.decimals()` for first-depositor inflation protection.
+- **SyndicateGovernor** — Proposal lifecycle, optimistic voting, execution, settlement, collaborative proposals. Inherits `GovernorParameters` (abstract) for all parameter setters, validation, and timelock logic.
+- **GovernorParameters** — Abstract contract with constants, bounds, 10 parameter setters (all timelock-gated: queue → delay → finalize), and validation helpers. Extracted to reduce governor bytecode.
+- **SyndicateFactory** — UUPS upgradeable factory. Deploys vault + registers it with the governor. Creation fee, vault upgrades, paginated queries. Owner-configurable: `setVaultImpl`, `setGovernor`, `setCreationFee`, `setManagementFeeBps`, `setUpgradesEnabled`.
+- **BatchExecutorLib** — Stateless library for `delegatecall`-based batch execution.
+- **Strategy Templates** — `BaseStrategy` (abstract) + `MoonwellSupplyStrategy` + `AerodromeLPStrategy`. ERC-1167 clonable. Vault calls `execute()`/`settle()` via batch.
+
+### Governor Key Concepts
+
+- **Optimistic governance** — Proposals pass by default after voting period ends. Only rejected if AGAINST votes reach `vetoThresholdBps`. Vault owner can also `vetoProposal()` to reject Pending/Approved proposals.
+- **VoteType enum** — `For`, `Against`, `Abstain` (replaces boolean vote).
+- **Separate `executeCalls` / `settlementCalls`** — Proposals store opening and closing calls in two distinct arrays. No `splitIndex`.
+- **Parameter timelock** — All governance parameter changes are queued with a configurable delay (6h–7d). Owner calls the setter (queues), waits, then calls `finalizeParameterChange(paramKey)`. Parameters are re-validated at finalize time. Owner can `cancelParameterChange(paramKey)` at any time.
+- **Protocol fee** — `protocolFeeBps` + `protocolFeeRecipient` taken from gross profit before agent and management fees. Timelocked. Max 10%.
+- **Two settlement paths**: (1) `settleProposal` — proposer can call anytime, anyone else after strategy duration; (2) `emergencySettle` — vault owner after duration, tries pre-committed calls first then falls back to custom calls.
+- **Vault reads governor from factory** — no `setGovernor` on vault, no lock/unlock storage. `redemptionsLocked()` checks `governor.getActiveProposal()` directly.
 
 ## CLI
 
@@ -149,7 +169,10 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 
 ## Safety
 
-- All vault contracts are UUPS upgradeable — never change storage layout order
+- All contracts (Vault, Governor, Factory) are UUPS upgradeable — never change storage layout order, append new slots only, reduce `__gap` accordingly
 - Two-layer permission model: on-chain caps (vault) + off-chain policies (agent software)
 - Agent wallets are standard EOAs
 - Syndicate-level caps are hard limits — no agent can bypass them
+- Governor parameter changes require timelock delay — prevents instant governance manipulation
+- ERC-4626 inflation protection via dynamic `_decimalsOffset()` — scales to any asset denomination
+- `delegatecall` to `BatchExecutorLib` only (stateless, 62-line library) — not arbitrary strategy contracts

@@ -85,14 +85,13 @@ templates:
         - Deposit
         - Withdrawal
         - Depositor
-        - Ragequit
         - VaultLookup
       abis:
         - name: SyndicateVault
           file: ../out/SyndicateVault.sol/SyndicateVault.json
       eventHandlers:
         # Agent management
-        - event: AgentRegistered(indexed uint256,indexed address,indexed address)
+        - event: AgentRegistered(indexed uint256,indexed address)
           handler: handleAgentRegistered
         - event: AgentRemoved(indexed address)
           handler: handleAgentRemoved
@@ -101,9 +100,6 @@ templates:
           handler: handleDeposit
         - event: Withdraw(indexed address,indexed address,indexed address,uint256,uint256)
           handler: handleWithdraw
-        # Ragequit
-        - event: Ragequit(indexed address,uint256,uint256)
-          handler: handleRagequit
         # Depositor whitelist
         - event: DepositorApproved(indexed address)
           handler: handleDepositorApproved
@@ -112,4 +108,5 @@ templates:
         # Config changes
         - event: OpenDepositsUpdated(bool)
           handler: handleOpenDepositsUpdated
+        # Governor integration
       file: ./src/vault.ts

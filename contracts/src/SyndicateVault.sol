@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
 import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
+import {ISyndicateFactory} from "./interfaces/ISyndicateFactory.sol";
 import {BatchExecutorLib} from "./BatchExecutorLib.sol";
 import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {
@@ -10,14 +11,14 @@ import {
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {ERC721Holder} from "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 /**
@@ -34,7 +35,7 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
  *   Inherits ERC20VotesUpgradeable to provide proper vote checkpointing for
  *   the governor's snapshot-based voting system.
  *
- *   LPs can redeem at any time for their pro-rata share.
+ *   Deployed as ERC-1967 UUPS proxy. Upgradeable only via the factory when upgrades are enabled.
  */
 contract SyndicateVault is
     ISyndicateVault,
@@ -50,9 +51,8 @@ contract SyndicateVault is
     using EnumerableSet for EnumerableSet.AddressSet;
 
     // ==================== STORAGE ====================
-    // WARNING: Never reorder existing slots. Append-only for UUPS safety.
 
-    /// @notice Agent wallet address => agent config
+    /// @notice Agent address => agent config
     mapping(address => AgentConfig) private _agents;
 
     /// @notice Set of all registered agent addresses
@@ -72,15 +72,15 @@ contract SyndicateVault is
     /// @notice ERC-8004 agent identity registry (ERC-721)
     IERC721 private _agentRegistry;
 
-    // ── Governor storage (appended — UUPS safe) ──
-
-    /// @notice Trusted governor contract
-    address private _governor;
+    // ── Governor / Factory storage ──
 
     /// @notice Vault owner's management fee on strategy profits (basis points, set at init)
     uint256 private _managementFeeBps;
 
-    /// @dev Reserved storage for future upgrades. Decrease by 1 for each new slot added.
+    /// @notice Factory that deployed this vault (controls upgrades, provides governor address)
+    address private _factory;
+
+    /// @dev Reserved storage for future upgrades
     uint256[40] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -91,8 +91,7 @@ contract SyndicateVault is
     function initialize(InitParams memory p) external initializer {
         if (p.owner == address(0)) revert InvalidOwner();
         if (p.executorImpl == address(0)) revert InvalidExecutorImpl();
-        if (p.governor == address(0)) revert InvalidGovernor();
-        // agentRegistry may be address(0) on chains without ERC-8004
+        if (p.agentRegistry == address(0)) revert InvalidAgentRegistry();
 
         __ERC4626_init(IERC20(p.asset));
         __ERC20_init(p.name, p.symbol);
@@ -103,8 +102,8 @@ contract SyndicateVault is
         _executorImpl = p.executorImpl;
         _openDeposits = p.openDeposits;
         _agentRegistry = IERC721(p.agentRegistry);
-        _governor = p.governor;
         _managementFeeBps = p.managementFeeBps;
+        _factory = msg.sender;
     }
 
     // ==================== BATCH EXECUTION ====================
@@ -190,15 +189,15 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
-    function getAgentAddresses() external view returns (address[] memory) {
-        return _agentSet.values();
+    function factory() external view returns (address) {
+        return _factory;
     }
 
     // ==================== ADMIN ====================
 
     /// @inheritdoc ISyndicateVault
     function registerAgent(uint256 agentId, address agentAddress) external onlyOwner {
-        if (agentAddress == address(0)) revert InvalidAgentAddress();
+        if (agentAddress == address(0)) revert ZeroAddress();
         if (_agents[agentAddress].active) revert AgentAlreadyRegistered();
 
         // Verify ERC-8004 identity (skipped on chains without agent registry)
@@ -237,8 +236,13 @@ contract SyndicateVault is
     // ==================== GOVERNOR ====================
 
     modifier onlyGovernor() {
-        if (msg.sender != _governor) revert NotGovernor();
+        if (msg.sender != _getGovernor()) revert NotGovernor();
         _;
+    }
+
+    /// @dev Read governor address from factory
+    function _getGovernor() internal view returns (address) {
+        return ISyndicateFactory(_factory).governor();
     }
 
     /// @inheritdoc ISyndicateVault
@@ -259,12 +263,14 @@ contract SyndicateVault is
 
     /// @inheritdoc ISyndicateVault
     function governor() external view returns (address) {
-        return _governor;
+        return _getGovernor();
     }
 
     /// @inheritdoc ISyndicateVault
-    function redemptionsLocked() external view returns (bool) {
-        return ISyndicateGovernor(_governor).getActiveProposal(address(this)) != 0;
+    function redemptionsLocked() public view returns (bool) {
+        address gov = _getGovernor();
+        if (gov == address(0)) return false;
+        return ISyndicateGovernor(gov).getActiveProposal(address(this)) != 0;
     }
 
     /// @inheritdoc ISyndicateVault
@@ -319,13 +325,38 @@ contract SyndicateVault is
         override
         whenNotPaused
     {
-        if (ISyndicateGovernor(_governor).getActiveProposal(address(this)) != 0) revert RedemptionsLocked();
+        if (redemptionsLocked()) revert RedemptionsLocked();
         super._withdraw(caller, receiver, _owner, assets, shares);
+    }
+
+    // ==================== RESCUE ====================
+
+    /// @notice Rescue ETH accidentally sent to the vault
+    function rescueEth(address payable to, uint256 amount) external onlyOwner {
+        if (to == address(0)) revert ZeroAddress();
+        Address.sendValue(to, amount);
+    }
+
+    /// @notice Rescue ERC-20 tokens accidentally sent to the vault (not the vault asset)
+    function rescueERC20(address token, address to, uint256 amount) external onlyOwner {
+        if (to == address(0)) revert ZeroAddress();
+        address asset = asset();
+        if (token == asset) revert CannotRescueAsset();
+        IERC20(token).safeTransfer(to, amount);
+    }
+
+    /// @notice Rescue ERC-721 tokens accidentally sent to the vault
+    function rescueERC721(address token, uint256 tokenId, address to) external onlyOwner {
+        if (to == address(0)) revert ZeroAddress();
+        IERC721(token).safeTransferFrom(address(this), to, tokenId);
     }
 
     // ==================== UUPS ====================
 
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    /// @dev Only the factory can authorize upgrades.
+    function _authorizeUpgrade(address) internal view override {
+        if (msg.sender != _factory) revert NotFactory();
+    }
 
     // ==================== RECEIVE ====================
 

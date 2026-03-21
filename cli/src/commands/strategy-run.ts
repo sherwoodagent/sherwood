@@ -20,7 +20,7 @@ import ora from "ora";
 import { buildEntryBatch, type LeveredSwapConfig } from "../strategies/levered-swap.js";
 import { getQuote, applySlippage } from "../lib/quote.js";
 import { formatBatch } from "../lib/batch.js";
-import { executeBatch, simulateBatch } from "../lib/vault.js";
+import { executeBatch } from "../lib/vault.js";
 import { getPublicClient } from "../lib/client.js";
 import { ERC20_ABI } from "../lib/abis.js";
 import { TOKENS } from "../lib/addresses.js";
@@ -134,35 +134,6 @@ export async function runLeveredSwap(opts: {
   console.log(chalk.bold("Batch calls (6):"));
   console.log(formatBatch(calls));
   console.log();
-
-  // ── Simulate ──
-
-  const simSpinner = ora("Simulating via vault...").start();
-  try {
-    const results = await simulateBatch(calls);
-    const allSucceeded = results.every((r) => r.success);
-    if (allSucceeded) {
-      simSpinner.succeed("Simulation passed");
-    } else {
-      simSpinner.fail("Simulation: some calls failed");
-      for (let i = 0; i < results.length; i++) {
-        const status = results[i].success ? "✓" : "✗";
-        console.log(`  ${status} Call ${i + 1}`);
-      }
-      if (!opts.execute) {
-        process.exit(1);
-      }
-      console.log(chalk.yellow("Continuing to execution despite simulation failure..."));
-    }
-  } catch (err) {
-    simSpinner.fail("Simulation failed");
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(chalk.red(msg));
-    if (!opts.execute) {
-      process.exit(1);
-    }
-    console.log(chalk.yellow("Continuing to execution despite simulation failure..."));
-  }
 
   // ── Execute ──
 

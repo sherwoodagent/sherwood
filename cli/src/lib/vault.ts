@@ -6,17 +6,12 @@
  */
 
 import type { Address, Hex } from "viem";
-import { formatUnits, encodeFunctionData, decodeFunctionResult } from "viem";
-import { getChain, getNetwork } from "./network.js";
+import { formatUnits } from "viem";
+import { getChain } from "./network.js";
 import { getPublicClient, getWalletClient, getAccount } from "./client.js";
 import { SYNDICATE_VAULT_ABI, ERC20_ABI } from "./abis.js";
 import type { BatchCall } from "./batch.js";
 import { getChainContracts } from "./config.js";
-
-export interface SimulationResult {
-  success: boolean;
-  returnData: Hex;
-}
 
 // Per-command override (set by --vault flag in index.ts)
 let _vaultOverride: Address | null = null;
@@ -101,23 +96,6 @@ export async function deposit(amount: bigint): Promise<Hex> {
   });
 }
 
-/**
- * Ragequit — withdraw all shares for pro-rata assets.
- */
-export async function ragequit(): Promise<Hex> {
-  const wallet = getWalletClient();
-  const account = getAccount();
-
-  return wallet.writeContract({
-    account: getAccount(),
-    chain: getChain(),
-    address: getVaultAddress(),
-    abi: SYNDICATE_VAULT_ABI,
-    functionName: "ragequit",
-    args: [account.address],
-  });
-}
-
 // ── Batch Execution ──
 
 /**
@@ -142,48 +120,6 @@ export async function executeBatch(calls: BatchCall[]): Promise<Hex> {
       })),
     ],
   });
-}
-
-/**
- * Simulate a batch via eth_call (no state committed).
- * simulateBatch is NOT a view function — must use raw eth_call.
- * Anyone can call this (no agent check).
- */
-export async function simulateBatch(calls: BatchCall[]): Promise<SimulationResult[]> {
-  const client = getPublicClient();
-  const vaultAddress = getVaultAddress();
-
-  const calldata = encodeFunctionData({
-    abi: SYNDICATE_VAULT_ABI,
-    functionName: "simulateBatch",
-    args: [
-      calls.map((c) => ({
-        target: c.target,
-        data: c.data,
-        value: c.value,
-      })),
-    ],
-  });
-
-  const { data } = await client.call({
-    to: vaultAddress,
-    data: calldata,
-  });
-
-  if (!data) {
-    throw new Error("simulateBatch returned no data");
-  }
-
-  const decoded = decodeFunctionResult({
-    abi: SYNDICATE_VAULT_ABI,
-    functionName: "simulateBatch",
-    data,
-  });
-
-  return (decoded as readonly { success: boolean; returnData: Hex }[]).map((r) => ({
-    success: r.success,
-    returnData: r.returnData,
-  }));
 }
 
 // ── Depositor Management ──

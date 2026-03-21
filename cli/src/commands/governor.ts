@@ -14,7 +14,8 @@ import {
   getRegisteredVaults,
   setVotingPeriod,
   setExecutionWindow,
-  setQuorumBps,
+  setVetoThresholdBps,
+  setProtocolFeeBps,
   setMaxPerformanceFeeBps,
   setMaxStrategyDuration,
   setCooldownPeriod,
@@ -52,7 +53,7 @@ export function registerGovernorCommands(program: Command): void {
         console.log(W(`  Address:              ${G(getGovernorAddress())}`));
         console.log(W(`  Voting Period:        ${BOLD(formatDuration(params.votingPeriod))}`));
         console.log(W(`  Execution Window:     ${BOLD(formatDuration(params.executionWindow))}`));
-        console.log(W(`  Quorum:               ${BOLD(`${Number(params.quorumBps) / 100}%`)}`));
+        console.log(W(`  Veto Threshold:         ${BOLD(`${Number(params.vetoThresholdBps) / 100}%`)}`));
         console.log(W(`  Max Performance Fee:  ${BOLD(`${Number(params.maxPerformanceFeeBps) / 100}%`)}`));
         console.log(W(`  Max Strategy Duration:${BOLD(` ${formatDuration(params.maxStrategyDuration)}`)}`));
         console.log(W(`  Cooldown Period:      ${BOLD(formatDuration(params.cooldownPeriod))}`));
@@ -114,20 +115,20 @@ export function registerGovernorCommands(program: Command): void {
       }
     });
 
-  // ── governor set-quorum ──
+  // ── governor set-veto-threshold ──
 
   governor
-    .command("set-quorum")
-    .description("Set the quorum threshold in bps (owner only)")
-    .requiredOption("--bps <n>", "New quorum in bps (e.g. 4000 = 40%)")
+    .command("set-veto-threshold")
+    .description("Set the veto threshold in bps (owner only)")
+    .requiredOption("--bps <n>", "New veto threshold in bps (e.g. 4000 = 40%)")
     .action(async (opts) => {
-      const spinner = ora("Setting quorum...").start();
+      const spinner = ora("Setting veto threshold...").start();
       try {
-        const hash = await setQuorumBps(parseBigIntArg(opts.bps, "bps"));
-        spinner.succeed(G(`Quorum updated to ${Number(opts.bps) / 100}%`));
+        const hash = await setVetoThresholdBps(parseBigIntArg(opts.bps, "bps"));
+        spinner.succeed(G(`Veto threshold updated to ${Number(opts.bps) / 100}%`));
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
-        spinner.fail("Failed to set quorum");
+        spinner.fail("Failed to set veto threshold");
         console.error(chalk.red(err instanceof Error ? err.message : String(err)));
         process.exit(1);
       }
@@ -185,6 +186,25 @@ export function registerGovernorCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set cooldown");
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
+    });
+
+  // ── governor set-protocol-fee ──
+
+  governor
+    .command("set-protocol-fee")
+    .description("Set the protocol fee in bps (owner only)")
+    .requiredOption("--bps <n>", "New protocol fee in bps (e.g. 500 = 5%, max 1000 = 10%)")
+    .action(async (opts) => {
+      const spinner = ora("Setting protocol fee...").start();
+      try {
+        const hash = await setProtocolFeeBps(parseBigIntArg(opts.bps, "bps"));
+        spinner.succeed(G(`Protocol fee updated to ${Number(opts.bps) / 100}%`));
+        console.log(DIM(`  ${getExplorerUrl(hash)}`));
+      } catch (err) {
+        spinner.fail("Failed to set protocol fee");
         console.error(chalk.red(err instanceof Error ? err.message : String(err)));
         process.exit(1);
       }
