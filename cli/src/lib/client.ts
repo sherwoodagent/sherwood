@@ -97,19 +97,24 @@ export async function estimateFeesWithBuffer() {
 }
 
 // ── Retry helpers for nonce collision / underpriced tx recovery ──
+//
+// Gas bump ceiling: base * 1.2 (buffer) * 1.1^3 (max retries) ≈ 1.6x base fee.
 
 const MAX_RETRIES = 3;
 const GAS_BUMP_NUMERATOR = 110n;
 const GAS_BUMP_DENOMINATOR = 100n;
 
+function isUnderpricedError(msg: string): boolean {
+  return msg.includes("replacement transaction underpriced");
+}
+
+function isNonceStaleError(msg: string): boolean {
+  return msg.includes("nonce too low") || msg.includes("NONCE_EXPIRED");
+}
+
 function isRetryableError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return (
-    msg.includes("replacement transaction underpriced") ||
-    msg.includes("nonce too low") ||
-    msg.includes("already known") ||
-    msg.includes("NONCE_EXPIRED")
-  );
+  return isUnderpricedError(msg) || isNonceStaleError(msg);
 }
 
 function bumpFees(fees: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }) {
@@ -119,54 +124,51 @@ function bumpFees(fees: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }) 
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type TxSender = (params: any) => Promise<Hex>;
+
+/**
+ * Shared retry loop: explicit nonce + EIP-1559 fee buffer + gas-bump on underpriced errors.
+ * On "nonce too low" / "NONCE_EXPIRED", re-fetches nonce from pending state before retrying.
+ */
+async function withRetry(send: TxSender, txParams: Record<string, unknown>): Promise<Hex> {
+  const client = getPublicClient();
+  const account = getAccount();
+  let fees = await estimateFeesWithBuffer();
+  let nonce = await client.getTransactionCount({ address: account.address, blockTag: "pending" });
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await send({ ...txParams, ...fees, nonce });
+    } catch (err) {
+      if (attempt >= MAX_RETRIES || !isRetryableError(err)) throw err;
+
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`  Retry ${attempt + 1}/${MAX_RETRIES}: ${isNonceStaleError(msg) ? "refreshing nonce" : "bumping gas"}...`);
+
+      if (isNonceStaleError(msg)) {
+        nonce = await client.getTransactionCount({ address: account.address, blockTag: "pending" });
+      }
+      fees = bumpFees(fees);
+    }
+  }
+  throw new Error("withRetry: exhausted retries");
+}
+
 /**
  * Send a raw transaction with automatic gas-bump retry on nonce/underpriced errors.
- * Uses explicit nonce + EIP-1559 fee buffer to prevent stuck txs on Base gas spikes.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function sendTxWithRetry(txParams: Record<string, any>): Promise<Hex> {
   const wallet = getWalletClient();
-  const client = getPublicClient();
-  const account = getAccount();
-  let fees = await estimateFeesWithBuffer();
-  const nonce = await client.getTransactionCount({ address: account.address, blockTag: "pending" });
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await wallet.sendTransaction({ ...txParams, ...fees, nonce } as any);
-    } catch (err) {
-      if (attempt < MAX_RETRIES && isRetryableError(err)) {
-        fees = bumpFees(fees);
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw new Error("sendTxWithRetry: exhausted retries");
+  return withRetry((p) => wallet.sendTransaction(p), txParams);
 }
 
 /**
  * Call writeContract with automatic gas-bump retry on nonce/underpriced errors.
- * Uses explicit nonce + EIP-1559 fee buffer to prevent stuck txs on Base gas spikes.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function writeContractWithRetry(txParams: Record<string, any>): Promise<Hex> {
   const wallet = getWalletClient();
-  const client = getPublicClient();
-  const account = getAccount();
-  let fees = await estimateFeesWithBuffer();
-  const nonce = await client.getTransactionCount({ address: account.address, blockTag: "pending" });
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await wallet.writeContract({ ...txParams, ...fees, nonce } as any);
-    } catch (err) {
-      if (attempt < MAX_RETRIES && isRetryableError(err)) {
-        fees = bumpFees(fees);
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw new Error("writeContractWithRetry: exhausted retries");
+  return withRetry((p) => wallet.writeContract(p), txParams);
 }
