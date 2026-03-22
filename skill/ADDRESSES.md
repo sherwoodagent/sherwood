@@ -63,7 +63,7 @@ ERC-1167 clonable singletons. Use `sherwood strategy list` to see current addres
 | MoonwellSupplyStrategy | `0x25E33fAeE061E752fDFe851911ccC4C6D9FBA346` |
 | AerodromeLPStrategy | `0x1c61c740702690B86b874ab929A6F04A4Ec56C1c` |
 | VeniceInferenceStrategy | `0xd882056ba6b0aEd8908c541884B327121E2f2C9C` |
-| WstETHMoonwellStrategy | `0x3e9aFad2DAAD410F9aeF997ebeE6cE9c46D63163` |
+| WstETHMoonwellStrategy | `0x6d026e2f5Ff0C34A01690EC46Cb601B8fF391985` |
 
 ## Allowlist Targets by Strategy
 
