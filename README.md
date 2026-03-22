@@ -63,8 +63,7 @@ sherwood vault ragequit
 # Execute strategy (simulate by default, --execute for onchain)
 sherwood strategy run --collateral 1.0 --borrow 500 --token 0x... --execute
 
-# Fund agents with Venice inference
-sherwood venice fund --vault 0x... --amount 500 --execute
+# Venice inference
 sherwood venice provision
 
 # Chat

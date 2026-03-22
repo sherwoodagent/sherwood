@@ -292,10 +292,10 @@ Add `--execute` to submit onchain.
 
 ### Fund Venice (private AI inference)
 
-Swaps vault profits to VVV, stakes for sVVV, distributes to agents:
+Venice inference funding uses the VeniceInferenceStrategy template via the proposal flow:
 
 ```bash
-sherwood venice fund --amount 1000 --fee1 3000 --fee2 10000 --slippage 100
+sherwood proposal create --strategy venice-inference --performance-fee 0 --duration 1h
 sherwood venice provision  # self-provision API key (requires sVVV)
 sherwood venice status     # check sVVV balances + API key
 ```
@@ -519,7 +519,7 @@ User wants to...
 ├── Check governance   → Governance: governor info, proposal list, proposal show <id>
 ├── Tune parameters    → Governance: governor set-* (owner only)
 ├── Rescue stuck assets → vault rescue-eth / rescue-erc721 (owner only)
-├── Pay agents / AI    → Phase 5: allowance disburse / venice fund
+├── Pay agents / AI    → Phase 5: allowance disburse / proposal (venice-inference strategy)
 ├── Fund Venice via governance → delegate to `strategies/venice-inference` skill
 ├── Private inference   → Phase 5: venice infer (or delegate to `strategies/venice-inference` skill)
 ├── Check status       → Phase 6: vault info, balance, syndicate list

@@ -95,7 +95,7 @@ Private inference → trade signals → onchain execution
 
 ### How it works
 
-1. **Funding** — `sherwood venice fund` swaps vault profits from the deposit asset through Uniswap (multi-hop: asset → WETH → VVV), stakes VVV at the Venice staking contract, and distributes sVVV equally to each registered agent's operator wallet. All steps execute atomically in a single `executeBatch` call.
+1. **Funding** — Use the `VeniceInferenceStrategy` template via the proposal flow (`sherwood proposal create`). The strategy swaps vault capital from the deposit asset to VVV via Aerodrome, stakes VVV at the Venice staking contract, and distributes sVVV to the agent's operator wallet. This ensures governance oversight over vault capital usage.
 
 2. **Key provisioning** — `sherwood venice provision` has each agent self-provision their own Venice API key:
    - GET validation token from Venice API
@@ -124,7 +124,6 @@ Not deployed on Base Sepolia — Venice commands fail with a clear error on test
 ### CLI commands
 
 ```bash
-sherwood venice fund --vault 0x... --amount 500 --execute    # fund agents with sVVV
 sherwood venice provision                                     # self-provision API key
 sherwood venice status --vault 0x...                          # sVVV balances, DIEM, key validity
 ```

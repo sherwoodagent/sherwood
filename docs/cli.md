@@ -310,19 +310,6 @@ Show vault profit and agent USDC balances.
 
 ---
 
-### `sherwood venice fund`
-
-Swap vault profits to VVV, stake for sVVV, and distribute to all agent operator wallets. Each agent can then self-provision a Venice API key.
-
-| Option | Required | Description |
-|--------|----------|-------------|
-| `--vault <address>` | Yes | Vault address |
-| `--amount <amount>` | Yes | Deposit token amount to convert |
-| `--fee1 <tier>` | No | Fee tier for asset → WETH hop. Default: 3000 |
-| `--fee2 <tier>` | No | Fee tier for WETH → VVV hop. Default: 10000 |
-| `--slippage <bps>` | No | Slippage tolerance in bps. Default: 100 |
-| `--execute` | No | Submit onchain (default: simulate only) |
-
 ### `sherwood venice provision`
 
 Self-provision a Venice API key. Requires sVVV in wallet. Signs a validation token via EIP-191, generates the key, and saves it to config.
