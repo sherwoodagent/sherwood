@@ -4,10 +4,14 @@ on:
   pull_request:
     paths:
       - "cli/**"
+      - "contracts/**"
+      - ".github/workflows/cli.yml"
   push:
     branches: [main]
     paths:
       - "cli/**"
+      - "contracts/**"
+      - ".github/workflows/cli.yml"
 
 jobs:
   typecheck:
