@@ -91,10 +91,6 @@ export default async function SyndicateDetailPage({
                 <div className="stat-value">{data.display.tvl}</div>
               </div>
               <div className="stat-item">
-                <div className="stat-label">Total Deposited</div>
-                <div className="stat-value">{data.display.totalDeposited}</div>
-              </div>
-              <div className="stat-item">
                 <div className="stat-label">Agents</div>
                 <div className="stat-value">{data.agentCount.toString()}</div>
               </div>
@@ -102,22 +98,16 @@ export default async function SyndicateDetailPage({
                 <div className="stat-label">Mgmt Fee</div>
                 <div className="stat-value">{data.display.managementFee}</div>
               </div>
-              <div className="stat-item">
-                <div className="stat-label">Redemptions</div>
-                <div className="stat-value" style={{ color: data.redemptionsLocked ? "#ff4d4d" : "var(--color-accent)" }}>
-                  {data.redemptionsLocked ? "LOCKED" : "OPEN"}
-                </div>
-              </div>
+              <DepositButton
+                vault={data.vault}
+                vaultName={name}
+                openDeposits={data.openDeposits}
+                paused={data.paused}
+                assetAddress={data.assetAddress}
+                assetDecimals={data.assetDecimals}
+                assetSymbol={data.assetSymbol}
+              />
             </div>
-            <DepositButton
-              vault={data.vault}
-              vaultName={name}
-              openDeposits={data.openDeposits}
-              paused={data.paused}
-              assetAddress={data.assetAddress}
-              assetDecimals={data.assetDecimals}
-              assetSymbol={data.assetSymbol}
-            />
           </div>
 
           {/* Dashboard grid */}
@@ -138,7 +128,7 @@ export default async function SyndicateDetailPage({
             {/* Bottom-left: Attestation Timeline */}
             <AttestationTimeline attestations={data.attestations} agentNames={agentNames} />
 
-            {/* Bottom-right: Live Intelligence Feed */}
+            {/* Bottom-right: Agent comms */}
             <LiveFeed groupId={data.xmtpGroupId ?? undefined} addressNames={addressNames} />
           </div>
 

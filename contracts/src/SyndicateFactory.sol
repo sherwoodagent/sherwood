@@ -108,6 +108,9 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     /// @notice Whether vault upgrades are enabled (default: false)
     bool public upgradesEnabled;
 
+    /// @dev Reserved for future storage — reduce by 1 for each new slot added
+    uint256[50] private __gap;
+
     // ── Events ──
 
     event SyndicateCreated(
@@ -195,6 +198,9 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         bytes memory initData = abi.encodeCall(SyndicateVault.initialize, (initParams));
 
         vault = address(new ERC1967Proxy(vaultImpl, initData));
+
+        // Register vault with the governor so it can receive proposals
+        ISyndicateGovernor(governor).addVault(vault);
 
         // Register ENS subname — vault is both address record + NFT owner
         ensRegistrar.register(config.subdomain, vault);

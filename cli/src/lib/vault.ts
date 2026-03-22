@@ -8,7 +8,12 @@
 import type { Address, Hex } from "viem";
 import { formatUnits } from "viem";
 import { getChain } from "./network.js";
-import { getPublicClient, getWalletClient, getAccount } from "./client.js";
+import {
+  getPublicClient,
+  getWalletClient,
+  getAccount,
+  estimateFeesWithBuffer,
+} from "./client.js";
 import { SYNDICATE_VAULT_ABI, ERC20_ABI } from "./abis.js";
 import type { BatchCall } from "./batch.js";
 import { getChainContracts } from "./config.js";
@@ -72,18 +77,29 @@ export async function deposit(amount: bigint): Promise<Hex> {
   const client = getPublicClient();
   const vaultAddress = getVaultAddress();
   const account = getAccount();
-
-  // Approve vault to pull the underlying asset
   const asset = await getAssetAddress();
-  const approveHash = await wallet.writeContract({
-    account: getAccount(),
-    chain: getChain(),
+  const fees = await estimateFeesWithBuffer();
+
+  // Check existing allowance — skip approve if sufficient
+  const currentAllowance = (await client.readContract({
     address: asset,
     abi: ERC20_ABI,
-    functionName: "approve",
-    args: [vaultAddress, amount],
-  });
-  await client.waitForTransactionReceipt({ hash: approveHash });
+    functionName: "allowance",
+    args: [account.address, vaultAddress],
+  })) as bigint;
+
+  if (currentAllowance < amount) {
+    const approveHash = await wallet.writeContract({
+      account: getAccount(),
+      chain: getChain(),
+      address: asset,
+      abi: ERC20_ABI,
+      functionName: "approve",
+      args: [vaultAddress, amount],
+      ...fees,
+    });
+    await client.waitForTransactionReceipt({ hash: approveHash });
+  }
 
   // Deposit
   const depositHash = await wallet.writeContract({
@@ -93,6 +109,7 @@ export async function deposit(amount: bigint): Promise<Hex> {
     abi: SYNDICATE_VAULT_ABI,
     functionName: "deposit",
     args: [amount, account.address],
+    ...fees,
   });
   await client.waitForTransactionReceipt({ hash: depositHash });
   return depositHash;

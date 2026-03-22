@@ -94,7 +94,6 @@ export interface SyndicatePageData {
   // Vault data
   totalAssets: bigint;
   totalSupply: bigint;
-  totalDeposited: bigint;
   agentCount: bigint;
   openDeposits: boolean;
   owner: Address;
@@ -128,7 +127,6 @@ export interface SyndicatePageData {
   // Formatted display values
   display: {
     tvl: string;
-    totalDeposited: string;
     managementFee: string;
   };
 }
@@ -289,11 +287,6 @@ async function resolveOnChain(
       {
         address: vault,
         abi: SYNDICATE_VAULT_ABI,
-        functionName: "totalDeposited",
-      },
-      {
-        address: vault,
-        abi: SYNDICATE_VAULT_ABI,
         functionName: "getAgentCount",
       },
       {
@@ -319,14 +312,13 @@ async function resolveOnChain(
 
   const totalAssets = (vaultResults[0].result as bigint) ?? 0n;
   const totalSupply = (vaultResults[1].result as bigint) ?? 0n;
-  const totalDeposited = (vaultResults[2].result as bigint) ?? 0n;
-  const agentCount = (vaultResults[3].result as bigint) ?? 0n;
-  const openDepositsVal = (vaultResults[4].result as boolean) ?? false;
-  const owner = (vaultResults[5].result as Address) ?? creator;
-  const paused = (vaultResults[6].result as boolean) ?? false;
-  const redemptionsLocked = (vaultResults[7].result as boolean) ?? false;
-  const managementFeeBps = (vaultResults[8].result as bigint) ?? 0n;
-  const assetAddress = (vaultResults[9].result as Address) ?? addresses.usdc;
+  const agentCount = (vaultResults[2].result as bigint) ?? 0n;
+  const openDepositsVal = (vaultResults[3].result as boolean) ?? false;
+  const owner = (vaultResults[4].result as Address) ?? creator;
+  const paused = (vaultResults[5].result as boolean) ?? false;
+  const redemptionsLocked = (vaultResults[6].result as boolean) ?? false;
+  const managementFeeBps = (vaultResults[7].result as bigint) ?? 0n;
+  const assetAddress = (vaultResults[8].result as Address) ?? addresses.usdc;
 
   // Step 2b: Get asset decimals + symbol
   const assetInfoResults = await client.multicall({
@@ -412,12 +404,6 @@ async function resolveOnChain(
     assetDecimals,
     isUSD ? "USD" : undefined,
   );
-  const depositedFormatted = formatAsset(
-    totalDeposited,
-    assetDecimals,
-    isUSD ? "USD" : undefined,
-  );
-
   return {
     syndicateId,
     vault,
@@ -429,7 +415,6 @@ async function resolveOnChain(
     chainId,
     totalAssets,
     totalSupply,
-    totalDeposited,
     agentCount,
     openDeposits: openDepositsVal,
     owner,
@@ -447,9 +432,6 @@ async function resolveOnChain(
     equityCurve,
     display: {
       tvl: isUSD ? tvlFormatted : `${tvlFormatted} ${assetSymbol}`,
-      totalDeposited: isUSD
-        ? depositedFormatted
-        : `${depositedFormatted} ${assetSymbol}`,
       managementFee: formatBps(managementFeeBps),
     },
   };
