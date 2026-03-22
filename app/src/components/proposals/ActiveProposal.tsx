@@ -4,18 +4,22 @@ import {
   formatDuration,
   formatTimeRemaining,
 } from "@/lib/governor-data";
-import { truncateAddress, formatUSDC, formatBps } from "@/lib/contracts";
+import { truncateAddress, formatAsset, formatBps } from "@/lib/contracts";
 
 interface ActiveProposalProps {
   proposal: ProposalData | null;
   cooldownEnd: bigint;
   addressNames?: Record<string, string>;
+  assetDecimals: number;
+  assetSymbol: string;
 }
 
 export default function ActiveProposal({
   proposal,
   cooldownEnd,
   addressNames,
+  assetDecimals,
+  assetSymbol,
 }: ActiveProposalProps) {
   const now = BigInt(Math.floor(Date.now() / 1000));
 
@@ -108,7 +112,7 @@ export default function ActiveProposal({
         <div className="metric-card">
           <div className="metric-label">Capital Deployed</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
-            {formatUSDC(proposal.capitalSnapshot)}
+            {formatAsset(proposal.capitalSnapshot, assetDecimals)} {assetSymbol}
           </div>
         </div>
         <div className="metric-card">
