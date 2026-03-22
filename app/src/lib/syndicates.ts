@@ -91,9 +91,12 @@ const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
 
 /**
  * Resolve proposal-aware status for a list of vaults.
- * Multicalls: vault.governor() → governor.getActiveProposal(vault) → governor.getProposalState(id)
  * Returns a map from lowercase vault address → "VOTING" | "ACTIVE_STRATEGY".
- * Vaults with no active proposal (or no governor) are absent from the map.
+ * Vaults with no active/voting proposal (or no governor) are absent from the map.
+ *
+ * `getActiveProposal(vault)` only returns non-zero for Executed proposals.
+ * To detect Pending/Approved (voting) proposals we also scan recent proposals
+ * via `proposalCount()` + `getProposal(id)`.
  */
 async function resolveProposalStatuses(
   chainId: number,
@@ -122,50 +125,76 @@ async function resolveProposalStatuses(
   }
   if (govVaults.length === 0) return statusMap;
 
-  // 2. Get active proposal ID for each vault
-  const activeResults = await client.multicall({
-    contracts: govVaults.map((gv) => ({
-      address: gv.governor,
-      abi: SYNDICATE_GOVERNOR_ABI,
-      functionName: "getActiveProposal" as const,
-      args: [gv.vault] as const,
-    })),
-  });
+  // 2. Get active proposal ID for each vault + proposalCount from governor
+  //    (all vaults share the same governor, so we only need proposalCount once)
+  const governorAddress = govVaults[0].governor;
 
-  const stateQueries: { vault: Address; governor: Address; proposalId: bigint }[] = [];
+  const [activeResults, countResult] = await Promise.all([
+    client.multicall({
+      contracts: govVaults.map((gv) => ({
+        address: gv.governor,
+        abi: SYNDICATE_GOVERNOR_ABI,
+        functionName: "getActiveProposal" as const,
+        args: [gv.vault] as const,
+      })),
+    }),
+    client.readContract({
+      address: governorAddress,
+      abi: SYNDICATE_GOVERNOR_ABI,
+      functionName: "proposalCount",
+    }).catch(() => 0n),
+  ]);
+
+  const proposalCount = Number(countResult);
+
+  // Mark vaults with an executed active proposal
+  const vaultSet = new Set(govVaults.map((gv) => gv.vault.toLowerCase()));
   for (let i = 0; i < govVaults.length; i++) {
     const r = activeResults[i];
     if (r.status === "success") {
       const pid = r.result as bigint;
       if (pid > 0n) {
-        stateQueries.push({ ...govVaults[i], proposalId: pid });
+        statusMap.set(govVaults[i].vault.toLowerCase(), "ACTIVE_STRATEGY");
       }
     }
   }
-  if (stateQueries.length === 0) return statusMap;
 
-  // 3. Get proposal state for each active proposal
-  const stateResults = await client.multicall({
-    contracts: stateQueries.map((sq) => ({
-      address: sq.governor,
-      abi: SYNDICATE_GOVERNOR_ABI,
-      functionName: "getProposalState" as const,
-      args: [sq.proposalId] as const,
-    })),
-  });
+  // 3. Scan recent proposals to detect Pending/Approved (voting) state.
+  //    Only needed for vaults not already marked. Scan last N proposals
+  //    (enough to cover all vaults with potential voting proposals).
+  const unresolvedVaults = govVaults.filter(
+    (gv) => !statusMap.has(gv.vault.toLowerCase()),
+  );
 
-  for (let i = 0; i < stateQueries.length; i++) {
-    const r = stateResults[i];
-    if (r.status === "success") {
-      const state = Number(r.result);
-      const key = stateQueries[i].vault.toLowerCase();
-      // Pending (1) or Approved (2) → VOTING
+  if (unresolvedVaults.length > 0 && proposalCount > 0) {
+    // Scan the last (vaults.length * 3) proposals or all if fewer exist
+    const scanCount = Math.min(proposalCount, vaults.length * 3);
+    const startId = proposalCount - scanCount + 1;
+
+    const proposalCalls = [];
+    for (let id = startId; id <= proposalCount; id++) {
+      proposalCalls.push({
+        address: governorAddress,
+        abi: SYNDICATE_GOVERNOR_ABI,
+        functionName: "getProposal" as const,
+        args: [BigInt(id)] as const,
+      });
+    }
+
+    const proposalResults = await client.multicall({ contracts: proposalCalls });
+
+    for (const r of proposalResults) {
+      if (r.status !== "success" || !r.result) continue;
+      const p = r.result as {
+        vault: Address;
+        state: number;
+      };
+      const key = p.vault.toLowerCase();
+      // Only care about vaults we're tracking that aren't already resolved
+      if (!vaultSet.has(key) || statusMap.has(key)) continue;
+      const state = Number(p.state);
       if (state === 1 || state === 2) {
         statusMap.set(key, "VOTING");
-      }
-      // Executed (5) → ACTIVE_STRATEGY
-      else if (state === 5) {
-        statusMap.set(key, "ACTIVE_STRATEGY");
       }
     }
   }

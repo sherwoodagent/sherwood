@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { type Address } from "viem";
 import { SYNDICATE_GOVERNOR_ABI, formatShares } from "@/lib/contracts";
@@ -16,6 +17,7 @@ export default function VoteButton({
   proposalId,
   voteEnd,
 }: VoteButtonProps) {
+  const router = useRouter();
   const { address, isConnected } = useAccount();
   const [votingEnded, setVotingEnded] = useState(
     () => voteEnd <= BigInt(Math.floor(Date.now() / 1000)),
@@ -50,7 +52,14 @@ export default function VoteButton({
   });
 
   const { writeContract, data: txHash, isPending } = useWriteContract();
-  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
+
+  // Re-fetch page data once the vote tx is confirmed
+  useEffect(() => {
+    if (isConfirmed) {
+      router.refresh();
+    }
+  }, [isConfirmed, router]);
 
   const busy = isPending || isConfirming;
 
