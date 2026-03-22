@@ -208,21 +208,24 @@ const ROBINHOOD_TESTNET_AERODROME = {
 // Populated after running script/DeployTemplates.s.sol
 
 const BASE_STRATEGY_TEMPLATES = {
-  MOONWELL_SUPPLY: ZERO as Address, // TODO: fill after deployment
-  AERODROME_LP: ZERO as Address, // TODO: fill after deployment
-  VENICE_INFERENCE: ZERO as Address, // TODO: fill after deployment
+  MOONWELL_SUPPLY: "0x25E33fAeE061E752fDFe851911ccC4C6D9FBA346" as Address,
+  AERODROME_LP: "0x1c61c740702690B86b874ab929A6F04A4Ec56C1c" as Address,
+  VENICE_INFERENCE: "0xd882056ba6b0aEd8908c541884B327121E2f2C9C" as Address,
+  WSTETH_MOONWELL: "0x3e9aFad2DAAD410F9aeF997ebeE6cE9c46D63163" as Address,
 } as const;
 
 const BASE_SEPOLIA_STRATEGY_TEMPLATES = {
   MOONWELL_SUPPLY: ZERO as Address,
   AERODROME_LP: ZERO as Address,
   VENICE_INFERENCE: ZERO as Address,
+  WSTETH_MOONWELL: ZERO as Address,
 } as const;
 
 const ROBINHOOD_TESTNET_STRATEGY_TEMPLATES = {
   MOONWELL_SUPPLY: ZERO as Address,
   AERODROME_LP: ZERO as Address,
   VENICE_INFERENCE: ZERO as Address,
+  WSTETH_MOONWELL: ZERO as Address,
 } as const;
 
 // ── EAS (Ethereum Attestation Service) — Base predeploys ──

@@ -57,6 +57,12 @@ const TEMPLATES: TemplateDef[] = [
     description: "Stake VVV for sVVV — Venice private AI inference",
     addressKey: "VENICE_INFERENCE",
   },
+  {
+    name: "wstETH Moonwell Yield",
+    key: "wsteth-moonwell",
+    description: "WETH → wstETH → Moonwell — stack Lido + lending yield",
+    addressKey: "WSTETH_MOONWELL",
+  },
 ];
 
 function resolveTemplate(key: string): { def: TemplateDef; address: Address } {
