@@ -249,6 +249,64 @@ contract SyndicateFactoryTest is Test {
         assertFalse(factory.isSubdomainAvailable("ab"));
     }
 
+    function test_createSyndicate_reregistersOwnedSubdomain() public {
+        // Creator1 registers "alpha" on the first factory
+        vm.prank(creator1);
+        (, address oldVault) = factory.createSyndicate(creator1AgentId, _configWithSubdomain("alpha"));
+        assertTrue(ensRegistrar.isRegistered("alpha"));
+        assertEq(ensRegistrar.getOwner("alpha"), oldVault);
+
+        // Deploy a NEW factory (simulates redeployment) — same ENS registrar, clean mapping
+        SyndicateFactory factoryImpl2 = new SyndicateFactory();
+        bytes memory factoryInit2 = abi.encodeCall(
+            SyndicateFactory.initialize,
+            (SyndicateFactory.InitParams({
+                    owner: owner,
+                    executorImpl: address(executorLib),
+                    vaultImpl: address(vaultImpl),
+                    ensRegistrar: address(ensRegistrar),
+                    agentRegistry: address(agentRegistry),
+                    governor: governorAddr,
+                    managementFeeBps: 50
+                }))
+        );
+        SyndicateFactory factory2 = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl2), factoryInit2)));
+
+        // Creator1 can reclaim "alpha" on the new factory (owns the vault that holds the subname)
+        vm.prank(creator1);
+        (uint256 newId, address newVault) = factory2.createSyndicate(creator1AgentId, _configWithSubdomain("alpha"));
+
+        assertEq(factory2.subdomainToSyndicate("alpha"), newId);
+        assertTrue(newVault != oldVault); // new vault deployed
+    }
+
+    function test_createSyndicate_reregister_notOwner_reverts() public {
+        // Creator1 registers "beta" on the first factory
+        vm.prank(creator1);
+        factory.createSyndicate(creator1AgentId, _configWithSubdomain("beta"));
+
+        // Deploy a new factory — same ENS registrar
+        SyndicateFactory factoryImpl2 = new SyndicateFactory();
+        bytes memory factoryInit2 = abi.encodeCall(
+            SyndicateFactory.initialize,
+            (SyndicateFactory.InitParams({
+                    owner: owner,
+                    executorImpl: address(executorLib),
+                    vaultImpl: address(vaultImpl),
+                    ensRegistrar: address(ensRegistrar),
+                    agentRegistry: address(agentRegistry),
+                    governor: governorAddr,
+                    managementFeeBps: 50
+                }))
+        );
+        SyndicateFactory factory2 = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl2), factoryInit2)));
+
+        // Creator2 tries to reclaim "beta" — reverts (not the vault owner)
+        vm.prank(creator2);
+        vm.expectRevert(SyndicateFactory.NotSubdomainOwner.selector);
+        factory2.createSyndicate(creator2AgentId, _configWithSubdomain("beta"));
+    }
+
     // ==================== METADATA ====================
 
     function test_updateMetadata() public {

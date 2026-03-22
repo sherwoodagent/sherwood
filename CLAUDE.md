@@ -47,7 +47,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 **Keep docs in sync.** When changes touch contracts, CLI, or app, update the corresponding pages in `mintlify-docs/`:
 - Contract changes → `protocol/architecture.mdx`, `protocol/governance/*.mdx`
 - CLI command changes → `cli/commands.mdx`, `cli/governance-commands.mdx`
-- Address/deployment changes → `reference/deployments.mdx`, `cli/src/lib/addresses.ts`, `contracts/chains/*.json`, `skill/ADDRESSES.md`
+- Address/deployment changes → `contracts/chains/{chainId}.json` (auto-written by deploy scripts), `cli/src/lib/addresses.ts`, `reference/deployments.mdx`, `skill/ADDRESSES.md`
 - Integration changes → `reference/integrations/*.mdx`
 - New features → `learn/concepts.mdx` if it introduces a new primitive
 
@@ -59,6 +59,13 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - Run `forge build` and `forge test` before every PR
 - Run `forge fmt` before committing
 - SyndicateGovernor is near the EIP-170 bytecode limit (~23.8k / 24.6k) — avoid adding large functions without deduplicating first
+
+### Address Management
+
+- Deploy scripts auto-write to `contracts/chains/{chainId}.json` (CAPS_SNAKE_CASE keys: `SYNDICATE_FACTORY`, `SYNDICATE_GOVERNOR`, etc.)
+- Admin scripts (QueueParams, FinalizeParams) read from the same JSON — no env vars needed
+- All scripts inherit `script/ScriptBase.sol` for shared helpers (`_writeAddresses`, `_readAddress`, `_checkAddr`, `_checkUint`)
+- After redeployment, also update: `cli/src/lib/addresses.ts`, `mintlify-docs/reference/deployments.mdx`
 
 ### Architecture
 

@@ -24,9 +24,14 @@ contract MockL2Registrar is IL2Registrar {
         return !_taken[keccak256(bytes(label))];
     }
 
+    /// @notice Get the current owner of a registered label
+    function ownerOf(string calldata label) external view override returns (address) {
+        return _owners[keccak256(bytes(label))];
+    }
+
     // ── Test helpers ──
 
-    /// @notice Get the owner of a registered label (for test assertions)
+    /// @notice Alias for ownerOf (backwards compat with existing tests)
     function getOwner(string calldata label) external view returns (address) {
         return _owners[keccak256(bytes(label))];
     }

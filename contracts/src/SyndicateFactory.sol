@@ -5,6 +5,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -38,6 +39,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     error NotAgentOwner();
     error SubdomainTooShort();
     error SubdomainTaken();
+    error NotSubdomainOwner();
     error NotCreator();
     error InvalidGovernor();
     error InsufficientCreationFee();
@@ -196,8 +198,13 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
 
         vault = address(new ERC1967Proxy(vaultImpl, initData));
 
-        // Register ENS subname — vault is both address record + NFT owner
-        ensRegistrar.register(config.subdomain, vault);
+        // Register ENS subname, or verify ownership if already registered (e.g. from previous deployment)
+        if (ensRegistrar.available(config.subdomain)) {
+            ensRegistrar.register(config.subdomain, vault);
+        } else {
+            address previousVault = ensRegistrar.ownerOf(config.subdomain);
+            if (Ownable(previousVault).owner() != msg.sender) revert NotSubdomainOwner();
+        }
 
         syndicates[syndicateId] = Syndicate({
             id: syndicateId,

@@ -79,11 +79,10 @@ forge script script/testnet/Deploy.s.sol:DeployTestnet \
 The deploy script:
 1. Deploys `BatchExecutorLib` (shared, stateless)
 2. Deploys `SyndicateVault` implementation
-3. Deploys `SyndicateFactory` (registers executor, vault impl, ENS registrar, agent registry)
-4. Deploys `StrategyRegistry` (UUPS proxy)
-
-Protocol addresses are hardcoded in `cli/src/lib/addresses.ts` (bundled with CLI).
-Deployment records saved in `contracts/chains/{chainId}.json`.
+3. Deploys `SyndicateGovernor` (UUPS proxy)
+4. Deploys `SyndicateFactory` (UUPS proxy)
+5. Validates all on-chain state matches expected init params
+6. Writes addresses to `chains/{chainId}.json`
 
 ### Gas Snapshots
 
@@ -93,21 +92,15 @@ forge snapshot
 
 ## Deployed Addresses
 
-### Sherwood Contracts (Base Sepolia)
+Sherwood contract addresses are written automatically by deploy scripts to `chains/{chainId}.json`:
 
-| Contract | Address |
-|----------|---------|
-| SyndicateFactory | `0x2efD194ADb3Db40E0e6faAe06c4e602c7a3D9199` |
-| SyndicateGovernor | `0x6fc67a9aD15eD3A9DE25c29CCe10D662079129E2` |
-| BatchExecutorLib | `0xd5C4eE2E4c5B606b9401E69A3B3FeE169037C284` |
+- **Base** — `chains/8453.json`
+- **Base Sepolia** — `chains/84532.json`
+- **Robinhood L2 Testnet** — `chains/46630.json`
 
-### Sherwood Contracts (Robinhood L2 Testnet)
+Admin scripts (QueueParams, FinalizeParams) read from these files automatically — no env vars needed.
 
-| Contract | Address |
-|----------|---------|
-| SyndicateFactory | `0xea644E2Bc0215fC73B11f52CB16a87334B0922E6` |
-| SyndicateGovernor | `0x5cBE8269CfF68D52329B8E0F9174F893627AFf0f` |
-| BatchExecutorLib | `0x70d0E510454eE246BFCFD53F2204f2487B19a137` |
+After redeployment, also update: `cli/src/lib/addresses.ts`, `mintlify-docs/reference/deployments.mdx`.
 
 ### External Contracts (Base Mainnet)
 

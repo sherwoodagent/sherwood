@@ -1,27 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Script, console} from "forge-std/Script.sol";
+import {console} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {SyndicateVault} from "../../src/SyndicateVault.sol";
 import {BatchExecutorLib} from "../../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../../src/SyndicateFactory.sol";
 import {SyndicateGovernor} from "../../src/SyndicateGovernor.sol";
 import {ISyndicateGovernor} from "../../src/interfaces/ISyndicateGovernor.sol";
+import {ScriptBase} from "../ScriptBase.sol";
 
 /**
  * @notice Deploy Sherwood protocol infrastructure to Base Sepolia (testnet).
- *         This script deploys only the shared infrastructure contracts:
- *         1. BatchExecutorLib (shared, stateless)
- *         2. SyndicateVault implementation
- *         3. SyndicateGovernor (UUPS proxy)
- *         4. SyndicateFactory (registers both)
- *
- *         Syndicate creation and agent registration are handled via the CLI
- *         after deployment:
- *           sherwood identity mint
- *           sherwood syndicate create --agent-id <id> ...
- *           sherwood syndicate add --vault <addr> ...
+ *         Deploys shared infrastructure, validates on-chain state, and writes
+ *         addresses to chains/{chainId}.json.
  *
  *   Usage:
  *     forge script script/testnet/Deploy.s.sol:DeployTestnet \
@@ -29,7 +22,7 @@ import {ISyndicateGovernor} from "../../src/interfaces/ISyndicateGovernor.sol";
  *       --account sherwood-agent \
  *       --broadcast
  */
-contract DeployTestnet is Script {
+contract DeployTestnet is ScriptBase {
     // ── Base Sepolia addresses ──
 
     // Durin L2 Registrar (ENS subnames for sherwoodagent.eth)
@@ -39,13 +32,11 @@ contract DeployTestnet is Script {
     address constant AGENT_REGISTRY = 0x8004A818BFB912233c491871b3d84c89A494BD9e;
 
     function run() external {
-        // Use --account flag (keystore) instead of raw PRIVATE_KEY
-        address deployer = msg.sender;
+        vm.startBroadcast();
 
+        address deployer = msg.sender;
         console.log("Deployer:", deployer);
         console.log("Network: Base Sepolia (testnet)");
-
-        vm.startBroadcast();
 
         // 1. Deploy BatchExecutorLib (shared, stateless)
         BatchExecutorLib executorLib = new BatchExecutorLib();
@@ -61,11 +52,11 @@ contract DeployTestnet is Script {
             SyndicateGovernor.initialize,
             (ISyndicateGovernor.InitParams({
                     owner: deployer,
-                    votingPeriod: 1 days,
+                    votingPeriod: 1 hours,
                     executionWindow: 1 days,
                     vetoThresholdBps: 4000,
                     maxPerformanceFeeBps: 3000,
-                    cooldownPeriod: 1 days,
+                    cooldownPeriod: 1 hours,
                     collaborationWindow: 48 hours,
                     maxCoProposers: 5,
                     minStrategyDuration: 1 hours,
@@ -97,14 +88,57 @@ contract DeployTestnet is Script {
 
         vm.stopBroadcast();
 
-        // Summary
-        console.log("\n=== Testnet Deployment Summary ===");
-        console.log("FACTORY_ADDRESS_TESTNET=%s", address(factory));
-        console.log("EXECUTOR_LIB_ADDRESS=%s", address(executorLib));
-        console.log("\nCopy the above to cli/.env");
+        // ── Validate on-chain state matches expected values ──
+        _validate(deployer, governorProxy, address(factory), address(executorLib), address(vaultImpl));
+
+        // ── Persist addresses to chains/{chainId}.json ──
+        _writeAddresses(
+            "Base Sepolia", deployer, address(factory), governorProxy, address(executorLib), address(vaultImpl)
+        );
+
         console.log("\nNext steps:");
         console.log("  1. sherwood --testnet identity mint");
         console.log("  2. sherwood --testnet syndicate create --agent-id <id> --subdomain <name> --name <name>");
         console.log("Explorer: https://sepolia.basescan.org/address/%s", address(factory));
+    }
+
+    function _validate(
+        address deployer,
+        address governorAddr,
+        address factoryAddr,
+        address executorLibAddr,
+        address vaultImplAddr
+    ) internal view {
+        console.log("\n=== Validating on-chain state ===");
+
+        SyndicateGovernor governor = SyndicateGovernor(governorAddr);
+        SyndicateFactory factory = SyndicateFactory(factoryAddr);
+
+        // ── Governor ──
+        ISyndicateGovernor.GovernorParams memory p = governor.getGovernorParams();
+
+        _checkAddr("gov.owner", Ownable(governorAddr).owner(), deployer);
+        _checkUint("gov.votingPeriod", p.votingPeriod, 1 hours);
+        _checkUint("gov.executionWindow", p.executionWindow, 1 days);
+        _checkUint("gov.vetoThresholdBps", p.vetoThresholdBps, 4000);
+        _checkUint("gov.maxPerformanceFeeBps", p.maxPerformanceFeeBps, 3000);
+        _checkUint("gov.cooldownPeriod", p.cooldownPeriod, 1 hours);
+        _checkUint("gov.collaborationWindow", p.collaborationWindow, 48 hours);
+        _checkUint("gov.maxCoProposers", p.maxCoProposers, 5);
+        _checkUint("gov.minStrategyDuration", p.minStrategyDuration, 1 hours);
+        _checkUint("gov.maxStrategyDuration", p.maxStrategyDuration, 30 days);
+        _checkUint("gov.protocolFeeBps", governor.protocolFeeBps(), 200);
+        _checkAddr("gov.protocolFeeRecipient", governor.protocolFeeRecipient(), deployer);
+
+        // ── Factory ──
+        _checkAddr("factory.owner", Ownable(factoryAddr).owner(), deployer);
+        _checkAddr("factory.governor", factory.governor(), governorAddr);
+        _checkAddr("factory.executorImpl", factory.executorImpl(), executorLibAddr);
+        _checkAddr("factory.vaultImpl", factory.vaultImpl(), vaultImplAddr);
+        _checkAddr("factory.ensRegistrar", address(factory.ensRegistrar()), L2_REGISTRAR);
+        _checkAddr("factory.agentRegistry", address(factory.agentRegistry()), AGENT_REGISTRY);
+        _checkUint("factory.managementFeeBps", factory.managementFeeBps(), 50);
+
+        console.log("=== All checks passed ===");
     }
 }

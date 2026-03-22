@@ -17,7 +17,7 @@ import { EAS_ABI } from "./abis.js";
 const ZERO_BYTES32 = "0x0000000000000000000000000000000000000000000000000000000000000000" as Hex;
 
 // keccak256("Attested(address,address,bytes32,bytes32)")
-const ATTESTED_TOPIC = "0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75c68f3c78e" as Hex;
+const ATTESTED_TOPIC = "0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75685141b35" as Hex;
 
 const JOIN_REQUEST_PARAMS = parseAbiParameters("uint256, uint256, address, string");
 const AGENT_APPROVED_PARAMS = parseAbiParameters("uint256, uint256, address");

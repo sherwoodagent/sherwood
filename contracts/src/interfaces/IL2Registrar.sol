@@ -14,4 +14,9 @@ interface IL2Registrar {
     /// @param label The subdomain label to check
     /// @return True if the label is available (not taken and >= 3 chars)
     function available(string calldata label) external view returns (bool);
+
+    /// @notice Get the current owner of a registered subdomain's NFT
+    /// @param label The subdomain label to look up
+    /// @return The address that owns the subname NFT (typically the vault)
+    function ownerOf(string calldata label) external view returns (address);
 }
