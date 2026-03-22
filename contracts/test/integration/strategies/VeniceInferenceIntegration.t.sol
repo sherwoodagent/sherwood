@@ -189,9 +189,7 @@ contract VeniceInferenceIntegrationTest is BaseIntegrationTest {
         vm.prank(agent);
         VeniceInferenceStrategy(strategy).updateParams(abi.encode(totalRepayment, uint256(0), uint256(0)));
         assertEq(
-            VeniceInferenceStrategy(strategy).repaymentAmount(),
-            totalRepayment,
-            "repaymentAmount should be updated"
+            VeniceInferenceStrategy(strategy).repaymentAmount(), totalRepayment, "repaymentAmount should be updated"
         );
 
         // Agent earned 600 VVV total off-chain (principal + profit)
@@ -207,11 +205,7 @@ contract VeniceInferenceIntegrationTest is BaseIntegrationTest {
         governor.settleProposal(proposalId);
 
         // Assert: vault received 600e18 VVV (more than the 500e18 principal)
-        assertEq(
-            IERC20(VVV_TOKEN).balanceOf(address(vault)),
-            totalRepayment,
-            "vault should receive principal + profit"
-        );
+        assertEq(IERC20(VVV_TOKEN).balanceOf(address(vault)), totalRepayment, "vault should receive principal + profit");
     }
 
     /// @notice Settlement reverts when agent cannot repay (insufficient asset balance).

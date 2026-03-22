@@ -151,9 +151,7 @@ contract DeployTemplates is ScriptBase {
 
         // Verify each returns the correct strategy name
         string memory moonwellName = IStrategy(moonwell).name();
-        require(
-            keccak256(bytes(moonwellName)) == keccak256("Moonwell Supply"), "MoonwellSupplyStrategy: wrong name"
-        );
+        require(keccak256(bytes(moonwellName)) == keccak256("Moonwell Supply"), "MoonwellSupplyStrategy: wrong name");
         console.log("  MoonwellSupplyStrategy:  name OK (\"%s\")", moonwellName);
 
         string memory aerodromeName = IStrategy(aerodrome).name();
@@ -161,9 +159,7 @@ contract DeployTemplates is ScriptBase {
         console.log("  AerodromeLPStrategy:     name OK (\"%s\")", aerodromeName);
 
         string memory veniceName = IStrategy(venice).name();
-        require(
-            keccak256(bytes(veniceName)) == keccak256("Venice Inference"), "VeniceInferenceStrategy: wrong name"
-        );
+        require(keccak256(bytes(veniceName)) == keccak256("Venice Inference"), "VeniceInferenceStrategy: wrong name");
         console.log("  VeniceInferenceStrategy: name OK (\"%s\")", veniceName);
 
         string memory wstethName = IStrategy(wsteth).name();

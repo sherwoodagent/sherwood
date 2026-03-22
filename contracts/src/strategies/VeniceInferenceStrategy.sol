@@ -160,9 +160,8 @@ contract VeniceInferenceStrategy is BaseStrategy {
                 routes[1] = IAeroRouter.Route({from: weth, to: vvv, stable: false, factory: aeroFactory});
             }
 
-            uint256[] memory amounts = IAeroRouter(aeroRouter).swapExactTokensForTokens(
-                assetAmount, minVVV, routes, address(this), block.timestamp + deadlineOffset
-            );
+            uint256[] memory amounts = IAeroRouter(aeroRouter)
+                .swapExactTokensForTokens(assetAmount, minVVV, routes, address(this), block.timestamp + deadlineOffset);
             vvvToStake = amounts[amounts.length - 1];
             if (vvvToStake == 0) revert SwapFailed();
         } else {

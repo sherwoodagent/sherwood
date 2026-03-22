@@ -42,11 +42,7 @@ contract AerodromeLPIntegrationTest is BaseIntegrationTest {
     // ==================== HELPERS ====================
 
     /// @dev Build InitParams for AerodromeLPStrategy
-    function _buildInitParams(address gauge)
-        internal
-        pure
-        returns (AerodromeLPStrategy.InitParams memory)
-    {
+    function _buildInitParams(address gauge) internal pure returns (AerodromeLPStrategy.InitParams memory) {
         return AerodromeLPStrategy.InitParams({
             tokenA: WETH, // token0 in pool
             tokenB: USDC, // token1 in pool
@@ -69,30 +65,18 @@ contract AerodromeLPIntegrationTest is BaseIntegrationTest {
     function _buildExecCalls(address strategy) internal pure returns (BatchExecutorLib.Call[] memory calls) {
         calls = new BatchExecutorLib.Call[](3);
         calls[0] = BatchExecutorLib.Call({
-            target: WETH,
-            data: abi.encodeCall(IERC20.approve, (strategy, WETH_AMOUNT)),
-            value: 0
+            target: WETH, data: abi.encodeCall(IERC20.approve, (strategy, WETH_AMOUNT)), value: 0
         });
         calls[1] = BatchExecutorLib.Call({
-            target: USDC,
-            data: abi.encodeCall(IERC20.approve, (strategy, USDC_AMOUNT)),
-            value: 0
+            target: USDC, data: abi.encodeCall(IERC20.approve, (strategy, USDC_AMOUNT)), value: 0
         });
-        calls[2] = BatchExecutorLib.Call({
-            target: strategy,
-            data: abi.encodeWithSignature("execute()"),
-            value: 0
-        });
+        calls[2] = BatchExecutorLib.Call({target: strategy, data: abi.encodeWithSignature("execute()"), value: 0});
     }
 
     /// @dev Build settlement batch calls: [strategy.settle()]
     function _buildSettleCalls(address strategy) internal pure returns (BatchExecutorLib.Call[] memory calls) {
         calls = new BatchExecutorLib.Call[](1);
-        calls[0] = BatchExecutorLib.Call({
-            target: strategy,
-            data: abi.encodeWithSignature("settle()"),
-            value: 0
-        });
+        calls[0] = BatchExecutorLib.Call({target: strategy, data: abi.encodeWithSignature("settle()"), value: 0});
     }
 
     /// @dev Deploy, init, propose, vote, and execute an Aerodrome LP strategy.
@@ -150,11 +134,7 @@ contract AerodromeLPIntegrationTest is BaseIntegrationTest {
         assertGt(vaultUsdcAfterSettle, vaultUsdcAfterExec, "vault should recover USDC after settlement");
 
         // Should recover roughly what was deposited (within slippage tolerance)
-        assertGe(
-            vaultWethAfterSettle,
-            (WETH_AMOUNT * 80) / 100,
-            "vault WETH should be within slippage tolerance"
-        );
+        assertGe(vaultWethAfterSettle, (WETH_AMOUNT * 80) / 100, "vault WETH should be within slippage tolerance");
         assertGe(
             vaultUsdcAfterSettle + USDC_AMOUNT, // add back the amount to compare total
             vaultUsdcBefore,
@@ -195,11 +175,7 @@ contract AerodromeLPIntegrationTest is BaseIntegrationTest {
         // Vault should have received tokens back
         uint256 vaultWethAfterSettle = IERC20(WETH).balanceOf(address(vault));
         uint256 vaultUsdcAfterSettle = IERC20(USDC).balanceOf(address(vault));
-        assertGe(
-            vaultWethAfterSettle,
-            (WETH_AMOUNT * 80) / 100,
-            "vault should recover WETH within slippage"
-        );
+        assertGe(vaultWethAfterSettle, (WETH_AMOUNT * 80) / 100, "vault should recover WETH within slippage");
         // USDC: vault started with 100k, spent 250, should get ~250 back
         assertGt(vaultUsdcAfterSettle, vaultUsdcBefore - USDC_AMOUNT, "vault should recover USDC");
     }

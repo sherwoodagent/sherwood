@@ -55,7 +55,7 @@ contract UpgradeFactory is ScriptBase {
         // Also snapshot first syndicate vault if any exist
         address firstVault;
         if (snap.syndicateCount > 0) {
-            (,address v,,,,,) = factory.syndicates(1);
+            (, address v,,,,,) = factory.syndicates(1);
             firstVault = v;
             console.log("Syndicate #1 vault:", firstVault);
         }
@@ -146,7 +146,7 @@ contract UpgradeFactory is ScriptBase {
 
         // Validate syndicate mapping survived
         if (firstVault != address(0)) {
-            (,address v,,,,,) = factory.syndicates(1);
+            (, address v,,,,,) = factory.syndicates(1);
             require(v == firstVault, "syndicate #1 vault changed");
             console.log("  syndicate #1 vault: OK (%s)", firstVault);
 
