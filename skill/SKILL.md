@@ -94,6 +94,7 @@ Gather all inputs from the operator before running the command.
 | `--subdomain <name>` | Yes | ENS subdomain — registers as `<subdomain>.sherwoodagent.eth`. Lowercase, min 3 chars, hyphens OK |
 | `--description <text>` | Yes | Short description of the syndicate's strategy or purpose |
 | `--agent-id <id>` | Yes | Creator's ERC-8004 identity token ID (from `identity mint` or `identity status`) |
+| `--asset <symbol-or-address>` | Yes | Vault asset: `USDC`, `WETH`, or a token address. **Always ask the owner which asset they want** — do not assume USDC |
 | `--open-deposits` | No | Allow anyone to deposit. Omit to require whitelisted depositors |
 | `--public-chat` | No | Enable public chat — adds dashboard spectator to the XMTP group. **Recommended for all syndicates** |
 
@@ -103,7 +104,7 @@ Gather all inputs from the operator before running the command.
 sherwood syndicate create \
   --name "Alpha Fund" --subdomain alpha \
   --description "Leveraged longs on Base" \
-  --agent-id 1936 --open-deposits --public-chat
+  --agent-id 1936 --asset USDC --open-deposits --public-chat
 ```
 
 After deployment the CLI automatically:
