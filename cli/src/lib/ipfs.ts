@@ -1,8 +1,8 @@
 /**
- * IPFS metadata upload/fetch via Pinata.
+ * IPFS metadata upload/fetch via Sherwood API.
  *
- * Used for syndicate metadata (name, description, strategies, terms).
- * Requires PINATA_API_KEY and PINATA_GATEWAY env vars.
+ * Uploads go through the server-side API at sherwood.sh/api/ipfs/upload
+ * which holds the Pinata JWT. CLI and app only need the gateway URL for reads.
  */
 
 export interface SyndicateMetadata {
@@ -32,22 +32,12 @@ export interface SyndicateMetadata {
 }
 
 const DEFAULT_PINATA_GATEWAY = "https://sherwood.mypinata.cloud";
+const DEFAULT_UPLOAD_API = "https://sherwood.sh/api/ipfs/upload";
 
-function getPinataJwt(): string {
-  const envJwt = process.env.PINATA_JWT ?? process.env.PINATA_API_KEY;
-  if (envJwt) return envJwt;
-
-  // Check config file
-  try {
-    const { loadConfig } = require("./config");
-    const config = loadConfig();
-    if (config.pinataJwt) return config.pinataJwt;
-  } catch {}
-
-  throw new Error(
-    "PINATA_JWT environment variable is required for IPFS uploads. " +
-      "Get a free API key at https://app.pinata.cloud/developers/api-keys",
-  );
+function getUploadApiUrl(): string {
+  return process.env.SHERWOOD_API_URL
+    ? `${process.env.SHERWOOD_API_URL}/api/ipfs/upload`
+    : DEFAULT_UPLOAD_API;
 }
 
 function getPinataGateway(): string {
@@ -55,62 +45,43 @@ function getPinataGateway(): string {
 }
 
 /**
- * Pin arbitrary JSON to IPFS via Pinata.
+ * Upload JSON to IPFS via the Sherwood API (server-side Pinata).
+ * Returns the IPFS URI (ipfs://Qm...).
+ */
+async function uploadToIPFS(content: Record<string, unknown>, name: string): Promise<string> {
+  const url = getUploadApiUrl();
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, name }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`IPFS upload failed (${response.status}): ${text}`);
+  }
+
+  const result = (await response.json()) as { ipfsHash: string };
+  return `ipfs://${result.ipfsHash}`;
+}
+
+/**
+ * Pin arbitrary JSON to IPFS.
  * Used for research results and other generic JSON payloads.
  * Returns the IPFS URI (ipfs://Qm...).
  */
 export async function pinJSON(content: Record<string, unknown>, name: string): Promise<string> {
-  const jwt = getPinataJwt();
-
-  const response = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${jwt}`,
-    },
-    body: JSON.stringify({
-      pinataContent: content,
-      pinataMetadata: { name },
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Pinata upload failed (${response.status}): ${text}`);
-  }
-
-  const result = (await response.json()) as { IpfsHash: string };
-  return `ipfs://${result.IpfsHash}`;
+  return uploadToIPFS(content, name);
 }
 
 /**
- * Upload syndicate metadata to IPFS via Pinata.
+ * Upload syndicate metadata to IPFS.
  * Returns the IPFS URI (ipfs://Qm...).
  */
 export async function uploadMetadata(metadata: SyndicateMetadata): Promise<string> {
-  const jwt = getPinataJwt();
-
-  const response = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${jwt}`,
-    },
-    body: JSON.stringify({
-      pinataContent: metadata,
-      pinataMetadata: {
-        name: `sherwood-syndicate-${metadata.name.toLowerCase().replace(/\s+/g, "-")}`,
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Pinata upload failed (${response.status}): ${text}`);
-  }
-
-  const result = (await response.json()) as { IpfsHash: string };
-  return `ipfs://${result.IpfsHash}`;
+  const name = `sherwood-syndicate-${metadata.name.toLowerCase().replace(/\s+/g, "-")}`;
+  return uploadToIPFS(metadata as unknown as Record<string, unknown>, name);
 }
 
 /**
