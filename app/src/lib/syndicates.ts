@@ -309,7 +309,7 @@ async function fetchViaSubgraph(
       const tvlFormatted = formatAsset(
         totalAssets,
         info.decimals,
-        info.symbol === "USDC" ? "USD" : undefined,
+        undefined,
       );
 
       // Aggregate P&L per agent from settled proposals
@@ -330,7 +330,7 @@ async function fetchViaSubgraph(
         subdomain: s.subdomain,
         name: metadata?.name || `Syndicate #${s.id}`,
         strategy,
-        tvl: info.symbol === "USDC" ? tvlFormatted : `${tvlFormatted} ${info.symbol}`,
+        tvl: `${tvlFormatted} ${info.symbol}`,
         agentCount,
         agents: (s.agents || []).map((a) => {
           const stats = agentPnl[a.agentAddress.toLowerCase()] ?? { count: 0, pnl: 0n };
@@ -545,7 +545,7 @@ async function fetchViaOnChain(
       const tvlFormatted = formatAsset(
         totalAssets,
         info.decimals,
-        info.symbol === "USDC" ? "USD" : undefined,
+        undefined,
       );
 
       return {
@@ -554,7 +554,7 @@ async function fetchViaOnChain(
         subdomain: s.subdomain,
         name: metadata?.name || `Syndicate #${s.id.toString()}`,
         strategy,
-        tvl: info.symbol === "USDC" ? tvlFormatted : `${tvlFormatted} ${info.symbol}`,
+        tvl: `${tvlFormatted} ${info.symbol}`,
         agentCount,
         agents: agentsByVault[s.vault.toLowerCase()] ?? [],
         status,
