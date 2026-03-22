@@ -17,6 +17,7 @@ import { agentHomeDir } from "../agent-home.js";
 import { execSherwood } from "../exec.js";
 import { updateAgent, updateSyndicate, saveState } from "../state.js";
 import { PERSONAS } from "../personas.js";
+import type { SimLogger } from "../logger.js";
 
 /**
  * Parse proposal list output to find pending proposals.
@@ -88,6 +89,7 @@ export async function runHeartbeatRound(
   config: SimConfig,
   state: SimState,
   round: number,
+  logger?: SimLogger,
 ): Promise<HeartbeatRoundResult> {
   const result: HeartbeatRoundResult = {
     round,
@@ -118,6 +120,8 @@ export async function runHeartbeatRound(
         chatHome,
         ["chat", syndicate.subdomain, "log", "--limit", "5"],
         config,
+        logger,
+        chatChecker.index,
       );
       result.messagesChecked++;
 
@@ -133,6 +137,8 @@ export async function runHeartbeatRound(
             replierHome,
             ["chat", syndicate.subdomain, "send", reply, "--markdown"],
             config,
+            logger,
+            replier.index,
           );
           result.repliesSent++;
         } catch (chatErr) {
@@ -150,6 +156,8 @@ export async function runHeartbeatRound(
           chatHome,
           ["proposal", "list", "--vault", syndicate.vault],
           config,
+          logger,
+          chatChecker.index,
         );
 
         const pendingIds = parsePendingProposals(proposalOutput);
@@ -170,6 +178,8 @@ export async function runHeartbeatRound(
                 voterHome,
                 ["proposal", "vote", "--id", String(proposalId), "--support", "for"],
                 config,
+                logger,
+                voter.index,
               );
               result.votescast++;
             } catch (voteErr) {
@@ -227,13 +237,16 @@ export async function runPhase09(
   config: SimConfig,
   state: SimState,
   rounds: number = 3,
+  logger?: SimLogger,
 ): Promise<void> {
   console.log(`\n=== Phase 09: Heartbeat (${rounds} rounds) ===\n`);
+  logger?.setPhase(9);
+  logger?.info(`phase 09 started: heartbeat x${rounds}`);
 
   for (let round = 1; round <= rounds; round++) {
     console.log(`\n--- Heartbeat Round ${round}/${rounds} ---`);
 
-    const result = await runHeartbeatRound(config, state, round);
+    const result = await runHeartbeatRound(config, state, round, logger);
 
     console.log(`  Messages checked:  ${result.messagesChecked}`);
     console.log(`  Replies sent:      ${result.repliesSent}`);
@@ -252,5 +265,6 @@ export async function runPhase09(
     }
   }
 
+  logger?.info("phase 09 complete");
   console.log("\nPhase 09 complete.");
 }

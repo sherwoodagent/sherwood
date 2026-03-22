@@ -14,9 +14,12 @@ import { agentHomeDir, updateAgentConfig } from "../agent-home.js";
 import { execSherwood, parseVaultAddress } from "../exec.js";
 import { updateAgent, updateSyndicate } from "../state.js";
 import { PERSONAS } from "../personas.js";
+import type { SimLogger } from "../logger.js";
 
-export async function runPhase02(config: SimConfig, state: SimState): Promise<void> {
+export async function runPhase02(config: SimConfig, state: SimState, logger?: SimLogger): Promise<void> {
   console.log("\n=== Phase 02: Create Syndicates ===\n");
+  logger?.setPhase(2);
+  logger?.info("phase 02 started: create syndicates");
 
   const creators = state.agents.filter((a) => a.role === "creator");
 
@@ -68,6 +71,8 @@ export async function runPhase02(config: SimConfig, state: SimState): Promise<vo
           "-y",
         ],
         config,
+        logger,
+        creator.index,
       );
 
       // Parse vault address
@@ -108,5 +113,6 @@ export async function runPhase02(config: SimConfig, state: SimState): Promise<vo
     }
   }
 
+  logger?.info("phase 02 complete");
   console.log("\nPhase 02 complete.");
 }

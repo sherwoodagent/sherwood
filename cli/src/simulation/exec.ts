@@ -5,6 +5,7 @@
  *   - Sets HOME to the agent's isolated directory
  *   - Sets BASE_RPC_URL from config
  *   - Calls: npx tsx <sherwoodBin> <args...>
+ *   - Appends a structured LogEntry to the SimLogger (if provided)
  *
  * This keeps XMTP DBs and sherwood configs per-agent without modifying the CLI.
  */
@@ -12,6 +13,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { SimConfig } from "./types.js";
+import type { SimLogger } from "./logger.js";
 
 /**
  * Execute a sherwood CLI command for a specific agent.
@@ -19,9 +21,17 @@ import type { SimConfig } from "./types.js";
  * @param agentHome - The HOME directory for this agent
  * @param args - CLI arguments (e.g. ["identity", "mint", "--name", "Alpha"])
  * @param config - SimConfig
+ * @param logger - Optional SimLogger for structured log output
+ * @param agentIndex - Agent index for log attribution
  * @returns stdout as string
  */
-export function execSherwood(agentHome: string, args: string[], config: SimConfig): string {
+export function execSherwood(
+  agentHome: string,
+  args: string[],
+  config: SimConfig,
+  logger?: SimLogger,
+  agentIndex?: number,
+): string {
   const agentLabel = path.basename(agentHome);
   const cliPath = path.resolve(config.sherwoodBin);
   // cwd should be the cli/ directory so tsx/tsconfig resolves correctly
@@ -32,6 +42,7 @@ export function execSherwood(agentHome: string, args: string[], config: SimConfi
 
   if (config.dryRun) {
     console.log(`  [${agentLabel}] [DRY RUN] skipped`);
+    logger?.skip(`sherwood ${displayArgs}`, agentIndex);
     return "";
   }
 
@@ -43,6 +54,7 @@ export function execSherwood(agentHome: string, args: string[], config: SimConfi
     CI: "true",
   };
 
+  const t0 = Date.now();
   try {
     const output = execFileSync("npx", ["tsx", cliPath, ...args], {
       encoding: "utf8",
@@ -52,13 +64,17 @@ export function execSherwood(agentHome: string, args: string[], config: SimConfi
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    return (output || "").trim();
+    const result = (output || "").trim();
+    logger?.ok(`sherwood ${displayArgs}`, result.slice(0, 500), agentIndex, Date.now() - t0);
+    return result;
   } catch (err: unknown) {
     const execErr = err as { stdout?: string; stderr?: string; message?: string };
     const stderr = execErr.stderr || "";
     const stdout = execErr.stdout || "";
     const combined = [stdout, stderr].filter(Boolean).join("\n");
-    throw new Error(`sherwood ${displayArgs} failed:\n${combined || execErr.message}`);
+    const message = `sherwood ${displayArgs} failed:\n${combined || execErr.message}`;
+    logger?.err(`sherwood ${displayArgs}`, message, agentIndex, Date.now() - t0);
+    throw new Error(message);
   }
 }
 

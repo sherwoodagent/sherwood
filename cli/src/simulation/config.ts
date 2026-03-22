@@ -28,6 +28,7 @@ export function loadSimConfig(): SimConfig {
     syndicateCount: parseInt(process.env.SIM_SYNDICATE_COUNT || "5", 10),
     baseDir: process.env.SIM_BASE_DIR || "/tmp/sherwood-sim/agents",
     stateFile: process.env.SIM_STATE_FILE || "/tmp/sherwood-sim/state.json",
+    logFile: process.env.SIM_LOG_FILE || "/tmp/sherwood-sim/sim.log",
     sherwoodBin: process.env.SIM_SHERWOOD_BIN || DEFAULT_SHERWOOD_BIN,
     rpcUrl,
     dryRun: process.env.SIM_DRY_RUN === "true",

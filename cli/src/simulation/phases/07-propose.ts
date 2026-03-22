@@ -16,6 +16,7 @@ import type { SimConfig, SimState } from "../types.js";
 import { agentHomeDir } from "../agent-home.js";
 import { execSherwood, parseProposalId } from "../exec.js";
 import { updateSyndicate } from "../state.js";
+import type { SimLogger } from "../logger.js";
 
 interface ProposalSpec {
   strategy: "moonwell-supply";
@@ -83,8 +84,10 @@ function getProposalSpec(creatorIndex: number): ProposalSpec {
   return specs[creatorIndex] || specs[1];
 }
 
-export async function runPhase07(config: SimConfig, state: SimState): Promise<void> {
+export async function runPhase07(config: SimConfig, state: SimState, logger?: SimLogger): Promise<void> {
   console.log("\n=== Phase 07: Propose Strategies ===\n");
+  logger?.setPhase(7);
+  logger?.info("phase 07 started: propose strategies");
 
   const creators = state.agents.filter((a) => a.role === "creator" && a.syndicateCreated);
 
@@ -137,6 +140,8 @@ export async function runPhase07(config: SimConfig, state: SimState): Promise<vo
           spec.duration,
         ],
         config,
+        logger,
+        creator.index,
       );
 
       const proposalId = config.dryRun ? creator.index * 10 : parseProposalId(output);
@@ -163,5 +168,6 @@ export async function runPhase07(config: SimConfig, state: SimState): Promise<vo
     }
   }
 
+  logger?.info("phase 07 complete");
   console.log("\nPhase 07 complete.");
 }

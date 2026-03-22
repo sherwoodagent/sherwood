@@ -8,11 +8,24 @@ export interface SimConfig {
   syndicateCount: number; // default 5
   baseDir: string; // default /tmp/sherwood-sim/agents
   stateFile: string; // default /tmp/sherwood-sim/state.json
+  logFile: string; // default /tmp/sherwood-sim/sim.log (JSONL)
   sherwoodBin: string; // path to CLI entry (cli/src/index.ts)
   rpcUrl: string; // from BASE_RPC_URL
   dryRun: boolean; // from SIM_DRY_RUN
   fundAmountEth: string; // default "0.002"
   fundAmountUsdc: string; // default "50"
+}
+
+/** A single structured log entry written as a JSONL line. */
+export interface LogEntry {
+  ts: number; // unix ms
+  phase: number; // simulation phase (0 = setup, etc.)
+  agentIndex?: number; // which agent, if applicable
+  command: string; // full CLI args string or description
+  status: "ok" | "error" | "skip" | "info";
+  output?: string; // stdout (trimmed)
+  error?: string; // error message on failure
+  durationMs?: number; // how long the command took
 }
 
 export interface AgentState {

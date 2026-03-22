@@ -10,6 +10,7 @@ import type { SimConfig, SimState } from "../types.js";
 import { agentHomeDir } from "../agent-home.js";
 import { execSherwood } from "../exec.js";
 import { PERSONAS } from "../personas.js";
+import type { SimLogger } from "../logger.js";
 
 /**
  * Pick a random element from an array.
@@ -19,8 +20,10 @@ function pickRandom<T>(arr: T[]): T | undefined {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-export async function runPhase06(config: SimConfig, state: SimState): Promise<void> {
+export async function runPhase06(config: SimConfig, state: SimState, logger?: SimLogger): Promise<void> {
   console.log("\n=== Phase 06: Chat ===\n");
+  logger?.setPhase(6);
+  logger?.info("phase 06 started: chat");
 
   for (const syndicate of state.syndicates) {
     if (!syndicate.vault && !config.dryRun) {
@@ -66,6 +69,8 @@ export async function runPhase06(config: SimConfig, state: SimState): Promise<vo
             "--markdown",
           ],
           config,
+          logger,
+          agent.index,
         );
       } catch (err) {
         // XMTP chat failures are non-fatal
@@ -76,5 +81,6 @@ export async function runPhase06(config: SimConfig, state: SimState): Promise<vo
     }
   }
 
+  logger?.info("phase 06 complete");
   console.log("\nPhase 06 complete.");
 }

@@ -94,11 +94,82 @@ npx tsx cli/src/simulation/orchestrator.ts vote
 npx tsx cli/src/simulation/orchestrator.ts heartbeat --rounds 3
 ```
 
+### Autonomous scheduling
+
+Run the heartbeat on a fixed interval — designed to be started once and left running:
+
+```bash
+# Run heartbeat every 30 minutes, 3 rounds per cycle
+npx tsx cli/src/simulation/orchestrator.ts schedule --interval 30 --rounds 3
+
+# Run for exactly 10 cycles then exit
+npx tsx cli/src/simulation/orchestrator.ts schedule --interval 30 --rounds 3 --max-cycles 10
+```
+
+Claude Code can start this in the background, then periodically check the structured log to decide if intervention is needed.
+
+### Inspecting logs (for Claude)
+
+Every CLI command is logged as a JSONL entry to `SIM_LOG_FILE` (default `/tmp/sherwood-sim/sim.log`).
+
+```bash
+# Show last 50 entries (human-readable)
+npx tsx cli/src/simulation/orchestrator.ts logs
+
+# Show only errors
+npx tsx cli/src/simulation/orchestrator.ts logs --errors
+
+# Filter to a specific phase or agent
+npx tsx cli/src/simulation/orchestrator.ts logs --phase 3 --agent 7
+
+# Raw JSONL output (for piping to jq or other tools)
+npx tsx cli/src/simulation/orchestrator.ts logs --raw --last 100
+```
+
+### Diagnose (machine-readable for Claude)
+
+The `diagnose` command outputs a JSON report Claude can parse to determine what needs attention:
+
+```bash
+npx tsx cli/src/simulation/orchestrator.ts diagnose
+```
+
+Output includes:
+- `errorCount` — total failures since logging started
+- `errorsByPhase` — per-phase breakdown of command + error message
+- `agentsWithErrors` — which agent indices have had failures
+- `errorPatterns` — deduplicated first-line error messages
+- `suggestions` — auto-generated `sim retry --phase N` commands to run
+- `simState` — full current state snapshot
+
+### Retrying failures
+
+After checking `diagnose`, re-run a specific phase without disturbing completed agents:
+
+```bash
+# Re-run phase 3 (all phases are idempotent — skips agents already marked done)
+npx tsx cli/src/simulation/orchestrator.ts retry --phase 3
+```
+
 ### Status
 
 ```bash
 npx tsx cli/src/simulation/orchestrator.ts status
 ```
+
+## Claude Autonomous Workflow
+
+The simulation is designed so Claude Code can orchestrate it end-to-end:
+
+1. **Start the run**: `sim run-all` (or individual phases)
+2. **Schedule ongoing activity**: `sim schedule --interval 30 &` (background)
+3. **Check health periodically**: `sim diagnose` → parse JSON → decide action
+4. **Fix failures**: `sim logs --errors` → identify root cause → `sim retry --phase N`
+5. **Inspect specific agents**: `sim logs --agent 7 --last 20`
+
+All state is in two files:
+- `/tmp/sherwood-sim/state.json` — structured sim state (agents, syndicates, proposals)
+- `/tmp/sherwood-sim/sim.log` — append-only JSONL audit log of every command
 
 ## Agent Personas
 

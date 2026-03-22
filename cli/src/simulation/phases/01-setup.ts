@@ -18,9 +18,12 @@ import { fundAgents } from "../fund-agents.js";
 import { execSherwood, parseAgentId } from "../exec.js";
 import { saveState, updateAgent, initState } from "../state.js";
 import { PERSONAS, getCreators, getJoiners } from "../personas.js";
+import type { SimLogger } from "../logger.js";
 
-export async function runPhase01(config: SimConfig, state: SimState | null): Promise<SimState> {
+export async function runPhase01(config: SimConfig, state: SimState | null, logger?: SimLogger): Promise<SimState> {
   console.log("\n=== Phase 01: Setup ===\n");
+  logger?.setPhase(1);
+  logger?.info("phase 01 started: setup");
 
   // Derive all wallets (0 = master, 1-N = agents)
   const totalWallets = config.agentCount + 1; // +1 for master
@@ -128,6 +131,8 @@ export async function runPhase01(config: SimConfig, state: SimState | null): Pro
           persona.description,
         ],
         config,
+        logger,
+        agent.index,
       );
 
       // Parse agent ID from output
@@ -154,6 +159,7 @@ export async function runPhase01(config: SimConfig, state: SimState | null): Pro
     }
   }
 
+  logger?.info("phase 01 complete");
   console.log("\nPhase 01 complete.");
   return state;
 }

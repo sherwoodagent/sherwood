@@ -13,9 +13,12 @@ import { agentHomeDir } from "../agent-home.js";
 import { execSherwood } from "../exec.js";
 import { updateAgent } from "../state.js";
 import { PERSONAS } from "../personas.js";
+import type { SimLogger } from "../logger.js";
 
-export async function runPhase05(config: SimConfig, state: SimState): Promise<void> {
+export async function runPhase05(config: SimConfig, state: SimState, logger?: SimLogger): Promise<void> {
   console.log("\n=== Phase 05: Deposit ===\n");
+  logger?.setPhase(5);
+  logger?.info("phase 05 started: deposit");
 
   // All agents that are eligible to deposit:
   // - Creators: already have their vault
@@ -72,6 +75,8 @@ export async function runPhase05(config: SimConfig, state: SimState): Promise<vo
           vault,
         ],
         config,
+        logger,
+        agent.index,
       );
 
       updateAgent(config.stateFile, state, agent.index - 1, { deposited: true });
@@ -83,5 +88,6 @@ export async function runPhase05(config: SimConfig, state: SimState): Promise<vo
     }
   }
 
+  logger?.info("phase 05 complete");
   console.log("\nPhase 05 complete.");
 }

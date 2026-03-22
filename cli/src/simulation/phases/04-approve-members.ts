@@ -13,6 +13,7 @@ import type { SimConfig, SimState } from "../types.js";
 import { agentHomeDir } from "../agent-home.js";
 import { execSherwood } from "../exec.js";
 import { updateAgent } from "../state.js";
+import type { SimLogger } from "../logger.js";
 
 interface JoinRequest {
   agentId: number;
@@ -60,8 +61,10 @@ function parseJoinRequests(output: string): JoinRequest[] {
   return requests;
 }
 
-export async function runPhase04(config: SimConfig, state: SimState): Promise<void> {
+export async function runPhase04(config: SimConfig, state: SimState, logger?: SimLogger): Promise<void> {
   console.log("\n=== Phase 04: Approve Members ===\n");
+  logger?.setPhase(4);
+  logger?.info("phase 04 started: approve members");
 
   const creators = state.agents.filter((a) => a.role === "creator" && a.syndicateCreated);
 
@@ -103,6 +106,8 @@ export async function runPhase04(config: SimConfig, state: SimState): Promise<vo
           creatorHome,
           ["syndicate", "requests", "--subdomain", subdomain],
           config,
+          logger,
+          creator.index,
         );
         requests = parseJoinRequests(requestsOutput);
         console.log(`  [agent-${creator.index}] Found ${requests.length} pending requests`);
@@ -141,6 +146,8 @@ export async function runPhase04(config: SimConfig, state: SimState): Promise<vo
             subdomain,
           ],
           config,
+          logger,
+          creator.index,
         );
 
         updateAgent(config.stateFile, state, joiner.index - 1, { approved: true });
@@ -153,5 +160,6 @@ export async function runPhase04(config: SimConfig, state: SimState): Promise<vo
     }
   }
 
+  logger?.info("phase 04 complete");
   console.log("\nPhase 04 complete.");
 }

@@ -14,6 +14,7 @@ import { agentHomeDir } from "../agent-home.js";
 import { execSherwood } from "../exec.js";
 import { updateAgent } from "../state.js";
 import { PERSONAS } from "../personas.js";
+import type { SimLogger } from "../logger.js";
 
 /**
  * Assign joiners to syndicates round-robin.
@@ -36,8 +37,10 @@ function assignJoinersToSyndicates(
   return assignments;
 }
 
-export async function runPhase03(config: SimConfig, state: SimState): Promise<void> {
+export async function runPhase03(config: SimConfig, state: SimState, logger?: SimLogger): Promise<void> {
   console.log("\n=== Phase 03: Join Syndicates ===\n");
+  logger?.setPhase(3);
+  logger?.info("phase 03 started: join syndicates");
 
   const joiners = state.agents.filter((a) => a.role === "joiner");
   const syndicates = state.syndicates.filter((s) => s.vault || config.dryRun);
@@ -97,6 +100,8 @@ export async function runPhase03(config: SimConfig, state: SimState): Promise<vo
           message,
         ],
         config,
+        logger,
+        joiner.index,
       );
 
       updateAgent(config.stateFile, state, joiner.index - 1, {
@@ -112,5 +117,6 @@ export async function runPhase03(config: SimConfig, state: SimState): Promise<vo
     }
   }
 
+  logger?.info("phase 03 complete");
   console.log("\nPhase 03 complete.");
 }

@@ -13,9 +13,12 @@ import { agentHomeDir } from "../agent-home.js";
 import { execSherwood } from "../exec.js";
 import { updateSyndicate } from "../state.js";
 import { PERSONAS } from "../personas.js";
+import type { SimLogger } from "../logger.js";
 
-export async function runPhase08(config: SimConfig, state: SimState): Promise<void> {
+export async function runPhase08(config: SimConfig, state: SimState, logger?: SimLogger): Promise<void> {
   console.log("\n=== Phase 08: Vote ===\n");
+  logger?.setPhase(8);
+  logger?.info("phase 08 started: vote");
 
   for (const syndicate of state.syndicates) {
     // Find proposals in "proposed" state that have an ID
@@ -69,6 +72,8 @@ export async function runPhase08(config: SimConfig, state: SimState): Promise<vo
               support,
             ],
             config,
+            logger,
+            voter.index,
           );
           voteCount++;
 
@@ -100,5 +105,6 @@ export async function runPhase08(config: SimConfig, state: SimState): Promise<vo
     }
   }
 
+  logger?.info("phase 08 complete");
   console.log("\nPhase 08 complete.");
 }
