@@ -373,6 +373,8 @@ export default async function ProposalsPage({
               proposal={activeProposal}
               cooldownEnd={governor.cooldownEnd}
               addressNames={addressNames}
+              assetDecimals={data.assetDecimals}
+              assetSymbol={data.assetSymbol}
             />
           </div>
 
