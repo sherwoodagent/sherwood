@@ -54,6 +54,18 @@ Base predeploys (same on mainnet and Sepolia):
 
 Schema UIDs are stored in `cli/src/lib/addresses.ts` and differ per network. Register via `cli/scripts/register-eas-schemas.ts`.
 
+## Strategy Templates (Base Mainnet)
+
+ERC-1167 clonable singletons. Use `sherwood strategy list` to see current addresses.
+
+| Template | Address |
+|----------|---------|
+| MoonwellSupplyStrategy | *not yet deployed* |
+| AerodromeLPStrategy | *not yet deployed* |
+| VeniceInferenceStrategy | *not yet deployed* |
+
+Deploy via: `forge script script/DeployTemplates.s.sol --rpc-url base --broadcast`
+
 ## Allowlist Targets by Strategy
 
 ### Levered Swap (Moonwell + Uniswap)
@@ -85,9 +97,11 @@ sherwood vault add-target --target 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913  #
 sherwood vault add-target --target <strategy-clone-address>                      # Your strategy contract
 ```
 
-### Venice Funding (VVV Staking)
+### Venice Inference (Strategy Template)
 
 ```bash
 sherwood vault add-target --target 0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf  # VVV token
 sherwood vault add-target --target 0x321b7ff75154472b18edb199033ff4d116f340ff  # VVV Staking (sVVV)
+sherwood vault add-target --target 0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43  # Aerodrome Router (swap path only)
+sherwood vault add-target --target <strategy-clone-address>                      # Your strategy contract
 ```

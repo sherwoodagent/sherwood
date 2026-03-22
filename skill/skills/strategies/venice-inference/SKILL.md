@@ -53,53 +53,47 @@ sherwood identity show
 sherwood vault info --vault <vault-address>
 ```
 
-### Step 2: Pre-approve sVVV clawback
+### Step 2: Clone + init + build calls (all-in-one)
 
-The agent must approve the strategy contract to claw back sVVV on settlement. ERC20 approve works before holding tokens.
-
-```bash
-# The strategy clone address is known after proposal creation
-# Agent calls: sVVV.approve(strategyClone, type(uint256).max)
-sherwood vault execute-raw --vault <vault> --target 0x321b7ff75154472b18edb199033ff4d116f340ff --data <approve-calldata>
-```
-
-Or the agent can call `approve` directly from their wallet (not through the vault).
-
-### Step 3: Build proposal calls
-
-#### Option A: Using `venice fund` (multi-agent, Uniswap routing)
+The `strategy propose` command handles everything: clones the template, initializes it, builds batch calls, and optionally submits the proposal.
 
 ```bash
-# Generate execute calls for governance proposal
-sherwood venice fund --vault <vault-address> --amount 500 --write-calls ./venice-execute.json
+# Generate execute/settle JSON files (clone + init happens on-chain)
+sherwood strategy propose venice-inference \
+  --vault <vault-address> \
+  --amount 500 \
+  --asset USDC \
+  --min-vvv 900 \
+  --write-calls ./venice-calls
 
-# Create proposal
+# Submit the proposal
 sherwood proposal create \
   --vault <vault-address> \
   --name "Venice VVV Staking" \
   --performance-fee 0 \
   --duration 7d \
-  --execute-calls ./venice-execute.json \
-  --settle-calls ./venice-settle.json
+  --execute-calls ./venice-calls/execute.json \
+  --settle-calls ./venice-calls/settle.json
 ```
 
-#### Option B: Using VeniceInferenceStrategy contract directly
+Or submit directly (skip `--write-calls`):
 
-For the on-chain strategy contract (single agent, Aerodrome routing):
-
-**Execute batch calls:**
-```
-[asset.approve(strategy, assetAmount), strategy.execute()]
-```
-
-**Settle batch calls:**
-```
-[strategy.settle()]
+```bash
+sherwood strategy propose venice-inference \
+  --vault <vault-address> \
+  --amount 500 --asset USDC --min-vvv 900 \
+  --name "Venice VVV Staking" --performance-fee 0 --duration 7d
 ```
 
-**After settlement + cooldown:**
-```
-strategy.claimVVV()  // callable by anyone — pushes VVV back to vault
+The CLI prints the clone address after deployment. Use it for the pre-approval step.
+
+### Step 3: Pre-approve sVVV clawback
+
+The agent must approve the strategy clone to claw back sVVV on settlement. ERC20 approve works before holding tokens.
+
+```bash
+# Agent calls sVVV.approve(strategyClone, type(uint256).max) from their wallet
+# The clone address is printed by `strategy propose`
 ```
 
 ### Step 4: Provision API key
