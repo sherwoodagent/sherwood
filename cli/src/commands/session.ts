@@ -29,6 +29,7 @@ import {
   getVaultEvents,
   getGovernorEvents,
   getCurrentBlock,
+  enrichProposalEvents,
   type ChainEvent,
 } from "../lib/events.js";
 import type { ChatEnvelope } from "../lib/types.js";
@@ -166,6 +167,13 @@ async function handleCheck(name: string, stream: boolean): Promise<void> {
       currentBlock,
     );
     events = [...vaultEvents, ...govEvents].sort((a, b) => a.block - b.block);
+
+    // Enrich proposal events with IPFS metadata (name, description, state)
+    try {
+      events = await enrichProposalEvents(events);
+    } catch {
+      // IPFS/RPC unreachable — continue with raw events
+    }
   }
 
   // ── Output initial catch-up result ──
@@ -222,6 +230,9 @@ async function startStream(
   vaultAddress: Address,
   governorAddress: Address,
 ): Promise<void> {
+  // Cache for proposal metadata — immutable once pinned, safe to reuse across polls
+  const metadataCache = new Map<string, { name: string; description: string }>();
+
   // Start XMTP message stream
   let xmtpCleanup: (() => void) | undefined;
   try {
@@ -270,9 +281,16 @@ async function startStream(
         toBlock,
       );
 
-      const events = [...vaultEvents, ...govEvents].sort(
+      let events = [...vaultEvents, ...govEvents].sort(
         (a, b) => a.block - b.block,
       );
+
+      // Enrich proposal events with IPFS metadata (reuse cache across polls)
+      try {
+        events = await enrichProposalEvents(events, metadataCache);
+      } catch {
+        // IPFS/RPC unreachable — continue with raw events
+      }
 
       for (const event of events) {
         process.stdout.write(JSON.stringify(event) + "\n");

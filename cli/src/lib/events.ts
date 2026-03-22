@@ -8,6 +8,8 @@
 import type { Address, Log } from "viem";
 import { parseAbiItem } from "viem";
 import { getPublicClient } from "./client.js";
+import { getProposal, PROPOSAL_STATES } from "./governor.js";
+import { resolveMetadataSummary } from "./ipfs.js";
 
 const MAX_BLOCK_RANGE = 10_000n;
 
@@ -157,4 +159,100 @@ export async function getGovernorEvents(
 export async function getCurrentBlock(): Promise<bigint> {
   const client = getPublicClient();
   return client.getBlockNumber();
+}
+
+// ── Proposal event enrichment ──
+
+const PROPOSAL_EVENT_TYPES = new Set([
+  "ProposalCreated",
+  "VoteCast",
+  "ProposalExecuted",
+  "ProposalSettled",
+  "ProposalCancelled",
+]);
+
+/**
+ * Enrich proposal-related events with IPFS metadata (name, description)
+ * and current on-chain state. Best-effort — events are returned un-enriched
+ * if RPC or IPFS calls fail.
+ *
+ * An optional metadataCache avoids redundant IPFS fetches across poll cycles
+ * in streaming mode (proposal metadata is immutable once pinned).
+ */
+export async function enrichProposalEvents(
+  events: ChainEvent[],
+  metadataCache?: Map<string, { name: string; description: string }>,
+): Promise<ChainEvent[]> {
+  const cache = metadataCache ?? new Map<string, { name: string; description: string }>();
+
+  const proposalEvents = events.filter((e) => PROPOSAL_EVENT_TYPES.has(e.type));
+  if (proposalEvents.length === 0) return events;
+
+  // Collect unique proposalIds and their metadata sources
+  const idsNeedingLookup = new Set<string>();
+  const createdURIs = new Map<string, string>(); // proposalId → metadataURI from event args
+
+  for (const event of proposalEvents) {
+    const pid = event.args.proposalId;
+    if (!pid) continue;
+
+    if (event.type === "ProposalCreated" && event.args.metadataURI) {
+      createdURIs.set(pid, event.args.metadataURI);
+    } else if (!cache.has(pid)) {
+      idsNeedingLookup.add(pid);
+    }
+  }
+
+  // Fetch on-chain proposal data for non-Created events (parallel, deduplicated)
+  const proposalData = new Map<string, { metadataURI: string; state: number }>();
+
+  await Promise.all(
+    Array.from(idsNeedingLookup).map(async (pid) => {
+      try {
+        const p = await getProposal(BigInt(pid));
+        proposalData.set(pid, { metadataURI: p.metadataURI, state: p.state });
+      } catch {
+        // RPC failure — skip enrichment for this proposalId
+      }
+    }),
+  );
+
+  // Resolve IPFS metadata (parallel, deduplicated, uses cache)
+  const allURIs = new Map<string, string>();
+  for (const [pid, uri] of createdURIs) allURIs.set(pid, uri);
+  for (const [pid, data] of proposalData) {
+    if (!allURIs.has(pid)) allURIs.set(pid, data.metadataURI);
+  }
+
+  await Promise.all(
+    Array.from(allURIs.entries()).map(async ([pid, uri]) => {
+      if (cache.has(pid) || !uri) return;
+      const summary = await resolveMetadataSummary(uri);
+      if (summary) cache.set(pid, summary);
+    }),
+  );
+
+  // Inject enrichment fields into event args
+  return events.map((event) => {
+    if (!PROPOSAL_EVENT_TYPES.has(event.type)) return event;
+    const pid = event.args.proposalId;
+    if (!pid) return event;
+
+    const meta = cache.get(pid);
+    const pData = proposalData.get(pid);
+    const enrichedArgs = { ...event.args };
+
+    if (meta) {
+      enrichedArgs.proposalName = meta.name;
+      enrichedArgs.proposalDescription = meta.description;
+    }
+
+    if (event.type === "ProposalCreated") {
+      enrichedArgs.proposalState = "Pending";
+    } else if (pData) {
+      enrichedArgs.proposalState = PROPOSAL_STATES[pData.state] || "Unknown";
+    }
+
+    return { ...event, args: enrichedArgs };
+  });
 }

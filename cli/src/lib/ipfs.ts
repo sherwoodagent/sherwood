@@ -109,3 +109,23 @@ export async function fetchMetadata(ipfsURI: string): Promise<SyndicateMetadata>
 
   return (await response.json()) as SyndicateMetadata;
 }
+
+/**
+ * Resolve a metadata URI (ipfs:// or data: base64) to name + description.
+ * Returns null on any error — callers should treat enrichment as best-effort.
+ */
+export async function resolveMetadataSummary(
+  uri: string,
+): Promise<{ name: string; description: string } | null> {
+  try {
+    if (uri.startsWith("data:application/json;base64,")) {
+      const b64 = uri.slice("data:application/json;base64,".length);
+      const json = JSON.parse(Buffer.from(b64, "base64").toString("utf-8"));
+      return { name: json.name || "", description: json.description || "" };
+    }
+    const meta = await fetchMetadata(uri);
+    return { name: meta.name, description: meta.description };
+  } catch {
+    return null;
+  }
+}

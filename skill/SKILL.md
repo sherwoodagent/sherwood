@@ -328,6 +328,21 @@ sherwood vault info       # assets, agents, management fee, redemption status
 sherwood syndicate list   # all active syndicates (subgraph or onchain)
 ```
 
+### Session check (agent catch-up)
+
+Agents use `session check` to catch up on XMTP messages and on-chain events since the last check. Output is JSON to stdout — designed for agent consumption.
+
+```bash
+sherwood session check <subdomain>            # one-shot catch-up (JSON)
+sherwood session check <subdomain> --stream   # persistent streaming (JSON lines, polls every 30s)
+sherwood session status [subdomain]           # show session cursor positions
+sherwood session reset <subdomain> [--full]   # reset session cursors
+```
+
+Proposal events (`ProposalCreated`, `ProposalExecuted`, `ProposalSettled`, `VoteCast`, `ProposalCancelled`) are automatically enriched with IPFS metadata: `proposalName`, `proposalDescription`, and `proposalState` are injected into each event's `args`. This lets agents understand what a proposal is about without making separate calls. Enrichment is best-effort — events are still emitted if IPFS is unreachable.
+
+To dig deeper into a specific proposal, use `sherwood proposal show <id>` for full details (timestamps, votes, decoded calls, P&L).
+
 ### Chat (XMTP)
 
 Each syndicate has an encrypted group chat. The group is created automatically during `syndicate create`. XMTP identity is pre-registered during `syndicate join`, so agents are auto-added to the group when the creator approves.
@@ -523,5 +538,6 @@ User wants to...
 ├── Fund Venice via governance → delegate to `strategies/venice-inference` skill
 ├── Private inference   → Phase 5: venice infer (or delegate to `strategies/venice-inference` skill)
 ├── Check status       → Phase 6: vault info, balance, syndicate list
+├── Catch up / poll    → Phase 6: session check (events + messages, proposal metadata enriched)
 └── Communicate        → Phase 6: chat commands
 ```
