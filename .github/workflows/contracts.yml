@@ -29,8 +29,14 @@ jobs:
       - name: Build
         run: forge build --sizes
 
-      - name: Test
-        run: forge test -vvv
+      - name: Unit tests
+        run: forge test -vvv --no-match-path "test/integration/*"
+
+      - name: Fork integration tests
+        if: env.BASE_RPC_URL != ''
+        run: forge test -vvv --fork-url base --match-path "test/integration/*"
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
 
       - name: Format check
         run: forge fmt --check
