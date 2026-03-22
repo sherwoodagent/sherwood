@@ -44,7 +44,7 @@ abstract contract BaseStrategy is IStrategy {
 
     address private _vault;
     address private _proposer;
-    State private _state;
+    State internal _state;
     bool private _initialized;
 
     modifier onlyProposer() {
@@ -85,7 +85,7 @@ abstract contract BaseStrategy is IStrategy {
     }
 
     /// @inheritdoc IStrategy
-    function updateParams(bytes calldata data) external onlyProposer {
+    function updateParams(bytes calldata data) external virtual onlyProposer {
         if (_state != State.Executed) revert NotExecuted();
         _updateParams(data);
     }

@@ -50,6 +50,7 @@ contract WstETHMoonwellStrategy is BaseStrategy {
     error MintFailed();
     error RedeemFailed();
     error SwapFailed();
+    error AlreadySettledParams();
 
     // ── Initialization parameters ──
     struct InitParams {
@@ -158,10 +159,17 @@ contract WstETHMoonwellStrategy is BaseStrategy {
     }
 
     /**
-     * @notice Update settlement slippage params
-     * @dev Decode: (uint256 newMinWethOut, uint256 newMinWstethOut, uint256 newDeadlineOffset)
-     *      Pass 0 to keep current value. Only proposer, only while Executed.
+     * @notice Update slippage params — allowed in Pending OR Executed state.
+     * @dev Overrides BaseStrategy to relax the state check. Proposer can fix
+     *      slippage before execution (Pending) or between execute/settle (Executed).
+     *      Decode: (uint256 newMinWethOut, uint256 newMinWstethOut, uint256 newDeadlineOffset)
+     *      Pass 0 to keep current value.
      */
+    function updateParams(bytes calldata data) external override onlyProposer {
+        if (_state == State.Settled) revert AlreadySettledParams();
+        _updateParams(data);
+    }
+
     function _updateParams(bytes calldata data) internal override {
         (uint256 newMinWethOut, uint256 newMinWstethOut, uint256 newDeadlineOffset) =
             abi.decode(data, (uint256, uint256, uint256));

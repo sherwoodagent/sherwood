@@ -423,13 +423,16 @@ contract WstETHMoonwellStrategyTest is Test {
         assertEq(strategy.deadlineOffset(), DEADLINE_OFFSET);
     }
 
-    function test_updateParams_onlyWhenExecuted() public {
+    function test_updateParams_inPendingState() public {
         bytes memory newParams = abi.encode(uint256(22e18), uint256(18e18), uint256(600));
 
-        // Can't update in Pending state
+        // WstETHMoonwellStrategy allows updateParams in Pending state
         vm.prank(proposer);
-        vm.expectRevert(BaseStrategy.NotExecuted.selector);
         strategy.updateParams(newParams);
+
+        assertEq(strategy.minWethOut(), 22e18);
+        assertEq(strategy.minWstethOut(), 18e18);
+        assertEq(strategy.deadlineOffset(), 600);
     }
 
     function test_updateParams_onlyProposer() public {
@@ -447,7 +450,7 @@ contract WstETHMoonwellStrategyTest is Test {
         strategy.settle();
 
         vm.prank(proposer);
-        vm.expectRevert(BaseStrategy.NotExecuted.selector);
+        vm.expectRevert(WstETHMoonwellStrategy.AlreadySettledParams.selector);
         strategy.updateParams(abi.encode(uint256(22e18), uint256(18e18), uint256(600)));
     }
 
