@@ -115,7 +115,7 @@ describe("addresses", () => {
 
     it("returns correct Sherwood protocol addresses on Sepolia", () => {
       expect(SHERWOOD().FACTORY).toBe(
-        "0xffB15e53360b01fEecb8952Ec4F4e809cB0D4965",
+        "0x121AaC2B96Ec365e457fcCc1C2ED5a6142064069",
       );
     });
   });
