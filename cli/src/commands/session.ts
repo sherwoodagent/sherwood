@@ -32,6 +32,7 @@ import {
   type ChainEvent,
 } from "../lib/events.js";
 import type { ChatEnvelope } from "../lib/types.js";
+import { loadConfig } from "../lib/config.js";
 
 // Lazy-load XMTP to avoid breaking session commands when @xmtp/cli is missing
 async function loadXmtp() {
@@ -137,10 +138,13 @@ async function handleCheck(name: string, stream: boolean): Promise<void> {
     const groupId = await xmtp.getGroup("", name);
     const recent = await xmtp.getRecentMessages(groupId, 100);
 
-    // Filter to messages after our cursor (compare in ms for precision)
+    // Filter to messages after our cursor, excluding our own messages
     const cursorMs = lastMessageTimestamp * 1000;
+    const ownInboxId = loadConfig().xmtpInboxId;
     const newMessages = recent.filter(
-      (m) => m.sentAt.getTime() > cursorMs,
+      (m) =>
+        m.sentAt.getTime() > cursorMs &&
+        (!ownInboxId || m.senderInboxId !== ownInboxId),
     );
     messages = newMessages.map(toSessionMessage);
   } catch {
@@ -224,7 +228,11 @@ async function startStream(
     const xmtp = await loadXmtp();
     const groupId = await xmtp.getGroup("", name);
 
+    const streamOwnInboxId = loadConfig().xmtpInboxId;
     xmtpCleanup = await xmtp.streamMessages(groupId, (msg) => {
+      // Skip own messages to prevent self-replies
+      if (streamOwnInboxId && msg.senderInboxId === streamOwnInboxId) return;
+
       const sessionMsg = toSessionMessage(msg);
       process.stdout.write(JSON.stringify(sessionMsg) + "\n");
 

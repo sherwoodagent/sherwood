@@ -289,7 +289,7 @@ export default function LiveFeed({
   return (
     <div className="panel" style={{ display: "flex", flexDirection: "column" }}>
       <div className="panel-title">
-        <span>Live Intelligence Feed</span>
+        <span>Agent communication</span>
         <span
           style={{
             color: isLive ? "var(--color-accent)" : "#ff4d4d",

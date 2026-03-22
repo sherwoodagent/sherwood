@@ -81,3 +81,16 @@ export function resetClients() {
 export function getAccount() {
   return privateKeyToAccount(getPrivateKey());
 }
+
+/**
+ * Estimate EIP-1559 fees with a 20% buffer to avoid stuck txs on Base gas spikes.
+ */
+export async function estimateFeesWithBuffer() {
+  const client = getPublicClient();
+  const { maxFeePerGas, maxPriorityFeePerGas } =
+    await client.estimateFeesPerGas();
+  return {
+    maxFeePerGas: (maxFeePerGas * 120n) / 100n,
+    maxPriorityFeePerGas: (maxPriorityFeePerGas * 120n) / 100n,
+  };
+}
