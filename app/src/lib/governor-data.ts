@@ -10,7 +10,6 @@ import {
   getPublicClient,
   SYNDICATE_VAULT_ABI,
   SYNDICATE_GOVERNOR_ABI,
-  formatUSDC,
 } from "./contracts";
 
 // ── Types ──────────────────────────────────────────────────
@@ -348,8 +347,3 @@ export function formatTimeRemaining(endTimestamp: bigint): string {
   return formatDuration(endTimestamp - now) + " remaining";
 }
 
-export function formatPnL(capitalSnapshot: bigint, currentBalance: bigint): string {
-  const diff = currentBalance - capitalSnapshot;
-  const formatted = formatUSDC(diff < 0n ? -diff : diff);
-  return diff >= 0n ? `+${formatted}` : `-${formatted}`;
-}

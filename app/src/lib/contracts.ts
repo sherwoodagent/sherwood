@@ -641,7 +641,7 @@ export function formatAsset(
       maximumFractionDigits: 2,
     });
   }
-  if (num > 0 && num < 0.01) {
+  if (num !== 0 && Math.abs(num) < 0.01) {
     return num.toPrecision(4);
   }
   return num.toLocaleString("en-US", {
