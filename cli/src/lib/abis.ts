@@ -1184,3 +1184,75 @@ export const SCHEMA_REGISTRY_ABI = [
     ],
   },
 ] as const;
+
+// ── BaseStrategy (IStrategy + lifecycle views) ──
+
+export const BASE_STRATEGY_ABI = [
+  {
+    name: "initialize",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "vault", type: "address" },
+      { name: "proposer", type: "address" },
+      { name: "data", type: "bytes" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "execute",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: "settle",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: "updateParams",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "data", type: "bytes" }],
+    outputs: [],
+  },
+  {
+    name: "name",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    name: "vault",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "proposer",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "executed",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "state",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint8" }],
+  },
+] as const;

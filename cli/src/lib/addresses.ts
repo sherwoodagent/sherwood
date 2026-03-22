@@ -187,6 +187,44 @@ const ROBINHOOD_TESTNET_VENICE = {
   DIEM: ZERO,
 } as const;
 
+// ── Aerodrome (Base ve(3,3) DEX) ──
+
+const BASE_AERODROME = {
+  ROUTER: "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43" as Address,
+  FACTORY: "0x420DD381b31aEf6683db6B902084cB0FFECe40Da" as Address,
+} as const;
+
+const BASE_SEPOLIA_AERODROME = {
+  ROUTER: ZERO,
+  FACTORY: ZERO,
+} as const;
+
+const ROBINHOOD_TESTNET_AERODROME = {
+  ROUTER: ZERO,
+  FACTORY: ZERO,
+} as const;
+
+// ── Strategy Templates (ERC-1167 clonable singletons) ──
+// Populated after running script/DeployTemplates.s.sol
+
+const BASE_STRATEGY_TEMPLATES = {
+  MOONWELL_SUPPLY: ZERO as Address, // TODO: fill after deployment
+  AERODROME_LP: ZERO as Address, // TODO: fill after deployment
+  VENICE_INFERENCE: ZERO as Address, // TODO: fill after deployment
+} as const;
+
+const BASE_SEPOLIA_STRATEGY_TEMPLATES = {
+  MOONWELL_SUPPLY: ZERO as Address,
+  AERODROME_LP: ZERO as Address,
+  VENICE_INFERENCE: ZERO as Address,
+} as const;
+
+const ROBINHOOD_TESTNET_STRATEGY_TEMPLATES = {
+  MOONWELL_SUPPLY: ZERO as Address,
+  AERODROME_LP: ZERO as Address,
+  VENICE_INFERENCE: ZERO as Address,
+} as const;
+
 // ── EAS (Ethereum Attestation Service) — Base predeploys ──
 
 const BASE_EAS = {
@@ -280,6 +318,18 @@ const VENICE_REGISTRY: Record<Network, typeof BASE_VENICE> = {
   "robinhood-testnet": ROBINHOOD_TESTNET_VENICE,
 };
 
+const AERODROME_REGISTRY: Record<Network, typeof BASE_AERODROME> = {
+  base: BASE_AERODROME,
+  "base-sepolia": BASE_SEPOLIA_AERODROME,
+  "robinhood-testnet": ROBINHOOD_TESTNET_AERODROME,
+};
+
+const STRATEGY_TEMPLATE_REGISTRY: Record<Network, typeof BASE_STRATEGY_TEMPLATES> = {
+  base: BASE_STRATEGY_TEMPLATES,
+  "base-sepolia": BASE_SEPOLIA_STRATEGY_TEMPLATES,
+  "robinhood-testnet": ROBINHOOD_TESTNET_STRATEGY_TEMPLATES,
+};
+
 const EAS_CONTRACT_REGISTRY: Record<Network, typeof BASE_EAS> = {
   base: BASE_EAS,
   "base-sepolia": BASE_SEPOLIA_EAS,
@@ -324,6 +374,14 @@ export function VENICE() {
 
 export function SHERWOOD() {
   return SHERWOOD_REGISTRY[getNetwork()];
+}
+
+export function AERODROME() {
+  return AERODROME_REGISTRY[getNetwork()];
+}
+
+export function STRATEGY_TEMPLATES() {
+  return STRATEGY_TEMPLATE_REGISTRY[getNetwork()];
 }
 
 export function EAS_CONTRACTS() {

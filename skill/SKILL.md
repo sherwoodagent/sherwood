@@ -155,55 +155,95 @@ Sherwood provides composable **strategy template contracts** that agents deploy 
 
 #### Available Templates
 
-| Template | Description | Tokens |
-|----------|-------------|--------|
-| **MoonwellSupplyStrategy** | Supply to Moonwell lending market, earn yield | Single asset (e.g., USDC → mUSDC) |
-| **AerodromeLPStrategy** | Provide liquidity on Aerodrome DEX + optional Gauge staking for AERO rewards | Token pair (e.g., USDC + WETH) |
+| Template | CLI key | Description |
+|----------|---------|-------------|
+| **MoonwellSupplyStrategy** | `moonwell-supply` | Supply tokens to Moonwell lending market, earn yield |
+| **AerodromeLPStrategy** | `aerodrome-lp` | Provide liquidity on Aerodrome DEX + optional Gauge staking |
+| **VeniceInferenceStrategy** | `venice-inference` | Stake VVV for sVVV — Venice private AI inference (dual-path) |
+
+Templates are ERC-1167 clonable singletons deployed once per chain. Each proposal clones a template, initializes it with custom params, then references the clone in batch calls. The vault has no allowlist for strategy calls — it trusts the governor.
+
+#### Using Strategy Templates via CLI
+
+```bash
+# List available templates and their addresses
+sherwood strategy list
+
+# All-in-one: clone + init + build calls + write JSON for proposal
+sherwood strategy propose moonwell-supply \
+  --vault 0x... --amount 10 --min-redeem 9.9 \
+  --write-calls ./calls
+
+# Submit the proposal
+sherwood proposal create \
+  --vault 0x... --name "Moonwell USDC Yield" \
+  --description "Supply 10 USDC to Moonwell for 7 days" \
+  --performance-fee 1000 --duration 7d \
+  --execute-calls ./calls/execute.json \
+  --settle-calls ./calls/settle.json
+
+# Or skip --write-calls to submit directly:
+sherwood strategy propose venice-inference \
+  --vault 0x... --amount 500 --asset USDC --min-vvv 900 \
+  --name "Venice Inference" --performance-fee 0 --duration 7d
+```
+
+#### Strategy + Governor Integration
+
+- **Cloning:** The CLI clones the template (ERC-1167 minimal proxy) and initializes it. The proposer pays gas for both txs.
+- **Allowlisting:** The vault must allowlist the strategy clone address and any external protocol addresses as batch targets via `sherwood vault add-target`. See each strategy's skill and `ADDRESSES.md` for required targets.
+- **updateParams:** The proposer can call `strategy.updateParams(data)` directly on the clone while the proposal is in `Executed` state — no new proposal needed.
+- **Lifecycle:** `Pending → execute() → Executed → settle() → Settled`
 
 #### MoonwellSupplyStrategy
 
 Supplies underlying tokens (e.g., USDC) to a Moonwell market to earn yield.
 
 - **Execute:** pulls USDC from vault → approves mToken → mints mUSDC
-- **Settle:** redeems all mUSDC → verifies ≥ `minRedeemAmount` → pushes USDC back to vault
+- **Settle:** redeems all mUSDC → verifies >= `minRedeemAmount` → pushes USDC back to vault
 - **Tunable params:** `supplyAmount`, `minRedeemAmount`
+- **Batch calls:** `Execute: [underlying.approve(clone, amount), clone.execute()]` / `Settle: [clone.settle()]`
 
-```solidity
-// Initialize
-bytes memory initData = abi.encode(usdc, mUsdc, 50_000e6, 49_900e6);
-strategy.initialize(vault, proposer, initData);
-
-// Proposal batch calls:
-// Execute: [usdc.approve(strategy, 50_000e6), strategy.execute()]
-// Settle:  [strategy.settle()]
+```bash
+sherwood strategy propose moonwell-supply \
+  --vault 0x... --amount 50000 --min-redeem 49900 --token USDC \
+  --write-calls ./moonwell-calls
 ```
 
 #### AerodromeLPStrategy
 
 Provides liquidity on Aerodrome (Base ve(3,3) DEX) with optional Gauge staking for AERO rewards.
 
-- **Execute:** pulls tokenA + tokenB → `addLiquidity` via Router → stakes LP in Gauge → returns dust to vault
-- **Settle:** unstakes LP → claims AERO rewards → `removeLiquidity` → pushes tokenA + tokenB + AERO back to vault
+- **Execute:** pulls tokenA + tokenB → addLiquidity → optional Gauge stake
+- **Settle:** unstakes LP → claims AERO → removeLiquidity → pushes all back
 - **Tunable params:** `minAmountAOut`, `minAmountBOut` (settlement slippage)
-- **Options:** stable/volatile pools, Gauge staking optional (`address(0)` to skip)
+- **Batch calls:** `Execute: [tokenA.approve, tokenB.approve, clone.execute()]` / `Settle: [clone.settle()]`
 
-```solidity
-// Initialize
-AerodromeLPStrategy.InitParams memory p = AerodromeLPStrategy.InitParams({
-    tokenA: usdc, tokenB: weth, stable: false,
-    factory: aeroFactory, router: aeroRouter,
-    gauge: aeroGauge,  // address(0) to skip staking
-    lpToken: lpToken,
-    amountADesired: 50_000e6, amountBDesired: 25e18,
-    amountAMin: 49_000e6, amountBMin: 24e18,
-    minAmountAOut: 49_000e6, minAmountBOut: 24e18
-});
-strategy.initialize(vault, proposer, abi.encode(p));
-
-// Proposal batch calls:
-// Execute: [usdc.approve(strategy, 50_000e6), weth.approve(strategy, 25e18), strategy.execute()]
-// Settle:  [strategy.settle()]
+```bash
+sherwood strategy propose aerodrome-lp \
+  --vault 0x... --token-a 0x833589... --token-b 0x420000... \
+  --amount-a 50000 --amount-b 25 --lp-token 0x... \
+  --min-a-out 49000 --min-b-out 24 \
+  --write-calls ./aero-calls
 ```
+
+#### VeniceInferenceStrategy
+
+Stakes VVV for sVVV to enable Venice private inference. Dual-path: receive VVV directly or swap from vault asset via Aerodrome. Settlement initiates unstaking with cooldown; `claimVVV()` returns VVV to vault after cooldown.
+
+- **Execute:** pull asset → [swap to VVV if needed] → stake to agent
+- **Settle:** claw back sVVV → initiate unstake (cooldown)
+- **Claim:** `strategy.claimVVV()` after cooldown — callable by anyone
+- **Pre-requisite:** agent must call `sVVV.approve(strategy, amount)` before proposal
+- **Batch calls:** `Execute: [asset.approve(clone, amount), clone.execute()]` / `Settle: [clone.settle()]`
+
+```bash
+sherwood strategy propose venice-inference \
+  --vault 0x... --amount 500 --asset USDC --min-vvv 900 \
+  --write-calls ./venice-calls
+```
+
+> For the full Venice inference workflow (provision API key, run inference, settle), delegate to the **`strategies/venice-inference` skill**.
 
 #### Writing Custom Strategies
 
@@ -219,7 +259,7 @@ contract MyStrategy is BaseStrategy {
 }
 ```
 
-`BaseStrategy` provides: lifecycle management (`Pending → Executed → Settled`), access control (`onlyVault`, `onlyProposer`), and token helpers (`_pullFromVault`, `_pushToVault`, `_pushAllToVault`).
+`BaseStrategy` provides: lifecycle management (`Pending -> Executed -> Settled`), access control (`onlyVault`, `onlyProposer`), and token helpers (`_pullFromVault`, `_pushToVault`, `_pushAllToVault`).
 
 ### Levered swap (Moonwell + Uniswap)
 
@@ -480,6 +520,8 @@ User wants to...
 ├── Tune parameters    → Governance: governor set-* (owner only)
 ├── Rescue stuck assets → vault rescue-eth / rescue-erc721 (owner only)
 ├── Pay agents / AI    → Phase 5: allowance disburse / venice fund
+├── Fund Venice via governance → delegate to `strategies/venice-inference` skill
+├── Private inference   → Phase 5: venice infer (or delegate to `strategies/venice-inference` skill)
 ├── Check status       → Phase 6: vault info, balance, syndicate list
 └── Communicate        → Phase 6: chat commands
 ```

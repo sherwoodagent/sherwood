@@ -19,11 +19,11 @@ import { getPublicClient, getAccount } from "./lib/client.js";
 import { ERC20_ABI } from "./lib/abis.js";
 import { MoonwellProvider } from "./providers/moonwell.js";
 import { UniswapProvider } from "./providers/uniswap.js";
-import { runLeveredSwap } from "./commands/strategy-run.js";
+import { registerStrategyTemplateCommands } from "./commands/strategy-template.js";
 import * as vaultLib from "./lib/vault.js";
 import * as factoryLib from "./lib/factory.js";
 import * as subgraphLib from "./lib/subgraph.js";
-import * as registryLib from "./lib/registry.js";
+// registryLib removed — strategy registry is deprecated, replaced by template commands
 import { uploadMetadata } from "./lib/ipfs.js";
 import type { SyndicateMetadata } from "./lib/ipfs.js";
 import { registerVeniceCommands } from "./commands/venice.js";
@@ -1000,113 +1000,8 @@ vaultCmd
   });
 
 // ── Strategy commands ──
-const strategy = program.command("strategy");
-
-strategy
-  .command("list")
-  .description("List registered strategies")
-  .option("--type <id>", "Filter by strategy type")
-  .action(async (opts) => {
-    const spinner = ora("Loading strategies...").start();
-    try {
-      const strategies = await registryLib.listStrategies(
-        opts.type ? BigInt(opts.type) : undefined,
-      );
-      spinner.stop();
-
-      if (strategies.length === 0) {
-        console.log(chalk.dim("No strategies registered."));
-        return;
-      }
-
-      console.log();
-      console.log(chalk.bold(`Strategies (${strategies.length})`));
-      console.log(chalk.dim("─".repeat(70)));
-      for (const s of strategies) {
-        const status = s.active ? chalk.green("active") : chalk.red("inactive");
-        console.log(`  #${s.id}  ${chalk.bold(s.name)}  [type: ${s.strategyTypeId}]  ${status}`);
-        console.log(`    Creator:        ${s.creator}`);
-        console.log(`    Implementation: ${s.implementation}`);
-        if (s.metadataURI) {
-          console.log(`    Metadata:       ${chalk.dim(s.metadataURI)}`);
-        }
-        console.log();
-      }
-    } catch (err) {
-      spinner.fail("Failed to load strategies");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
-      process.exit(1);
-    }
-  });
-
-strategy
-  .command("info")
-  .description("Show strategy details")
-  .argument("<id>", "Strategy ID")
-  .action(async (idStr) => {
-    const spinner = ora("Loading strategy...").start();
-    try {
-      const s = await registryLib.getStrategy(BigInt(idStr));
-      spinner.stop();
-
-      console.log();
-      console.log(chalk.bold(`Strategy #${s.id}`));
-      console.log(chalk.dim("─".repeat(40)));
-      console.log(`  Name:           ${s.name}`);
-      console.log(`  Type:           ${s.strategyTypeId}`);
-      console.log(`  Active:         ${s.active ? chalk.green("yes") : chalk.red("no")}`);
-      console.log(`  Creator:        ${s.creator}`);
-      console.log(`  Implementation: ${s.implementation}`);
-      if (s.metadataURI) {
-        console.log(`  Metadata:       ${chalk.dim(s.metadataURI)}`);
-      }
-      console.log();
-    } catch (err) {
-      spinner.fail("Failed to load strategy");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
-      process.exit(1);
-    }
-  });
-
-strategy
-  .command("register")
-  .description("Register a new strategy on-chain")
-  .requiredOption("--implementation <address>", "Strategy contract address")
-  .requiredOption("--type <id>", "Strategy type ID")
-  .requiredOption("--name <name>", "Strategy name")
-  .option("--metadata <uri>", "Metadata URI (IPFS/Arweave)", "")
-  .action(async (opts) => {
-    const spinner = ora("Registering strategy...").start();
-    try {
-      const hash = await registryLib.registerStrategy(
-        opts.implementation as Address,
-        BigInt(opts.type),
-        opts.name,
-        opts.metadata,
-      );
-      spinner.succeed(`Strategy registered: ${hash}`);
-      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
-    } catch (err) {
-      spinner.fail("Registration failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
-      process.exit(1);
-    }
-  });
-
-strategy
-  .command("run")
-  .description("Execute the levered swap strategy")
-  .option("--vault <address>", "Vault address (default: from config)")
-  .requiredOption("--collateral <amount>", "WETH collateral amount (e.g. 1.0)")
-  .requiredOption("--borrow <amount>", "USDC to borrow against collateral")
-  .requiredOption("--token <address>", "Target token address to buy")
-  .option("--fee <tier>", "Uniswap fee tier in bps (500, 3000, 10000)", "500")
-  .option("--slippage <bps>", "Slippage tolerance in bps", "100")
-  .option("--execute", "Actually execute on-chain (default: simulate only)", false)
-  .action(async (opts) => {
-    resolveVault(opts);
-    await runLeveredSwap(opts);
-  });
+const strategy = program.command("strategy").description("Strategy templates — list, clone, propose");
+registerStrategyTemplateCommands(strategy);
 
 // ── Provider info ──
 program
