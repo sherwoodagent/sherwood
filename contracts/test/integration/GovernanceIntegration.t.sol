@@ -294,19 +294,27 @@ contract GovernanceIntegrationTest is BaseIntegrationTest {
         // Agent fee is taken from net profit
         uint256 expectedAgentFee = (netProfit * PERF_FEE_BPS) / 10000;
 
-        // Verify protocol fee distribution
+        // Verify protocol fee distribution (use approx due to real Moonwell yield accrual)
         if (protocolFeeBps > 0 && protocolFeeRecipient != address(0)) {
             uint256 protocolBalAfter = IERC20(USDC).balanceOf(protocolFeeRecipient);
-            assertEq(
-                protocolBalAfter - protocolBalBefore,
+            uint256 actualProtocolFee = protocolBalAfter - protocolBalBefore;
+            // Real Moonwell yield may add a small amount to profit, so fee may be slightly higher
+            assertApproxEqAbs(
+                actualProtocolFee,
                 expectedProtocolFee,
-                "protocol fee recipient should receive correct fee"
+                1e6, // 1 USDC tolerance for Moonwell yield accrual during test
+                "protocol fee recipient should receive approximately correct fee"
             );
         }
 
         // Verify agent fee distribution
         uint256 agentBalAfter = IERC20(USDC).balanceOf(agent);
-        assertEq(agentBalAfter - agentBalBefore, expectedAgentFee, "agent should receive correct performance fee");
+        assertApproxEqAbs(
+            agentBalAfter - agentBalBefore,
+            expectedAgentFee,
+            1e6, // 1 USDC tolerance
+            "agent should receive approximately correct performance fee"
+        );
     }
 
     // ==================== TEST 6: SEQUENTIAL STRATEGIES ====================
