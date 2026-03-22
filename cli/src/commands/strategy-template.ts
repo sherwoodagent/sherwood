@@ -492,8 +492,9 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
 
         if (templateKey === "venice-inference") {
           console.log();
-          console.log(chalk.yellow("Reminder: agent must pre-approve sVVV clawback:"));
-          console.log(chalk.yellow(`  sVVV.approve(${clone}, <amount>)`));
+          console.log(chalk.yellow("Reminder: before settlement, agent must approve repayment:"));
+          console.log(chalk.yellow(`  asset.approve(${clone}, <repaymentAmount>)`));
+          console.log(chalk.yellow("  Agent can update repayment via strategy.updateParams(newRepayment, 0, 0)"));
         }
 
         console.log();
@@ -559,9 +560,10 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
       if (templateKey === "venice-inference") {
         console.log();
         console.log(chalk.yellow("Next steps:"));
-        console.log(chalk.yellow(`  1. Pre-approve sVVV clawback: sVVV.approve(${clone}, <amount>)`));
-        console.log(chalk.yellow("  2. After execution: sherwood venice provision"));
-        console.log(chalk.yellow("  3. Use inference: sherwood venice infer --model <id> --prompt '...'"));
+        console.log(chalk.yellow("  1. After execution: sherwood venice provision"));
+        console.log(chalk.yellow("  2. Use inference: sherwood venice infer --model <id> --prompt '...'"));
+        console.log(chalk.yellow("  3. Before settlement: approve repayment (principal + profit):"));
+        console.log(chalk.yellow(`     asset.approve(${clone}, <repaymentAmount>)`));
       }
 
       console.log();

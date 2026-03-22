@@ -91,7 +91,7 @@ abstract contract BaseStrategy is IStrategy {
     }
 
     /// @inheritdoc IStrategy
-    function vault() external view returns (address) {
+    function vault() public view returns (address) {
         return _vault;
     }
 

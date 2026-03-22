@@ -8,40 +8,17 @@ import {BaseStrategy} from "../src/strategies/BaseStrategy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 
-/// @notice Mock Venice staking — accepts VVV, mints sVVV to recipient, handles unstake with cooldown
+/// @notice Simplified mock Venice staking — accepts VVV, mints sVVV to recipient. No unstake.
 contract MockVeniceStaking is ERC20Mock {
     ERC20Mock public vvvToken;
-    uint256 public cooldownDuration;
 
-    struct UnstakeRequest {
-        uint256 amount;
-        uint256 readyAt;
-    }
-
-    mapping(address => UnstakeRequest) public unstakeRequests;
-
-    constructor(address vvv_, uint256 cooldown_) ERC20Mock("Staked VVV", "sVVV", 18) {
+    constructor(address vvv_) ERC20Mock("Staked VVV", "sVVV", 18) {
         vvvToken = ERC20Mock(vvv_);
-        cooldownDuration = cooldown_;
     }
 
     function stake(address recipient, uint256 amount) external {
         vvvToken.transferFrom(msg.sender, address(this), amount);
         _mint(recipient, amount); // 1:1 sVVV
-    }
-
-    function initiateUnstake(uint256 amount) external {
-        _burn(msg.sender, amount);
-        unstakeRequests[msg.sender] = UnstakeRequest({amount: amount, readyAt: block.timestamp + cooldownDuration});
-    }
-
-    function finalizeUnstake() external {
-        UnstakeRequest memory req = unstakeRequests[msg.sender];
-        require(req.amount > 0, "No unstake request");
-        require(block.timestamp >= req.readyAt, "Cooldown not elapsed");
-
-        delete unstakeRequests[msg.sender];
-        vvvToken.mint(msg.sender, req.amount); // return VVV
     }
 }
 
@@ -92,11 +69,10 @@ contract VeniceInferenceStrategy_DirectTest is Test {
     address public agentWallet = makeAddr("agentWallet");
 
     uint256 constant VVV_AMOUNT = 1000e18;
-    uint256 constant COOLDOWN = 1 hours;
 
     function setUp() public {
         vvvToken = new ERC20Mock("VVV", "VVV", 18);
-        sVVVToken = new MockVeniceStaking(address(vvvToken), COOLDOWN);
+        sVVVToken = new MockVeniceStaking(address(vvvToken));
         vvvToken.mint(vault, 10_000e18);
 
         template = new VeniceInferenceStrategy();
@@ -129,9 +105,9 @@ contract VeniceInferenceStrategy_DirectTest is Test {
         assertEq(strategy.sVVV(), address(sVVVToken));
         assertEq(strategy.agent(), agentWallet);
         assertEq(strategy.assetAmount(), VVV_AMOUNT);
+        assertEq(strategy.repaymentAmount(), VVV_AMOUNT); // defaults to assetAmount
         assertFalse(strategy.needsSwap());
         assertEq(strategy.stakedAmount(), 0);
-        assertFalse(strategy.unstakeInitiated());
         assertEq(uint256(strategy.state()), uint256(BaseStrategy.State.Pending));
         assertEq(strategy.name(), "Venice Inference");
     }
@@ -239,25 +215,43 @@ contract VeniceInferenceStrategy_DirectTest is Test {
         strategy.execute();
     }
 
-    // ── Settle ──
+    // ── Settle (loan-model: agent repays vault in asset) ──
 
     function test_settle() public {
         _executeStrategy();
 
+        // Agent gets VVV to repay (direct path: asset == VVV)
+        vvvToken.mint(agentWallet, VVV_AMOUNT);
         vm.prank(agentWallet);
-        sVVVToken.approve(address(strategy), VVV_AMOUNT);
+        vvvToken.approve(address(strategy), VVV_AMOUNT);
+
+        uint256 vaultBalBefore = vvvToken.balanceOf(vault);
+        uint256 agentSVVVBefore = sVVVToken.balanceOf(agentWallet);
 
         vm.prank(vault);
         strategy.settle();
 
-        assertEq(sVVVToken.balanceOf(agentWallet), 0);
-        assertEq(sVVVToken.balanceOf(address(strategy)), 0); // burned by initiateUnstake
-        assertTrue(strategy.unstakeInitiated());
+        // Vault received repaymentAmount
+        assertEq(vvvToken.balanceOf(vault), vaultBalBefore + VVV_AMOUNT);
+        // sVVV stays with agent — unchanged
+        assertEq(sVVVToken.balanceOf(agentWallet), agentSVVVBefore);
         assertEq(uint256(strategy.state()), uint256(BaseStrategy.State.Settled));
     }
 
     function test_settle_agentNotApproved_reverts() public {
         _executeStrategy();
+        // Agent has balance but hasn't approved
+        vvvToken.mint(agentWallet, VVV_AMOUNT);
+        vm.prank(vault);
+        vm.expectRevert();
+        strategy.settle();
+    }
+
+    function test_settle_agentInsufficientBalance_reverts() public {
+        _executeStrategy();
+        // Agent approves but has no balance
+        vm.prank(agentWallet);
+        vvvToken.approve(address(strategy), VVV_AMOUNT);
         vm.prank(vault);
         vm.expectRevert();
         strategy.settle();
@@ -276,66 +270,60 @@ contract VeniceInferenceStrategy_DirectTest is Test {
         strategy.settle();
     }
 
-    // ── ClaimVVV ──
-
-    function test_claimVVV() public {
-        _executeAndSettle();
-        vm.warp(block.timestamp + COOLDOWN);
-
-        strategy.claimVVV();
-
-        assertEq(vvvToken.balanceOf(vault), 10_000e18); // all returned
-        assertEq(vvvToken.balanceOf(address(strategy)), 0);
-        assertFalse(strategy.unstakeInitiated());
-    }
-
-    function test_claimVVV_beforeCooldown_reverts() public {
-        _executeAndSettle();
-        vm.expectRevert("Cooldown not elapsed");
-        strategy.claimVVV();
-    }
-
-    function test_claimVVV_beforeSettled_reverts() public {
-        _executeStrategy();
-        vm.expectRevert(VeniceInferenceStrategy.NotSettled.selector);
-        strategy.claimVVV();
-    }
-
-    function test_claimVVV_twice_reverts() public {
-        _executeAndSettle();
-        vm.warp(block.timestamp + COOLDOWN);
-        strategy.claimVVV();
-
-        vm.expectRevert(VeniceInferenceStrategy.NothingToClaim.selector);
-        strategy.claimVVV();
-    }
-
     // ── Full Lifecycle (direct) ──
 
     function test_fullLifecycle() public {
-        // 1. Agent pre-approves clawback
-        vm.prank(agentWallet);
-        sVVVToken.approve(address(strategy), type(uint256).max);
-
-        // 2. Execute
+        // 1. Execute — vault lends VVV, agent gets sVVV
         vm.prank(vault);
         vvvToken.approve(address(strategy), VVV_AMOUNT);
         vm.prank(vault);
         strategy.execute();
         assertEq(sVVVToken.balanceOf(agentWallet), VVV_AMOUNT);
 
-        // 3. Settle
+        // 2. Agent earns off-chain and gets VVV to repay
+        vvvToken.mint(agentWallet, VVV_AMOUNT);
+        vm.prank(agentWallet);
+        vvvToken.approve(address(strategy), VVV_AMOUNT);
+
+        // 3. Settle — agent repays principal
+        uint256 vaultBalBefore = vvvToken.balanceOf(vault);
         vm.prank(vault);
         strategy.settle();
-        assertEq(sVVVToken.balanceOf(agentWallet), 0);
-        assertTrue(strategy.unstakeInitiated());
 
-        // 4. Cooldown
-        vm.warp(block.timestamp + COOLDOWN);
+        // Vault recovered principal
+        assertEq(vvvToken.balanceOf(vault), vaultBalBefore + VVV_AMOUNT);
+        // sVVV stays with agent permanently
+        assertEq(sVVVToken.balanceOf(agentWallet), VVV_AMOUNT);
+    }
 
-        // 5. Claim
-        strategy.claimVVV();
-        assertEq(vvvToken.balanceOf(vault), 10_000e18);
+    function test_fullLifecycle_withProfit() public {
+        // 1. Execute
+        vm.prank(vault);
+        vvvToken.approve(address(strategy), VVV_AMOUNT);
+        vm.prank(vault);
+        strategy.execute();
+
+        // 2. Agent updates repayment to include profit (120% of principal)
+        uint256 repayment = VVV_AMOUNT * 120 / 100;
+        vm.prank(proposer);
+        strategy.updateParams(abi.encode(repayment, uint256(0), uint256(0)));
+        assertEq(strategy.repaymentAmount(), repayment);
+
+        // 3. Agent gets funds and approves
+        vvvToken.mint(agentWallet, repayment);
+        vm.prank(agentWallet);
+        vvvToken.approve(address(strategy), repayment);
+
+        // 4. Settle
+        uint256 vaultBalBefore = vvvToken.balanceOf(vault);
+        vm.prank(vault);
+        strategy.settle();
+
+        // Vault received more than principal
+        assertEq(vvvToken.balanceOf(vault), vaultBalBefore + repayment);
+        assertGt(repayment, VVV_AMOUNT);
+        // sVVV stays with agent
+        assertEq(sVVVToken.balanceOf(agentWallet), VVV_AMOUNT);
     }
 
     // ── Cloning ──
@@ -364,6 +352,8 @@ contract VeniceInferenceStrategy_DirectTest is Test {
         assertEq(strategy2.agent(), agent2);
         assertEq(strategy.assetAmount(), VVV_AMOUNT);
         assertEq(strategy2.assetAmount(), 2_000e18);
+        assertEq(strategy.repaymentAmount(), VVV_AMOUNT);
+        assertEq(strategy2.repaymentAmount(), 2_000e18);
     }
 
     // ── Helpers ──
@@ -373,14 +363,6 @@ contract VeniceInferenceStrategy_DirectTest is Test {
         vvvToken.approve(address(strategy), VVV_AMOUNT);
         vm.prank(vault);
         strategy.execute();
-    }
-
-    function _executeAndSettle() internal {
-        _executeStrategy();
-        vm.prank(agentWallet);
-        sVVVToken.approve(address(strategy), VVV_AMOUNT);
-        vm.prank(vault);
-        strategy.settle();
     }
 }
 
@@ -405,12 +387,11 @@ contract VeniceInferenceStrategy_SwapTest is Test {
     uint256 constant USDC_AMOUNT = 500e6; // 500 USDC
     uint256 constant MIN_VVV = 900e18; // slippage floor
     uint256 constant SWAP_RATE = 2e30; // accounts for 6→18 decimal gap: 500e6 * 2e30 / 1e18 = 1000e18
-    uint256 constant COOLDOWN = 1 hours;
 
     function setUp() public {
         usdc = new ERC20Mock("USD Coin", "USDC", 6);
         vvvToken = new ERC20Mock("VVV", "VVV", 18);
-        sVVVToken = new MockVeniceStaking(address(vvvToken), COOLDOWN);
+        sVVVToken = new MockVeniceStaking(address(vvvToken));
         swapRouter = new MockSwapRouter(address(vvvToken), SWAP_RATE);
 
         usdc.mint(vault, 10_000e6);
@@ -435,33 +416,17 @@ contract VeniceInferenceStrategy_SwapTest is Test {
         strategy.initialize(vault, proposer, abi.encode(p));
     }
 
+    // ── Initialization (swap-specific) ──
+
     function test_initialize_swap() public view {
         assertEq(strategy.asset(), address(usdc));
         assertEq(strategy.vvv(), address(vvvToken));
         assertTrue(strategy.needsSwap());
         assertEq(strategy.assetAmount(), USDC_AMOUNT);
+        assertEq(strategy.repaymentAmount(), USDC_AMOUNT); // defaults to assetAmount
         assertEq(strategy.minVVV(), MIN_VVV);
         assertEq(strategy.deadlineOffset(), 300);
         assertTrue(strategy.singleHop());
-    }
-
-    function test_initialize_swap_noRouter_reverts() public {
-        address clone = Clones.clone(address(template));
-        VeniceInferenceStrategy.InitParams memory p = VeniceInferenceStrategy.InitParams({
-            asset: address(usdc),
-            weth: address(0),
-            vvv: address(vvvToken),
-            sVVV: address(sVVVToken),
-            aeroRouter: address(0), // missing router
-            aeroFactory: aeroFactory,
-            agent: agentWallet,
-            assetAmount: USDC_AMOUNT,
-            minVVV: MIN_VVV,
-            deadlineOffset: 300,
-            singleHop: true
-        });
-        vm.expectRevert(BaseStrategy.ZeroAddress.selector);
-        VeniceInferenceStrategy(clone).initialize(vault, proposer, abi.encode(p));
     }
 
     function test_initialize_swap_noMinVVV_reverts() public {
@@ -480,6 +445,25 @@ contract VeniceInferenceStrategy_SwapTest is Test {
             singleHop: true
         });
         vm.expectRevert(VeniceInferenceStrategy.InvalidAmount.selector);
+        VeniceInferenceStrategy(clone).initialize(vault, proposer, abi.encode(p));
+    }
+
+    function test_initialize_swap_noRouter_reverts() public {
+        address clone = Clones.clone(address(template));
+        VeniceInferenceStrategy.InitParams memory p = VeniceInferenceStrategy.InitParams({
+            asset: address(usdc),
+            weth: address(0),
+            vvv: address(vvvToken),
+            sVVV: address(sVVVToken),
+            aeroRouter: address(0), // missing router
+            aeroFactory: aeroFactory,
+            agent: agentWallet,
+            assetAmount: USDC_AMOUNT,
+            minVVV: MIN_VVV,
+            deadlineOffset: 300,
+            singleHop: true
+        });
+        vm.expectRevert(BaseStrategy.ZeroAddress.selector);
         VeniceInferenceStrategy(clone).initialize(vault, proposer, abi.encode(p));
     }
 
@@ -502,82 +486,21 @@ contract VeniceInferenceStrategy_SwapTest is Test {
         VeniceInferenceStrategy(clone).initialize(vault, proposer, abi.encode(p));
     }
 
+    // ── Execute (swap path) ──
+
     function test_execute_swap() public {
-        // Vault approves strategy
         vm.prank(vault);
         usdc.approve(address(strategy), USDC_AMOUNT);
-
-        // Execute — pulls USDC, swaps to VVV, stakes to agent
         vm.prank(vault);
         strategy.execute();
 
-        // Mock gives 2 VVV per USDC unit
+        // Mock gives 2 VVV per USDC unit (rate accounts for decimal gap)
         uint256 expectedVVV = (USDC_AMOUNT * SWAP_RATE) / 1e18;
 
         assertEq(sVVVToken.balanceOf(agentWallet), expectedVVV);
         assertEq(strategy.stakedAmount(), expectedVVV);
         assertTrue(strategy.executed());
     }
-
-    function test_fullLifecycle_swap() public {
-        // Pre-approve clawback
-        vm.prank(agentWallet);
-        sVVVToken.approve(address(strategy), type(uint256).max);
-
-        // Execute
-        vm.prank(vault);
-        usdc.approve(address(strategy), USDC_AMOUNT);
-        vm.prank(vault);
-        strategy.execute();
-
-        uint256 staked = strategy.stakedAmount();
-        assertGt(staked, 0);
-
-        // Settle
-        vm.prank(vault);
-        strategy.settle();
-        assertTrue(strategy.unstakeInitiated());
-
-        // Cooldown + claim
-        vm.warp(block.timestamp + COOLDOWN);
-        strategy.claimVVV();
-
-        // VVV returned to vault (not USDC — vault holds VVV after unstake)
-        assertEq(vvvToken.balanceOf(vault), staked);
-    }
-
-    // ── updateParams ──
-
-    function test_updateParams() public {
-        _executeStrategy();
-
-        vm.prank(proposer);
-        strategy.updateParams(abi.encode(uint256(500e18), uint256(600)));
-
-        assertEq(strategy.minVVV(), 500e18);
-        assertEq(strategy.deadlineOffset(), 600);
-    }
-
-    function test_updateParams_partialUpdate() public {
-        _executeStrategy();
-
-        // Only update minVVV (deadlineOffset = 0 keeps current)
-        vm.prank(proposer);
-        strategy.updateParams(abi.encode(uint256(500e18), uint256(0)));
-
-        assertEq(strategy.minVVV(), 500e18);
-        assertEq(strategy.deadlineOffset(), 300); // unchanged
-    }
-
-    function test_updateParams_onlyProposer() public {
-        _executeStrategy();
-
-        vm.prank(vault);
-        vm.expectRevert(BaseStrategy.NotProposer.selector);
-        strategy.updateParams(abi.encode(uint256(500e18), uint256(600)));
-    }
-
-    // ── Multi-hop (M3) ──
 
     function test_execute_multiHop() public {
         // Deploy a multi-hop strategy: USDC → WETH → VVV
@@ -614,6 +537,77 @@ contract VeniceInferenceStrategy_SwapTest is Test {
         assertEq(sVVVToken.balanceOf(agentWallet), expectedVVV);
         assertEq(multiHop.stakedAmount(), expectedVVV);
     }
+
+    // ── Settle (swap path: agent repays in ORIGINAL asset, e.g. USDC) ──
+
+    function test_settle_swapPath() public {
+        _executeStrategy();
+
+        uint256 agentSVVVAfterExec = sVVVToken.balanceOf(agentWallet);
+
+        // Agent gets USDC to repay (repays in vault's asset, not VVV)
+        usdc.mint(agentWallet, USDC_AMOUNT);
+        vm.prank(agentWallet);
+        usdc.approve(address(strategy), USDC_AMOUNT);
+
+        uint256 vaultUsdcBefore = usdc.balanceOf(vault);
+
+        vm.prank(vault);
+        strategy.settle();
+
+        // Vault received repaymentAmount in USDC
+        assertEq(usdc.balanceOf(vault), vaultUsdcBefore + USDC_AMOUNT);
+        // sVVV stays with agent — unchanged
+        assertEq(sVVVToken.balanceOf(agentWallet), agentSVVVAfterExec);
+        assertEq(uint256(strategy.state()), uint256(BaseStrategy.State.Settled));
+    }
+
+    // ── updateParams (3 fields) ──
+
+    function test_updateParams() public {
+        _executeStrategy();
+
+        uint256 newRepayment = 600e6;
+        uint256 newMinVVV = 500e18;
+        uint256 newDeadlineOffset = 600;
+
+        vm.prank(proposer);
+        strategy.updateParams(abi.encode(newRepayment, newMinVVV, newDeadlineOffset));
+
+        assertEq(strategy.repaymentAmount(), newRepayment);
+        assertEq(strategy.minVVV(), newMinVVV);
+        assertEq(strategy.deadlineOffset(), newDeadlineOffset);
+    }
+
+    function test_updateParams_onlyProposer() public {
+        _executeStrategy();
+
+        vm.prank(vault);
+        vm.expectRevert(BaseStrategy.NotProposer.selector);
+        strategy.updateParams(abi.encode(uint256(600e6), uint256(500e18), uint256(600)));
+    }
+
+    function test_updateParams_partialUpdate() public {
+        _executeStrategy();
+
+        // Only update repaymentAmount (minVVV = 0, deadlineOffset = 0 keeps current)
+        vm.prank(proposer);
+        strategy.updateParams(abi.encode(uint256(600e6), uint256(0), uint256(0)));
+
+        assertEq(strategy.repaymentAmount(), 600e6);
+        assertEq(strategy.minVVV(), MIN_VVV); // unchanged
+        assertEq(strategy.deadlineOffset(), 300); // unchanged
+
+        // Only update minVVV
+        vm.prank(proposer);
+        strategy.updateParams(abi.encode(uint256(0), uint256(800e18), uint256(0)));
+
+        assertEq(strategy.repaymentAmount(), 600e6); // unchanged from previous update
+        assertEq(strategy.minVVV(), 800e18);
+        assertEq(strategy.deadlineOffset(), 300); // unchanged
+    }
+
+    // ── Helpers ──
 
     function _executeStrategy() internal {
         vm.prank(vault);

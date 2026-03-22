@@ -27,36 +27,36 @@ interface IAeroRouter {
 /// @notice Venice staking contract interface
 interface IVeniceStaking {
     function stake(address recipient, uint256 amount) external;
-    function initiateUnstake(uint256 amount) external;
-    function finalizeUnstake() external;
 }
 
 /**
  * @title VeniceInferenceStrategy
- * @notice Stakes VVV for sVVV to a single agent for Venice private inference.
- *         Supports two execution paths:
- *           1. Vault sends VVV directly → stake immediately
- *           2. Vault sends another asset (e.g. USDC) → swap to VVV via Aerodrome → stake
+ * @notice Loan-model strategy: vault lends asset to an agent for Venice private
+ *         inference. The agent stakes VVV for sVVV (their inference license),
+ *         uses Venice to run off-chain strategies, and repays the vault in the
+ *         vault's asset (principal + profit from their off-chain work).
  *
- *         Path is determined by init params: if asset == vvv, skip swap.
+ *         sVVV is non-transferrable on Base — it stays with the agent permanently.
+ *         The agent's proposal must justify the inference cost and repayment plan.
  *
- *   Execute: pull asset from vault → [swap to VVV if needed] → stake → agent receives sVVV
- *   Settle:  claw back sVVV from agent → initiate unstake (cooldown begins)
- *   Claim:   after cooldown, finalize unstake → push VVV back to vault
+ *   Execute: pull asset → [swap to VVV if needed] → stake → agent gets sVVV
+ *   Settle:  agent repays vault in vault asset (principal + profit)
+ *
+ *   Two execution paths (determined by asset vs vvv):
+ *     1. Direct: vault holds VVV → stake immediately
+ *     2. Swap:   vault holds USDC → Aerodrome swap to VVV → stake
  *
  *   Batch calls from governor:
- *     Execute: [asset.approve(strategy, amount), strategy.execute()]
+ *     Execute: [asset.approve(strategy, assetAmount), strategy.execute()]
  *     Settle:  [strategy.settle()]
  *
- *   After settlement + cooldown:
- *     Anyone calls strategy.claimVVV() → finalizes unstake → pushes VVV to vault
- *
- *   Pre-requisite: agent must call sVVV.approve(strategy, amount) before proposal
- *   creation. ERC20 approve does not require holding tokens.
+ *   Pre-requisite: agent must call asset.approve(strategy, repaymentAmount)
+ *   before settlement. The agent earns off-chain and repays in vault asset.
  *
  *   Tunable params (updatable by proposer between execution and settlement):
- *     - minVVV: minimum VVV to accept from swap (slippage) — only relevant for swap path
- *     - deadlineOffset: seconds added to block.timestamp for swap deadline
+ *     - repaymentAmount: total amount agent will repay (principal + profit)
+ *     - minVVV: minimum VVV from swap (swap path only)
+ *     - deadlineOffset: seconds for swap deadline (swap path only)
  */
 contract VeniceInferenceStrategy is BaseStrategy {
     using SafeERC20 for IERC20;
@@ -65,8 +65,6 @@ contract VeniceInferenceStrategy is BaseStrategy {
     error InvalidAmount();
     error SwapFailed();
     error NoAgent();
-    error NotSettled();
-    error NothingToClaim();
 
     // ── Initialization parameters ──
     struct InitParams {
@@ -77,7 +75,7 @@ contract VeniceInferenceStrategy is BaseStrategy {
         address aeroRouter; // Aerodrome router (address(0) if asset == vvv)
         address aeroFactory; // Aerodrome factory (address(0) if asset == vvv)
         address agent; // single agent wallet receiving sVVV (the proposer)
-        uint256 assetAmount; // amount of asset to pull from vault
+        uint256 assetAmount; // amount of asset to pull from vault (the "loan")
         uint256 minVVV; // min VVV output from swap (0 if asset == vvv)
         uint256 deadlineOffset; // seconds added to block.timestamp for swap deadline
         bool singleHop; // true for direct asset→VVV swap (no WETH hop)
@@ -97,8 +95,8 @@ contract VeniceInferenceStrategy is BaseStrategy {
     uint256 public deadlineOffset;
     bool public singleHop;
 
-    uint256 public stakedAmount; // recorded during execute for settlement clawback
-    bool public unstakeInitiated; // true after settle initiates unstake
+    uint256 public stakedAmount; // VVV staked during execute (for reference)
+    uint256 public repaymentAmount; // amount agent must repay in vault asset (defaults to assetAmount)
 
     /// @inheritdoc IStrategy
     function name() external pure returns (string memory) {
@@ -136,6 +134,9 @@ contract VeniceInferenceStrategy is BaseStrategy {
         minVVV = p.minVVV;
         deadlineOffset = p.deadlineOffset == 0 ? 300 : p.deadlineOffset;
         singleHop = p.singleHop;
+
+        // Default repayment = principal (no profit). Agent updates via updateParams.
+        repaymentAmount = p.assetAmount;
     }
 
     /// @notice Pull asset from vault → [swap to VVV if needed] → stake to agent
@@ -159,8 +160,9 @@ contract VeniceInferenceStrategy is BaseStrategy {
                 routes[1] = IAeroRouter.Route({from: weth, to: vvv, stable: false, factory: aeroFactory});
             }
 
-            uint256[] memory amounts = IAeroRouter(aeroRouter)
-                .swapExactTokensForTokens(assetAmount, minVVV, routes, address(this), block.timestamp + deadlineOffset);
+            uint256[] memory amounts = IAeroRouter(aeroRouter).swapExactTokensForTokens(
+                assetAmount, minVVV, routes, address(this), block.timestamp + deadlineOffset
+            );
             vvvToStake = amounts[amounts.length - 1];
             if (vvvToStake == 0) revert SwapFailed();
         } else {
@@ -168,7 +170,7 @@ contract VeniceInferenceStrategy is BaseStrategy {
             vvvToStake = assetAmount;
         }
 
-        // 3. Stake VVV to agent
+        // 3. Stake VVV to agent — sVVV is non-transferrable and stays with agent
         IERC20(vvv).forceApprove(sVVV, vvvToStake);
         IVeniceStaking(sVVV).stake(agent, vvvToStake);
         stakedAmount = vvvToStake;
@@ -178,42 +180,27 @@ contract VeniceInferenceStrategy is BaseStrategy {
         _pushAllToVault(vvv);
     }
 
-    /// @notice Claw back sVVV from agent → initiate unstake (cooldown begins)
-    /// @dev Assumes 1:1 sVVV:VVV ratio (Venice staking is non-rebasing).
-    ///      Pulls exactly `stakedAmount` of sVVV — will revert if agent transferred any.
+    /// @notice Agent repays the vault in the vault's asset (principal + profit).
+    /// @dev The agent must have approved this strategy for `repaymentAmount` of `asset`.
+    ///      sVVV stays with the agent — it is their inference license.
+    ///      The governor calculates P&L from vault balance diff and distributes fees.
     function _settle() internal override {
-        // 1. Pull sVVV from agent (agent pre-approved this strategy)
-        IERC20(sVVV).safeTransferFrom(agent, address(this), stakedAmount);
-
-        // 2. Initiate unstake — cooldown period begins
-        IVeniceStaking(sVVV).initiateUnstake(stakedAmount);
-        unstakeInitiated = true;
+        address _vault = this.vault();
+        IERC20(asset).safeTransferFrom(agent, _vault, repaymentAmount);
     }
 
     /**
-     * @notice Finalize unstake after cooldown and push VVV back to vault.
-     * @dev Callable by anyone after settlement. Reverts if cooldown not elapsed
-     *      (Venice staking contract enforces this).
-     */
-    function claimVVV() external {
-        if (this.state() != State.Settled) revert NotSettled();
-        if (!unstakeInitiated) revert NothingToClaim();
-
-        // Finalize unstake — Venice staking returns VVV to this contract
-        IVeniceStaking(sVVV).finalizeUnstake();
-        unstakeInitiated = false;
-
-        // Push all VVV back to vault
-        _pushAllToVault(vvv);
-    }
-
-    /**
-     * @notice Update slippage params (swap path only)
-     * @dev Decode: (uint256 newMinVVV, uint256 newDeadlineOffset)
+     * @notice Update repayment amount and/or swap slippage params.
+     * @dev Decode: (uint256 newRepayment, uint256 newMinVVV, uint256 newDeadlineOffset)
      *      Pass 0 to keep current value. Only proposer, only while Executed.
+     *
+     *      The agent should call this before settlement to set repaymentAmount
+     *      to principal + profit earned from their off-chain strategy.
      */
     function _updateParams(bytes calldata data) internal override {
-        (uint256 newMinVVV, uint256 newDeadlineOffset) = abi.decode(data, (uint256, uint256));
+        (uint256 newRepayment, uint256 newMinVVV, uint256 newDeadlineOffset) =
+            abi.decode(data, (uint256, uint256, uint256));
+        if (newRepayment > 0) repaymentAmount = newRepayment;
         if (newMinVVV > 0) minVVV = newMinVVV;
         if (newDeadlineOffset > 0) deadlineOffset = newDeadlineOffset;
     }

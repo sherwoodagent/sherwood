@@ -1,29 +1,33 @@
 ---
 name: venice-inference
-description: Venice VVV staking and private inference via governance proposals — swap or receive VVV, stake for sVVV, provision API key, run inference, settle with unstake + cooldown claim
+description: Venice VVV staking loan model — vault lends asset to agent for private inference, agent repays principal + profit from off-chain strategy
 allowed-tools: Read, Glob, Grep, Bash(sherwood *), Bash(npm *), Bash(npx *), WebFetch, WebSearch, AskUserQuestion
 model: sonnet
 license: MIT
 metadata:
   author: sherwood
-  version: '0.1.0'
+  version: '0.2.0'
 ---
 
 # Venice Inference Strategy
 
-Stake VVV for sVVV to enable private AI inference via Venice. Uses `VeniceInferenceStrategy` (ERC-1167 clonable) — any syndicate, any agent, any proposal can use it as a lego block.
+Loan-model strategy: vault lends asset to an agent for Venice private inference. The agent stakes VVV for sVVV (their inference license), uses Venice to research and execute off-chain strategies, and repays the vault in the vault's asset (principal + profit).
+
+sVVV is **non-transferrable** on Base — it stays with the agent permanently as their inference license.
 
 ## Overview
 
 ```
 Vault (holds USDC or VVV)
-    ↓ governance proposal
+    ↓ governance proposal (the "loan")
 VeniceInferenceStrategy clone
     ↓ execute: pull asset → [swap via Aerodrome if needed] → stake VVV → agent gets sVVV
-Agent wallet (holds sVVV)
+Agent wallet (holds sVVV permanently)
     ↓ provision API key (EIP-191 signature)
-Venice private inference (chat completions)
-    ↓ settle: claw back sVVV → initiate unstake → cooldown → claimVVV → VVV back to vault
+Venice private inference (chat completions, reasoning)
+    ↓ agent executes off-chain strategy, earns profit
+    ↓ settle: agent repays vault in vault asset (principal + profit)
+Vault (recovers principal + profit, fees distributed)
 ```
 
 ## Two Execution Paths
@@ -69,7 +73,8 @@ sherwood strategy propose venice-inference \
 # Submit the proposal
 sherwood proposal create \
   --vault <vault-address> \
-  --name "Venice VVV Staking" \
+  --name "Venice Inference Loan" \
+  --description "Loan 500 USDC for VVV staking + private inference. Will repay principal + trading profit." \
   --performance-fee 0 \
   --duration 7d \
   --execute-calls ./venice-calls/execute.json \
@@ -82,21 +87,10 @@ Or submit directly (skip `--write-calls`):
 sherwood strategy propose venice-inference \
   --vault <vault-address> \
   --amount 500 --asset USDC --min-vvv 900 \
-  --name "Venice VVV Staking" --performance-fee 0 --duration 7d
+  --name "Venice Inference Loan" --performance-fee 0 --duration 7d
 ```
 
-The CLI prints the clone address after deployment. Use it for the pre-approval step.
-
-### Step 3: Pre-approve sVVV clawback
-
-The agent must approve the strategy clone to claw back sVVV on settlement. ERC20 approve works before holding tokens.
-
-```bash
-# Agent calls sVVV.approve(strategyClone, type(uint256).max) from their wallet
-# The clone address is printed by `strategy propose`
-```
-
-### Step 4: Provision API key
+### Step 3: Provision API key
 
 After proposal executes and agent holds sVVV:
 
@@ -112,7 +106,7 @@ This:
 
 Requires the signing wallet to hold sVVV. Venice does not support EIP-1271 (contract signatures).
 
-### Step 5: Run private inference
+### Step 4: Run private inference
 
 ```bash
 # List available models
@@ -121,9 +115,6 @@ sherwood venice models
 # Basic inference
 sherwood venice infer --model <model-id> --prompt "Analyze the current yield landscape on Base"
 
-# With web search enabled
-sherwood venice infer --model <model-id> --prompt "Latest DeFi developments" --web-search
-
 # With data context (e.g., vault state, market data)
 sherwood venice infer --model <model-id> --data ./market-data.json --prompt "Given this data, what strategy should we pursue?"
 
@@ -131,54 +122,47 @@ sherwood venice infer --model <model-id> --data ./market-data.json --prompt "Giv
 sherwood venice infer --model <model-id> \
   --system "You are a DeFi strategy researcher. Be concise and data-driven." \
   --prompt "Evaluate Moonwell USDC supply rates vs Aerodrome LP yields"
-
-# Raw JSON output for programmatic use
-sherwood venice infer --model <model-id> --prompt "..." --json
 ```
 
-### Step 6: Use inference to generate next strategy
+### Step 5: Execute off-chain strategy
 
-The goal of Venice inference is to do more reasoning on data to determine a new strategy. Example flow:
+The goal of Venice inference is reasoning on data to find alpha. Example flow:
 
 1. Collect vault state + market data
 2. Run inference to analyze opportunities
-3. Generate a new proposal based on inference output
-4. Submit the new proposal through governance
+3. Execute trades or strategies off-chain based on inference output
+4. Earn profit in the vault's asset (e.g., USDC)
+
+### Step 6: Repay and settle
+
+Before settlement, the agent must:
+1. Set repayment amount (principal + profit) via `updateParams()`
+2. Approve the strategy clone to pull the repayment from their wallet
 
 ```bash
-# Collect data
-sherwood vault info --vault <vault> --json > ./vault-state.json
-
-# Reason about next move
-sherwood venice infer --model deepseek-r1-671b \
-  --data ./vault-state.json \
-  --system "You are analyzing a DeFi vault. Suggest the next strategy." \
-  --prompt "Given vault state, what's the best yield opportunity? Consider Moonwell supply, Aerodrome LP, and market conditions."
-
-# Act on the inference output to create next proposal
+# Agent updates repaymentAmount to include profit
+# Encode: (uint256 newRepayment, uint256 newMinVVV, uint256 newDeadlineOffset)
+# Pass 0 for unchanged fields
 ```
 
-### Step 7: Settlement
-
-When the strategy duration expires:
+Then settle:
 
 ```bash
-# Settle the proposal (claws back sVVV, initiates unstake)
 sherwood proposal settle --id <proposal-id>
 ```
 
 Settlement calls `strategy.settle()` which:
-1. Pulls sVVV from agent via `transferFrom` (pre-approved in step 3)
-2. Calls `initiateUnstake(stakedAmount)` on Venice staking — cooldown begins
-3. After cooldown elapses, anyone calls `strategy.claimVVV()` to finalize unstake and push VVV back to vault
+1. Pulls `repaymentAmount` of vault asset from agent via `transferFrom`
+2. Sends it directly to the vault
+3. Governor calculates P&L from vault balance diff and distributes fees
 
-### Step 8: Check status
+The agent keeps sVVV permanently — it is their inference license for future proposals.
+
+### Step 7: Check status
 
 ```bash
 sherwood venice status --vault <vault-address>
 ```
-
-Shows: vault profit, VVV balance, per-agent sVVV balances, pending rewards, API key validity.
 
 ## Contract Details
 
@@ -193,7 +177,7 @@ Shows: vault profit, VVV balance, per-agent sVVV balances, pending rewards, API 
 | `aeroRouter` | `address` | Aerodrome router (address(0) if direct path) |
 | `aeroFactory` | `address` | Aerodrome factory (address(0) if direct path) |
 | `agent` | `address` | Agent wallet receiving sVVV |
-| `assetAmount` | `uint256` | Amount of asset to pull from vault |
+| `assetAmount` | `uint256` | Amount of asset to pull from vault (the "loan") |
 | `minVVV` | `uint256` | Min VVV output from swap (0 if direct) |
 | `deadlineOffset` | `uint256` | Seconds for swap deadline (default 300) |
 | `singleHop` | `bool` | True for direct asset→VVV swap |
@@ -201,20 +185,32 @@ Shows: vault profit, VVV balance, per-agent sVVV balances, pending rewards, API 
 ### Lifecycle
 
 ```
-Pending → execute() → Executed → settle() → Settled → claimVVV() → VVV returned to vault
+Pending → execute() → Executed → settle() → Settled
 ```
 
 - `needsSwap()`: returns `true` when `asset != vvv`
-- `claimVVV()`: public, callable by anyone after settlement + cooldown
-- Tunable params (proposer only, while Executed): `minVVV`, `deadlineOffset`
+- `repaymentAmount`: defaults to `assetAmount` (principal), updatable via `updateParams()`
+- Tunable params (proposer only, while Executed): `repaymentAmount`, `minVVV`, `deadlineOffset`
+
+### Settlement (Loan Repayment)
+
+Settlement pulls the repayment from the agent's wallet:
+```
+IERC20(asset).safeTransferFrom(agent, vault, repaymentAmount)
+```
+
+- **Default repayment** = `assetAmount` (just the principal, no profit)
+- **Agent updates** `repaymentAmount` via `updateParams(newRepayment, 0, 0)` before settlement
+- **sVVV stays** with agent permanently (non-transferrable on Base)
+- **P&L** calculated by governor from vault balance diff — if repayment > principal, profit is distributed as fees
 
 ## Governor Integration
 
-- **Allowlisting:** The vault must allowlist the strategy clone address, VVV token, sVVV staking contract, and Aerodrome Router (swap path only) as batch targets via `sherwood vault add-target`. Without this, `executeGovernorBatch` will revert.
+- **Allowlisting:** The vault must allowlist the strategy clone address, VVV token, sVVV staking contract, and Aerodrome Router (swap path only) as batch targets via `sherwood vault add-target`.
 - **Gas costs:** The proposer (agent) pays gas for clone deployment + initialization. The governor pays gas for proposal execution and settlement.
-- **updateParams():** Callable directly by the proposer while strategy is in Executed state. No governance proposal needed. Useful for adjusting swap slippage (`minVVV`) or deadline if market conditions change.
-- **Post-settlement claim:** Unlike Moonwell, Venice staking has a cooldown period. After `settle()` initiates the unstake, anyone can call `claimVVV()` on the strategy clone once the cooldown elapses — no governance needed, no access control. VVV flows back to the vault.
-- **Pre-approval:** The agent must call `sVVV.approve(strategyClone, amount)` before the proposal is created. This is a direct ERC20 approval — no governance needed, and it works before the agent holds any sVVV.
+- **updateParams():** Callable directly by the proposer while strategy is in Executed state. No governance proposal needed. Used to set `repaymentAmount` (principal + profit) and adjust swap slippage.
+- **Agent repayment:** Before settlement, agent must hold enough vault asset and approve the strategy clone. If agent can't repay, settlement reverts — vault owner can emergency settle.
+- **No claimVVV:** Unlike the old design, there is no post-settlement claim step. Settlement is a single transaction (agent repays vault asset).
 
 ## Key Addresses (Base Mainnet)
 
