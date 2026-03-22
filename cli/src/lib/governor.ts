@@ -5,7 +5,8 @@
  * settlement, and parameter management.
  */
 
-import type { Address, Hex } from "viem";
+import type { Address, Hex, Log } from "viem";
+import { parseEventLogs } from "viem";
 import { getPublicClient, getWalletClient, getAccount } from "./client.js";
 import { getChain } from "./network.js";
 import { SHERWOOD } from "./addresses.js";
@@ -277,6 +278,23 @@ export async function isRegisteredVault(vault: Address): Promise<boolean> {
   }) as Promise<boolean>;
 }
 
+/**
+ * Extract proposalId from ProposalCreated event logs.
+ * Returns undefined if the event is not found or parsing fails.
+ */
+export function parseProposalIdFromLogs(logs: Log[]): bigint | undefined {
+  try {
+    const parsed = parseEventLogs({
+      abi: SYNDICATE_GOVERNOR_ABI,
+      logs,
+      eventName: "ProposalCreated",
+    });
+    return parsed[0]?.args.proposalId;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Write helpers ──
 
 export async function propose(
@@ -302,14 +320,15 @@ export async function propose(
 
   const receipt = await client.waitForTransactionReceipt({ hash });
 
-  // Parse proposalId from return value — use proposalCount as fallback.
-  // NOTE: In concurrent environments, another proposal could be created between
-  // our tx and this read, returning the wrong ID. The event log path above is preferred.
-  let proposalId: bigint;
-  try {
-    proposalId = await proposalCount();
-  } catch {
-    proposalId = 0n;
+  // Parse proposalId from the ProposalCreated event in the receipt logs.
+  // Falls back to proposalCount() if event parsing fails.
+  let proposalId = parseProposalIdFromLogs(receipt.logs);
+  if (proposalId === undefined) {
+    try {
+      proposalId = await proposalCount();
+    } catch {
+      proposalId = 0n;
+    }
   }
 
   return { hash: receipt.transactionHash, proposalId };

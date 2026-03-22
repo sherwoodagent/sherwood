@@ -182,7 +182,8 @@ export async function fetchGovernorData(
     ],
   });
 
-  const proposalCount = (baseResults[0].result as bigint) ?? 0n;
+  const proposalCountRaw =
+    baseResults[0].status === "success" ? (baseResults[0].result as bigint) : 0n;
   const paramsRaw = baseResults[1].result as GovernorParams | undefined;
   const params: GovernorParams = paramsRaw ?? {
     votingPeriod: 0n,
@@ -197,6 +198,13 @@ export async function fetchGovernorData(
   };
   const activeProposalId = (baseResults[2].result as bigint) ?? 0n;
   const cooldownEnd = (baseResults[3].result as bigint) ?? 0n;
+
+  // If proposalCount read failed but we have an active proposal, use it as a
+  // lower-bound so we still fetch at least that proposal instead of returning empty.
+  const proposalCount =
+    proposalCountRaw === 0n && activeProposalId > 0n
+      ? activeProposalId
+      : proposalCountRaw;
 
   if (proposalCount === 0n) {
     return {
