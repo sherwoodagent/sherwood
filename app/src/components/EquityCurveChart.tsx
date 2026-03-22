@@ -71,12 +71,31 @@ export default function EquityCurveChart({ data, hwm }: EquityCurveChartProps) {
           options={{
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false }, tooltip: { enabled: true } },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                enabled: true,
+                callbacks: {
+                  label: (ctx) => {
+                    const v = ctx.parsed.y;
+                    if (v === 0) return "0";
+                    if (Math.abs(v) < 0.01) return v.toPrecision(3);
+                    return v.toFixed(4);
+                  },
+                },
+              },
+            },
             scales: {
               x: { display: false },
               y: {
                 grid: { color: "rgba(255,255,255,0.05)" },
                 ticks: {
+                  callback: (value) => {
+                    const v = Number(value);
+                    if (v === 0) return "0";
+                    if (Math.abs(v) < 0.01) return v.toPrecision(3);
+                    return v.toFixed(4);
+                  },
                   color: "rgba(255,255,255,0.3)",
                   font: { size: 10, family: "Plus Jakarta Sans" },
                 },

@@ -641,6 +641,9 @@ export function formatAsset(
       maximumFractionDigits: 2,
     });
   }
+  if (num > 0 && num < 0.01) {
+    return num.toPrecision(4);
+  }
   return num.toLocaleString("en-US", {
     minimumFractionDigits: decimals <= 6 ? 2 : 4,
     maximumFractionDigits: decimals <= 6 ? 2 : 4,
