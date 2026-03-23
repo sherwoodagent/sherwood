@@ -305,6 +305,17 @@ export const SYNDICATE_VAULT_ABI = [
     inputs: [{ name: "shares", type: "uint256" }],
     outputs: [{ name: "assets", type: "uint256" }],
   },
+  {
+    name: "redeem",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "shares", type: "uint256" },
+      { name: "receiver", type: "address" },
+      { name: "owner", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
   // Views
   {
     name: "getAgentCount",

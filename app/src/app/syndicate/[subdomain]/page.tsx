@@ -4,6 +4,7 @@ import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import SyndicateClient from "@/components/SyndicateClient";
 import DepositButton from "@/components/DepositButton";
+import WithdrawButton from "@/components/WithdrawButton";
 import EquityCurveChart from "@/components/EquityCurveChart";
 import VaultOverview from "@/components/VaultOverview";
 import AgentRoster from "@/components/AgentRoster";
@@ -107,6 +108,14 @@ export default async function SyndicateDetailPage({
                 assetAddress={data.assetAddress}
                 assetDecimals={data.assetDecimals}
                 assetSymbol={data.assetSymbol}
+              />
+              <WithdrawButton
+                vault={data.vault}
+                vaultName={name}
+                assetDecimals={data.assetDecimals}
+                assetSymbol={data.assetSymbol}
+                redemptionsLocked={data.redemptionsLocked}
+                paused={data.paused}
               />
             </div>
           </div>
