@@ -3,9 +3,9 @@ pragma solidity 0.8.28;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ICToken} from "../src/interfaces/ICToken.sol";
-import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
-import {WstETHMoonwellStrategy} from "../src/strategies/WstETHMoonwellStrategy.sol";
+import {ICToken} from "../../src/interfaces/ICToken.sol";
+import {ISyndicateGovernor} from "../../src/interfaces/ISyndicateGovernor.sol";
+import {WstETHMoonwellStrategy} from "../../src/strategies/WstETHMoonwellStrategy.sol";
 
 interface IAeroRouter {
     struct Route {
