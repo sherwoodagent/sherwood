@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import Providers from "@/components/Providers";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./globals.css";
+
+const umamiWebsiteId = process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID;
 
 const inter = Inter({
   subsets: ["latin"],
@@ -49,6 +52,14 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${plusJakartaSans.variable}`}>
       <body className="bg-black text-[#E5E7EB] antialiased overflow-x-hidden font-[family-name:var(--font-inter)]">
         <Providers>{children}</Providers>
+        {umamiWebsiteId && (
+          <Script
+            src="https://cloud.umami.is/script.js"
+            data-website-id={umamiWebsiteId}
+            data-domains="app.sherwood.sh"
+            strategy="afterInteractive"
+          />
+        )}
       </body>
     </html>
   );
