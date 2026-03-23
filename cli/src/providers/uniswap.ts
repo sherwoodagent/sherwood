@@ -17,10 +17,9 @@ import type { Address, Hex } from "viem";
 import { isAddress, isHex, formatUnits } from "viem";
 import { base, baseSepolia } from "viem/chains";
 import type { TradingProvider, ProviderInfo, SwapParams, SwapQuoteParams, TxResult, SwapQuote } from "../types.js";
-import { getPublicClient, getAccount, writeContractWithRetry } from "../lib/client.js";
+import { getPublicClient, getAccount } from "../lib/client.js";
 import { getChain } from "../lib/network.js";
 import { getUniswapApiKey } from "../lib/config.js";
-import { ERC20_ABI } from "../lib/abis.js";
 
 const API_BASE = "https://trade-api.gateway.uniswap.org/v1";
 
@@ -268,20 +267,7 @@ export class UniswapProvider implements TradingProvider {
     const data = (await res.json()) as ApprovalResponse;
 
     if (data.approval) {
-      // Submit the approval transaction
-      const hash = await writeContractWithRetry({
-        address: data.approval.to,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        // Decode the approval data — the API returns the full calldata
-        // but we need to send the raw transaction
-        args: [], // unused — we send raw data
-        account,
-        chain: getChain(),
-      });
-
-      // Actually, the API returns a ready-to-send transaction, so use sendTransaction
-      // Let's use the wallet client directly
+      // The Trading API returns a ready-to-send approval transaction
       const { getWalletClient } = await import("../lib/client.js");
       const wallet = getWalletClient();
       const approvalHash = await wallet.sendTransaction({

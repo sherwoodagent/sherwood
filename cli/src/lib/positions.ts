@@ -16,14 +16,17 @@ export interface Position {
   tokenAddress: Address;
   tokenSymbol: string;
   tokenDecimals: number;
-  amountIn: string;           // USDC spent (human-readable, e.g. "500")
+  amountIn: string;           // amount spent (human-readable, e.g. "500")
   amountOut: string;          // tokens received (raw bigint as string)
-  entryPrice: number;         // USDC per token at entry
+  entryPrice: number;         // input token per target token at entry
   highWaterPrice: number;     // highest observed price since entry
   feeTier: number;            // Uniswap fee tier used
   openedAt: number;           // unix timestamp
   txHash: string;             // buy tx hash
   exitConfig: ExitConfig;     // per-position exit parameters
+  inputTokenAddress?: Address; // token used to buy (default: USDC for backwards compat)
+  inputTokenSymbol?: string;   // symbol of input token (default: "USDC")
+  inputTokenDecimals?: number; // decimals of input token (default: 6)
 }
 
 export interface ClosedPosition extends Position {

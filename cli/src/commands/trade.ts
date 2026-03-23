@@ -42,6 +42,8 @@ async function loadXmtp() {
 
 // ── Token resolution ──
 
+const ETH_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
+
 const KNOWN_MEMECOINS: Record<string, Address> = {
   DEGEN: "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed" as Address,
   TOSHI: "0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4" as Address,
@@ -49,9 +51,26 @@ const KNOWN_MEMECOINS: Record<string, Address> = {
   HIGHER: "0x0578d8A44db98B23BF096A382e016e29a5Ce0ffe" as Address,
 };
 
+const WETH_ABI = [
+  {
+    name: "deposit",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [],
+    outputs: [],
+  },
+] as const;
+
 async function resolveToken(
   symbolOrAddress: string,
 ): Promise<{ address: Address; symbol: string; decimals: number }> {
+  const upper = symbolOrAddress.toUpperCase();
+
+  // ETH is native — not an ERC-20, handle specially
+  if (upper === "ETH") {
+    return { address: ETH_ADDRESS, symbol: "ETH", decimals: 18 };
+  }
+
   let address: Address;
   let symbol: string;
 
@@ -68,7 +87,6 @@ async function resolveToken(
       symbol = address.slice(0, 8);
     }
   } else {
-    const upper = symbolOrAddress.toUpperCase();
     const tokens = TOKENS();
     const tokenMap: Record<string, Address> = {
       USDC: tokens.USDC,
@@ -245,9 +263,10 @@ export function registerTradeCommands(program: Command): void {
 
   trade
     .command("buy")
-    .description("Buy a token with USDC via Uniswap Trading API")
+    .description("Buy a token via Uniswap Trading API")
     .requiredOption("--token <addr|symbol>", "Token to buy")
-    .requiredOption("--amount <usdc>", "USDC amount to spend")
+    .requiredOption("--amount <n>", "Amount of input token to spend")
+    .option("--with <token>", "Input token to spend (default: USDC). Use ETH for native ETH (auto-wraps to WETH).", "USDC")
     .option("--slippage <pct>", "Slippage tolerance % (default: 0.5)", "0.5")
     .option("--stop-loss <pct>", "Stop loss percentage (default: 10)", "10")
     .option("--trailing-stop <pct>", "Trailing stop percentage (0 = disabled)", "0")
@@ -255,25 +274,70 @@ export function registerTradeCommands(program: Command): void {
     .option("--syndicate <name>", "Post trade to syndicate chat")
     .action(async (opts) => {
       const { address: tokenAddr, symbol, decimals } = await resolveToken(opts.token as string);
-      const usdc = TOKENS().USDC;
-      const usdcAmount = parseUnits(opts.amount as string, 6);
       const slippage = Number(opts.slippage);
 
-      // Check USDC balance
+      // Resolve input token
+      const inputSpec = (opts.with as string).toUpperCase();
+      const isEthInput = inputSpec === "ETH";
+      // ETH input: wrap to WETH first, then swap WETH → target
+      const {
+        address: inputAddr,
+        symbol: inputSymbol,
+        decimals: inputDecimals,
+      } = isEthInput
+        ? { address: TOKENS().WETH, symbol: "ETH", decimals: 18 }
+        : await resolveToken(opts.with as string);
+      const inputAmount = parseUnits(opts.amount as string, inputDecimals);
+
+      // Check balance
       const client = getPublicClient();
       const account = getAccount();
-      const balance = (await client.readContract({
-        address: usdc,
-        abi: ERC20_ABI,
-        functionName: "balanceOf",
-        args: [account.address],
-      })) as bigint;
 
-      if (balance < usdcAmount) {
-        console.error(chalk.red(
-          `Insufficient USDC. Have ${formatUnits(balance, 6)}, need ${opts.amount}`,
-        ));
-        process.exit(1);
+      if (isEthInput) {
+        const ethBalance = await client.getBalance({ address: account.address });
+        if (ethBalance < inputAmount) {
+          console.error(chalk.red(
+            `Insufficient ETH. Have ${formatUnits(ethBalance, 18)}, need ${opts.amount}`,
+          ));
+          process.exit(1);
+        }
+
+        // Wrap ETH → WETH
+        const wrapSpinner = ora("Wrapping ETH → WETH...").start();
+        try {
+          const { getWalletClient } = await import("../lib/client.js");
+          const wallet = getWalletClient();
+          const wethAddr = TOKENS().WETH;
+          const wrapHash = await wallet.writeContract({
+            address: wethAddr,
+            abi: WETH_ABI,
+            functionName: "deposit",
+            args: [],
+            value: inputAmount,
+            account,
+            chain: (await import("../lib/network.js")).getChain(),
+          });
+          await client.waitForTransactionReceipt({ hash: wrapHash });
+          wrapSpinner.succeed(`Wrapped ${opts.amount} ETH → WETH`);
+        } catch (err) {
+          wrapSpinner.fail("ETH wrap failed");
+          console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+          process.exit(1);
+        }
+      } else {
+        const balance = (await client.readContract({
+          address: inputAddr,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [account.address],
+        })) as bigint;
+
+        if (balance < inputAmount) {
+          console.error(chalk.red(
+            `Insufficient ${inputSymbol}. Have ${formatUnits(balance, inputDecimals)}, need ${opts.amount}`,
+          ));
+          process.exit(1);
+        }
       }
 
       // Get quote via Uniswap Trading API (handles routing automatically)
@@ -282,9 +346,9 @@ export function registerTradeCommands(program: Command): void {
 
       try {
         const result = await uniswap.fullQuote({
-          tokenIn: usdc,
+          tokenIn: inputAddr,
           tokenOut: tokenAddr,
-          amountIn: usdcAmount,
+          amountIn: inputAmount,
           slippageTolerance: slippage,
         });
         expectedOut = result.amountOut;
@@ -298,14 +362,14 @@ export function registerTradeCommands(program: Command): void {
         process.exit(1);
       }
 
-      // Execute swap (check_approval + quote + swap + sign + broadcast)
+      // Execute swap via Uniswap Trading API (check_approval + quote + swap + sign + broadcast)
       const swapSpinner = ora("Executing swap via Uniswap API...").start();
       let txHash: string;
       try {
         const result = await uniswap.swap({
-          tokenIn: usdc,
+          tokenIn: inputAddr,
           tokenOut: tokenAddr,
-          amountIn: usdcAmount,
+          amountIn: inputAmount,
           amountOutMinimum: 0n, // slippage handled by API
           fee: 3000, // unused in API mode
         });
@@ -357,15 +421,18 @@ export function registerTradeCommands(program: Command): void {
         openedAt: Math.floor(Date.now() / 1000),
         txHash,
         exitConfig,
+        inputTokenAddress: inputAddr,
+        inputTokenSymbol: inputSymbol,
+        inputTokenDecimals: inputDecimals,
       });
 
       console.log();
       console.log(chalk.bold("Trade Executed"));
       console.log(chalk.dim("─".repeat(40)));
       console.log(`  Token:    ${symbol} (${tokenAddr})`);
-      console.log(`  Spent:    ${opts.amount} USDC`);
+      console.log(`  Spent:    ${opts.amount} ${inputSymbol}`);
       console.log(`  Received: ${formatUnits(tokensReceived, decimals)} ${symbol}`);
-      console.log(`  Entry:    $${entryPrice.toFixed(8)} per ${symbol}`);
+      console.log(`  Entry:    ${entryPrice.toFixed(8)} ${inputSymbol}/${symbol}`);
       console.log(`  Stop:     -${exitConfig.stopLossPct}%`);
       if (exitConfig.trailingStopPct > 0) {
         console.log(`  Trailing: ${exitConfig.trailingStopPct}%`);
@@ -379,7 +446,7 @@ export function registerTradeCommands(program: Command): void {
       try {
         const { createTradeAttestation, getEasScanUrl } = await import("../lib/eas.js");
         const { uid } = await createTradeAttestation(
-          usdc, tokenAddr, usdcAmount,
+          inputAddr, tokenAddr, inputAmount,
           formatUnits(tokensReceived, decimals),
           txHash, "BUY",
         );
@@ -394,8 +461,8 @@ export function registerTradeCommands(program: Command): void {
 
       if (opts.syndicate) {
         await postToChat(opts.syndicate, "TRADE_EXECUTED" as MessageType,
-          `Bought ${formatUnits(tokensReceived, decimals)} ${symbol} for ${opts.amount} USDC via Uniswap`,
-          { token: symbol, address: tokenAddr, amountUsdc: opts.amount, txHash },
+          `Bought ${formatUnits(tokensReceived, decimals)} ${symbol} for ${opts.amount} ${inputSymbol} via Uniswap`,
+          { token: symbol, address: tokenAddr, amountIn: opts.amount, inputToken: inputSymbol, txHash },
         );
       }
     });
@@ -404,14 +471,19 @@ export function registerTradeCommands(program: Command): void {
 
   trade
     .command("sell")
-    .description("Sell a token position back to USDC via Uniswap Trading API")
+    .description("Sell a token position via Uniswap Trading API")
     .requiredOption("--token <addr|symbol>", "Token to sell")
     .option("--amount <n>", "Token amount to sell (default: entire position)")
+    .option("--for <token>", "Output token to receive (default: USDC)", "USDC")
     .option("--slippage <pct>", "Slippage tolerance % (default: 0.5)", "0.5")
     .option("--syndicate <name>", "Post trade to syndicate chat")
     .action(async (opts) => {
       const { address: tokenAddr, symbol, decimals } = await resolveToken(opts.token as string);
-      const usdc = TOKENS().USDC;
+      const {
+        address: outputAddr,
+        symbol: outputSymbol,
+        decimals: outputDecimals,
+      } = await resolveToken(opts.for as string);
       const slippage = Number(opts.slippage);
 
       // Find open position
@@ -443,19 +515,19 @@ export function registerTradeCommands(program: Command): void {
 
       // Quote via Uniswap Trading API
       const quoteSpinner = ora("Getting quote from Uniswap API...").start();
-      let expectedUsdc: bigint;
+      let expectedOut: bigint;
 
       try {
         const result = await uniswap.fullQuote({
           tokenIn: tokenAddr,
-          tokenOut: usdc,
+          tokenOut: outputAddr,
           amountIn: sellAmount,
           slippageTolerance: slippage,
         });
-        expectedUsdc = result.amountOut;
+        expectedOut = result.amountOut;
         const routing = result.routing;
         quoteSpinner.succeed(
-          `Quote: ${formatUnits(result.amountOut, 6)} USDC (${routing} route)`,
+          `Quote: ${formatUnits(result.amountOut, outputDecimals)} ${outputSymbol} (${routing} route)`,
         );
       } catch (err) {
         quoteSpinner.fail("Quote failed");
@@ -463,13 +535,13 @@ export function registerTradeCommands(program: Command): void {
         process.exit(1);
       }
 
-      // Execute sell
+      // Execute sell via Uniswap Trading API
       const swapSpinner = ora("Executing sell via Uniswap API...").start();
       let txHash: string;
       try {
         const result = await uniswap.swap({
           tokenIn: tokenAddr,
-          tokenOut: usdc,
+          tokenOut: outputAddr,
           amountIn: sellAmount,
           amountOutMinimum: 0n,
           fee: 3000,
@@ -487,13 +559,16 @@ export function registerTradeCommands(program: Command): void {
         process.exit(1);
       }
 
-      // Calculate P&L
-      const usdcReceived = Number(formatUnits(expectedUsdc, 6));
+      // Calculate P&L (meaningful when output matches the original input token)
+      const outputReceived = Number(formatUnits(expectedOut, outputDecimals));
       const costBasis = pos ? Number(pos.amountIn) : 0;
-      const pnlUsdc = costBasis > 0 ? usdcReceived - costBasis : 0;
-      const pnlPct = costBasis > 0 ? (pnlUsdc / costBasis) * 100 : 0;
+      const inputMatchesOutput = pos
+        ? (pos.inputTokenSymbol ?? "USDC").toUpperCase() === outputSymbol.toUpperCase()
+        : outputSymbol.toUpperCase() === "USDC";
+      const pnl = costBasis > 0 && inputMatchesOutput ? outputReceived - costBasis : 0;
+      const pnlPct = costBasis > 0 && inputMatchesOutput ? (pnl / costBasis) * 100 : 0;
       const exitPrice = sellAmount > 0n
-        ? usdcReceived / Number(formatUnits(sellAmount, decimals))
+        ? outputReceived / Number(formatUnits(sellAmount, decimals))
         : 0;
 
       if (pos) {
@@ -502,22 +577,23 @@ export function registerTradeCommands(program: Command): void {
           closedAt: Math.floor(Date.now() / 1000),
           exitTxHash: txHash,
           exitReason: "manual",
-          pnlUsdc,
+          pnlUsdc: pnl,
           pnlPct,
         });
       }
 
-      const pnlColor = pnlUsdc >= 0 ? chalk.green : chalk.red;
+      const pnlColor = pnl >= 0 ? chalk.green : chalk.red;
 
       console.log();
       console.log(chalk.bold("Position Closed"));
       console.log(chalk.dim("─".repeat(40)));
       console.log(`  Token:    ${symbol}`);
       console.log(`  Sold:     ${formatUnits(sellAmount, decimals)} ${symbol}`);
-      console.log(`  Received: ~${usdcReceived.toFixed(2)} USDC`);
-      if (costBasis > 0) {
-        console.log(`  Cost:     ${costBasis.toFixed(2)} USDC`);
-        console.log(`  P&L:      ${pnlColor(`${pnlUsdc >= 0 ? "+" : ""}${pnlUsdc.toFixed(2)} USDC (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%)`)}`);
+      console.log(`  Received: ~${outputReceived.toFixed(outputDecimals <= 6 ? 2 : 6)} ${outputSymbol}`);
+      if (costBasis > 0 && inputMatchesOutput) {
+        const posInputSymbol = pos?.inputTokenSymbol ?? "USDC";
+        console.log(`  Cost:     ${costBasis.toFixed(2)} ${posInputSymbol}`);
+        console.log(`  P&L:      ${pnlColor(`${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} ${outputSymbol} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%)`)}`);
       }
       console.log(`  Tx:       ${chalk.dim(getExplorerUrl(txHash as `0x${string}`))}`);
 
@@ -525,8 +601,8 @@ export function registerTradeCommands(program: Command): void {
       try {
         const { createTradeAttestation, getEasScanUrl } = await import("../lib/eas.js");
         const { uid } = await createTradeAttestation(
-          tokenAddr, usdc, sellAmount,
-          usdcReceived.toFixed(6),
+          tokenAddr, outputAddr, sellAmount,
+          outputReceived.toFixed(6),
           txHash, "SELL",
         );
         if (uid !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
@@ -540,8 +616,8 @@ export function registerTradeCommands(program: Command): void {
 
       if (opts.syndicate) {
         await postToChat(opts.syndicate, "TRADE_EXECUTED" as MessageType,
-          `Sold ${formatUnits(sellAmount, decimals)} ${symbol} for ~${usdcReceived.toFixed(2)} USDC (P&L: ${pnlUsdc >= 0 ? "+" : ""}${pnlUsdc.toFixed(2)})`,
-          { token: symbol, address: tokenAddr, usdcReceived, pnlUsdc, pnlPct, txHash },
+          `Sold ${formatUnits(sellAmount, decimals)} ${symbol} for ~${outputReceived.toFixed(2)} ${outputSymbol}${inputMatchesOutput && costBasis > 0 ? ` (P&L: ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)})` : ""}`,
+          { token: symbol, address: tokenAddr, outputReceived, outputToken: outputSymbol, pnl, pnlPct, txHash },
         );
       }
     });
