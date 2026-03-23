@@ -374,6 +374,22 @@ export function registerTradeCommands(program: Command): void {
         console.log(`  Deadline: ${new Date(exitConfig.deadlineUnix * 1000).toISOString()}`);
       }
       console.log(`  Tx:       ${chalk.dim(getExplorerUrl(txHash as `0x${string}`))}`);
+
+      // EAS attestation (best-effort)
+      try {
+        const { createTradeAttestation, getEasScanUrl } = await import("../lib/eas.js");
+        const { uid } = await createTradeAttestation(
+          usdc, tokenAddr, usdcAmount,
+          formatUnits(tokensReceived, decimals),
+          txHash, "BUY",
+        );
+        if (uid !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
+          console.log(`  Attested: ${chalk.dim(getEasScanUrl(uid))}`);
+        }
+      } catch {
+        // Attestation is best-effort
+      }
+
       console.log();
 
       if (opts.syndicate) {
@@ -504,6 +520,22 @@ export function registerTradeCommands(program: Command): void {
         console.log(`  P&L:      ${pnlColor(`${pnlUsdc >= 0 ? "+" : ""}${pnlUsdc.toFixed(2)} USDC (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%)`)}`);
       }
       console.log(`  Tx:       ${chalk.dim(getExplorerUrl(txHash as `0x${string}`))}`);
+
+      // EAS attestation (best-effort)
+      try {
+        const { createTradeAttestation, getEasScanUrl } = await import("../lib/eas.js");
+        const { uid } = await createTradeAttestation(
+          tokenAddr, usdc, sellAmount,
+          usdcReceived.toFixed(6),
+          txHash, "SELL",
+        );
+        if (uid !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
+          console.log(`  Attested: ${chalk.dim(getEasScanUrl(uid))}`);
+        }
+      } catch {
+        // Attestation is best-effort
+      }
+
       console.log();
 
       if (opts.syndicate) {

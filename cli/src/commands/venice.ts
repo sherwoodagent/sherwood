@@ -63,6 +63,17 @@ export function registerVeniceCommands(program: Command): void {
         keySpinner.succeed("Venice API key provisioned");
         console.log(chalk.dim(`  Key: ${apiKey.slice(0, 8)}...${apiKey.slice(-4)}`));
         console.log(chalk.dim("  Saved to ~/.sherwood/config.json"));
+
+        // Create EAS attestation
+        try {
+          const { createVeniceProvisionAttestation, getEasScanUrl } = await import("../lib/eas.js");
+          const { uid } = await createVeniceProvisionAttestation(account.address);
+          if (uid !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
+            console.log(chalk.dim(`  Attested: ${getEasScanUrl(uid)}`));
+          }
+        } catch {
+          // Attestation is best-effort
+        }
       } catch (err) {
         keySpinner.fail("Failed to provision API key");
         console.error(chalk.red(err instanceof Error ? err.message : String(err)));
@@ -253,6 +264,24 @@ export function registerVeniceCommands(program: Command): void {
           console.log(result.content);
           console.log();
           console.log(chalk.dim(`Model: ${result.model} | Tokens: ${result.usage.promptTokens} in, ${result.usage.completionTokens} out, ${result.usage.totalTokens} total`));
+        }
+
+        // Create EAS attestation (best-effort)
+        try {
+          const { createVeniceInferenceAttestation, getEasScanUrl } = await import("../lib/eas.js");
+          const { keccak256, toHex } = await import("viem");
+          const promptHash = keccak256(toHex(userContent)).slice(0, 18); // short hash
+          const { uid } = await createVeniceInferenceAttestation(
+            result.model,
+            result.usage.promptTokens,
+            result.usage.completionTokens,
+            promptHash,
+          );
+          if (uid !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
+            console.log(chalk.dim(`Attested: ${getEasScanUrl(uid)}`));
+          }
+        } catch {
+          // Attestation is best-effort
         }
       } catch (err) {
         spinner.fail("Inference failed");

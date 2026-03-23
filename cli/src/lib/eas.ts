@@ -22,6 +22,9 @@ const ATTESTED_TOPIC = "0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b7
 const JOIN_REQUEST_PARAMS = parseAbiParameters("uint256, uint256, address, string");
 const AGENT_APPROVED_PARAMS = parseAbiParameters("uint256, uint256, address");
 const X402_RESEARCH_PARAMS = parseAbiParameters("string, string, string, string, string");
+const VENICE_PROVISION_PARAMS = parseAbiParameters("address, string");
+const VENICE_INFERENCE_PARAMS = parseAbiParameters("string, uint256, uint256, string");
+const TRADE_EXECUTED_PARAMS = parseAbiParameters("address, address, uint256, string, string, string");
 
 function assertSchemasRegistered() {
   const schemas = EAS_SCHEMAS();
@@ -237,6 +240,149 @@ export async function createResearchAttestation(
   const uid = extractAttestationUid(receipt);
 
   return { uid, hash };
+}
+
+/**
+ * Create a VENICE_PROVISION attestation — records that an agent provisioned a Venice API key.
+ * Schema: "address agent, string status"
+ */
+export async function createVeniceProvisionAttestation(
+  agent: Address,
+): Promise<{ uid: Hex; hash: Hex }> {
+  const schemas = EAS_SCHEMAS();
+  if (schemas.VENICE_PROVISION === ZERO_BYTES32) return skipAttestation("VENICE_PROVISION");
+
+  const wallet = getWalletClient();
+  const client = getPublicClient();
+  const account = getAccount();
+
+  const data = encodeAbiParameters(VENICE_PROVISION_PARAMS, [agent, "provisioned"]);
+
+  const hash = await wallet.writeContract({
+    account,
+    chain: getChain(),
+    address: EAS_CONTRACTS().EAS,
+    abi: EAS_ABI,
+    functionName: "attest",
+    args: [{
+      schema: schemas.VENICE_PROVISION,
+      data: {
+        recipient: agent,
+        expirationTime: 0n,
+        revocable: false,
+        refUID: ZERO_BYTES32,
+        data,
+        value: 0n,
+      },
+    }],
+    value: 0n,
+  });
+
+  const receipt = await client.waitForTransactionReceipt({ hash });
+  const uid = extractAttestationUid(receipt);
+  return { uid, hash };
+}
+
+/**
+ * Create a VENICE_INFERENCE attestation — records an inference call.
+ * Schema: "string model, uint256 promptTokens, uint256 completionTokens, string promptHash"
+ */
+export async function createVeniceInferenceAttestation(
+  model: string,
+  promptTokens: number,
+  completionTokens: number,
+  promptHash: string,
+): Promise<{ uid: Hex; hash: Hex }> {
+  const schemas = EAS_SCHEMAS();
+  if (schemas.VENICE_INFERENCE === ZERO_BYTES32) return skipAttestation("VENICE_INFERENCE");
+
+  const wallet = getWalletClient();
+  const client = getPublicClient();
+  const account = getAccount();
+
+  const data = encodeAbiParameters(VENICE_INFERENCE_PARAMS, [
+    model,
+    BigInt(promptTokens),
+    BigInt(completionTokens),
+    promptHash,
+  ]);
+
+  const hash = await wallet.writeContract({
+    account,
+    chain: getChain(),
+    address: EAS_CONTRACTS().EAS,
+    abi: EAS_ABI,
+    functionName: "attest",
+    args: [{
+      schema: schemas.VENICE_INFERENCE,
+      data: {
+        recipient: account.address,
+        expirationTime: 0n,
+        revocable: false,
+        refUID: ZERO_BYTES32,
+        data,
+        value: 0n,
+      },
+    }],
+    value: 0n,
+  });
+
+  const receipt = await client.waitForTransactionReceipt({ hash });
+  const uid = extractAttestationUid(receipt);
+  return { uid, hash };
+}
+
+/**
+ * Create a TRADE_EXECUTED attestation — records a swap on-chain.
+ * Schema: "address tokenIn, address tokenOut, uint256 amountIn, string amountOut, string txHash, string routing"
+ */
+export async function createTradeAttestation(
+  tokenIn: Address,
+  tokenOut: Address,
+  amountIn: bigint,
+  amountOut: string,
+  txHash: string,
+  routing: string,
+): Promise<{ uid: Hex; hash: Hex }> {
+  const schemas = EAS_SCHEMAS();
+  if (schemas.TRADE_EXECUTED === ZERO_BYTES32) return skipAttestation("TRADE_EXECUTED");
+
+  const wallet = getWalletClient();
+  const client = getPublicClient();
+  const account = getAccount();
+
+  const data = encodeAbiParameters(TRADE_EXECUTED_PARAMS, [
+    tokenIn, tokenOut, amountIn, amountOut, txHash, routing,
+  ]);
+
+  const hash = await wallet.writeContract({
+    account,
+    chain: getChain(),
+    address: EAS_CONTRACTS().EAS,
+    abi: EAS_ABI,
+    functionName: "attest",
+    args: [{
+      schema: schemas.TRADE_EXECUTED,
+      data: {
+        recipient: account.address,
+        expirationTime: 0n,
+        revocable: false,
+        refUID: ZERO_BYTES32,
+        data,
+        value: 0n,
+      },
+    }],
+    value: 0n,
+  });
+
+  const receipt = await client.waitForTransactionReceipt({ hash });
+  const uid = extractAttestationUid(receipt);
+  return { uid, hash };
+}
+
+/** Skip attestation gracefully when schema isn't registered on this chain. */
+function skipAttestation(name: string): { uid: Hex; hash: Hex } {
+  return { uid: ZERO_BYTES32, hash: ZERO_BYTES32 };
 }
 
 // ── Attestation Queries ──

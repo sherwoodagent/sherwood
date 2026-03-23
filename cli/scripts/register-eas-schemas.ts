@@ -107,6 +107,21 @@ const SCHEMAS = [
     definition: "string provider, string queryType, string prompt, string costUsdc, string resultUri",
     revocable: false,
   },
+  {
+    name: "VENICE_PROVISION",
+    definition: "address agent, string status",
+    revocable: false,
+  },
+  {
+    name: "VENICE_INFERENCE",
+    definition: "string model, uint256 promptTokens, uint256 completionTokens, string promptHash",
+    revocable: false,
+  },
+  {
+    name: "TRADE_EXECUTED",
+    definition: "address tokenIn, address tokenOut, uint256 amountIn, string amountOut, string txHash, string routing",
+    revocable: false,
+  },
 ];
 
 // ── Main ──
