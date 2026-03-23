@@ -14,6 +14,7 @@ import {
   getAddresses,
   SYNDICATE_FACTORY_ABI,
   SYNDICATE_VAULT_ABI,
+  SYNDICATE_GOVERNOR_ABI,
   ERC20_ABI,
   IDENTITY_REGISTRY_ABI,
   L2_REGISTRY_ABI,
@@ -320,7 +321,49 @@ async function resolveOnChain(
   const managementFeeBps = (vaultResults[7].result as bigint) ?? 0n;
   const assetAddress = (vaultResults[8].result as Address) ?? addresses.usdc;
 
-  // Step 2b: Get asset decimals + symbol
+  // Step 2b: Check for capital deployed to active strategies
+  let deployedCapital = 0n;
+  try {
+    const governorAddr = await client.readContract({
+      address: vault,
+      abi: SYNDICATE_VAULT_ABI,
+      functionName: "governor",
+    }) as Address;
+
+    if (governorAddr && governorAddr !== "0x0000000000000000000000000000000000000000") {
+      const activeProposalId = await client.readContract({
+        address: governorAddr,
+        abi: SYNDICATE_GOVERNOR_ABI,
+        functionName: "getActiveProposal",
+        args: [vault],
+      }) as bigint;
+
+      if (activeProposalId > 0n) {
+        const proposal = await client.readContract({
+          address: governorAddr,
+          abi: SYNDICATE_GOVERNOR_ABI,
+          functionName: "getProposal",
+          args: [activeProposalId],
+        }) as { executedAt: bigint };
+
+        // Only count deployed capital when proposal is executed (capital has left the vault)
+        if (proposal.executedAt > 0n) {
+          deployedCapital = await client.readContract({
+            address: governorAddr,
+            abi: SYNDICATE_GOVERNOR_ABI,
+            functionName: "getCapitalSnapshot",
+            args: [activeProposalId],
+          }) as bigint;
+        }
+      }
+    }
+  } catch {
+    // Governor read failed — ignore, keep deployedCapital = 0
+  }
+
+  const effectiveTotalAssets = totalAssets + deployedCapital;
+
+  // Step 2c: Get asset decimals + symbol
   const assetInfoResults = await client.multicall({
     contracts: [
       { address: assetAddress, abi: ERC20_ABI, functionName: "decimals" },
@@ -394,13 +437,13 @@ async function resolveOnChain(
     fetchXmtpGroupId(chainId, subdomain, addresses.l2Registry),
     fetchSyndicateAttestations(creator, syndicateId, chainId),
     fetchStrategyActivity(entry.subgraphUrl, syndicateId.toString()),
-    fetchEquityCurve(entry.subgraphUrl, syndicateId.toString(), assetDecimals, totalAssets),
+    fetchEquityCurve(entry.subgraphUrl, syndicateId.toString(), assetDecimals, effectiveTotalAssets),
   ]);
 
   // Format display values based on asset
   const isUSD = assetSymbol === "USDC" || assetSymbol === "USDT";
   const tvlFormatted = formatAsset(
-    totalAssets,
+    effectiveTotalAssets,
     assetDecimals,
     isUSD ? "USD" : undefined,
   );
@@ -413,7 +456,7 @@ async function resolveOnChain(
     active,
     subdomain,
     chainId,
-    totalAssets,
+    totalAssets: effectiveTotalAssets,
     totalSupply,
     agentCount,
     openDeposits: openDepositsVal,
