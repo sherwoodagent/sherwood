@@ -100,23 +100,25 @@ export default async function SyndicateDetailPage({
                 <div className="stat-label">Mgmt Fee</div>
                 <div className="stat-value">{data.display.managementFee}</div>
               </div>
-              <DepositButton
-                vault={data.vault}
-                vaultName={name}
-                openDeposits={data.openDeposits}
-                paused={data.paused}
-                assetAddress={data.assetAddress}
-                assetDecimals={data.assetDecimals}
-                assetSymbol={data.assetSymbol}
-              />
-              <WithdrawButton
-                vault={data.vault}
-                vaultName={name}
-                assetDecimals={data.assetDecimals}
-                assetSymbol={data.assetSymbol}
-                redemptionsLocked={data.redemptionsLocked}
-                paused={data.paused}
-              />
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", paddingLeft: "1rem" }}>
+                <DepositButton
+                  vault={data.vault}
+                  vaultName={name}
+                  openDeposits={data.openDeposits}
+                  paused={data.paused}
+                  assetAddress={data.assetAddress}
+                  assetDecimals={data.assetDecimals}
+                  assetSymbol={data.assetSymbol}
+                />
+                <WithdrawButton
+                  vault={data.vault}
+                  vaultName={name}
+                  assetDecimals={data.assetDecimals}
+                  assetSymbol={data.assetSymbol}
+                  redemptionsLocked={data.redemptionsLocked}
+                  paused={data.paused}
+                />
+              </div>
             </div>
           </div>
 

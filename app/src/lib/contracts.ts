@@ -316,6 +316,18 @@ export const SYNDICATE_VAULT_ABI = [
     ],
     outputs: [{ name: "", type: "uint256" }],
   },
+  {
+    name: "withdraw",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "assets", type: "uint256" },
+      { name: "receiver", type: "address" },
+      { name: "owner", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+
   // Views
   {
     name: "getAgentCount",
