@@ -1,6 +1,6 @@
 ---
 name: sherwood
-description: Turns any agent into a fund manager. Creates autonomous investment syndicates that pool capital and run composable onchain strategies across DeFi, lending, and more. Agents manage. Contracts enforce. Humans watch. Triggers on syndicate creation, vault management, agent registration, strategy execution, governance proposals, voting, settlement, depositor approvals, allowance disbursements, Venice funding, and general Sherwood CLI operations.
+description: Turns any agent into a fund manager. Creates autonomous investment syndicates that pool capital and run composable onchain strategies across DeFi, lending, trading, and more. Agents manage. Contracts enforce. Humans watch. Triggers on syndicate creation, vault management, agent registration, strategy execution, governance proposals, voting, settlement, depositor approvals, allowance disbursements, Venice funding, token trading (buy/sell/swap via Uniswap), memecoin signal scanning, position monitoring, and general Sherwood CLI operations.
 allowed-tools: Read, Glob, Grep, Bash(git:*), Bash(npm:*), Bash(npx:*), Bash(cd:*), Bash(curl:*), Bash(jq:*), Bash(cat:*), Bash(sherwood:*), Bash(which:*), WebFetch, WebSearch, AskUserQuestion
 license: MIT
 metadata:
@@ -39,6 +39,7 @@ All commands below use `sherwood` as shorthand. Add `--testnet` for Base Sepolia
 4. Govern      →  proposal create → vote → execute → settle/cancel
                   governor info, governor set-* (owner only)
 5. Operate     →  execute strategies, disburse allowances, fund Venice
+                  trade memecoins (scan → buy → monitor → sell via Uniswap)
 6. Monitor     →  vault info, balance, chat
 ```
 
@@ -538,7 +539,9 @@ User wants to...
 ├── Review requests    → Phase 3: syndicate requests → syndicate approve/reject
 ├── Configure vault    → Phase 3: register agents → approve depositors
 ├── Trade (levered)    → Phase 4: delegate to `levered-swap` skill
-├── Trade (memecoins)  → Phase 5: delegate to `strategies/memecoin-alpha` skill
+├── Trade / swap / buy / sell tokens → Phase 5: delegate to `strategies/memecoin-alpha` skill
+├── Memecoin / signal trading        → Phase 5: delegate to `strategies/memecoin-alpha` skill
+├── Uniswap / scan / monitor         → Phase 5: `sherwood trade scan`, `trade buy`, `trade sell`, `trade monitor`
 ├── Use strategy template → Phase 4: clone template, initialize, include in proposal batch
 ├── Supply to lending  → Phase 4: MoonwellSupplyStrategy template
 ├── Provide LP         → Phase 4: AerodromeLPStrategy template (+ optional gauge staking)

@@ -17,7 +17,16 @@
     "moonwell",
     "uniswap",
     "levered-swap",
-    "agent"
+    "agent",
+    "trade",
+    "swap",
+    "memecoin",
+    "buy",
+    "sell",
+    "scan",
+    "monitor",
+    "signal",
+    "position"
   ],
   "license": "MIT",
   "skills": [

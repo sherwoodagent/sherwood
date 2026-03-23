@@ -1,6 +1,6 @@
 ---
 name: memecoin-alpha
-description: Signal-driven memecoin trading on Base via Uniswap Trading API — research with Messari/Nansen, analyze with Venice inference, trade with Uniswap, auto-exit on signals
+description: Signal-driven memecoin trading on Base via Uniswap Trading API — buy, sell, swap tokens, scan for opportunities, monitor positions, auto-exit on signals. Uses Messari/Nansen research, Venice inference for sentiment. Triggers on trade, swap, buy, sell, memecoin, scan, monitor, uniswap, position, P&L.
 allowed-tools: Read, Glob, Grep, Bash(sherwood *), Bash(npm *), Bash(npx *), WebFetch, WebSearch, AskUserQuestion
 model: sonnet
 license: MIT
