@@ -20,8 +20,8 @@ export default async function LeaderboardPage() {
     }))
     .sort((a, b) => b.tvlNum - a.tvlNum);
 
-  // Aggregate stats
-  const totalTVL = ranked.reduce((sum, s) => sum + s.tvlNum, 0);
+  // Aggregate stats — group TVL by asset to avoid mixing currencies
+  const totalTVLDisplay = formatTotalTVL(ranked.map((s) => s.tvl));
   const totalAgents = ranked.reduce((sum, s) => sum + s.agentCount, 0);
   const activeSyndicates = ranked.length;
 
@@ -54,7 +54,7 @@ export default async function LeaderboardPage() {
             <div className="stat-item">
               <div className="stat-label">Total TVL</div>
               <div className="stat-value apy-highlight">
-                {formatUSD(totalTVL)}
+                {totalTVLDisplay}
               </div>
             </div>
             <div className="stat-item">
@@ -83,13 +83,49 @@ export default async function LeaderboardPage() {
   );
 }
 
+const USD_STABLES = new Set(["USDC", "USDT", "DAI", "USDbC"]);
+
 function parseTVL(tvl: string): number {
   const cleaned = tvl.replace(/[^0-9.]/g, "");
   return parseFloat(cleaned) || 0;
+}
+
+/** Parse the asset symbol from a tvl string like "0.0191 WETH" or "$20.02 USDC" */
+function parseAssetSymbol(tvl: string): string {
+  const parts = tvl.trim().split(/\s+/);
+  return parts.length >= 2 ? parts[parts.length - 1] : "USD";
 }
 
 function formatUSD(num: number): string {
   if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
   if (num >= 1_000) return `$${(num / 1_000).toFixed(1)}K`;
   return `$${num.toFixed(2)}`;
+}
+
+function formatTotalTVL(tvlStrings: string[]): string {
+  // Group amounts by asset symbol
+  const groups = new Map<string, number>();
+  for (const tvl of tvlStrings) {
+    const symbol = parseAssetSymbol(tvl);
+    const amount = parseTVL(tvl);
+    groups.set(symbol, (groups.get(symbol) || 0) + amount);
+  }
+
+  // If all assets are USD stablecoins, show single dollar amount
+  const symbols = [...groups.keys()];
+  if (symbols.every((s) => USD_STABLES.has(s))) {
+    const total = [...groups.values()].reduce((a, b) => a + b, 0);
+    return formatUSD(total);
+  }
+
+  // Mixed assets — show each separately
+  const parts: string[] = [];
+  for (const [symbol, amount] of groups) {
+    if (USD_STABLES.has(symbol)) {
+      parts.push(formatUSD(amount));
+    } else {
+      parts.push(`${amount.toFixed(4)} ${symbol}`);
+    }
+  }
+  return parts.join(" + ");
 }
