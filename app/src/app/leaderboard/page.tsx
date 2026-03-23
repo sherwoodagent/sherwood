@@ -27,7 +27,7 @@ export default async function LeaderboardPage() {
 
   // Aggregate stats — convert all TVL to USD
   const totalTVLDisplay = formatTotalTVL(ranked.map((s) => s.tvl), tokenPrices);
-  const totalAgents = ranked.reduce((sum, s) => sum + s.agentCount, 0);
+  const totalAgents = new Set(ranked.flatMap((s) => s.agents.map((a) => a.agentAddress.toLowerCase()))).size;
   const activeSyndicates = ranked.length;
 
   return (
