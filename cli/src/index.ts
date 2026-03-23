@@ -44,7 +44,7 @@ async function loadXmtp() {
 async function loadCron() {
   return import("./lib/cron.js");
 }
-import { cacheGroupId, getCachedGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey, getAgentId, setConfigRpcUrl, getNotifyTo, setNotifyTo, setUniswapApiKey, getUniswapApiKey } from "./lib/config.js";
+import { cacheGroupId, getCachedGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey, getAgentId, setConfigRpcUrl, getNotifyTo, setNotifyTo, setUniswapApiKey, getUniswapApiKey, setVeniceApiKey, getVeniceApiKey } from "./lib/config.js";
 import { isTestnet } from "./lib/network.js";
 
 // ── Theme ──
@@ -1072,6 +1072,7 @@ configCmd
   .option("--rpc <url>", "Custom RPC URL for the active --chain network")
   .option("--notify-to <id>", "Destination for cron summaries (Telegram chat ID, phone, etc.)")
   .option("--uniswap-api-key <key>", "Uniswap Trading API key (from developers.uniswap.org)")
+  .option("--venice-api-key <key>", "Venice AI inference API key")
   .action((opts) => {
     let saved = false;
 
@@ -1112,8 +1113,14 @@ configCmd
       saved = true;
     }
 
+    if (opts.veniceApiKey) {
+      setVeniceApiKey(opts.veniceApiKey);
+      console.log(chalk.green("Venice API key saved to ~/.sherwood/config.json"));
+      saved = true;
+    }
+
     if (!saved) {
-      console.log(chalk.red("Provide at least one of: --private-key, --vault, --rpc, --notify-to, --uniswap-api-key"));
+      console.log(chalk.red("Provide at least one of: --private-key, --vault, --rpc, --notify-to, --uniswap-api-key, --venice-api-key"));
       process.exit(1);
     }
   });
@@ -1136,7 +1143,8 @@ configCmd
     console.log(`  Wallet:     ${config.privateKey ? chalk.green("configured") : chalk.dim("not set")}`);
     console.log(`  Agent ID:   ${config.agentId ?? chalk.dim("not set")}`);
     console.log(`  Vault:      ${contracts.vault ?? chalk.dim("not set")}`);
-    console.log(`  Uniswap:   ${getUniswapApiKey() ? chalk.green("API key configured") : chalk.dim("not set")}`);
+    console.log(`  Uniswap:    ${getUniswapApiKey() ? chalk.green("API key configured") : chalk.dim("not set")}`);
+    console.log(`  Venice:     ${getVeniceApiKey() ? chalk.green("API key configured") : chalk.dim("not set")}`);
     console.log();
     console.log(chalk.dim("  Config file: ~/.sherwood/config.json"));
     console.log();

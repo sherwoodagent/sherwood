@@ -25,8 +25,17 @@ const VENICE_API_BASE = "https://api.venice.ai/api/v1";
 export async function provisionApiKey(): Promise<string> {
   const account = getAccount();
 
-  // 1. Get validation token
+  // 1. Get validation token (requires admin API key)
+  const adminKey = process.env.VENICE_ADMIN_KEY;
+  if (!adminKey) {
+    throw new Error(
+      "VENICE_ADMIN_KEY env var required for autonomous provisioning.\n" +
+      "  Get an admin key from https://venice.ai/settings/api-keys\n" +
+      "  Or set a key manually: sherwood config set --venice-api-key <key>",
+    );
+  }
   const tokenRes = await fetch(`${VENICE_API_BASE}/api_keys/generate_web3_key`, {
+    headers: { Authorization: `Bearer ${adminKey}` },
     signal: AbortSignal.timeout(15_000),
   });
   if (!tokenRes.ok) {

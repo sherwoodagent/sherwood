@@ -62,7 +62,7 @@ export function setVeniceApiKey(apiKey: string): void {
 }
 
 export function getVeniceApiKey(): string | undefined {
-  return loadConfig().veniceApiKey;
+  return loadConfig().veniceApiKey ?? process.env.VENICE_API_KEY;
 }
 
 export function setAgentId(agentId: number): void {
