@@ -1,15 +1,8 @@
 // Umami Cloud analytics helpers
-// All functions are safe to call even if Umami is not loaded (e.g. local dev)
-
-declare global {
-  interface Window {
-    umami?: {
-      track: (eventName: string, data?: Record<string, string | number>) => void;
-    };
-  }
-}
+// All functions are safe to call even if Umami is not loaded (e.g. local dev, SSR)
 
 export function track(eventName: string, data?: Record<string, string | number>) {
+  if (typeof window === "undefined") return;
   window.umami?.track(eventName, data);
 }
 

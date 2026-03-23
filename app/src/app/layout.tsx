@@ -50,15 +50,16 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable} ${plusJakartaSans.variable}`}>
-      {umamiWebsiteId && (
-        <Script
-          src="https://cloud.umami.is/script.js"
-          data-website-id={umamiWebsiteId}
-          strategy="afterInteractive"
-        />
-      )}
       <body className="bg-black text-[#E5E7EB] antialiased overflow-x-hidden font-[family-name:var(--font-inter)]">
         <Providers>{children}</Providers>
+        {umamiWebsiteId && (
+          <Script
+            src="https://cloud.umami.is/script.js"
+            data-website-id={umamiWebsiteId}
+            data-domains="app.sherwood.sh"
+            strategy="afterInteractive"
+          />
+        )}
       </body>
     </html>
   );
