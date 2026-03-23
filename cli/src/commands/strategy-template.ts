@@ -402,7 +402,10 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
           args: [vault, account.address, initData],
         });
 
-        await getPublicClient().waitForTransactionReceipt({ hash: initHash });
+        const receipt = await getPublicClient().waitForTransactionReceipt({ hash: initHash });
+        if (receipt.status === "reverted") {
+          throw new Error("Initialize transaction reverted on-chain");
+        }
         initSpinner.succeed("Initialized");
       } catch (err) {
         initSpinner.fail("Initialize failed");
@@ -413,6 +416,102 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
       console.log();
       console.log(chalk.bold("Strategy clone ready:"), chalk.green(clone));
       console.log(chalk.dim("Use this address in your proposal batch calls."));
+      console.log();
+    });
+
+  // ── strategy init ──
+
+  strategy
+    .command("init")
+    .description("Initialize an already-deployed but uninitialized strategy clone")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell")
+    .requiredOption("--clone <address>", "Clone address to initialize")
+    .requiredOption("--vault <address>", "Vault address")
+    // moonwell-supply / wsteth-moonwell
+    .option("--amount <n>", "Asset amount to deploy")
+    .option("--min-redeem <n>", "Min asset on settlement (Moonwell)")
+    .option("--token <symbol>", "Asset token symbol (default: USDC)")
+    // venice-inference
+    .option("--asset <symbol>", "Asset token (USDC, VVV, or address)")
+    .option("--agent <address>", "Agent wallet (Venice, default: your wallet)")
+    .option("--min-vvv <n>", "Min VVV from swap (Venice)")
+    .option("--single-hop", "Single-hop Aerodrome swap (Venice)")
+    // aerodrome-lp
+    .option("--token-a <address>", "Token A (Aerodrome)")
+    .option("--token-b <address>", "Token B (Aerodrome)")
+    .option("--amount-a <n>", "Token A amount (Aerodrome)")
+    .option("--amount-b <n>", "Token B amount (Aerodrome)")
+    .option("--stable", "Stable pool (Aerodrome)")
+    .option("--gauge <address>", "Gauge address (Aerodrome)")
+    .option("--lp-token <address>", "LP token address (Aerodrome)")
+    .option("--min-a-out <n>", "Min token A on settle (Aerodrome)")
+    .option("--min-b-out <n>", "Min token B on settle (Aerodrome)")
+    // wsteth-moonwell
+    .option("--slippage <bps>", "Slippage tolerance in bps (wstETH, default: 500 = 5%)")
+    .action(async (templateKey: string, opts) => {
+      const clone = opts.clone as Address;
+      const vault = opts.vault as Address;
+      if (!isAddress(clone)) {
+        console.error(chalk.red("Invalid clone address"));
+        process.exit(1);
+      }
+      if (!isAddress(vault)) {
+        console.error(chalk.red("Invalid vault address"));
+        process.exit(1);
+      }
+
+      resolveTemplate(templateKey); // validate template exists
+
+      // Check if already initialized
+      const publicClient = getPublicClient();
+      const currentVault = await publicClient.readContract({
+        address: clone,
+        abi: BASE_STRATEGY_ABI,
+        functionName: "vault",
+      }) as Address;
+
+      if (currentVault !== "0x0000000000000000000000000000000000000000") {
+        console.error(chalk.red(`Clone already initialized (vault: ${currentVault})`));
+        process.exit(1);
+      }
+
+      const initSpinner = ora("Initializing strategy clone...").start();
+      try {
+        const { initData } = await buildInitDataForTemplate(templateKey, opts, vault);
+        const account = getAccount();
+
+        const initHash = await writeContractWithRetry({
+          account,
+          chain: getChain(),
+          address: clone,
+          abi: BASE_STRATEGY_ABI,
+          functionName: "initialize",
+          args: [vault, account.address, initData],
+        });
+
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: initHash });
+        if (receipt.status === "reverted") {
+          throw new Error("Initialize transaction reverted on-chain");
+        }
+        initSpinner.succeed("Initialized");
+        console.log(chalk.dim(`  Tx: ${getExplorerUrl(initHash)}`));
+      } catch (err) {
+        initSpinner.fail("Initialize failed");
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
+
+      // Verify
+      const verifiedVault = await publicClient.readContract({
+        address: clone,
+        abi: BASE_STRATEGY_ABI,
+        functionName: "vault",
+      }) as Address;
+
+      console.log();
+      console.log(chalk.bold("Clone initialized:"), chalk.green(clone));
+      console.log(`  Vault:    ${chalk.green(verifiedVault)}`);
+      console.log(`  Proposer: ${chalk.green(getAccount().address)}`);
       console.log();
     });
 
@@ -493,7 +592,10 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
           args: [vault, account.address, built.initData],
         });
 
-        await getPublicClient().waitForTransactionReceipt({ hash: initHash });
+        const initReceipt = await getPublicClient().waitForTransactionReceipt({ hash: initHash });
+        if (initReceipt.status === "reverted") {
+          throw new Error("Initialize transaction reverted on-chain");
+        }
         initSpinner.succeed("Initialized");
       } catch (err) {
         initSpinner.fail("Initialize failed");
