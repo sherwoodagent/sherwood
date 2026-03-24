@@ -924,6 +924,42 @@ syndicate
     }
   });
 
+syndicate
+  .command("leave")
+  .description("Leave a syndicate — removes participation crons and session state")
+  .requiredOption("--subdomain <name>", "Syndicate subdomain to leave")
+  .action(async (opts) => {
+    const spinner = ora("Cleaning up...").start();
+    try {
+      // 1. Remove participation crons (if OpenClaw)
+      let cronsRemoved = false;
+      try {
+        const cron = await loadCron();
+        const result = cron.unregisterSyndicateCrons(opts.subdomain, isTestnet());
+        cronsRemoved = result.removed;
+      } catch { /* non-fatal */ }
+
+      // 2. Reset session state
+      const { resetSession } = await import("./lib/session.js");
+      resetSession(opts.subdomain);
+
+      spinner.succeed("Left syndicate");
+      if (cronsRemoved) {
+        console.log(G("  ✓ Participation crons removed"));
+      }
+      console.log(G("  ✓ Session state cleared"));
+      console.log();
+      console.log(chalk.dim("  Note: This does not remove you on-chain. To exit your position:"));
+      console.log(chalk.dim("    sherwood vault balance   — check your LP share balance"));
+      console.log(chalk.dim("    Redeem shares via the vault contract or dashboard"));
+      console.log();
+    } catch (err) {
+      spinner.fail("Leave failed");
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
 // ── Vault commands ──
 const vaultCmd = program.command("vault");
 
