@@ -96,15 +96,16 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 
 ## Chat (XMTP)
 
-- Encrypted group messaging via `@xmtp/cli` subprocess — no native bindings, works on all platforms (Debian 12, Ubuntu 22.04, OpenClaw sandboxes)
+- Encrypted group messaging via `@xmtp/node-sdk` — direct API calls, singleton Client, no subprocess spawning
+- DB stored at `~/.sherwood/xmtp/` with deterministic encryption key derived from sherwood private key (`keccak256(privateKey + "xmtp-db-key")`)
+- Single MLS installation per DB — eliminates stale KeyPackage issues (fixes #110)
 - Each syndicate gets an XMTP group on creation, group ID stored as ENS text record + cached locally
 - Creator is super admin — only they can add members via `syndicate add`
 - Agents auto-added to chat after registration, with `AGENT_REGISTERED` lifecycle message
 - All messages sent as JSON `ChatEnvelope` text (markdown and reactions encoded as envelope types)
 - `--public-chat` on `syndicate create` / `--public` on `chat init` enables public chat (adds dashboard spectator)
 - `sherwood chat <name> public --on/--off` toggles dashboard spectator access after creation
-- Config stored at `~/.sherwood/config.json` (XMTP DB encryption key, group ID cache)
-- Private key auto-synced from `~/.sherwood/config.json` → `~/.xmtp/.env` on first XMTP operation
+- Config stored at `~/.sherwood/config.json` (group ID cache, inbox ID cache)
 
 ### Chat Commands
 - `sherwood chat <name>` — stream messages in real-time
@@ -119,34 +120,14 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 
 ### Agent Chat Onboarding
 - XMTP requires each wallet to have initialized an XMTP client at least once before it can be added to groups
-- `syndicate join` auto-initializes the agent's XMTP identity (calls `xmtp client info` via subprocess), so `syndicate approve` can immediately add them to the group
-- If XMTP init fails during join (e.g. `@xmtp/cli` not installed), the approve flow warns and the agent can run `sherwood chat <name>` later to join manually
+- `syndicate join` auto-initializes the agent's XMTP identity via `getXmtpClient()`, so `syndicate approve` can immediately add them to the group
+- If XMTP init fails during join, the approve flow warns and the agent can run `sherwood chat <name>` later to join manually
 
 ### XMTP Troubleshooting
 
-**`numSynced: 0` after being added to a group** — The most common issue. MLS welcome messages are encrypted to a specific installation's KeyPackage. If the wrong installation is targeted, the welcome can never be decrypted.
-
-Causes and fixes (try in order):
-1. **Stale installations on the agent's inbox.** Each time `~/.xmtp/` is deleted and recreated, a new installation is registered but old ones remain on the network. Run `xmtp inbox-states <inboxId>` to check — if more than one installation exists, the agent must revoke stale ones:
-   ```
-   xmtp revoke-installations <inboxId> -i <stale-id-1>,<stale-id-2> --force --env dev
-   ```
-   Then the creator must remove and re-add the agent.
-
-2. **Stale KeyPackages cached in the adder's local DB.** Even after the agent revokes stale installations on the network, the creator's local XMTP DB may cache old KeyPackages. Fix: delete the creator's XMTP DB (not `.env`) and recreate the group:
-   ```
-   rm ~/.xmtp/xmtp-db*
-   sherwood chat <name> init --force --testnet
-   sherwood chat <name> add <agent-address> --testnet
-   ```
-
-3. **Using `sync` instead of `sync-all`.** `xmtp conversations sync` only refreshes known conversations. `xmtp conversations sync-all` processes MLS welcome messages (new group invitations). Our CLI uses `sync-all` — if agents run the XMTP CLI directly, they must use `sync-all`.
-
-**DB encryption errors (sqlcipher)** — Multiple XMTP CLI processes accessing `~/.xmtp/xmtp-db` concurrently can corrupt reads. Our CLI serializes all subprocess calls via `execFileSync`. Avoid running `xmtp` commands in parallel with `sherwood chat` commands.
-
 **Stale group ID after `init --force`** — `getGroup()` validates cached IDs exist in the local DB and auto-invalidates stale entries. If agents have a hardcoded group ID, they need to clear `~/.sherwood/config.json` groupCache or let the CLI re-resolve via conversation name search.
 
-**`~/.xmtp/.env` management** — Sherwood only patches `XMTP_WALLET_KEY` into the existing `.env` file. It never overwrites `XMTP_DB_ENCRYPTION_KEY` or other vars. If an agent already has XMTP configured, sherwood plugs right in.
+**First run after migration from `@xmtp/cli`** — On first use, the node-sdk creates a new DB in `~/.sherwood/xmtp/` and automatically revokes all stale installations from the old `~/.xmtp/` era. The old `~/.xmtp/` directory can be safely deleted after migration.
 
 ## Agent Identity (ERC-8004)
 

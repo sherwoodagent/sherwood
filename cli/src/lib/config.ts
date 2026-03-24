@@ -29,6 +29,7 @@ export interface SherwoodConfig {
   uniswapApiKey?: string; // Uniswap Trading API key (from developers.uniswap.org)
   positions?: unknown[];        // open trade positions (typed in positions.ts)
   closedPositions?: unknown[];  // historical closed positions
+  _xmtpMigrated?: boolean;     // one-time flag: revoked stale installations from ~/.xmtp/ era
 }
 
 export function loadConfig(): SherwoodConfig {
