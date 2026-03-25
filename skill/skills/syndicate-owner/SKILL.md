@@ -66,15 +66,18 @@ cast 4byte <first-4-bytes-of-calldata>
 cast calldata-decode "functionName(type1,type2)" <calldata>
 ```
 
-**Step 3 — Simulate execution on a fork.** Use the Foundry test in `skill/skills/syndicate-owner/simulate/SimulateProposal.t.sol`:
+**Step 3 — Simulate execution.** Use the built-in `proposal simulate` command, which runs a full Tenderly fork simulation via the Sherwood API and returns per-call results with decoded calldata:
 ```bash
-PROPOSAL_ID=<id> GOVERNOR_ADDRESS=$GOVERNOR_ADDRESS VAULT_ADDRESS=$VAULT_ADDRESS \
-  forge test --fork-url $RPC_URL \
-  --match-path skill/skills/syndicate-owner/simulate/SimulateProposal.t.sol \
-  --match-test test_simulateProposalCalls -vvvv
+# Simulate an existing proposal by ID
+sherwood proposal simulate --id <PROPOSAL_ID>
+
+# Simulate call files before creating a proposal
+sherwood proposal simulate --vault $VAULT_ADDRESS --execute-calls execute.json --settle-calls settle.json
 ```
 
-Or simulate individual calls directly:
+The command outputs a human-readable report with per-call pass/fail status, gas usage, and decoded function names. If the Tenderly API is unavailable, it falls back to a basic `eth_call` check.
+
+For deeper debugging, you can also simulate individual calls directly:
 ```bash
 cast call --rpc-url $RPC_URL <target> <calldata>
 ```
@@ -183,8 +186,8 @@ cast call $GOVERNOR_ADDRESS "getCapitalSnapshot(uint256)(uint256)" <PROPOSAL_ID>
 
 3. **Simulate settlement calls before expiry:**
    ```bash
-   # Dry-run settlement on a fork
-   cast call --rpc-url $RPC_URL <target> <settlement_calldata>
+   # Dry-run the full proposal (includes settlement calls)
+   sherwood proposal simulate --id <PROPOSAL_ID>
    ```
 
 4. **If settlement might fail** (liquidity dried up, position liquidated, slippage too high):
@@ -268,9 +271,12 @@ Run these checks on a recurring basis. Proposal monitoring is the highest priori
 # 1. Check for pending proposals
 sherwood proposal list --state pending
 
-# 2. For each: fetch metadata, decode calls, simulate, apply decision tree
-# 3. Veto anything suspicious
-# 4. Log results
+# 2. For each: simulate via Tenderly
+sherwood proposal simulate --id <PROPOSAL_ID>
+
+# 3. Fetch metadata, apply decision tree
+# 4. Veto anything suspicious or that fails simulation
+# 5. Log results
 ```
 
 ### Hourly heartbeat (strategy health)

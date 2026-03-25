@@ -2,7 +2,7 @@
  * Proposal commands — sherwood proposal <subcommand>
  *
  * Manages the full proposal lifecycle: create, list, show, vote,
- * execute, settle, cancel.
+ * execute, settle, cancel, simulate.
  */
 
 import { Command } from "commander";
@@ -41,6 +41,7 @@ import {
 } from "../lib/governor.js";
 import type { BatchCall } from "../lib/governor.js";
 import { formatDurationShort as formatDuration, formatShares, formatUSDC, parseBigIntArg } from "../lib/format.js";
+import { simulateBatchCalls, printSimulationResult } from "../lib/simulate.js";
 
 const G = chalk.green;
 const W = chalk.white;
@@ -80,6 +81,8 @@ export function registerProposalCommands(program: Command): void {
     .requiredOption("--execute-calls <path>", "Path to JSON file with execute Call[] array")
     .requiredOption("--settle-calls <path>", "Path to JSON file with settlement Call[] array")
     .option("--metadata-uri <uri>", "Override — skip IPFS upload and use this URI directly")
+    .option("--simulate", "Simulate calls via Tenderly before submitting")
+    .option("--force", "Submit even if simulation fails (requires --simulate)")
     .action(async (opts) => {
       try {
         const vault = opts.vault as Address;
@@ -139,6 +142,31 @@ export function registerProposalCommands(program: Command): void {
         console.log(W(`  Calls:            ${executeCalls.length} execute + ${settleCalls.length} settle`));
         console.log(W(`  Metadata:         ${DIM(metadataURI.length > 50 ? metadataURI.slice(0, 50) + "..." : metadataURI)}`));
         SEP();
+
+        // ── Simulate (optional) ──
+        if (opts.simulate) {
+          const simSpinner = ora({ text: W("Simulating execute calls..."), color: "green" }).start();
+          const execResult = await simulateBatchCalls(vault, executeCalls, "execute");
+          simSpinner.stop();
+          printSimulationResult(execResult, "execute");
+
+          if (settleCalls.length > 0) {
+            const settleSpinner = ora({ text: W("Simulating settlement calls..."), color: "green" }).start();
+            const settleResult = await simulateBatchCalls(vault, settleCalls, "settlement");
+            settleSpinner.stop();
+            printSimulationResult(settleResult, "settlement");
+
+            if (!settleResult.success && !opts.force) {
+              console.error(chalk.red("\n  ✖ Settlement simulation failed. Use --force to submit anyway."));
+              process.exit(1);
+            }
+          }
+
+          if (!execResult.success && !opts.force) {
+            console.error(chalk.red("\n  ✖ Execution simulation failed. Use --force to submit anyway."));
+            process.exit(1);
+          }
+        }
 
         // ── Submit ──
         const spinner = ora({ text: W("Submitting proposal..."), color: "green" }).start();
@@ -408,6 +436,7 @@ export function registerProposalCommands(program: Command): void {
     .command("execute")
     .description("Execute an approved proposal")
     .requiredOption("--id <proposalId>", "Proposal ID")
+    .option("--dry-run", "Simulate execution without sending a transaction")
     .action(async (opts) => {
       try {
         const proposalId = parseBigIntArg(opts.id, "proposal ID");
@@ -418,6 +447,17 @@ export function registerProposalCommands(program: Command): void {
         if (state !== PROPOSAL_STATE.Approved) {
           spinner.fail(`Proposal is ${PROPOSAL_STATES[state] || "Unknown"}, not Approved`);
           process.exit(1);
+        }
+
+        // Dry run — simulate instead of executing
+        if (opts.dryRun) {
+          const p = await getProposal(proposalId);
+          const execCalls = await getExecuteCalls(proposalId);
+          spinner.text = W("Simulating execution...");
+          const result = await simulateBatchCalls(p.vault, execCalls, "execute");
+          spinner.stop();
+          printSimulationResult(result, "execute");
+          process.exit(result.success ? 0 : 1);
         }
 
         spinner.text = W("Executing proposal...");
@@ -534,6 +574,76 @@ export function registerProposalCommands(program: Command): void {
         console.log();
       } catch (err) {
         console.error(chalk.red(`\n  ✖ ${formatContractError(err)}`));
+        process.exit(1);
+      }
+    });
+
+  // ── proposal simulate ──
+
+  proposal
+    .command("simulate")
+    .description("Simulate proposal calls via Tenderly (or eth_call fallback)")
+    .option("--id <proposalId>", "Proposal ID to simulate")
+    .option("--vault <address>", "Vault address (required with --execute-calls)")
+    .option("--execute-calls <path>", "Path to JSON execute calls file")
+    .option("--settle-calls <path>", "Path to JSON settlement calls file")
+    .action(async (opts) => {
+      try {
+        let vault: Address;
+        let executeCalls: BatchCall[];
+        let settlementCalls: BatchCall[] = [];
+
+        if (opts.id) {
+          // By proposal ID — fetch calls from chain
+          const proposalId = parseBigIntArg(opts.id, "proposal ID");
+          const spinner = ora("Loading proposal...").start();
+
+          const p = await getProposal(proposalId);
+          vault = p.vault;
+          executeCalls = await getExecuteCalls(proposalId);
+          settlementCalls = await getSettlementCalls(proposalId);
+
+          spinner.stop();
+          console.log(DIM(`\n  Simulating proposal #${proposalId} on vault ${vault.slice(0, 10)}...`));
+        } else if (opts.executeCalls) {
+          // By call files — validate vault is provided
+          if (!opts.vault || !isAddress(opts.vault)) {
+            console.error(chalk.red("\n  ✖ --vault is required when using --execute-calls"));
+            process.exit(1);
+          }
+          vault = opts.vault as Address;
+          executeCalls = parseCallsFile(opts.executeCalls);
+          if (opts.settleCalls) {
+            settlementCalls = parseCallsFile(opts.settleCalls);
+          }
+        } else {
+          console.error(chalk.red("\n  ✖ Provide --id <proposalId> or --execute-calls <path>"));
+          process.exit(1);
+        }
+
+        // Simulate execute calls
+        const spinner = ora({ text: W("Simulating execute calls..."), color: "green" }).start();
+        const execResult = await simulateBatchCalls(vault, executeCalls, "execute");
+        spinner.stop();
+        printSimulationResult(execResult, "execute");
+
+        // Simulate settlement calls if present
+        if (settlementCalls.length > 0) {
+          const settleSpinner = ora({ text: W("Simulating settlement calls..."), color: "green" }).start();
+          const settleResult = await simulateBatchCalls(vault, settlementCalls, "settlement");
+          settleSpinner.stop();
+          printSimulationResult(settleResult, "settlement");
+
+          if (!settleResult.success) {
+            process.exit(1);
+          }
+        }
+
+        if (!execResult.success) {
+          process.exit(1);
+        }
+      } catch (err) {
+        console.error(chalk.red(`\n  ✖ ${err instanceof Error ? err.message : String(err)}`));
         process.exit(1);
       }
     });

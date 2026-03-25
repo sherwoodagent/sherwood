@@ -57,6 +57,24 @@ export const SYNDICATE_VAULT_ABI = [
     ],
     outputs: [],
   },
+  // Governor-initiated batch execution (governor-only)
+  {
+    name: "executeGovernorBatch",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "calls",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "data", type: "bytes" },
+          { name: "value", type: "uint256" },
+        ],
+      },
+    ],
+    outputs: [],
+  },
   // Agent management
   {
     name: "registerAgent",
