@@ -298,7 +298,7 @@ describe("writeContractWithRetry", () => {
     mockWriteContract.mockRejectedValue(new Error("replacement transaction underpriced"));
 
     await expect(runWithTimers(clientModule.writeContractWithRetry({ test: true })))
-      .rejects.toThrow("replacement transaction underpriced");
+      .rejects.toThrow("A previous transaction is stuck");
 
     // MAX_RETRIES = 3, so 4 total attempts (0,1,2,3)
     expect(mockWriteContract).toHaveBeenCalledTimes(4);
