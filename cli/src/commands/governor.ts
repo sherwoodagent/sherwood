@@ -8,6 +8,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
 import { getExplorerUrl } from "../lib/network.js";
+import { formatContractError } from "../lib/errors.js";
 import {
   getGovernorAddress,
   getGovernorParams,
@@ -72,7 +73,7 @@ export function registerGovernorCommands(program: Command): void {
         console.log();
       } catch (err) {
         spinner.fail("Failed to load governor info");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -91,7 +92,7 @@ export function registerGovernorCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set voting period");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -110,7 +111,7 @@ export function registerGovernorCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set execution window");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -129,7 +130,7 @@ export function registerGovernorCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set veto threshold");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -148,7 +149,7 @@ export function registerGovernorCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set max fee");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -167,7 +168,7 @@ export function registerGovernorCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set max duration");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -186,7 +187,7 @@ export function registerGovernorCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set cooldown");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -205,7 +206,7 @@ export function registerGovernorCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
       } catch (err) {
         spinner.fail("Failed to set protocol fee");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });

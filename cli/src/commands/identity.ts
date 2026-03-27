@@ -11,7 +11,7 @@ import type { Address } from "viem";
 import chalk from "chalk";
 import ora from "ora";
 import { SDK } from "agent0-sdk";
-import { getPublicClient, getAccount } from "../lib/client.js";
+import { getPublicClient, getAccount, formatContractError } from "../lib/client.js";
 import { getExplorerUrl, getChain, getRpcUrl } from "../lib/network.js";
 import { AGENT_REGISTRY } from "../lib/addresses.js";
 import { setAgentId, getAgentId, loadConfig } from "../lib/config.js";
@@ -115,7 +115,7 @@ export function registerIdentityCommands(program: Command): void {
         console.log(chalk.dim(`  sherwood syndicate create --agent-id ${tokenId} --subdomain <name> --name <name>`));
       } catch (err) {
         spinner.fail("Failed to register identity");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -152,7 +152,7 @@ export function registerIdentityCommands(program: Command): void {
         console.log(chalk.dim(`  Saved to ~/.sherwood/config.json`));
       } catch (err) {
         spinner.fail("Failed to load identity");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -221,7 +221,7 @@ export function registerIdentityCommands(program: Command): void {
         console.log();
       } catch (err) {
         spinner.fail("Failed to check identity");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });

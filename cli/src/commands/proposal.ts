@@ -11,7 +11,7 @@ import { isAddress } from "viem";
 import chalk from "chalk";
 import ora from "ora";
 import { readFileSync } from "node:fs";
-import { getAccount } from "../lib/client.js";
+import { getAccount, formatContractError } from "../lib/client.js";
 import { getExplorerUrl, getNetwork } from "../lib/network.js";
 import { uploadMetadata } from "../lib/ipfs.js";
 import type { SyndicateMetadata } from "../lib/ipfs.js";
@@ -153,7 +153,7 @@ export function registerProposalCommands(program: Command): void {
         SEP();
         console.log();
       } catch (err) {
-        console.error(chalk.red(`\n  ✖ ${err instanceof Error ? err.message : String(err)}`));
+        console.error(chalk.red(`\n  ✖ ${formatContractError(err)}`));
         process.exit(1);
       }
     });
@@ -238,7 +238,7 @@ export function registerProposalCommands(program: Command): void {
         console.log();
       } catch (err) {
         spinner.fail("Failed to load proposals");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -329,7 +329,7 @@ export function registerProposalCommands(program: Command): void {
         console.log();
       } catch (err) {
         spinner.fail("Failed to load proposal");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -397,7 +397,7 @@ export function registerProposalCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
         console.log();
       } catch (err) {
-        console.error(chalk.red(`\n  ✖ ${err instanceof Error ? err.message : String(err)}`));
+        console.error(chalk.red(`\n  ✖ ${formatContractError(err)}`));
         process.exit(1);
       }
     });
@@ -434,7 +434,7 @@ export function registerProposalCommands(program: Command): void {
 
         console.log();
       } catch (err) {
-        console.error(chalk.red(`\n  ✖ ${err instanceof Error ? err.message : String(err)}`));
+        console.error(chalk.red(`\n  ✖ ${formatContractError(err)}`));
         process.exit(1);
       }
     });
@@ -490,7 +490,7 @@ export function registerProposalCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
         console.log();
       } catch (err) {
-        console.error(chalk.red(`\n  ✖ ${err instanceof Error ? err.message : String(err)}`));
+        console.error(chalk.red(`\n  ✖ ${formatContractError(err)}`));
         process.exit(1);
       }
     });
@@ -533,7 +533,7 @@ export function registerProposalCommands(program: Command): void {
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
         console.log();
       } catch (err) {
-        console.error(chalk.red(`\n  ✖ ${err instanceof Error ? err.message : String(err)}`));
+        console.error(chalk.red(`\n  ✖ ${formatContractError(err)}`));
         process.exit(1);
       }
     });

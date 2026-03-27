@@ -23,7 +23,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
-import { getAccount } from "../lib/client.js";
+import { getAccount, formatContractError } from "../lib/client.js";
 import { resolveSyndicate, setTextRecord, getTextRecord } from "../lib/ens.js";
 import { cacheGroupId, getCachedGroupId } from "../lib/config.js";
 import type { ChatEnvelope, MessageType } from "../lib/types.js";
@@ -136,7 +136,7 @@ async function handleStream(name: string): Promise<void> {
     await new Promise(() => {});
   } catch (err) {
     spinner.fail("Failed to connect to chat");
-    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    console.error(chalk.red(formatContractError(err)));
     process.exit(1);
   }
 }
@@ -162,7 +162,7 @@ async function handleSend(name: string, message: string, markdown: boolean): Pro
     spinner.succeed("Message sent");
   } catch (err) {
     spinner.fail("Failed to send message");
-    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    console.error(chalk.red(formatContractError(err)));
     process.exit(1);
   }
 }
@@ -176,7 +176,7 @@ async function handleReact(name: string, messageId: string, emoji: string): Prom
     spinner.succeed(`Reacted ${emoji}`);
   } catch (err) {
     spinner.fail("Failed to send reaction");
-    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    console.error(chalk.red(formatContractError(err)));
     process.exit(1);
   }
 }
@@ -203,7 +203,7 @@ async function handleLog(name: string, limit: number): Promise<void> {
     console.log();
   } catch (err) {
     spinner.fail("Failed to load messages");
-    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    console.error(chalk.red(formatContractError(err)));
     process.exit(1);
   }
 }
@@ -233,7 +233,7 @@ async function handleMembers(name: string): Promise<void> {
     console.log();
   } catch (err) {
     spinner.fail("Failed to load members");
-    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    console.error(chalk.red(formatContractError(err)));
     process.exit(1);
   }
 }
@@ -255,7 +255,7 @@ async function handleAdd(name: string, address: string): Promise<void> {
     spinner.succeed(`Member added: ${address}`);
   } catch (err) {
     spinner.fail("Failed to add member");
-    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    console.error(chalk.red(formatContractError(err)));
     process.exit(1);
   }
 }
@@ -269,7 +269,7 @@ async function handleRemove(name: string, address: string): Promise<void> {
     spinner.succeed(`Member removed: ${address}`);
   } catch (err) {
     spinner.fail("Failed to remove member");
-    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    console.error(chalk.red(formatContractError(err)));
     process.exit(1);
   }
 }
@@ -295,7 +295,7 @@ async function handlePublic(name: string, on: boolean): Promise<void> {
     }
   } catch (err) {
     spinner.fail("Failed to toggle public chat");
-    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    console.error(chalk.red(formatContractError(err)));
     process.exit(1);
   }
 }
@@ -341,7 +341,7 @@ async function handleInit(name: string, force: boolean, isPublic: boolean): Prom
     console.log(chalk.dim(`  Stream:   sherwood chat ${name}`));
   } catch (err) {
     spinner.fail("Failed to initialize chat group");
-    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    console.error(chalk.red(formatContractError(err)));
     process.exit(1);
   }
 }

@@ -15,7 +15,7 @@ import { setNetwork, getNetwork, VALID_NETWORKS } from "./lib/network.js";
 import { getExplorerUrl, getChain } from "./lib/network.js";
 import type { Network } from "./lib/network.js";
 import { TOKENS } from "./lib/addresses.js";
-import { getPublicClient, getAccount } from "./lib/client.js";
+import { getPublicClient, getAccount, formatContractError } from "./lib/client.js";
 import { ERC20_ABI } from "./lib/abis.js";
 import { MoonwellProvider } from "./providers/moonwell.js";
 import { UniswapProvider } from "./providers/uniswap.js";
@@ -336,7 +336,7 @@ syndicate
       console.log(G("  ✓ Vault saved to ~/.sherwood/config.json"));
       console.log();
     } catch (err) {
-      console.error(chalk.red(`\n  ✖ ${err instanceof Error ? err.message : String(err)}`));
+      console.error(chalk.red(`\n  ✖ ${formatContractError(err)}`));
       process.exit(1);
     }
   });
@@ -398,7 +398,7 @@ syndicate
       }
     } catch (err) {
       spinner.fail("Failed to load syndicates");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -446,7 +446,7 @@ syndicate
       console.log();
     } catch (err) {
       spinner.fail("Failed to load syndicate info");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -494,7 +494,7 @@ syndicate
       console.log(DIM(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Metadata update failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -514,7 +514,7 @@ syndicate
       console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Approval failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -534,7 +534,7 @@ syndicate
       console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Removal failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -588,7 +588,7 @@ syndicate
       }
     } catch (err) {
       spinner.fail("Registration failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -707,7 +707,7 @@ syndicate
       console.log();
     } catch (err) {
       spinner.fail("Join request failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -789,7 +789,7 @@ syndicate
       console.log();
     } catch (err) {
       spinner.fail("Failed to load requests");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -899,7 +899,7 @@ syndicate
       SEP();
     } catch (err) {
       spinner.fail("Approval failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -919,7 +919,7 @@ syndicate
       console.log(DIM(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Rejection failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -979,7 +979,7 @@ vaultCmd
       console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Deposit failed");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -1005,7 +1005,7 @@ vaultCmd
       console.log();
     } catch (err) {
       spinner.fail("Failed to load vault info");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });
@@ -1030,7 +1030,7 @@ vaultCmd
       console.log();
     } catch (err) {
       spinner.fail("Failed to load balance");
-      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }
   });

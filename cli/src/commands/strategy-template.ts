@@ -15,7 +15,7 @@ import ora from "ora";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { getPublicClient, getAccount, writeContractWithRetry, waitForReceipt } from "../lib/client.js";
+import { getPublicClient, getAccount, writeContractWithRetry, waitForReceipt, formatContractError } from "../lib/client.js";
 import { getChain, getExplorerUrl } from "../lib/network.js";
 import { TOKENS, MOONWELL, VENICE, AERODROME, STRATEGY_TEMPLATES } from "../lib/addresses.js";
 import { BASE_STRATEGY_ABI } from "../lib/abis.js";
@@ -383,7 +383,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
         console.log(chalk.dim(`  Tx: ${getExplorerUrl(cloneHash)}`));
       } catch (err) {
         cloneSpinner.fail("Clone failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -409,7 +409,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
         initSpinner.succeed("Initialized");
       } catch (err) {
         initSpinner.fail("Initialize failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -497,7 +497,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
         console.log(chalk.dim(`  Tx: ${getExplorerUrl(initHash)}`));
       } catch (err) {
         initSpinner.fail("Initialize failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -566,7 +566,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
         console.log(chalk.dim(`  Tx: ${getExplorerUrl(result.hash)}`));
       } catch (err) {
         cloneSpinner.fail("Clone failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -599,7 +599,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
         initSpinner.succeed("Initialized");
       } catch (err) {
         initSpinner.fail("Initialize failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -685,7 +685,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
         metaSpinner.succeed(`Metadata pinned: ${metadataURI}`);
       } catch (err) {
         metaSpinner.fail("IPFS pin failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -700,7 +700,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
         console.log(chalk.dim(`  Clone: ${clone}`));
       } catch (err) {
         proposeSpinner.fail("Proposal failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 

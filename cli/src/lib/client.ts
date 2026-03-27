@@ -10,6 +10,8 @@ import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getChain, getRpcUrl } from "./network.js";
 import { loadConfig } from "./config.js";
+import { formatContractError } from "./errors.js";
+export { formatContractError } from "./errors.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _publicClient: any = null;
@@ -226,7 +228,10 @@ async function withRetry(send: TxSender, txParams: Record<string, unknown>): Pro
     try {
       return await send({ ...txParams, ...fees, nonce });
     } catch (err) {
-      if (attempt >= MAX_RETRIES || !isRetryableError(err)) throw err;
+      if (attempt >= MAX_RETRIES || !isRetryableError(err)) {
+        // Decode contract revert into a human-readable message before throwing
+        throw new Error(formatContractError(err));
+      }
 
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`  Retry ${attempt + 1}/${MAX_RETRIES}: ${isNonceStaleError(msg) ? "refreshing nonce" : "bumping gas"}...`);

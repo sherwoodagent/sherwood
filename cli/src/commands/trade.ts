@@ -15,7 +15,7 @@ import { confirm } from "@inquirer/prompts";
 import type { Address } from "viem";
 import { isAddress, parseUnits, formatUnits } from "viem";
 
-import { getPublicClient, getAccount } from "../lib/client.js";
+import { getPublicClient, getAccount, formatContractError } from "../lib/client.js";
 import { getExplorerUrl } from "../lib/network.js";
 import { TOKENS } from "../lib/addresses.js";
 import { ERC20_ABI } from "../lib/abis.js";
@@ -358,7 +358,7 @@ export function registerTradeCommands(program: Command): void {
         );
       } catch (err) {
         quoteSpinner.fail("Quote failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -382,7 +382,7 @@ export function registerTradeCommands(program: Command): void {
         swapSpinner.succeed("Swap executed");
       } catch (err) {
         swapSpinner.fail("Swap failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -534,7 +534,7 @@ export function registerTradeCommands(program: Command): void {
         );
       } catch (err) {
         quoteSpinner.fail("Quote failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -558,7 +558,7 @@ export function registerTradeCommands(program: Command): void {
         swapSpinner.succeed("Sell executed");
       } catch (err) {
         swapSpinner.fail("Sell failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -797,7 +797,7 @@ export function registerTradeCommands(program: Command): void {
                 }
               } catch (err) {
                 console.error(chalk.red(
-                  `  Failed to sell ${pos.tokenSymbol}: ${err instanceof Error ? err.message : String(err)}`,
+                  `  Failed to sell ${pos.tokenSymbol}: ${formatContractError(err)}`,
                 ));
               }
             }

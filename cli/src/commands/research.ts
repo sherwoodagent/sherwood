@@ -15,7 +15,7 @@ import chalk from "chalk";
 import ora from "ora";
 import { confirm } from "@inquirer/prompts";
 import { isAddress } from "viem";
-import { getAccount } from "../lib/client.js";
+import { getAccount, formatContractError } from "../lib/client.js";
 import type { MessageType } from "../lib/types.js";
 import { getResearchProvider } from "../providers/research/index.js";
 import type { ResearchResult } from "../providers/research/index.js";
@@ -150,7 +150,7 @@ async function postResearch(
   } catch (err) {
     pinSpinner.fail("Failed to pin to IPFS");
     console.error(
-      chalk.red(err instanceof Error ? err.message : String(err)),
+      chalk.red(formatContractError(err)),
     );
     return;
   }
@@ -178,7 +178,7 @@ async function postResearch(
   } catch (err) {
     easSpinner.fail("Failed to create EAS attestation");
     console.error(
-      chalk.red(err instanceof Error ? err.message : String(err)),
+      chalk.red(formatContractError(err)),
     );
     return;
   }
@@ -205,7 +205,7 @@ async function postResearch(
   } catch (err) {
     chatSpinner.fail("Failed to post to chat");
     console.error(
-      chalk.red(err instanceof Error ? err.message : String(err)),
+      chalk.red(formatContractError(err)),
     );
   }
 }
@@ -256,7 +256,7 @@ export function registerResearchCommands(program: Command): void {
       } catch (err) {
         spinner.fail(`Token query failed`);
         console.error(
-          chalk.red(err instanceof Error ? err.message : String(err)),
+          chalk.red(formatContractError(err)),
         );
         process.exit(1);
       }
@@ -299,7 +299,7 @@ export function registerResearchCommands(program: Command): void {
       } catch (err) {
         spinner.fail(`Market query failed`);
         console.error(
-          chalk.red(err instanceof Error ? err.message : String(err)),
+          chalk.red(formatContractError(err)),
         );
         process.exit(1);
       }
@@ -355,7 +355,7 @@ export function registerResearchCommands(program: Command): void {
       } catch (err) {
         spinner.fail(`Smart money query failed`);
         console.error(
-          chalk.red(err instanceof Error ? err.message : String(err)),
+          chalk.red(formatContractError(err)),
         );
         process.exit(1);
       }
@@ -408,7 +408,7 @@ export function registerResearchCommands(program: Command): void {
       } catch (err) {
         spinner.fail(`Wallet query failed`);
         console.error(
-          chalk.red(err instanceof Error ? err.message : String(err)),
+          chalk.red(formatContractError(err)),
         );
         process.exit(1);
       }

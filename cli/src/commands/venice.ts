@@ -13,7 +13,7 @@ import type { Address } from "viem";
 import { formatUnits, isAddress } from "viem";
 import chalk from "chalk";
 import ora from "ora";
-import { getPublicClient, getAccount } from "../lib/client.js";
+import { getPublicClient, getAccount, formatContractError } from "../lib/client.js";
 import { VENICE } from "../lib/addresses.js";
 import { SYNDICATE_VAULT_ABI, ERC20_ABI, VENICE_STAKING_ABI } from "../lib/abis.js";
 import { provisionApiKey, checkApiKeyValid, chatCompletion, listModels } from "../lib/venice.js";
@@ -52,7 +52,7 @@ export function registerVeniceCommands(program: Command): void {
         checkSpinner.succeed(`sVVV balance: ${formatUnits(sVvvBalance, 18)}`);
       } catch (err) {
         checkSpinner.fail("Failed to check sVVV balance");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -76,7 +76,7 @@ export function registerVeniceCommands(program: Command): void {
         }
       } catch (err) {
         keySpinner.fail("Failed to provision API key");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -182,7 +182,7 @@ export function registerVeniceCommands(program: Command): void {
         console.log();
       } catch (err) {
         spinner.fail("Failed to load status");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -204,7 +204,7 @@ export function registerVeniceCommands(program: Command): void {
         console.log();
       } catch (err) {
         spinner.fail("Failed to list models");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -239,7 +239,7 @@ export function registerVeniceCommands(program: Command): void {
           userContent = `Context data:\n\`\`\`\n${data}\n\`\`\`\n\n${opts.prompt}`;
         } catch (err) {
           console.error(chalk.red(`Failed to read data file: ${opts.data}`));
-          console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+          console.error(chalk.red(formatContractError(err)));
           process.exit(1);
         }
       }
@@ -290,7 +290,7 @@ export function registerVeniceCommands(program: Command): void {
         }
       } catch (err) {
         spinner.fail("Inference failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });

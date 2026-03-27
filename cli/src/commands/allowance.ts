@@ -10,7 +10,7 @@ import type { Address } from "viem";
 import { parseUnits, formatUnits, isAddress } from "viem";
 import chalk from "chalk";
 import ora from "ora";
-import { getPublicClient, getAccount } from "../lib/client.js";
+import { getPublicClient, getAccount, formatContractError } from "../lib/client.js";
 import { getExplorerUrl } from "../lib/network.js";
 import { TOKENS } from "../lib/addresses.js";
 import { SYNDICATE_VAULT_ABI, ERC20_ABI } from "../lib/abis.js";
@@ -75,7 +75,7 @@ export function registerAllowanceCommands(program: Command): void {
         spinner.stop();
       } catch (err) {
         spinner.fail("Failed to read vault state");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
 
@@ -157,7 +157,7 @@ export function registerAllowanceCommands(program: Command): void {
           );
         } catch (err) {
           quoteSpinner.fail("Failed to fetch quote");
-          console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+          console.error(chalk.red(formatContractError(err)));
           process.exit(1);
         }
       }
@@ -200,7 +200,7 @@ export function registerAllowanceCommands(program: Command): void {
         console.log(chalk.dim(`  ${getExplorerUrl(txHash)}`));
       } catch (err) {
         execSpinner.fail("Execution failed");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
@@ -272,7 +272,7 @@ export function registerAllowanceCommands(program: Command): void {
         console.log();
       } catch (err) {
         spinner.fail("Failed to load status");
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(chalk.red(formatContractError(err)));
         process.exit(1);
       }
     });
