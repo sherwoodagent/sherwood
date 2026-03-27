@@ -725,6 +725,7 @@ syndicate
   .command("join")
   .description("Request to join a syndicate (creates an EAS attestation)")
   .option("--subdomain <name>", "Syndicate subdomain to join")
+  .option("--ref <agentId>", "Referrer agent ID (from invite link)")
   .option("--message <text>", "Message to the creator", "Requesting to join your syndicate")
   .action(async (opts) => {
     const spinner = ora("Resolving syndicate...").start();
@@ -794,12 +795,14 @@ syndicate
       }
 
       spinner.text = "Creating join request attestation...";
+      const referrerAgentId = opts.ref ? parseInt(opts.ref, 10) : undefined;
       const { uid, hash } = await easLib.createJoinRequest(
         syndicate.id,
         BigInt(agentId),
         syndicate.vault,
         syndicate.creator,
         opts.message,
+        referrerAgentId,
       );
 
       // Pre-register XMTP identity so the creator can add us to the group on approval
@@ -914,8 +917,13 @@ syndicate
       for (let i = 0; i < requests.length; i++) {
         const req = requests[i];
         const date = new Date(req.time * 1000).toLocaleString();
+        const referrer = easLib.parseReferrer(req.decoded.message);
+        const cleanMessage = easLib.stripReferrerPrefix(req.decoded.message);
         console.log(W(`  ${i + 1}. Agent #${req.decoded.agentId} ${DIM(`(${req.attester})`)}`));
-        console.log(DIM(`     Message:     "${req.decoded.message}"`));
+        console.log(DIM(`     Message:     "${cleanMessage}"`));
+        if (referrer !== null) {
+          console.log(G(`     Referred by: Agent #${referrer}`));
+        }
         console.log(DIM(`     Requested:   ${date}`));
         console.log(DIM(`     Attestation: ${req.uid}`));
         console.log();

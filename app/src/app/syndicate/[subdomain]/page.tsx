@@ -89,7 +89,7 @@ export default async function SyndicateDetailPage({
 
           {/* Referral banner — shown when visitor arrives via ?ref=<agentId> */}
           <Suspense fallback={null}>
-            <ReferralBanner />
+            <ReferralBanner subdomain={subdomain} />
           </Suspense>
 
           {/* Stats bar + Deposit */}
