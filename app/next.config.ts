@@ -13,10 +13,8 @@ const nextConfig: NextConfig = {
   async rewrites() {
     const spectatorUrl = process.env.SPECTATOR_URL || 'https://spectator.sherwood.sh';
     return [
-      {
-        source: '/skill.md',
-        destination: 'https://raw.githubusercontent.com/imthatcarlos/sherwood/refs/heads/main/skill/SKILL.md',
-      },
+      // /skill.md is now a dynamic API route (app/src/app/skill.md/route.ts)
+      // that injects referral context when ?subdomain=X&ref=Y query params are present
       {
         source: '/skill-guardian.md',
         destination: 'https://raw.githubusercontent.com/imthatcarlos/sherwood/refs/heads/main/skill/skills/syndicate-owner/SKILL.md',

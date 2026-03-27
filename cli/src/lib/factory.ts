@@ -105,6 +105,21 @@ export async function createSyndicate(params: CreateSyndicateParams): Promise<Cr
 }
 
 /**
+ * Check if a subdomain is already registered. Returns the syndicate ID if found, null otherwise.
+ */
+export async function subdomainExists(subdomain: string): Promise<bigint | null> {
+  const client = getPublicClient();
+  const id = (await client.readContract({
+    address: getFactoryAddress(),
+    abi: SYNDICATE_FACTORY_ABI,
+    functionName: "subdomainToSyndicate",
+    args: [subdomain],
+  })) as bigint;
+
+  return id > 0n ? id : null;
+}
+
+/**
  * Get syndicate info by ID.
  */
 export async function getSyndicate(id: bigint): Promise<SyndicateInfo> {

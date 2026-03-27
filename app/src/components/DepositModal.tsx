@@ -302,6 +302,16 @@ export default function DepositModal({
               <span>{parseFloat(balanceFormatted).toLocaleString()} {assetSymbol}</span>
             </div>
 
+            {/* Inline warnings */}
+            {parsedAmount > 0n && parsedAmount > (assetBalance ?? 0n) && (
+              <div
+                className="font-[family-name:var(--font-plus-jakarta)]"
+                style={{ fontSize: "10px", color: "#ff6b6b", marginBottom: "0.5rem" }}
+              >
+                Insufficient balance — you need {formatUnits(parsedAmount - (assetBalance ?? 0n), assetDecimals)} more {assetSymbol}
+              </div>
+            )}
+
             {/* Amount input */}
             <div className="deposit-input-row">
               <input

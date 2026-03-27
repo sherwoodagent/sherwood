@@ -16,6 +16,13 @@ export interface ChainContracts {
   vault?: string; // user's default vault address
 }
 
+/** A syndicate the agent belongs to (creator or member). */
+export interface SyndicateMembership {
+  subdomain: string;
+  vault: string;
+  role: "creator" | "agent";
+}
+
 export interface SherwoodConfig {
   dbEncryptionKey?: string; // legacy — no longer used, XMTP CLI manages its own DB
   privateKey?: string; // wallet private key (0x-prefixed)
@@ -24,6 +31,8 @@ export interface SherwoodConfig {
   veniceApiKey?: string; // Venice AI inference API key
   agentId?: number; // ERC-8004 identity token ID
   contracts?: Record<string, ChainContracts>; // chainId → user addresses
+  syndicates?: Record<string, SyndicateMembership[]>; // chainId → syndicate memberships
+  primarySyndicate?: Record<string, string>; // chainId → subdomain of the active syndicate
   rpc?: Record<string, string>; // network name → custom RPC URL
   notifyTo?: string; // destination for cron summaries (Telegram chat ID, phone, etc.)
   uniswapApiKey?: string; // Uniswap Trading API key (from developers.uniswap.org)
@@ -139,4 +148,88 @@ export function setChainContract(
   if (!config.contracts[cid]) config.contracts[cid] = {};
   config.contracts[cid][key] = value;
   saveConfig(config);
+}
+
+// ── Syndicate Membership ──
+
+/**
+ * Add (or update) a syndicate membership. Deduplicates by subdomain.
+ * Automatically sets it as primary if it's the first syndicate on this chain.
+ */
+export function addSyndicate(
+  chainId: number,
+  membership: SyndicateMembership,
+): void {
+  const config = loadConfig();
+  const cid = String(chainId);
+  if (!config.syndicates) config.syndicates = {};
+  if (!config.syndicates[cid]) config.syndicates[cid] = [];
+
+  // Upsert — replace existing entry with same subdomain
+  const idx = config.syndicates[cid].findIndex(
+    (s) => s.subdomain === membership.subdomain,
+  );
+  if (idx >= 0) {
+    config.syndicates[cid][idx] = membership;
+  } else {
+    config.syndicates[cid].push(membership);
+  }
+
+  // Auto-set as primary if it's the first syndicate (or no primary set)
+  if (!config.primarySyndicate) config.primarySyndicate = {};
+  if (!config.primarySyndicate[cid]) {
+    config.primarySyndicate[cid] = membership.subdomain;
+  }
+
+  saveConfig(config);
+}
+
+/** Get all syndicate memberships for a chain. */
+export function getSyndicates(chainId: number): SyndicateMembership[] {
+  const config = loadConfig();
+  return config.syndicates?.[String(chainId)] ?? [];
+}
+
+/** Set which syndicate is the active/primary one for CLI commands. */
+export function setPrimarySyndicate(
+  chainId: number,
+  subdomain: string,
+): void {
+  const config = loadConfig();
+  if (!config.primarySyndicate) config.primarySyndicate = {};
+  config.primarySyndicate[String(chainId)] = subdomain;
+  saveConfig(config);
+}
+
+/**
+ * Get the primary syndicate for this chain.
+ * Falls back to ChainContracts.vault for backwards compat with older configs.
+ */
+export function getPrimarySyndicate(
+  chainId: number,
+): SyndicateMembership | undefined {
+  const config = loadConfig();
+  const cid = String(chainId);
+
+  // Check new syndicates store first
+  const primarySubdomain = config.primarySyndicate?.[cid];
+  if (primarySubdomain && config.syndicates?.[cid]) {
+    const found = config.syndicates[cid].find(
+      (s) => s.subdomain === primarySubdomain,
+    );
+    if (found) return found;
+  }
+
+  // Backwards compat: if syndicates list has entries but no primary, use the first one
+  if (config.syndicates?.[cid]?.length) {
+    return config.syndicates[cid][0];
+  }
+
+  // Legacy fallback: config only has a vault address, no subdomain
+  const vault = config.contracts?.[cid]?.vault;
+  if (vault) {
+    return { subdomain: "", vault, role: "creator" };
+  }
+
+  return undefined;
 }

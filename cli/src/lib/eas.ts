@@ -74,9 +74,39 @@ function extractAttestationUid(receipt: { logs: readonly { topics: readonly Hex[
   throw new Error("Could not extract attestation UID from transaction receipt");
 }
 
+// ── Referral Helpers ──
+
+const REF_PREFIX_RE = /^\[ref:(\d+)\]\s*/;
+
+/**
+ * Format a message with an optional referrer prefix.
+ * e.g. formatMessageWithRef("Hello", 42) → "[ref:42] Hello"
+ */
+export function formatMessageWithRef(message: string, referrerAgentId?: number): string {
+  if (referrerAgentId == null) return message;
+  return `[ref:${referrerAgentId}] ${message}`;
+}
+
+/**
+ * Parse a referrer agentId from a message, if present.
+ * e.g. parseReferrer("[ref:42] Hello") → 42
+ */
+export function parseReferrer(message: string): number | null {
+  const match = message.match(REF_PREFIX_RE);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+/**
+ * Strip the referrer prefix from a message, returning the clean message.
+ */
+export function stripReferrerPrefix(message: string): string {
+  return message.replace(REF_PREFIX_RE, "");
+}
+
 /**
  * Create a SYNDICATE_JOIN_REQUEST attestation.
  * Attester: the calling agent. Recipient: the syndicate creator.
+ * If referrerAgentId is provided, it's embedded in the message as a [ref:N] prefix.
  */
 export async function createJoinRequest(
   syndicateId: bigint,
@@ -84,12 +114,14 @@ export async function createJoinRequest(
   vault: Address,
   creatorAddress: Address,
   message: string,
+  referrerAgentId?: number,
 ): Promise<{ uid: Hex; hash: Hex }> {
   assertSchemasRegistered();
   const client = getPublicClient();
 
+  const encodedMessage = formatMessageWithRef(message, referrerAgentId);
   const data = encodeAbiParameters(JOIN_REQUEST_PARAMS, [
-    syndicateId, agentId, vault, message,
+    syndicateId, agentId, vault, encodedMessage,
   ]);
 
   const hash = await writeContractWithRetry({

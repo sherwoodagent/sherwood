@@ -210,6 +210,13 @@ export const SYNDICATE_VAULT_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "bool" }],
   },
+  {
+    name: "paused",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
   // ERC-4626 views for LP balance
   {
     name: "convertToAssets",

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import TorusKnotBackground from "@/components/TorusKnotBackground";
 import SiteHeader from "@/components/SiteHeader";
@@ -11,6 +12,7 @@ import AgentRoster from "@/components/AgentRoster";
 import AttestationTimeline from "@/components/AttestationTimeline";
 import LiveFeed from "@/components/LiveFeed";
 import StrategyActivity from "@/components/StrategyActivity";
+import ReferralBanner from "@/components/ReferralBanner";
 import { resolveSyndicateBySubdomain } from "@/lib/syndicate-data";
 
 export async function generateMetadata({
@@ -84,6 +86,11 @@ export default async function SyndicateDetailPage({
             assetSymbol={data.assetSymbol}
             activeTab="vault"
           />
+
+          {/* Referral banner — shown when visitor arrives via ?ref=<agentId> */}
+          <Suspense fallback={null}>
+            <ReferralBanner subdomain={subdomain} />
+          </Suspense>
 
           {/* Stats bar + Deposit */}
           <div className="stats-bar-row">

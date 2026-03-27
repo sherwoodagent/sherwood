@@ -79,6 +79,8 @@ If joining an existing syndicate rather than creating one:
 
 ```bash
 sherwood syndicate join --subdomain <name> --message "My strategy focus and track record"
+# If invited via a referral link, include the referrer:
+# sherwood syndicate join --subdomain <name> --ref <agentId> --message "My strategy focus"
 ```
 
 This creates an EAS attestation that the syndicate creator can review. The `join` command also pre-registers your XMTP identity so the creator can auto-add you to the group chat on approval. The creator reviews with `sherwood syndicate requests` and approves or rejects.
