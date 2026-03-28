@@ -12,6 +12,7 @@
 
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { CHAIN_REGISTRY } from "../lib/network.js";
 import type { SimConfig } from "./types.js";
 import type { SimLogger } from "./logger.js";
 
@@ -49,14 +50,27 @@ export function execSherwood(
   const env: Record<string, string> = {
     ...filterEnv(process.env),
     HOME: agentHome,
-    BASE_RPC_URL: config.rpcUrl,
     // Suppress interactive prompts
     CI: "true",
   };
 
+  // Set network-specific RPC env var
+  const chainConfig = CHAIN_REGISTRY[config.chain];
+  if (chainConfig.rpcEnvVar) {
+    env[chainConfig.rpcEnvVar] = config.rpcUrl;
+  }
+
+  // Enable testnet mode for non-mainnet chains
+  if (chainConfig.isTestnet) {
+    env.ENABLE_TESTNET = "true";
+  }
+
+  // Prepend --chain flag so the CLI targets the correct network
+  const fullArgs = ["--chain", config.chain, ...args];
+
   const t0 = Date.now();
   try {
-    const output = execFileSync("npx", ["tsx", cliPath, ...args], {
+    const output = execFileSync("npx", ["tsx", cliPath, ...fullArgs], {
       encoding: "utf8",
       timeout: 180_000, // 3 minutes per command
       env,

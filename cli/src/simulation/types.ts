@@ -4,13 +4,14 @@
 
 export interface SimConfig {
   mnemonic: string; // from SIM_MNEMONIC env
+  chain: "base" | "base-sepolia" | "robinhood-testnet"; // from --chain or SIM_CHAIN
   agentCount: number; // default 12
   syndicateCount: number; // default 5
   baseDir: string; // default /tmp/sherwood-sim/agents
   stateFile: string; // default /tmp/sherwood-sim/state.json
   logFile: string; // default /tmp/sherwood-sim/sim.log (JSONL)
   sherwoodBin: string; // path to CLI entry (cli/src/index.ts)
-  rpcUrl: string; // from BASE_RPC_URL
+  rpcUrl: string; // resolved from chain config or env
   dryRun: boolean; // from SIM_DRY_RUN
   fundAmountEth: string; // default "0.002"
   fundAmountUsdc: string; // default "50"

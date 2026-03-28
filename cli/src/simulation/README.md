@@ -22,30 +22,43 @@ Designed to be orchestrated by Claude Code — each phase is a CLI command, all 
 1. Node.js v20+
 2. Install CLI dependencies: `cd cli && npm install`
 3. A funded master wallet (holds ETH + USDC for all 12 agents)
-4. A Base mainnet RPC URL
 
 ### Environment Variables
 
 ```bash
 # Required
 export SIM_MNEMONIC="word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12"
-export BASE_RPC_URL="https://mainnet.base.org"
 
-# Optional
-export SIM_AGENT_COUNT=12          # default: 12
-export SIM_SYNDICATE_COUNT=5       # default: 5
-export SIM_DRY_RUN=false           # default: false (set true to skip on-chain calls)
+# Optional — chain defaults to "base", RPC auto-resolves from chain config
+export SIM_CHAIN=base-sepolia       # or pass --chain base-sepolia at runtime
+export BASE_RPC_URL="..."           # override RPC for base mainnet
+export BASE_SEPOLIA_RPC_URL="..."   # override RPC for base-sepolia
+export SIM_AGENT_COUNT=12           # default: 12
+export SIM_SYNDICATE_COUNT=5        # default: 5
+export SIM_DRY_RUN=false            # default: false (set true to skip on-chain calls)
 export SIM_BASE_DIR=/tmp/sherwood-sim/agents   # default
 export SIM_STATE_FILE=/tmp/sherwood-sim/state.json  # default
-export SIM_FUND_ETH=0.002          # ETH per agent, default: 0.002
-export SIM_FUND_USDC=50            # USDC per agent, default: 50
+export SIM_FUND_ETH=0.002           # ETH per agent, default: 0.002
+export SIM_FUND_USDC=50             # USDC per agent, default: 50
 ```
+
+### Chain support
+
+The orchestrator supports all networks in the CLI's chain registry:
+
+| Chain | Flag | Notes |
+|-------|------|-------|
+| Base mainnet | `--chain base` (default) | Production — real funds |
+| Base Sepolia | `--chain base-sepolia` | Testnet — Circle test USDC |
+| Robinhood testnet | `--chain robinhood-testnet` | L2 testnet — no USDC (ETH-only funding) |
+
+For testnet chains, `ENABLE_TESTNET=true` is set automatically in CLI subprocesses.
 
 ### Pre-flight check
 
 Estimate total funding needed:
 - ETH: `0.002 × 12 = 0.024 ETH` + gas buffer (~0.01 ETH)
-- USDC: `50 × 12 = 600 USDC`
+- USDC: `50 × 12 = 600 USDC` (testnet: use faucet USDC)
 
 Index 0 wallet (master) must hold this before running Phase 01.
 
@@ -54,7 +67,11 @@ Index 0 wallet (master) must hold this before running Phase 01.
 ### Full simulation (phases 01-08)
 
 ```bash
+# Base mainnet (default)
 npx tsx cli/src/simulation/orchestrator.ts run-all
+
+# Base Sepolia testnet
+npx tsx cli/src/simulation/orchestrator.ts --chain base-sepolia run-all
 ```
 
 This runs all setup phases sequentially. Takes ~30-60 minutes depending on block times and RPC latency.
@@ -239,8 +256,8 @@ State is persisted at `SIM_STATE_FILE` (default `/tmp/sherwood-sim/state.json`).
 Set `SIM_DRY_RUN=true` to validate the orchestration flow without any on-chain transactions:
 
 ```bash
-SIM_DRY_RUN=true SIM_MNEMONIC="test test test ..." BASE_RPC_URL="..." \
-  npx tsx cli/src/simulation/orchestrator.ts run-all
+SIM_DRY_RUN=true SIM_MNEMONIC="test test test ..." \
+  npx tsx cli/src/simulation/orchestrator.ts --chain base-sepolia run-all
 ```
 
 ## File Structure

@@ -1,9 +1,19 @@
 /**
- * Load SimConfig from environment variables with defaults.
+ * Load SimConfig from environment variables (and --chain override) with defaults.
+ *
+ * Chain resolution:
+ *   1. --chain flag passed to orchestrator (stored in SIM_CHAIN env by Commander preAction)
+ *   2. SIM_CHAIN env var
+ *   3. Default: "base"
+ *
+ * RPC resolution:
+ *   1. BASE_RPC_URL / BASE_SEPOLIA_RPC_URL env vars (legacy compat)
+ *   2. Public fallback from CHAIN_REGISTRY
  */
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CHAIN_REGISTRY, type Network } from "../lib/network.js";
 import type { SimConfig } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -11,19 +21,33 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Path to the CLI entry point (cli/src/index.ts), relative to this file
 const DEFAULT_SHERWOOD_BIN = path.resolve(__dirname, "..", "index.ts");
 
-export function loadSimConfig(): SimConfig {
+const VALID_CHAINS: Network[] = ["base", "base-sepolia", "robinhood-testnet"];
+
+export function loadSimConfig(chainOverride?: Network): SimConfig {
   const mnemonic = process.env.SIM_MNEMONIC;
   if (!mnemonic) {
     throw new Error("SIM_MNEMONIC env var is required (12-word BIP-39 mnemonic)");
   }
 
-  const rpcUrl = process.env.BASE_RPC_URL;
+  // Resolve chain
+  const chain = chainOverride || (process.env.SIM_CHAIN as Network) || "base";
+  if (!VALID_CHAINS.includes(chain)) {
+    throw new Error(`Invalid chain: ${chain}. Valid: ${VALID_CHAINS.join(", ")}`);
+  }
+
+  // Resolve RPC URL — check env vars first, fall back to registry
+  const chainConfig = CHAIN_REGISTRY[chain];
+  let rpcUrl: string | undefined;
+  if (chainConfig.rpcEnvVar && process.env[chainConfig.rpcEnvVar]) {
+    rpcUrl = process.env[chainConfig.rpcEnvVar];
+  }
   if (!rpcUrl) {
-    throw new Error("BASE_RPC_URL env var is required");
+    rpcUrl = chainConfig.rpcFallback;
   }
 
   return {
     mnemonic,
+    chain,
     agentCount: parseInt(process.env.SIM_AGENT_COUNT || "12", 10),
     syndicateCount: parseInt(process.env.SIM_SYNDICATE_COUNT || "5", 10),
     baseDir: process.env.SIM_BASE_DIR || "/tmp/sherwood-sim/agents",

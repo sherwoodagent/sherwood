@@ -4,7 +4,7 @@
  * Transfers ETH (for gas) and USDC from the master wallet to each agent wallet.
  * Uses viem directly — not the sherwood CLI — for reliable nonce management.
  *
- * USDC on Base: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (6 decimals)
+ * Chain and USDC address resolved from SimConfig.chain via CHAIN_REGISTRY.
  */
 
 import {
@@ -15,13 +15,20 @@ import {
   parseUnits,
   formatEther,
   formatUnits,
+  type Address,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { base } from "viem/chains";
+import { CHAIN_REGISTRY, type Network } from "../lib/network.js";
 import type { SimConfig } from "./types.js";
 
-const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
 const USDC_DECIMALS = 6;
+
+/** USDC address per network (zero = not available) */
+const USDC_BY_CHAIN: Record<Network, Address> = {
+  base: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "base-sepolia": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  "robinhood-testnet": "0x0000000000000000000000000000000000000000",
+};
 
 const ERC20_TRANSFER_ABI = [
   {
@@ -63,8 +70,13 @@ export async function fundAgents(
   agentAddresses: { index: number; address: string }[],
   config: SimConfig,
 ): Promise<FundResult[]> {
-  const chain = base;
+  const chain = CHAIN_REGISTRY[config.chain].chain;
   const transport = http(config.rpcUrl);
+  const USDC_ADDRESS = USDC_BY_CHAIN[config.chain];
+
+  if (USDC_ADDRESS === "0x0000000000000000000000000000000000000000") {
+    throw new Error(`USDC is not available on ${config.chain} — cannot fund agents`);
+  }
 
   const masterAccount = privateKeyToAccount(masterPrivateKey);
   const publicClient = createPublicClient({ chain, transport });

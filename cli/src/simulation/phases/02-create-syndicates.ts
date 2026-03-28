@@ -14,6 +14,7 @@ import { agentHomeDir, updateAgentConfig } from "../agent-home.js";
 import { execSherwood, parseVaultAddress } from "../exec.js";
 import { updateAgent, updateSyndicate } from "../state.js";
 import { PERSONAS } from "../personas.js";
+import { CHAIN_REGISTRY } from "../../lib/network.js";
 import type { SimLogger } from "../logger.js";
 
 export async function runPhase02(config: SimConfig, state: SimState, logger?: SimLogger): Promise<void> {
@@ -81,9 +82,10 @@ export async function runPhase02(config: SimConfig, state: SimState, logger?: Si
         : parseVaultAddress(output);
 
       if (vault) {
-        // Update agent HOME config with vault
+        // Update agent HOME config with vault (keyed by chain ID)
+        const chainId = String(CHAIN_REGISTRY[config.chain].chain.id);
         updateAgentConfig(config.baseDir, creator.index, {
-          contracts: { "8453": { vault } },
+          contracts: { [chainId]: { vault } },
         });
 
         updateAgent(config.stateFile, state, creator.index - 1, {

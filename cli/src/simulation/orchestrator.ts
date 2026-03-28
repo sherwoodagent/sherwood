@@ -25,7 +25,8 @@
  *   retry       Re-run a specific phase (idempotent, skips already-done)
  */
 
-import { Command } from "commander";
+import { Command, Option } from "commander";
+import { VALID_NETWORKS, type Network } from "../lib/network.js";
 import { loadSimConfig } from "./config.js";
 import { loadState, saveState, advancePhase, printStateSummary } from "./state.js";
 import { SimLogger } from "./logger.js";
@@ -44,7 +45,17 @@ const program = new Command();
 program
   .name("sim")
   .description("Sherwood multi-agent simulation orchestrator")
-  .version("1.0.0");
+  .version("1.0.0")
+  .addOption(
+    new Option("--chain <network>", "Target network (base, base-sepolia, robinhood-testnet)")
+      .choices(VALID_NETWORKS)
+      .default("base"),
+  );
+
+/** Read the resolved --chain value from Commander globals. */
+function getChain(): Network {
+  return program.opts().chain as Network;
+}
 
 // ── setup ──
 
@@ -53,7 +64,7 @@ program
   .description("Phase 01 — derive wallets, fund, mint ERC-8004 identities")
   .action(async () => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const logger = new SimLogger(config.logFile);
       const existingState = loadState(config.stateFile);
       const state = await runPhase01(config, existingState, logger);
@@ -72,7 +83,7 @@ program
   .description("Phase 02 — creators deploy syndicates")
   .action(async () => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const logger = new SimLogger(config.logFile);
       const state = loadState(config.stateFile);
       if (!state) {
@@ -95,7 +106,7 @@ program
   .description("Phase 03 — joiners send EAS membership requests")
   .action(async () => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const logger = new SimLogger(config.logFile);
       const state = loadState(config.stateFile);
       if (!state) {
@@ -118,7 +129,7 @@ program
   .description("Phase 04 — creators approve pending member requests")
   .action(async () => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const logger = new SimLogger(config.logFile);
       const state = loadState(config.stateFile);
       if (!state) {
@@ -141,7 +152,7 @@ program
   .description("Phase 05 — agents deposit USDC into their syndicates")
   .action(async () => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const logger = new SimLogger(config.logFile);
       const state = loadState(config.stateFile);
       if (!state) {
@@ -164,7 +175,7 @@ program
   .description("Phase 06 — agents send XMTP messages in their syndicates")
   .action(async () => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const logger = new SimLogger(config.logFile);
       const state = loadState(config.stateFile);
       if (!state) {
@@ -186,7 +197,7 @@ program
   .description("Phase 07 — creators submit Moonwell supply strategy proposals")
   .action(async () => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const logger = new SimLogger(config.logFile);
       const state = loadState(config.stateFile);
       if (!state) {
@@ -209,7 +220,7 @@ program
   .description("Phase 08 — members vote on pending proposals")
   .action(async () => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const logger = new SimLogger(config.logFile);
       const state = loadState(config.stateFile);
       if (!state) {
@@ -233,7 +244,7 @@ program
   .option("--rounds <n>", "Number of heartbeat rounds to run", "3")
   .action(async (opts) => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const logger = new SimLogger(config.logFile);
       const state = loadState(config.stateFile);
       if (!state) {
@@ -255,7 +266,7 @@ program
   .description("Show current simulation state")
   .action(() => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const state = loadState(config.stateFile);
       if (!state) {
         console.log("No simulation state found. Run 'sim setup' to initialize.");
@@ -275,11 +286,11 @@ program
   .description("Run phases 01-08 sequentially (full simulation setup)")
   .action(async () => {
     try {
-      const config = loadSimConfig();
+      const config = loadSimConfig(getChain());
       const logger = new SimLogger(config.logFile);
       logger.info("run-all started", 0);
 
-      console.log("Starting full simulation run (phases 01-08)...\n");
+      console.log(`Starting full simulation run (phases 01-08) on ${config.chain}...\n`);
 
       // Phase 01 — Setup
       const existingState = loadState(config.stateFile);
@@ -337,7 +348,7 @@ program
   .option("--last <n>", "Show last N entries", "50")
   .option("--raw", "Output raw JSONL (machine-readable)")
   .action((opts) => {
-    const config = loadSimConfig();
+    const config = loadSimConfig(getChain());
     const logger = new SimLogger(config.logFile);
 
     const filterStatus: "error" | undefined = opts.errors ? "error" : undefined;
@@ -396,7 +407,7 @@ program
   .command("diagnose")
   .description("Output a JSON diagnostic summary — designed for Claude to parse and act on")
   .action(() => {
-    const config = loadSimConfig();
+    const config = loadSimConfig(getChain());
     const logger = new SimLogger(config.logFile);
     const state = loadState(config.stateFile);
 
@@ -450,7 +461,7 @@ program
       process.exit(1);
     }
 
-    const config = loadSimConfig();
+    const config = loadSimConfig(getChain());
     const state = loadState(config.stateFile);
     if (!state) {
       console.error("No state found. Run 'sim setup' first.");
@@ -518,12 +529,13 @@ program
       process.exit(1);
     }
 
-    const config = loadSimConfig();
+    const config = loadSimConfig(getChain());
     const logger = new SimLogger(config.logFile);
 
     console.log(
-      `\n🤖 Sherwood Simulation Scheduler started`,
+      `\nSherwood Simulation Scheduler started`,
     );
+    console.log(`   Chain              : ${config.chain}`);
     console.log(`   Heartbeat interval : ${opts.interval} minutes`);
     console.log(`   Rounds per cycle   : ${rounds}`);
     console.log(`   Max cycles         : ${maxCycles === 0 ? "∞ (until stopped)" : maxCycles}`);
