@@ -13,8 +13,9 @@ export interface SimConfig {
   sherwoodBin: string; // path to CLI entry (cli/src/index.ts)
   rpcUrl: string; // resolved from chain config or env
   dryRun: boolean; // from SIM_DRY_RUN
-  fundAmountEth: string; // default "0.002"
-  fundAmountUsdc: string; // default "50"
+  fundAmountEth: string; // default "0.007" (gas + WETH deposit buffer)
+  fundAmountUsdc: string; // default "10"
+  strategyDuration: string; // default "3h", from SIM_STRATEGY_DURATION
 }
 
 /** A single structured log entry written as a JSONL line. */
@@ -52,6 +53,7 @@ export interface SyndicateState {
   name: string;
   creatorIndex: number;
   vault?: string;
+  asset?: "USDC" | "WETH"; // vault denomination
   members: number[]; // agent indices
   proposals: ProposalState[];
 }
@@ -61,6 +63,9 @@ export interface ProposalState {
   proposerIndex: number;
   strategy: string;
   state: "proposed" | "voted" | "executed" | "settled";
+  executedAt?: number; // unix ms
+  settledAt?: number; // unix ms
+  duration?: string; // "3h", "2h", etc.
 }
 
 export interface SimState {

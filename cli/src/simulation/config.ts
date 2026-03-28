@@ -56,7 +56,8 @@ export function loadSimConfig(chainOverride?: Network): SimConfig {
     sherwoodBin: process.env.SIM_SHERWOOD_BIN || DEFAULT_SHERWOOD_BIN,
     rpcUrl,
     dryRun: process.env.SIM_DRY_RUN === "true",
-    fundAmountEth: process.env.SIM_FUND_ETH || "0.002",
-    fundAmountUsdc: process.env.SIM_FUND_USDC || "50",
+    fundAmountEth: process.env.SIM_FUND_ETH || "0.007",
+    fundAmountUsdc: process.env.SIM_FUND_USDC || "10",
+    strategyDuration: process.env.SIM_STRATEGY_DURATION || "3h",
   };
 }

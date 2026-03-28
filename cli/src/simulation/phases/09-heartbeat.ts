@@ -190,15 +190,17 @@ export async function runHeartbeatRound(
             }
           }
 
-          // Mark as voted in state
+          // Mark as voted in state — preserve existing proposal data
+          const existing = syndicate.proposals.find((p) => p.id === proposalId);
           updateSyndicate(config.stateFile, state, syndicate.subdomain, {
             proposals: [
               ...syndicate.proposals.filter((p) => p.id !== proposalId),
               {
                 id: proposalId,
-                proposerIndex: syndicate.creatorIndex,
-                strategy: "moonwell-supply",
+                proposerIndex: existing?.proposerIndex ?? syndicate.creatorIndex,
+                strategy: existing?.strategy ?? "unknown",
                 state: "voted",
+                duration: existing?.duration,
               },
             ],
           });
@@ -208,18 +210,7 @@ export async function runHeartbeatRound(
       }
     }
 
-    // 3. Consider proposing if creator has no active proposals
-    const creator = state.agents.find(
-      (a) => a.role === "creator" && a.syndicateSubdomain === syndicate.subdomain,
-    );
-
-    if (creator && syndicate.proposals.every((p) => p.state === "settled")) {
-      // All proposals settled — creator could propose again (left for future cycles)
-      // For now just log the opportunity
-      console.log(
-        `  [${syndicate.subdomain}] All proposals settled — creator could propose again`,
-      );
-    }
+    // Proposal lifecycle (execute, settle, re-propose) is handled by phase 10 (lifecycle).
   }
 
   // Update lastHeartbeat for all agents

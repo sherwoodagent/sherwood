@@ -13,8 +13,10 @@ export interface Persona {
   syndicateName?: string; // only for creators
   syndicateSubdomain?: string; // only for creators (must be lowercase, 3+ chars, hyphens OK)
   syndicateDescription?: string; // only for creators
+  vaultAsset?: "USDC" | "WETH"; // only for creators — vault denomination
+  strategyTemplate?: string; // only for creators — moonwell-supply, venice-inference, wsteth-moonwell
   chatLines: string[]; // XMTP message lines themed to persona
-  depositAmount: string; // USDC amount to deposit (as string, 2 decimals)
+  depositAmount: string; // amount to deposit (USDC for USDC vaults, max $10)
 }
 
 export const PERSONAS: Persona[] = [
@@ -28,12 +30,14 @@ export const PERSONAS: Persona[] = [
     syndicateName: "Steady Yield Fund",
     syndicateSubdomain: "steady-yield",
     syndicateDescription: "Conservative USDC yield via Moonwell lending — capital preservation first.",
+    vaultAsset: "USDC",
+    strategyTemplate: "moonwell-supply",
     chatLines: [
       "Moonwell USDC supply APY is looking strong this week. Deploying 80% of vault capital.",
       "Risk check complete — no liquidation risk at current rates. Proceeding with supply strategy.",
       "Settlement complete. Returned principal + interest to vault. All good.",
     ],
-    depositAmount: "25",
+    depositAmount: "10",
   },
   {
     index: 2,
@@ -44,12 +48,14 @@ export const PERSONAS: Persona[] = [
     syndicateName: "Aerodrome Alpha Fund",
     syndicateSubdomain: "aero-alpha",
     syndicateDescription: "Aerodrome LP strategies targeting high-fee pools with gauge incentives.",
+    vaultAsset: "USDC",
+    strategyTemplate: "moonwell-supply",
     chatLines: [
       "USDC/WETH pool volume up 40% this week. LP fees look attractive. Preparing position.",
       "Gauge rewards are live on this pool. Staking LP tokens for extra AERO yield.",
       "Impermanent loss within acceptable range. Fees more than compensate. Holding position.",
     ],
-    depositAmount: "20",
+    depositAmount: "10",
   },
   {
     index: 3,
@@ -60,12 +66,14 @@ export const PERSONAS: Persona[] = [
     syndicateName: "Venice Inference Fund",
     syndicateSubdomain: "venice-oracle",
     syndicateDescription: "Private AI inference yield via Venice VVV staking + sVVV rewards.",
+    vaultAsset: "USDC",
+    strategyTemplate: "venice-inference",
     chatLines: [
       "VVV staking APY currently at 8.2%. Initiating position via Aerodrome swap.",
       "sVVV accumulated. Venice compute credits active. Ready to settle when duration elapses.",
       "Research query complete. Attestation published on-chain. Profit returned to vault.",
     ],
-    depositAmount: "15",
+    depositAmount: "10",
   },
   {
     index: 4,
@@ -76,12 +84,14 @@ export const PERSONAS: Persona[] = [
     syndicateName: "ETH Staking Fund",
     syndicateSubdomain: "eth-staking",
     syndicateDescription: "Stack Lido + Moonwell yields — WETH to wstETH to mWstETH.",
+    vaultAsset: "WETH",
+    strategyTemplate: "wsteth-moonwell",
     chatLines: [
       "wstETH Moonwell supply rate + Lido base APY = 6.8% combined. Initiating.",
       "Position live. Monitoring wstETH/WETH exchange rate for settlement optimization.",
       "Strategy duration elapsed. Unwinding position and returning WETH to vault.",
     ],
-    depositAmount: "20",
+    depositAmount: "10",
   },
   {
     index: 5,
@@ -92,12 +102,14 @@ export const PERSONAS: Persona[] = [
     syndicateName: "Diversified DeFi Fund",
     syndicateSubdomain: "diversified-defi",
     syndicateDescription: "Diversified DeFi allocation: Moonwell + Aerodrome + Venice in rotation.",
+    vaultAsset: "WETH",
+    strategyTemplate: "moonwell-supply",
     chatLines: [
       "Portfolio allocation: 50% Moonwell supply, 30% Aerodrome LP, 20% Venice VVV. Balanced approach.",
       "Rebalancing trigger hit — Moonwell rates compressed. Rotating to Aerodrome.",
       "All positions settled. Composite return: +4.2% over 7 days. Ready for next cycle.",
     ],
-    depositAmount: "15",
+    depositAmount: "10",
   },
 
   // ── Joiners (indices 6-12) ──
@@ -138,7 +150,7 @@ export const PERSONAS: Persona[] = [
       "Spotted a temporary rate spike on Moonwell. Window is narrow — act fast.",
       "This strategy is solid. FOR. Expected return beats risk-free by 200bps.",
     ],
-    depositAmount: "12",
+    depositAmount: "10",
   },
   {
     index: 9,
@@ -164,7 +176,7 @@ export const PERSONAS: Persona[] = [
       "Whale exit from Aerodrome pool. LP ratio shifted — reassess position.",
       "TVL trending up across Base DeFi. Bullish signal for yield strategies.",
     ],
-    depositAmount: "15",
+    depositAmount: "10",
   },
   {
     index: 11,

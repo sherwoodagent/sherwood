@@ -21,7 +21,7 @@
  *   run-all     Run phases 01-08 sequentially
  *   logs        Show structured log (filterable)
  *   diagnose    Output JSON diagnostic summary for Claude to parse
- *   schedule    Run heartbeat on a fixed interval (long-running)
+ *   lifecycle   Phase 10 — manage proposal lifecycle (execute, settle, re-propose)
  *   retry       Re-run a specific phase (idempotent, skips already-done)
  */
 
@@ -39,6 +39,7 @@ import { runPhase06 } from "./phases/06-chat.js";
 import { runPhase07 } from "./phases/07-propose.js";
 import { runPhase08 } from "./phases/08-vote.js";
 import { runPhase09 } from "./phases/09-heartbeat.js";
+import { runPhase10 } from "./phases/10-lifecycle.js";
 
 const program = new Command();
 
@@ -194,7 +195,7 @@ program
 
 program
   .command("propose")
-  .description("Phase 07 — creators submit Moonwell supply strategy proposals")
+  .description("Phase 07 — creators submit strategy proposals (diverse per persona)")
   .action(async () => {
     try {
       const config = loadSimConfig(getChain());
@@ -329,8 +330,9 @@ program
       console.log("\n=== Full simulation setup complete! ===\n");
       printStateSummary(state);
 
-      console.log("Next: run heartbeat rounds to simulate ongoing activity:");
-      console.log("  npx tsx cli/src/simulation/orchestrator.ts heartbeat --rounds 5\n");
+      console.log("Next: set up Claude cron for autonomous lifecycle management:");
+      console.log(`  Use CronCreate with: npx tsx cli/src/simulation/orchestrator.ts --chain ${config.chain} lifecycle`);
+      console.log("  See README.md for full cron setup instructions.\n");
     } catch (err) {
       console.error(`\nError: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
@@ -452,12 +454,12 @@ program
 program
   .command("retry")
   .description("Re-run a specific phase (idempotent — skips already-completed agents)")
-  .requiredOption("--phase <n>", "Phase number to re-run (1-9)")
+  .requiredOption("--phase <n>", "Phase number to re-run (1-10)")
   .option("--rounds <n>", "Rounds for heartbeat (phase 9 only)", "3")
   .action(async (opts) => {
     const phase = parseInt(opts.phase, 10);
-    if (isNaN(phase) || phase < 1 || phase > 9) {
-      console.error("--phase must be 1-9");
+    if (isNaN(phase) || phase < 1 || phase > 10) {
+      console.error("--phase must be 1-10");
       process.exit(1);
     }
 
@@ -500,6 +502,9 @@ program
         case 9:
           await runPhase09(config, state, parseInt(opts.rounds, 10), logger);
           break;
+        case 10:
+          await runPhase10(config, state, logger);
+          break;
       }
       logger.info(`retry phase ${phase} complete`, phase);
       printStateSummary(state);
@@ -509,80 +514,29 @@ program
     }
   });
 
-// ── schedule ──
+// ── lifecycle ──
 
 program
-  .command("schedule")
-  .description(
-    "Run heartbeat on a fixed interval — long-running process for autonomous orchestration",
-  )
-  .option("--interval <minutes>", "Minutes between heartbeat rounds", "30")
-  .option("--rounds <n>", "Heartbeat rounds per interval", "3")
-  .option("--max-cycles <n>", "Stop after N cycles (0 = run forever)", "0")
-  .action(async (opts) => {
-    const intervalMs = parseFloat(opts.interval) * 60 * 1000;
-    const rounds = parseInt(opts.rounds, 10);
-    const maxCycles = parseInt(opts.maxCycles, 10);
-
-    if (isNaN(intervalMs) || intervalMs < 60_000) {
-      console.error("--interval must be >= 1 minute");
-      process.exit(1);
-    }
-
-    const config = loadSimConfig(getChain());
-    const logger = new SimLogger(config.logFile);
-
-    console.log(
-      `\nSherwood Simulation Scheduler started`,
-    );
-    console.log(`   Chain              : ${config.chain}`);
-    console.log(`   Heartbeat interval : ${opts.interval} minutes`);
-    console.log(`   Rounds per cycle   : ${rounds}`);
-    console.log(`   Max cycles         : ${maxCycles === 0 ? "∞ (until stopped)" : maxCycles}`);
-    console.log(`   Log file           : ${config.logFile}`);
-    console.log(`   State file         : ${config.stateFile}`);
-    console.log(`\nPress Ctrl+C to stop.\n`);
-
-    logger.info(`scheduler started: interval=${opts.interval}m rounds=${rounds}`);
-
-    let cycle = 0;
-
-    const runCycle = async () => {
-      cycle++;
+  .command("lifecycle")
+  .description("Phase 10 — manage proposal lifecycle: execute, settle, re-propose")
+  .action(async () => {
+    try {
+      const config = loadSimConfig(getChain());
+      const logger = new SimLogger(config.logFile);
       const state = loadState(config.stateFile);
       if (!state) {
-        logger.info("scheduler: no state found, skipping cycle");
-        console.log(`[cycle ${cycle}] No state — run 'sim setup' first.\n`);
-        return;
+        console.error("No state found. Run 'sim setup' first.");
+        process.exit(1);
       }
-
-      console.log(`\n${"─".repeat(60)}`);
-      console.log(`[cycle ${cycle}] ${new Date().toLocaleString()}  — heartbeat x${rounds}`);
-      console.log(`${"─".repeat(60)}`);
-
-      logger.info(`scheduler cycle ${cycle} started`, 9);
-
-      try {
-        await runPhase09(config, state, rounds, logger);
-        logger.info(`scheduler cycle ${cycle} complete`, 9);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.err("scheduler heartbeat cycle", msg);
-        console.error(`[cycle ${cycle}] Heartbeat error (continuing): ${msg.split("\n")[0]}`);
+      const result = await runPhase10(config, state, logger);
+      if (result.errors.length > 0) {
+        console.log("\nErrors:");
+        for (const e of result.errors) console.log(`  - ${e}`);
       }
-
-      if (maxCycles > 0 && cycle >= maxCycles) {
-        console.log(`\nReached max cycles (${maxCycles}). Exiting.\n`);
-        process.exit(0);
-      }
-
-      console.log(`\n[cycle ${cycle}] Done. Next run in ${opts.interval} minutes.`);
-      console.log(`  → Run 'sim logs --errors' or 'sim diagnose' to inspect.\n`);
-    };
-
-    // Run immediately, then on interval
-    await runCycle();
-    setInterval(runCycle, intervalMs);
+    } catch (err) {
+      console.error(`\nError: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
   });
 
 program.parse(process.argv);

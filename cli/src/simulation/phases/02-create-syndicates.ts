@@ -52,6 +52,8 @@ export async function runPhase02(config: SimConfig, state: SimState, logger?: Si
         `  [agent-${creator.index}] Creating syndicate "${persona.syndicateName}" (${persona.syndicateSubdomain})...`,
       );
 
+      const vaultAsset = persona.vaultAsset || "USDC";
+
       const output = execSherwood(
         agentHome,
         [
@@ -66,7 +68,7 @@ export async function runPhase02(config: SimConfig, state: SimState, logger?: Si
           "--agent-id",
           String(creator.agentId),
           "--asset",
-          "USDC",
+          vaultAsset,
           "--open-deposits",
           "--public-chat",
           "-y",
@@ -96,6 +98,7 @@ export async function runPhase02(config: SimConfig, state: SimState, logger?: Si
 
         updateSyndicate(config.stateFile, state, persona.syndicateSubdomain, {
           vault,
+          asset: vaultAsset,
         });
 
         console.log(`  [agent-${creator.index}] Syndicate created! Vault: ${vault}`);
