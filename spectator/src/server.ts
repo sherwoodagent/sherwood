@@ -13,7 +13,6 @@
 
 import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { ConsentState } from "@xmtp/node-sdk";
 import type { Agent } from "@xmtp/agent-sdk";
 import type { HealthResponse, GroupInfo, SpectatorMessage } from "./types.js";
 
@@ -67,9 +66,12 @@ async function getGroups(agent: Agent): Promise<GroupInfo[]> {
 
   // syncAll without consent filter — processes Welcome messages for Unknown-state groups too
   await agent.client.conversations.syncAll();
-  // list without consent filter — groups joined via Welcome start as Unknown, not Allowed
+  // list with Unknown + Allowed — groups joined via Welcome start as Unknown (0), not Allowed (1).
+  // esbuild/tsup does not inline const enums, so we use raw numeric values.
+  const CONSENT_UNKNOWN = 0;
+  const CONSENT_ALLOWED = 1;
   const conversations = await agent.client.conversations.list({
-    consentStates: [ConsentState.Unknown, ConsentState.Allowed],
+    consentStates: [CONSENT_UNKNOWN, CONSENT_ALLOWED],
   } as any);
 
   // Promote Unknown groups to Allowed so they surface in future syncs,
@@ -77,8 +79,8 @@ async function getGroups(agent: Agent): Promise<GroupInfo[]> {
   await Promise.allSettled(
     conversations.map(async (c: any) => {
       try {
-        if (c.consentState?.() === ConsentState.Unknown) {
-          c.updateConsentState?.(ConsentState.Allowed);
+        if (c.consentState?.() === CONSENT_UNKNOWN) {
+          c.updateConsentState?.(CONSENT_ALLOWED);
         }
         await c.sync?.();
       } catch {}
