@@ -22,6 +22,8 @@ import { testLeave } from "./test-leave.js";
 import { testXmtp } from "./test-xmtp.js";
 import { testSimulate } from "./test-simulate.js";
 import { testTrade } from "./test-trade.js";
+import { testDepositEth } from "./test-deposit-eth.js";
+import { testDocs } from "./test-docs.js";
 
 const args = process.argv.slice(2);
 const onlyIdx = args.indexOf("--only");
@@ -45,12 +47,14 @@ if (config.dryRun) console.log("DRY RUN mode — no real transactions\n");
 
 type TestFn = (c: SimConfig, s: SimState, l: SimLogger) => Promise<void>;
 const tests: Array<{ name: string; fn: TestFn }> = [
-  { name: "errors",   fn: testErrors },
-  { name: "referral", fn: testReferral },
-  { name: "leave",    fn: testLeave },
-  { name: "xmtp",     fn: testXmtp },
-  { name: "simulate", fn: testSimulate },
-  { name: "trade",    fn: testTrade },
+  { name: "errors",       fn: testErrors },
+  { name: "referral",     fn: testReferral },
+  { name: "leave",        fn: testLeave },
+  { name: "xmtp",         fn: testXmtp },
+  { name: "simulate",     fn: testSimulate },
+  { name: "trade",        fn: testTrade },
+  { name: "deposit-eth",  fn: testDepositEth },
+  { name: "docs",         fn: testDocs },
 ];
 
 let passed = 0;

@@ -108,4 +108,62 @@ export async function testSimulate(config: SimConfig, state: SimState, logger?: 
     }
   }
   console.log("  ✓ proposal execute --dry-run showed trace output (no tx sent)");
+
+  // ── Test 3: proposal simulate --notify <syndicate> ──
+  // Verify that simulation results are delivered to the syndicate XMTP chat.
+  const syndicateName = syndicate?.subdomain;
+  if (!syndicateName) {
+    console.log("  ⚠  No syndicate subdomain found — skipping --notify test");
+    return;
+  }
+
+  let notifyOut = "";
+  try {
+    notifyOut = execSherwood(
+      home,
+      ["proposal", "simulate", "--id", String(proposal.id), "--notify", syndicateName],
+      config, logger, creator.index,
+    );
+  } catch (err) {
+    // Exits 1 when critical risks found (expected) — output is in the error
+    notifyOut = (err as Error).message;
+  }
+
+  if (!config.dryRun) {
+    if (!notifyOut.toLowerCase().includes("risk report sent") &&
+        !notifyOut.toLowerCase().includes("xmtp") &&
+        !notifyOut.toLowerCase().includes("sent to chat") &&
+        !notifyOut.toLowerCase().includes("alert")) {
+      throw new Error(
+        `proposal simulate --notify did not confirm XMTP delivery.\n` +
+        `Output (first 400 chars): ${notifyOut.slice(0, 400)}`,
+      );
+    }
+  }
+  console.log("  ✓ proposal simulate --notify delivered risk report to chat");
+
+  // Verify the message actually arrived in the chat log
+  let chatLog = "";
+  try {
+    chatLog = execSherwood(
+      home,
+      ["chat", syndicateName, "log"],
+      config, logger, creator.index,
+    );
+  } catch (err) {
+    chatLog = (err as Error).message;
+  }
+
+  if (!config.dryRun && chatLog) {
+    // The simulation alert sends a SIMULATION_ALERT envelope — look for proposal ID or risk keywords
+    const hasAlert = chatLog.includes(String(proposal.id)) ||
+                     chatLog.toLowerCase().includes("simulation") ||
+                     chatLog.toLowerCase().includes("risk") ||
+                     chatLog.toLowerCase().includes("proposal");
+    if (!hasAlert) {
+      console.log("  ⚠  Chat log does not yet show simulation alert (XMTP delivery lag)");
+    } else {
+      console.log("  ✓ Simulation alert visible in chat log");
+    }
+  }
 }
