@@ -1,31 +1,36 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {OFT} from "LayerZero-v2/packages/layerzero-v2/evm/oapp/contracts/oft/OFT.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-/// @title WoodToken — LayerZero OFT with hard 1B supply cap
-/// @notice Only the Minter contract can mint. Minting gracefully caps at MAX_SUPPLY.
-contract WoodToken is OFT {
+/// @title MockWoodToken — Simple ERC-20 for testing ve(3,3) contracts
+/// @notice Simplified version of WoodToken for testing without LayerZero dependencies
+contract MockWoodToken is ERC20, Ownable {
     uint256 public constant MAX_SUPPLY = 1_000_000_000e18; // 1B tokens
 
-    address public immutable minter;
+    address public minter;
 
     error OnlyMinter();
+    error OnlyOwner();
 
     modifier onlyMinter() {
         if (msg.sender != minter) revert OnlyMinter();
         _;
     }
 
-    /// @param _lzEndpoint LayerZero endpoint on this chain
-    /// @param _delegate    LayerZero oApp delegate (usually deployer / multisig)
-    /// @param _minter      Address of the Minter contract — sole mint authority
-    constructor(address _lzEndpoint, address _delegate, address _minter)
-        OFT("Wood Token", "WOOD", _lzEndpoint, _delegate)
-        Ownable(_delegate)
-    {
+    /// @param _owner Token owner
+    constructor(address _owner) ERC20("Wood Token", "WOOD") Ownable(_owner) {}
+
+    /// @notice Set the minter address (can only be called once by owner)
+    function setMinter(address _minter) external onlyOwner {
+        if (minter != address(0)) revert OnlyOwner();
         minter = _minter;
+    }
+
+    /// @notice Owner can mint for testing purposes
+    function ownerMint(address to, uint256 amount) external onlyOwner {
+        _mint(to, amount);
     }
 
     /// @notice Mint `amount` tokens to `to`. If minting the full amount would exceed
