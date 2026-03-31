@@ -1,6 +1,6 @@
 {
   "name": "@sherwoodagent/spectator",
-  "version": "0.3.0",
+  "version": "0.2.1",
   "description": "XMTP spectator sidecar — bridges syndicate chat to the dashboard via REST + WebSocket",
   "type": "module",
   "main": "dist/index.js",
@@ -14,9 +14,6 @@
     "@xmtp/agent-sdk": "^2.3.0",
     "dotenv": "^16.4.0",
     "ws": "^8.18.0"
-  },
-  "overrides": {
-    "@xmtp/node-bindings": "1.10.0-dev.97e86c6"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
