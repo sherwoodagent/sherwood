@@ -13,6 +13,7 @@
 
 import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
+import { ConsentState } from "@xmtp/node-sdk";
 import type { Agent } from "@xmtp/agent-sdk";
 import type { HealthResponse, GroupInfo, SpectatorMessage } from "./types.js";
 
@@ -64,13 +65,24 @@ const GROUPS_CACHE_TTL = 60_000; // 60 seconds
 async function getGroups(agent: Agent): Promise<GroupInfo[]> {
   if (Date.now() - groupsCacheTime < GROUPS_CACHE_TTL) return groupsCache;
 
+  // syncAll without consent filter — processes Welcome messages for Unknown-state groups too
   await agent.client.conversations.syncAll();
-  const conversations = await agent.client.conversations.list();
+  // list without consent filter — groups joined via Welcome start as Unknown, not Allowed
+  const conversations = await agent.client.conversations.list({
+    consentStates: [ConsentState.Unknown, ConsentState.Allowed],
+  } as any);
 
-  // Sync each conversation to ensure group metadata (name/description) is populated.
-  // Newly-joined groups (via Welcome message) may lack metadata until explicitly synced.
+  // Promote Unknown groups to Allowed so they surface in future syncs,
+  // and sync each to populate name/description metadata.
   await Promise.allSettled(
-    conversations.map((c: any) => c.sync?.().catch(() => {})),
+    conversations.map(async (c: any) => {
+      try {
+        if (c.consentState?.() === ConsentState.Unknown) {
+          c.updateConsentState?.(ConsentState.Allowed);
+        }
+        await c.sync?.();
+      } catch {}
+    }),
   );
 
   groupsCache = await Promise.all(
