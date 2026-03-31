@@ -29,9 +29,14 @@ if (!process.env.XMTP_DB_ENCRYPTION_KEY) {
 }
 
 // ── DB path (Railway volume for persistence) ──
+//
+// XMTP_DB_VERSION lets us bump to a fresh DB when node-bindings schema
+// changes make the existing file unreadable. Increment in Railway env vars
+// (e.g. "2") to start clean — then re-add spectator to groups.
 
+const dbVersion = process.env.XMTP_DB_VERSION ? `-v${process.env.XMTP_DB_VERSION}` : "";
 const dbPath = (inboxId: string) =>
-  `${process.env.RAILWAY_VOLUME_MOUNT_PATH ?? "."}/${process.env.XMTP_ENV || "dev"}-${inboxId.slice(0, 8)}.db3`;
+  `${process.env.RAILWAY_VOLUME_MOUNT_PATH ?? "."}/${process.env.XMTP_ENV || "dev"}${dbVersion}-${inboxId.slice(0, 8)}.db3`;
 
 // ── Create agent ──
 
