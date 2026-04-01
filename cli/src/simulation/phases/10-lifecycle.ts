@@ -145,10 +145,10 @@ export async function runPhase10(
       }
     }
 
-    // 4. Re-propose if no active proposals remain
+    // 4. Re-propose if no active proposals remain (including vaults with no proposals at all)
     const hasActiveProposal = onChainProposals.some((p) => ACTIVE_STATES.includes(p.state));
 
-    if (!hasActiveProposal && onChainProposals.length > 0) {
+    if (!hasActiveProposal) {
       // Count settled proposals to determine cycle number
       const settledCount = syndicate.proposals.filter((p) => p.state === "settled").length;
       const cycle = settledCount + 1;

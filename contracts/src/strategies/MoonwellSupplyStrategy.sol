@@ -7,6 +7,10 @@ import {ICToken} from "../interfaces/ICToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+interface IWETH {
+    function deposit() external payable;
+}
+
 /**
  * @title MoonwellSupplyStrategy
  * @notice Supply USDC to Moonwell's mUSDC market to earn yield.
@@ -68,13 +72,19 @@ contract MoonwellSupplyStrategy is BaseStrategy {
         if (err != 0) revert MintFailed();
     }
 
-    /// @notice Redeem all mUSDC from Moonwell, push USDC back to vault
+    /// @notice Redeem all mTokens from Moonwell, push underlying back to vault
     function _settle() internal override {
         // Redeem all mTokens we hold
         uint256 mTokenBalance = ICToken(mToken).balanceOf(address(this));
         if (mTokenBalance > 0) {
             uint256 err = ICToken(mToken).redeem(mTokenBalance);
             if (err != 0) revert RedeemFailed();
+        }
+
+        // Some markets (e.g. Moonwell mWETH) send native ETH instead of ERC20 WETH.
+        // Wrap any received ETH back to WETH so the vault always receives ERC20 tokens.
+        if (address(this).balance > 0) {
+            IWETH(underlying).deposit{value: address(this).balance}();
         }
 
         // Verify we got enough underlying back
@@ -84,6 +94,9 @@ contract MoonwellSupplyStrategy is BaseStrategy {
         // Push everything back to the vault
         _pushAllToVault(underlying);
     }
+
+    /// @notice Accept ETH from Moonwell mWETH market (which sends native ETH on redeem)
+    receive() external payable {}
 
     /// @notice Update params: (uint256 newSupplyAmount, uint256 newMinRedeemAmount)
     /// @dev Pass 0 to keep current value. Only proposer, only while Executed.

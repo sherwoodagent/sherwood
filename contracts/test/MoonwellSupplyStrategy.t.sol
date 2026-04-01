@@ -74,7 +74,7 @@ contract MoonwellSupplyStrategyTest is Test {
 
         // Deploy template and clone
         template = new MoonwellSupplyStrategy();
-        address clone = Clones.clone(address(template));
+        address payable clone = payable(Clones.clone(address(template)));
         strategy = MoonwellSupplyStrategy(clone);
 
         // Initialize (anyone can initialize — in production the agent does this)
@@ -102,14 +102,14 @@ contract MoonwellSupplyStrategyTest is Test {
     }
 
     function test_initialize_zeroVault_reverts() public {
-        address clone = Clones.clone(address(template));
+        address payable clone = payable(Clones.clone(address(template)));
         bytes memory initData = abi.encode(address(usdc), address(mUsdc), SUPPLY_AMOUNT, MIN_REDEEM);
         vm.expectRevert(BaseStrategy.ZeroAddress.selector);
         MoonwellSupplyStrategy(clone).initialize(address(0), proposer, initData);
     }
 
     function test_initialize_zeroAmount_reverts() public {
-        address clone = Clones.clone(address(template));
+        address payable clone = payable(Clones.clone(address(template)));
         bytes memory initData = abi.encode(address(usdc), address(mUsdc), 0, MIN_REDEEM);
         vm.expectRevert(MoonwellSupplyStrategy.InvalidAmount.selector);
         MoonwellSupplyStrategy(clone).initialize(vault, proposer, initData);
@@ -306,7 +306,7 @@ contract MoonwellSupplyStrategyTest is Test {
     // ==================== CLONING ====================
 
     function test_clonesHaveIsolatedStorage() public {
-        address clone2 = Clones.clone(address(template));
+        address payable clone2 = payable(Clones.clone(address(template)));
         MoonwellSupplyStrategy strategy2 = MoonwellSupplyStrategy(clone2);
 
         bytes memory initData2 = abi.encode(address(usdc), address(mUsdc), 100_000e6, 99_000e6);
