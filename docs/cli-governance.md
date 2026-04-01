@@ -22,7 +22,7 @@ sherwood proposal create \
   --calls <path-to-json> \
   --split-index <n> \
   [--metadata-uri <ipfs://...>] \
-  [--chain <network>]
+  [--testnet]
 ```
 
 **Flags:**
@@ -68,7 +68,7 @@ Calls before `splitIndex` run at execution time (open positions). Calls from `sp
 List proposals for a vault.
 
 ```
-sherwood proposal list [--vault <addr>] [--state <filter>] [--chain <network>]
+sherwood proposal list [--vault <addr>] [--state <filter>] [--testnet]
 ```
 
 **Flags:**
@@ -91,7 +91,7 @@ ID  Agent     State     Votes (For/Against)  Fee    Duration  Created
 Full detail view of a single proposal.
 
 ```
-sherwood proposal show <id> [--chain <network>]
+sherwood proposal show <id> [--testnet]
 ```
 
 **Output:**
@@ -107,7 +107,7 @@ sherwood proposal show <id> [--chain <network>]
 Cast a vote on a pending proposal.
 
 ```
-sherwood proposal vote --id <proposalId> --support <yes|no> [--chain <network>]
+sherwood proposal vote --id <proposalId> --support <yes|no> [--testnet]
 ```
 
 **Flow:**
@@ -122,7 +122,7 @@ sherwood proposal vote --id <proposalId> --support <yes|no> [--chain <network>]
 Execute an approved proposal (anyone can call).
 
 ```
-sherwood proposal execute --id <proposalId> [--chain <network>]
+sherwood proposal execute --id <proposalId> [--testnet]
 ```
 
 **Flow:**
@@ -137,7 +137,7 @@ sherwood proposal execute --id <proposalId> [--chain <network>]
 Settle an executed proposal. Routes to the appropriate settlement path.
 
 ```
-sherwood proposal settle --id <proposalId> [--calls <path-to-json>] [--chain <network>]
+sherwood proposal settle --id <proposalId> [--calls <path-to-json>] [--testnet]
 ```
 
 **Routing logic:**
@@ -152,7 +152,7 @@ sherwood proposal settle --id <proposalId> [--calls <path-to-json>] [--chain <ne
 Cancel a proposal before execution.
 
 ```
-sherwood proposal cancel --id <proposalId> [--chain <network>]
+sherwood proposal cancel --id <proposalId> [--testnet]
 ```
 
 **Flow:**
@@ -164,7 +164,7 @@ sherwood proposal cancel --id <proposalId> [--chain <network>]
 Display current governor parameters and status.
 
 ```
-sherwood governor info [--chain <network>]
+sherwood governor info [--testnet]
 ```
 
 **Output:**
@@ -188,12 +188,12 @@ Registered Vaults: 3
 Owner-only parameter setters.
 
 ```
-sherwood governor set-voting-period --seconds <n> [--chain <network>]
-sherwood governor set-execution-window --seconds <n> [--chain <network>]
-sherwood governor set-quorum --bps <n> [--chain <network>]
-sherwood governor set-max-fee --bps <n> [--chain <network>]
-sherwood governor set-max-duration --seconds <n> [--chain <network>]
-sherwood governor set-cooldown --seconds <n> [--chain <network>]
+sherwood governor set-voting-period --seconds <n> [--testnet]
+sherwood governor set-execution-window --seconds <n> [--testnet]
+sherwood governor set-quorum --bps <n> [--testnet]
+sherwood governor set-max-fee --bps <n> [--testnet]
+sherwood governor set-max-duration --seconds <n> [--testnet]
+sherwood governor set-cooldown --seconds <n> [--testnet]
 ```
 
 Each validates against hardcoded bounds before submitting.

@@ -1,6 +1,6 @@
 # CLI
 
-TypeScript CLI for syndicate management, LP operations, strategy execution, and agent coordination. Built with Commander and viem.
+TypeScript CLI for syndicate management, LP operations, strategy execution, and agent coordination. Built with Commander, viem, and the Lit SDK.
 
 ## Install
 
@@ -20,10 +20,7 @@ cd cli && npm install && npm run build
 
 | Flag | Effect |
 |------|--------|
-| `--chain <network>` | Target network: `base` (default), `base-sepolia`, `robinhood-testnet` |
-| `--testnet` | Alias for `--chain base-sepolia` (deprecated) |
-
-Testnets require `ENABLE_TESTNET=true` in your environment. See [Deployments](deployments.md) for chain details and feature availability.
+| `--testnet` | Use Base Sepolia instead of Base mainnet |
 
 ## Commands
 
@@ -39,8 +36,6 @@ Save settings to `~/.sherwood/config.json`.
 |--------|-------------|
 | `--private-key <key>` | Wallet private key (0x-prefixed) |
 | `--vault <address>` | Default SyndicateVault address |
-| `--rpc <url>` | Custom RPC URL for the current chain (saved per-network) |
-| `--notify-to <id>` | Destination for cron summaries (Telegram chat ID, phone, etc.) |
 
 ### `sherwood config show`
 
@@ -88,8 +83,7 @@ Create a new syndicate. Deploys an ERC-4626 vault via the factory, registers an 
 | `--borrow-ratio <bps>` | No | Max borrow ratio in basis points (7500 = 75%). Default: 7500 |
 | `--targets <addresses>` | No | Comma-separated contract addresses to allowlist |
 | `--metadata-uri <uri>` | No | Override metadata URI (skips IPFS upload) |
-| `--asset <symbol-or-address>` | No | Vault asset: `USDC`, `WETH`, or a `0x` address. Default: USDC (WETH on chains without USDC) |
-| `-y, --yes` | No | Skip confirmation prompt (non-interactive mode for agent use) |
+| `--asset <address>` | No | Underlying asset address. Default: USDC |
 | `--public-chat` | No | Enable public chat — adds dashboard spectator to XMTP group |
 
 ### `sherwood syndicate list`
@@ -111,7 +105,8 @@ Register an agent on a syndicate vault. Creator only.
 | Option | Required | Description |
 |--------|----------|-------------|
 | `--agent-id <id>` | Yes | Agent's ERC-8004 identity token ID |
-| `--wallet <address>` | Yes | Agent wallet address |
+| `--pkp <address>` | Yes | Agent PKP address |
+| `--eoa <address>` | Yes | Operator EOA address |
 | `--max-per-tx <amount>` | Yes | Max USDC per transaction |
 | `--daily-limit <amount>` | Yes | Daily USDC limit |
 | `--vault <address>` | No | Vault address (default: from config) |
@@ -170,7 +165,8 @@ Approve a join request. Registers the agent on the vault (same as `syndicate add
 | Option | Required | Description |
 |--------|----------|-------------|
 | `--agent-id <id>` | Yes | Agent's ERC-8004 identity token ID |
-| `--wallet <address>` | Yes | Agent wallet address |
+| `--pkp <address>` | Yes | Agent PKP address |
+| `--eoa <address>` | Yes | Operator EOA address |
 | `--max-per-tx <amount>` | Yes | Max per transaction (in asset units) |
 | `--daily-limit <amount>` | Yes | Daily limit (in asset units) |
 | `--vault <address>` | No | Vault address (default: from config) |
@@ -310,6 +306,19 @@ Show vault profit and agent USDC balances.
 
 ---
 
+### `sherwood venice fund`
+
+Swap vault profits to VVV, stake for sVVV, and distribute to all agent operator wallets. Each agent can then self-provision a Venice API key.
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `--vault <address>` | Yes | Vault address |
+| `--amount <amount>` | Yes | Deposit token amount to convert |
+| `--fee1 <tier>` | No | Fee tier for asset → WETH hop. Default: 3000 |
+| `--fee2 <tier>` | No | Fee tier for WETH → VVV hop. Default: 10000 |
+| `--slippage <bps>` | No | Slippage tolerance in bps. Default: 100 |
+| `--execute` | No | Submit onchain (default: simulate only) |
+
 ### `sherwood venice provision`
 
 Self-provision a Venice API key. Requires sVVV in wallet. Signs a validation token via EIP-191, generates the key, and saves it to config.
@@ -367,41 +376,6 @@ Toggle public chat (dashboard spectator access). Requires `DASHBOARD_SPECTATOR_A
 
 ---
 
-### `sherwood session check <name>`
-
-Fetch new XMTP messages and on-chain events since last check. Returns structured JSON with `messages` and `events` arrays.
-
-| Option | Description |
-|--------|-------------|
-| `--stream` | Stay alive streaming messages and polling events (30s interval) |
-
-### `sherwood session status [name]`
-
-Show session cursor positions — last check time, block number, message counts.
-
-### `sherwood session reset <name>`
-
-Reset session cursors to re-process history.
-
-| Option | Description |
-|--------|-------------|
-| `--full` | Reset everything (messages + events) |
-| `--since-block <n>` | Reset block cursor to a specific block |
-
-### `sherwood session cron <name>`
-
-Manage participation crons for OpenClaw agents. On non-OpenClaw environments, prints guidance for setting up your own scheduler.
-
-| Option | Description |
-|--------|-------------|
-| *(default)* | Register participation crons (15m silent check + hourly summary) |
-| `--status` | Show cron status (names, frequency, last run) |
-| `--remove` | Remove participation crons |
-
-See [Integrations — OpenClaw](integrations.md#openclaw-cron-jobs) for how auto-cron works.
-
----
-
 ### `sherwood providers`
 
 List available DeFi providers (Moonwell, Uniswap, etc.).
@@ -420,5 +394,3 @@ State stored in `~/.sherwood/config.json`:
 | `veniceApiKey` | Venice API key (from `venice provision`) |
 | `dbEncryptionKey` | XMTP database encryption key (auto-generated) |
 | `groupCache` | Local cache of subdomain → XMTP group ID |
-| `rpc` | Per-network custom RPC URLs (set via `config set --rpc`) |
-| `notifyTo` | Destination for cron summaries (set via `config set --notify-to`) |
