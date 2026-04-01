@@ -48,6 +48,15 @@ contract MockMamoStrategy {
     }
 }
 
+/// @notice Mock Mamo strategy that accepts deposit() but doesn't actually pull tokens
+contract MockMamoStrategyNoPull {
+    function deposit(uint256) external {
+        // no-op: doesn't transferFrom, so balance check should fail
+    }
+
+    function withdrawAll() external {}
+}
+
 /// @notice Mock Mamo StrategyFactory that deploys MockMamoStrategy instances
 contract MockMamoFactory {
     address public token;
@@ -61,6 +70,26 @@ contract MockMamoFactory {
         MockMamoStrategy s = new MockMamoStrategy(token, user);
         strategies[user] = address(s);
         return address(s);
+    }
+}
+
+/// @notice Mock factory that returns an EOA (non-contract) address
+contract MockMamoFactoryReturnsEOA {
+    function createStrategyForUser(address) external pure returns (address) {
+        return address(0xdead);
+    }
+}
+
+/// @notice Mock factory that returns a contract that doesn't pull tokens on deposit
+contract MockMamoFactoryNoPull {
+    address public noPullStrategy;
+
+    constructor() {
+        noPullStrategy = address(new MockMamoStrategyNoPull());
+    }
+
+    function createStrategyForUser(address) external view returns (address) {
+        return noPullStrategy;
     }
 }
 
@@ -282,6 +311,38 @@ contract MamoYieldStrategyTest is Test {
 
         assertEq(strategy.minRedeemAmount(), MIN_REDEEM);
         assertEq(strategy2.minRedeemAmount(), 50_000e6);
+    }
+
+    // ==================== VALIDATION (extcodesize + post-deposit) ====================
+
+    function test_execute_factoryReturnsEOA_reverts() public {
+        // Deploy a clone with factory that returns an EOA
+        MockMamoFactoryReturnsEOA badFactory = new MockMamoFactoryReturnsEOA();
+        address clone = Clones.clone(address(template));
+        MamoYieldStrategy badStrategy = MamoYieldStrategy(clone);
+        badStrategy.initialize(vault, proposer, abi.encode(address(usdc), address(badFactory), MIN_REDEEM));
+
+        vm.prank(vault);
+        usdc.approve(address(badStrategy), VAULT_BALANCE);
+
+        vm.prank(vault);
+        vm.expectRevert(MamoYieldStrategy.CreateStrategyFailed.selector);
+        badStrategy.execute();
+    }
+
+    function test_execute_depositNoPull_reverts() public {
+        // Deploy a clone with factory whose strategy doesn't pull tokens
+        MockMamoFactoryNoPull badFactory = new MockMamoFactoryNoPull();
+        address clone = Clones.clone(address(template));
+        MamoYieldStrategy badStrategy = MamoYieldStrategy(clone);
+        badStrategy.initialize(vault, proposer, abi.encode(address(usdc), address(badFactory), MIN_REDEEM));
+
+        vm.prank(vault);
+        usdc.approve(address(badStrategy), VAULT_BALANCE);
+
+        vm.prank(vault);
+        vm.expectRevert(MamoYieldStrategy.DepositFailed.selector);
+        badStrategy.execute();
     }
 
     // ==================== HELPERS ====================
