@@ -473,9 +473,6 @@ body {
   border-right: 1px solid var(--color-border);
 }
 
-.stat-item:last-child {
-  border-right: none;
-}
 
 .stat-label {
   font-family: var(--font-plus-jakarta), "Plus Jakarta Sans", sans-serif;
