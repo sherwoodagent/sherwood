@@ -8,6 +8,7 @@ import {MoonwellSupplyStrategy} from "../src/strategies/MoonwellSupplyStrategy.s
 import {AerodromeLPStrategy} from "../src/strategies/AerodromeLPStrategy.sol";
 import {VeniceInferenceStrategy} from "../src/strategies/VeniceInferenceStrategy.sol";
 import {WstETHMoonwellStrategy} from "../src/strategies/WstETHMoonwellStrategy.sol";
+import {MamoYieldStrategy} from "../src/strategies/MamoYieldStrategy.sol";
 
 /**
  * @notice Deploy strategy template singletons (one-time per chain).
@@ -28,6 +29,7 @@ contract DeployTemplates is ScriptBase {
     string constant AERODROME_KEY = "AERODROME_LP_TEMPLATE";
     string constant VENICE_KEY = "VENICE_INFERENCE_TEMPLATE";
     string constant WSTETH_KEY = "WSTETH_MOONWELL_TEMPLATE";
+    string constant MAMO_KEY = "MAMO_YIELD_TEMPLATE";
 
     function run() external {
         string memory path = string.concat(vm.projectRoot(), "/chains/", vm.toString(block.chainid), ".json");
@@ -39,12 +41,14 @@ contract DeployTemplates is ScriptBase {
         address aerodromeAddr = _tryReadAddress(json, AERODROME_KEY);
         address veniceAddr = _tryReadAddress(json, VENICE_KEY);
         address wstethAddr = _tryReadAddress(json, WSTETH_KEY);
+        address mamoAddr = _tryReadAddress(json, MAMO_KEY);
 
         // Verify addresses actually have code on-chain (catches stale dry-run addresses)
         bool needMoonwell = moonwellAddr == address(0) || moonwellAddr.code.length == 0;
         bool needAerodrome = aerodromeAddr == address(0) || aerodromeAddr.code.length == 0;
         bool needVenice = veniceAddr == address(0) || veniceAddr.code.length == 0;
         bool needWsteth = wstethAddr == address(0) || wstethAddr.code.length == 0;
+        bool needMamo = mamoAddr == address(0) || mamoAddr.code.length == 0;
 
         bool anyDeployed = false;
 
@@ -102,6 +106,18 @@ contract DeployTemplates is ScriptBase {
             console.log("  Skipped  WstETHMoonwellStrategy:   %s (already deployed)", wstethAddr);
         }
 
+        if (needMamo) {
+            if (mamoAddr != address(0)) {
+                console.log("  Stale    MamoYieldStrategy:        %s (no code, redeploying)", mamoAddr);
+            }
+            MamoYieldStrategy mamo = new MamoYieldStrategy();
+            mamoAddr = address(mamo);
+            console.log("  Deployed MamoYieldStrategy:        %s", mamoAddr);
+            anyDeployed = true;
+        } else {
+            console.log("  Skipped  MamoYieldStrategy:        %s (already deployed)", mamoAddr);
+        }
+
         vm.stopBroadcast();
 
         // ── 3. Save addresses ──
@@ -111,6 +127,7 @@ contract DeployTemplates is ScriptBase {
             vm.writeJson(vm.toString(aerodromeAddr), path, string.concat(".", AERODROME_KEY));
             vm.writeJson(vm.toString(veniceAddr), path, string.concat(".", VENICE_KEY));
             vm.writeJson(vm.toString(wstethAddr), path, string.concat(".", WSTETH_KEY));
+            vm.writeJson(vm.toString(mamoAddr), path, string.concat(".", MAMO_KEY));
             console.log("\n  Addresses saved to %s", path);
         } else {
             console.log("\n  All templates already deployed, nothing to save.");
@@ -119,7 +136,7 @@ contract DeployTemplates is ScriptBase {
         // ── 4. Validate ──
 
         console.log("\n=== Validation ===\n");
-        _validate(moonwellAddr, aerodromeAddr, veniceAddr, wstethAddr);
+        _validate(moonwellAddr, aerodromeAddr, veniceAddr, wstethAddr, mamoAddr);
         console.log("\n  All validations passed.\n");
     }
 
@@ -135,7 +152,10 @@ contract DeployTemplates is ScriptBase {
     }
 
     /// @notice Validate all deployed templates have correct on-chain state.
-    function _validate(address moonwell, address aerodrome, address venice, address wsteth) internal view {
+    function _validate(address moonwell, address aerodrome, address venice, address wsteth, address mamo)
+        internal
+        view
+    {
         // Each template should have code deployed
         require(moonwell.code.length > 0, "MoonwellSupplyStrategy: no code");
         console.log("  MoonwellSupplyStrategy:  code OK (%s bytes)", moonwell.code.length);
@@ -148,6 +168,9 @@ contract DeployTemplates is ScriptBase {
 
         require(wsteth.code.length > 0, "WstETHMoonwellStrategy: no code");
         console.log("  WstETHMoonwellStrategy:  code OK (%s bytes)", wsteth.code.length);
+
+        require(mamo.code.length > 0, "MamoYieldStrategy: no code");
+        console.log("  MamoYieldStrategy:       code OK (%s bytes)", mamo.code.length);
 
         // Verify each returns the correct strategy name
         string memory moonwellName = IStrategy(moonwell).name();
@@ -168,11 +191,16 @@ contract DeployTemplates is ScriptBase {
         );
         console.log("  WstETHMoonwellStrategy:  name OK (\"%s\")", wstethName);
 
+        string memory mamoName = IStrategy(mamo).name();
+        require(keccak256(bytes(mamoName)) == keccak256("Mamo Yield"), "MamoYieldStrategy: wrong name");
+        console.log("  MamoYieldStrategy:       name OK (\"%s\")", mamoName);
+
         // Templates should NOT be initialized (vault == address(0))
         require(IStrategy(moonwell).vault() == address(0), "MoonwellSupplyStrategy: already initialized");
         require(IStrategy(aerodrome).vault() == address(0), "AerodromeLPStrategy: already initialized");
         require(IStrategy(venice).vault() == address(0), "VeniceInferenceStrategy: already initialized");
         require(IStrategy(wsteth).vault() == address(0), "WstETHMoonwellStrategy: already initialized");
+        require(IStrategy(mamo).vault() == address(0), "MamoYieldStrategy: already initialized");
         console.log("  All templates: vault == address(0) (not initialized) OK");
     }
 }
