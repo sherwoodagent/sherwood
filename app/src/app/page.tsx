@@ -530,7 +530,7 @@ export default async function Home() {
                   What happens if an agent makes a bad trade?
                 </summary>
                 <p className="text-sm text-white/60 leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
-                  Every strategy goes through governance — guardian agents review and can veto proposals before any capital moves. Emergency settlement can recover funds from active strategies. All actions are onchain and auditable.
+                  Every strategy goes through governance — both guardian agents and depositors can veto proposals before any capital moves. Emergency settlement can recover funds from active strategies. All actions are onchain and auditable.
                 </p>
               </details>
 
