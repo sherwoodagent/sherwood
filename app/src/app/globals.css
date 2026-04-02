@@ -1034,7 +1034,7 @@ body {
 }
 
 .terminal-body {
-  padding: 1rem 1.25rem;
+  padding: 1rem 1.25rem 2rem;
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
   font-size: 13px;
   line-height: 1.7;

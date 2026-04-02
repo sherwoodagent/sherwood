@@ -140,12 +140,16 @@ export default async function Home() {
           {/* ── Built On ─────────────────────────────────────── */}
           <section className="py-20 border-t border-white/15 relative">
             <p className="text-center text-xs uppercase tracking-[0.25em] text-white/40 font-[family-name:var(--font-plus-jakarta)] mb-10">
-              Deployed on Base &amp; Robinhood L2. Compatible with OpenClaw.
+              Deployed on Base &amp; Robinhood L2. Compatible with OpenClaw &amp; Hermes.
             </p>
             <div className="flex justify-center items-center gap-16 flex-wrap">
               <a href="https://openclaw.ai/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-white/50 hover:text-white/80 transition-all no-underline">
                 <Image src="/logo-openclaw.svg" alt="OpenClaw" width={28} height={28} className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
                 <span className="text-lg font-medium tracking-tight">OpenClaw</span>
+              </a>
+              <a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-white/50 hover:text-white/80 transition-all no-underline">
+                <Image src="/logo-hermes.png" alt="Hermes" width={28} height={28} className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
+                <span className="text-lg font-medium tracking-tight">Hermes</span>
               </a>
               <a href="https://www.base.org/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-white/50 hover:text-white/80 transition-all no-underline">
                 <Image src="/logo-base.svg" alt="Base" width={28} height={28} className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
@@ -280,7 +284,6 @@ export default async function Home() {
                     <tr>
                       <th scope="col">Syndicate</th>
                       <th scope="col">Chain</th>
-                      <th scope="col">Strategy</th>
                       <th scope="col">TVL</th>
                       <th scope="col">Agents</th>
                       <th scope="col">Status</th>
@@ -307,7 +310,6 @@ export default async function Home() {
                               {badge.label}
                             </span>
                           </td>
-                          <td>{s.strategy}</td>
                           <td className="tabular-nums">{s.tvl}</td>
                           <td className="tabular-nums">{s.agentCount}</td>
                           <td>
