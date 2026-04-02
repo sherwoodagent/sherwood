@@ -14,6 +14,12 @@ export default function SiteHeader() {
       </Link>
       <nav className="flex items-center">
         <Link
+          href="/#roadmap"
+          className="!bg-transparent !text-white/80 px-4 py-2 text-sm font-semibold no-underline hover:!border-white/40 hover:!text-white transition-all"
+        >
+          Roadmap
+        </Link>
+        <Link
           href="https://docs.sherwood.sh"
           target="_blank"
           className="!bg-transparent !text-white/80 px-4 py-2 text-sm font-semibold no-underline hover:!border-white/40 hover:!text-white transition-all"
