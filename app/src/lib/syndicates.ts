@@ -53,6 +53,7 @@ export interface SyndicateDisplay {
   tvl: string;
   agentCount: number;
   agents: AgentDisplay[];
+  proposalCount: number;
   status: "ACTIVE_STRATEGY" | "VOTING" | "IDLE" | "NO_AGENTS";
   chainId: number;
 }
@@ -361,6 +362,7 @@ async function fetchViaSubgraph(
         strategy,
         tvl: `${tvlFormatted} ${info.symbol}`,
         agentCount,
+        proposalCount: (s.proposals || []).length,
         agents: (s.agents || []).map((a) => {
           const stats = agentPnl[a.agentAddress.toLowerCase()] ?? { count: 0, pnl: 0n };
           const pnlAbs = stats.pnl < 0n ? -stats.pnl : stats.pnl;
@@ -585,6 +587,7 @@ async function fetchViaOnChain(
         strategy,
         tvl: `${tvlFormatted} ${info.symbol}`,
         agentCount,
+        proposalCount: 0, // not available without extra calls in on-chain fallback
         agents: agentsByVault[s.vault.toLowerCase()] ?? [],
         status,
         chainId,

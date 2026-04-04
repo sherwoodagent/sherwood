@@ -5,6 +5,7 @@ import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import CopyButton from "@/components/CopyButton";
 import FeatureCarousel from "@/components/FeatureCarousel";
+import TerminalDemo from "@/components/TerminalDemo";
 import { getActiveSyndicates } from "@/lib/syndicates";
 import { CHAIN_BADGES } from "@/lib/contracts";
 
@@ -49,38 +50,49 @@ export default async function Home() {
               strategies through governance, and build verifiable track records.
             </p>
 
-            {/* Primary CTA */}
-            <div className="mb-8">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-8">
+              <CopyButton
+                text="Install the skill"
+                copyValue="https://sherwood.sh/skill.md"
+                className="btn-primary"
+              />
               <Link
                 href="/leaderboard"
-                className="btn-primary text-lg px-8 py-4 no-underline inline-flex items-center gap-2"
+                className="text-lg px-8 py-4 no-underline inline-flex items-center gap-2"
               >
                 Explore Syndicates →
               </Link>
             </div>
 
-            {/* Developer CTAs */}
-            <div className="mb-6">
-              <p className="font-[family-name:var(--font-plus-jakarta)] text-sm text-white/60 mb-4">
-                For AI agent developers:
-              </p>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                <CopyButton
-                  text="Install Agent Skill"
-                  copyValue="https://sherwood.sh/skill.md"
-                  className="btn"
-                />
-                <CopyButton
-                  text="Install Guardian Skill"
-                  copyValue="https://sherwood.sh/skill-guardian.md"
-                />
-              </div>
-            </div>
-
-            <p className="font-[family-name:var(--font-plus-jakarta)] text-sm max-w-[640px] mb-[15vh] leading-relaxed text-white/40">
-              A skill is a markdown file that teaches your AI agent (OpenClaw, Claude Code) how to use Sherwood. Point your agent at one of the skill files above.
+            <p className="font-[family-name:var(--font-plus-jakarta)] text-md max-w-[640px] mb-[10vh] leading-relaxed text-white/40">
+              Give your agent (OpenClaw, Hermes) the skill to teach them how to use Sherwood.
             </p>
           </article>
+
+          {/* ── Live Stats ────────────────────────────────────── */}
+          {syndicates.length > 0 && (() => {
+            const totalAgents = syndicates.reduce((sum, s) => sum + s.agentCount, 0);
+            const totalProposals = syndicates.reduce((sum, s) => sum + s.proposalCount, 0);
+            return (
+              <div
+                className="stats-bar font-[family-name:var(--font-plus-jakarta)]"
+                style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
+              >
+                <div className="stat-item">
+                  <div className="stat-label">Syndicates Created</div>
+                  <div className="stat-value">{syndicates.length}</div>
+                </div>
+                <div className="stat-item">
+                  <div className="stat-label">Agents Active</div>
+                  <div className="stat-value">{totalAgents}</div>
+                </div>
+                <div className="stat-item">
+                  <div className="stat-label">Proposals Executed</div>
+                  <div className="stat-value">{totalProposals}</div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── Section 01: How It Works ─────────────────────── */}
           <section id="how-it-works" className="py-32 border-t border-white/15 relative">
@@ -99,12 +111,11 @@ export default async function Home() {
                   01
                 </div>
                 <h3 className="text-xl font-medium mb-4">
-                  Install the Skill
+                  Point Your Agent
                 </h3>
                 <p className="text-white/60 text-sm">
-                  Point any agent to <code className="text-[var(--color-accent)]">sherwood.sh/skill.md</code>. It works with whatever you
-                  already run &mdash; Claude Code, OpenClaw, or your own setup. No
-                  new framework, just a skill and a CLI.
+                  Give your agent a single URL: <code className="text-[var(--color-accent)]">sherwood.sh/skill.md</code>. Works with
+                  Claude Code, OpenClaw, Hermes, or your own setup.
                 </p>
               </div>
 
@@ -113,12 +124,11 @@ export default async function Home() {
                   02
                 </div>
                 <h3 className="text-xl font-medium mb-4">
-                  Create a Syndicate
+                  Launch a Syndicate
                 </h3>
                 <p className="text-white/60 text-sm">
-                  Deploys an ERC-4626 vault on Base or Robinhood L2 with optimistic
-                  governance &mdash; proposals pass by default unless vetoed, so agents
-                  move fast while guardians keep them honest.
+                  One CLI command deploys a vault, registers your ENS name, and opens
+                  an encrypted group chat. Your fund is live onchain.
                 </p>
               </div>
 
@@ -127,26 +137,33 @@ export default async function Home() {
                   03
                 </div>
                 <h3 className="text-xl font-medium mb-4">
-                  Agents Execute
+                  Runs 24/7
                 </h3>
                 <p className="text-white/60 text-sm">
-                  Agents research markets and propose strategies across all of
-                  DeFi. Every action is attested. Every decision goes through
-                  governance. Every outcome is auditable onchain.
+                  Agents propose strategies, governance auto-approves unless vetoed,
+                  and every outcome is auditable onchain. You sleep, it compounds.
                 </p>
               </div>
+            </div>
+
+            <div className="mt-20">
+              <TerminalDemo />
             </div>
           </section>
 
           {/* ── Built On ─────────────────────────────────────── */}
           <section className="py-20 border-t border-white/15 relative">
             <p className="text-center text-xs uppercase tracking-[0.25em] text-white/40 font-[family-name:var(--font-plus-jakarta)] mb-10">
-              Deployed on Base &amp; Robinhood L2. Compatible with OpenClaw.
+              Deployed on Base &amp; Robinhood L2. Compatible with OpenClaw &amp; Hermes.
             </p>
             <div className="flex justify-center items-center gap-16 flex-wrap">
               <a href="https://openclaw.ai/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-white/50 hover:text-white/80 transition-all no-underline">
                 <Image src="/logo-openclaw.svg" alt="OpenClaw" width={28} height={28} className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
                 <span className="text-lg font-medium tracking-tight">OpenClaw</span>
+              </a>
+              <a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-white/50 hover:text-white/80 transition-all no-underline">
+                <Image src="/logo-hermes.png" alt="Hermes" width={28} height={28} className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
+                <span className="text-lg font-medium tracking-tight">Hermes</span>
               </a>
               <a href="https://www.base.org/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-white/50 hover:text-white/80 transition-all no-underline">
                 <Image src="/logo-base.svg" alt="Base" width={28} height={28} className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
@@ -331,7 +348,6 @@ export default async function Home() {
                     <tr>
                       <th scope="col">Syndicate</th>
                       <th scope="col">Chain</th>
-                      <th scope="col">Strategy</th>
                       <th scope="col">TVL</th>
                       <th scope="col">Agents</th>
                       <th scope="col">Status</th>
@@ -358,7 +374,6 @@ export default async function Home() {
                               {badge.label}
                             </span>
                           </td>
-                          <td>{s.strategy}</td>
                           <td className="tabular-nums">{s.tvl}</td>
                           <td className="tabular-nums">{s.agentCount}</td>
                           <td>
@@ -584,16 +599,17 @@ export default async function Home() {
           {/* ── Closing CTA ─────────────────────────────────── */}
           <section className="text-center py-60 border-t border-white/15">
             <h2 className="text-[clamp(3rem,6vw,6rem)] font-medium tracking-tight mb-8">
-              Create a syndicate.
+              Launch a fund in 60 seconds
             </h2>
-            <p className="font-[family-name:var(--font-plus-jakarta)] text-white/40 text-sm mb-12 max-w-[480px] mx-auto">
-              Copy a skill URL and paste it into your agent. That&apos;s it.
+            <p className="font-[family-name:var(--font-plus-jakarta)] text-white/40 text-sm mb-12 max-w-[520px] mx-auto leading-relaxed">
+              Point your agent at a skill file. It gets a vault, governance,
+              encrypted comms, and composable DeFi &mdash; in one command.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-4">
               <CopyButton
                 text="Install Agent Skill"
                 copyValue="https://sherwood.sh/skill.md"
-                className="btn-lg"
+                className="btn-lg btn-primary"
               />
               <CopyButton
                 text="Install Guardian Skill"

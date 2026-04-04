@@ -27,7 +27,7 @@ body {
   position: fixed;
   top: 0;
   left: 0;
-  width: 100vw;
+  width: 100%;
   height: 100vh;
   z-index: 0;
   pointer-events: none;
@@ -40,7 +40,7 @@ body {
   position: fixed;
   top: 0;
   left: 0;
-  width: 100vw;
+  width: 100%;
   height: 100vh;
   background: linear-gradient(
     to bottom,
@@ -73,8 +73,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 4rem;
-  margin: 0 -4rem;
+  padding: 1rem;
+  margin: 0 -1rem;
   border-bottom: 1px solid var(--color-border);
   background: rgba(0, 0, 0, 0.92);
   backdrop-filter: blur(12px);
@@ -473,9 +473,6 @@ body {
   border-right: 1px solid var(--color-border);
 }
 
-.stat-item:last-child {
-  border-right: none;
-}
 
 .stat-label {
   font-family: var(--font-plus-jakarta), "Plus Jakarta Sans", sans-serif;
@@ -587,6 +584,7 @@ body {
 /* ── Leaderboard Table ─────────────────────────────────── */
 
 .table-container {
+  overflow-x: auto;
   border: 1px solid var(--color-border);
   background: rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(10px);
@@ -645,6 +643,7 @@ body {
 }
 
 .panel {
+  overflow-x: auto;
   border: 1px solid var(--color-border);
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(10px);
@@ -994,7 +993,98 @@ body {
   pointer-events: none;
 }
 
+/* ── Terminal Demo ──────────────────────────────────────── */
+
+.terminal-demo {
+  border: 1px solid var(--color-border);
+  background: #0a0a0a;
+  max-width: 640px;
+  margin: 0 auto;
+  overflow: hidden;
+}
+
+.terminal-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.terminal-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.terminal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.terminal-dot--red { background: #ff5f57; }
+.terminal-dot--yellow { background: #febc2e; }
+.terminal-dot--green { background: #28c840; }
+
+.terminal-title {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.3);
+  font-family: monospace;
+}
+
+.terminal-body {
+  padding: 1rem 1.25rem 2rem;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  height: 360px;
+  overflow-y: scroll;
+  scrollbar-width: none;
+}
+
+.terminal-body::-webkit-scrollbar {
+  display: none;
+}
+
+.terminal-line--command { color: #fff; font-weight: 500; }
+.terminal-line--label { color: var(--color-accent); font-weight: 600; }
+.terminal-line--separator { color: rgba(255, 255, 255, 0.15); }
+.terminal-line--output { color: rgba(255, 255, 255, 0.8); }
+.terminal-line--success { color: var(--color-accent); }
+.terminal-line--dim { color: rgba(255, 255, 255, 0.35); }
+.terminal-line--blank { height: 0.5em; }
+
+.terminal-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  background: var(--color-accent);
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  animation: terminalBlink 0.8s step-end infinite;
+}
+
+@keyframes terminalBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* ── Responsive ─────────────────────────────────────────── */
+
+@media (min-width: 768px) {
+  .site-header {
+    padding: 1rem 2rem;
+    margin: 0 -2rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .site-header {
+    padding: 1rem 4rem;
+    margin: 0 -4rem;
+  }
+}
 
 @media (max-width: 1024px) {
   main {
@@ -1041,5 +1131,9 @@ body {
 
   .stats-bar .stat-item:nth-child(2) {
     border-right: none;
+  }
+
+  .stats-bar-row {
+    flex-direction: column;
   }
 }

@@ -84,12 +84,12 @@ export default function SyndicateHeader({
 
   return (
     <div className="agent-header" style={{ flexDirection: "column", alignItems: "stretch", gap: "1rem" }}>
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
         <div>
           <span className="section-num">
             {"//"} {subdomain.toUpperCase().replace(/[^A-Z0-9]/g, "_")}
           </span>
-          <h1 className="text-5xl font-medium tracking-tight text-white font-[family-name:var(--font-inter)]">
+          <h1 className="text-3xl sm:text-5xl font-medium tracking-tight text-white font-[family-name:var(--font-inter)]">
             {name}{" "}
             <span
               className="glitch-tag text-[11px] px-2.5 py-1 align-middle ml-4"
@@ -107,7 +107,7 @@ export default function SyndicateHeader({
       </div>
 
       <div
-        className="font-[family-name:var(--font-plus-jakarta)] text-sm flex items-center gap-6"
+        className="font-[family-name:var(--font-plus-jakarta)] text-sm flex flex-wrap items-center gap-x-6 gap-y-2"
         style={{ color: "rgba(255,255,255,0.4)" }}
       >
         <span style={{ color: "var(--color-accent)" }}>

@@ -41,6 +41,9 @@ export const metadata: Metadata = {
       "Pool capital into onchain vaults. Propose DeFi strategies through governance. Build verifiable track records.",
     images: ["/og-image.png"],
   },
+  other: {
+    "base:app_id": "69cd3f8c2608b1800e5d5340",
+  },
 };
 
 export default function RootLayout({
