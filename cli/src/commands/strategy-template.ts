@@ -16,8 +16,8 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { getPublicClient, getAccount, writeContractWithRetry, waitForReceipt, formatContractError } from "../lib/client.js";
-import { getChain, getExplorerUrl } from "../lib/network.js";
-import { TOKENS, MOONWELL, VENICE, AERODROME, STRATEGY_TEMPLATES } from "../lib/addresses.js";
+import { getChain, getExplorerUrl, getNetwork } from "../lib/network.js";
+import { TOKENS, MOONWELL, VENICE, AERODROME, UNISWAP, STRATEGY_TEMPLATES, SYNTHRA, CHAINLINK } from "../lib/addresses.js";
 import { BASE_STRATEGY_ABI } from "../lib/abis.js";
 import { cloneTemplate } from "../lib/clone.js";
 import type { BatchCall } from "../lib/batch.js";
@@ -28,6 +28,7 @@ import * as veniceBuilder from "../strategies/venice-inference-template.js";
 import * as aerodromeBuilder from "../strategies/aerodrome-lp-template.js";
 import * as wstethBuilder from "../strategies/wsteth-moonwell-template.js";
 import * as mamoBuilder from "../strategies/mamo-yield-template.js";
+import * as portfolioBuilder from "../strategies/portfolio-template.js";
 
 const ZERO: Address = "0x0000000000000000000000000000000000000000";
 
@@ -70,6 +71,12 @@ const TEMPLATES: TemplateDef[] = [
     key: "mamo-yield",
     description: "Deposit into Mamo for optimized yield across Moonwell + Morpho vaults",
     addressKey: "MAMO_YIELD",
+  },
+  {
+    name: "Portfolio",
+    key: "portfolio",
+    description: "Weighted portfolio of tokens (stock tokens, crypto) with rebalancing",
+    addressKey: "PORTFOLIO",
   },
 ];
 
@@ -292,6 +299,45 @@ async function buildInitDataForTemplate(
     };
   }
 
+  if (templateKey === "portfolio") {
+    if (!opts.amount) { console.error(chalk.red("--amount is required for portfolio template")); process.exit(1); }
+    if (!opts.tokens || !opts.weights) {
+      console.error(chalk.red("--tokens and --weights are required for portfolio template"));
+      console.error(chalk.dim("  --tokens: comma-separated token addresses or symbols"));
+      console.error(chalk.dim("  --weights: comma-separated bps (must sum to 10000)"));
+      process.exit(1);
+    }
+    const tokens = TOKENS();
+    const asset = resolveToken((opts.asset as string) || "WETH");
+    const decimals = (opts.asset as string)?.toUpperCase() === "USDC" ? 6 : 18;
+    const totalAmount = parseUnits(opts.amount as string, decimals);
+    const maxSlippageBps = Number((opts.maxSlippage as string) || "500");
+    const feeTier = (opts.feeTier as string) || "3000";
+
+    const tokenAddrs = (opts.tokens as string).split(",").map((t) => {
+      const trimmed = t.trim();
+      if (isAddress(trimmed)) return trimmed as Address;
+      const allTokens = tokens as Record<string, Address>;
+      const resolved = allTokens[trimmed.toUpperCase()];
+      if (resolved && resolved !== ZERO) return resolved;
+      console.error(chalk.red(`Unknown token: ${trimmed}`)); process.exit(1);
+    });
+    const weightsBps = (opts.weights as string).split(",").map((w) => Number(w.trim()));
+    if (tokenAddrs.length !== weightsBps.length) { console.error(chalk.red("--tokens and --weights must have same length")); process.exit(1); }
+    if (weightsBps.reduce((a, b) => a + b, 0) !== 10000) { console.error(chalk.red(`Weights must sum to 10000`)); process.exit(1); }
+
+    const swapAdapter = (opts.swapAdapter as Address) || resolveSwapAdapter();
+    const chainlinkVerifier = CHAINLINK().VERIFIER_PROXY;
+    const allocations: portfolioBuilder.BasketAllocation[] = tokenAddrs.map((token, i) => ({
+      token, weightBps: weightsBps[i],
+      swapExtraData: ("0x" + Buffer.from(new Uint8Array(new Uint32Array([Number(feeTier)]).buffer).slice(0, 3)).toString("hex").padStart(64, "0")) as `0x${string}`,
+    }));
+    return {
+      initData: portfolioBuilder.buildInitData(asset, swapAdapter, chainlinkVerifier, allocations, totalAmount, maxSlippageBps),
+      asset, assetAmount: totalAmount,
+    };
+  }
+
   throw new Error(`No init builder for template: ${templateKey}`);
 }
 
@@ -339,10 +385,28 @@ function buildCallsForTemplate(
     };
   }
 
+  if (templateKey === "portfolio") {
+    return {
+      executeCalls: portfolioBuilder.buildExecuteCalls(clone, asset, assetAmount),
+      settleCalls: portfolioBuilder.buildSettleCalls(clone),
+    };
+  }
+
   throw new Error(`No call builder for template: ${templateKey}`);
 }
 
 // ── Token resolution ──
+
+function resolveSwapAdapter(): Address {
+  const network = getNetwork();
+  if (network === "robinhood-testnet") {
+    if (SYNTHRA().ROUTER === ZERO) { console.error(chalk.red("Synthra DEX not available")); process.exit(1); }
+    return "0xD875EF9467DbC8B30Dcad38C46bB863EC6a74b43" as Address;
+  }
+  if (UNISWAP().SWAP_ROUTER === ZERO) { console.error(chalk.red("No swap adapter available")); process.exit(1); }
+  console.error(chalk.red("UniswapSwapAdapter not deployed yet. Use --swap-adapter to specify manually."));
+  process.exit(1);
+}
 
 function resolveToken(symbolOrAddress: string): Address {
   if (isAddress(symbolOrAddress)) return symbolOrAddress as Address;
@@ -400,18 +464,36 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .description("List available strategy templates")
     .action(() => {
       const templates = STRATEGY_TEMPLATES();
+      const network = getNetwork();
 
       console.log();
-      console.log(chalk.bold("Strategy Templates"));
+      console.log(chalk.bold("Strategy Templates"), chalk.dim(`(${network})`));
       console.log(chalk.dim("─".repeat(60)));
 
+      let availableCount = 0;
       for (const t of TEMPLATES) {
         const addr = templates[t.addressKey];
-        const deployed = addr !== ZERO;
+        if (addr !== ZERO) {
+          availableCount++;
+          console.log();
+          console.log(`  ${chalk.bold(t.name)} (${chalk.cyan(t.key)})`);
+          console.log(`    ${t.description}`);
+          console.log(`    Template: ${chalk.green(addr)}`);
+        }
+      }
+
+      if (availableCount === 0) {
         console.log();
-        console.log(`  ${chalk.bold(t.name)} (${chalk.cyan(t.key)})`);
-        console.log(`    ${t.description}`);
-        console.log(`    Template: ${deployed ? chalk.green(addr) : chalk.red("not deployed")}`);
+        console.log(chalk.yellow("  No strategy templates deployed on this network."));
+      }
+
+      const unavailable = TEMPLATES.filter((t) => templates[t.addressKey] === ZERO);
+      if (unavailable.length > 0) {
+        console.log();
+        console.log(chalk.dim(`  Not available on ${network}:`));
+        for (const t of unavailable) {
+          console.log(chalk.dim(`    ${t.name} (${t.key})`));
+        }
       }
 
       console.log();
@@ -425,7 +507,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("clone")
     .description("Clone a strategy template and initialize it")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio")
     .requiredOption("--vault <address>", "Vault address")
     // moonwell-supply / wsteth-moonwell
     .option("--amount <n>", "Asset amount to deploy")
@@ -450,6 +532,12 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--slippage <bps>", "Slippage tolerance in bps (wstETH, default: 500 = 5%)")
     // mamo-yield
     .option("--mamo-factory <address>", "Mamo StrategyFactory address (Mamo)")
+    // portfolio
+    .option("--tokens <list>", "Comma-separated token addresses or symbols (Portfolio)")
+    .option("--weights <list>", "Comma-separated weights in bps, must sum to 10000 (Portfolio)")
+    .option("--max-slippage <bps>", "Max slippage bps (Portfolio, default: 500)")
+    .option("--fee-tier <n>", "Pool fee tier (Portfolio, default: 3000)")
+    .option("--swap-adapter <address>", "Swap adapter address (Portfolio)")
     .action(async (templateKey: string, opts) => {
       const vault = opts.vault as Address;
       if (!isAddress(vault)) {
@@ -512,7 +600,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("init")
     .description("Initialize an already-deployed but uninitialized strategy clone")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio")
     .requiredOption("--clone <address>", "Clone address to initialize")
     .requiredOption("--vault <address>", "Vault address")
     // moonwell-supply / wsteth-moonwell
@@ -538,6 +626,12 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--slippage <bps>", "Slippage tolerance in bps (wstETH, default: 500 = 5%)")
     // mamo-yield
     .option("--mamo-factory <address>", "Mamo StrategyFactory address (Mamo)")
+    // portfolio
+    .option("--tokens <list>", "Comma-separated token addresses or symbols (Portfolio)")
+    .option("--weights <list>", "Comma-separated weights in bps, must sum to 10000 (Portfolio)")
+    .option("--max-slippage <bps>", "Max slippage bps (Portfolio, default: 500)")
+    .option("--fee-tier <n>", "Pool fee tier (Portfolio, default: 3000)")
+    .option("--swap-adapter <address>", "Swap adapter address (Portfolio)")
     .action(async (templateKey: string, opts) => {
       const clone = opts.clone as Address;
       const vault = opts.vault as Address;
@@ -610,7 +704,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("propose")
     .description("Clone + init + build calls + submit governance proposal (all-in-one)")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio")
     .requiredOption("--vault <address>", "Vault address")
     .option("--write-calls <dir>", "Write execute/settle JSON to directory (skip proposal submission)")
     // proposal metadata (required unless --write-calls)
@@ -639,6 +733,12 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--slippage <bps>", "Slippage tolerance in bps (wstETH, default: 500 = 5%)")
     // mamo-yield
     .option("--mamo-factory <address>", "Mamo StrategyFactory address (Mamo)")
+    // portfolio
+    .option("--tokens <list>", "Comma-separated token addresses or symbols (Portfolio)")
+    .option("--weights <list>", "Comma-separated weights in bps, must sum to 10000 (Portfolio)")
+    .option("--max-slippage <bps>", "Max slippage bps (Portfolio, default: 500)")
+    .option("--fee-tier <n>", "Pool fee tier (Portfolio, default: 3000)")
+    .option("--swap-adapter <address>", "Swap adapter address (Portfolio)")
     .action(async (templateKey: string, opts) => {
       const vault = opts.vault as Address;
       if (!isAddress(vault)) {
