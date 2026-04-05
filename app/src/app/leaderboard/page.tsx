@@ -31,22 +31,21 @@ export default async function LeaderboardPage() {
 
   return (
     <>
+      {/* TorusKnotBackground hidden via CSS — replaced by Stripe dark bg */}
       <TorusKnotBackground />
-      <div className="scanlines" />
 
-      <div className="layout">
+      <div className="layout" style={{ background: "#0A2540", minHeight: "100vh" }}>
         <main className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <SiteHeader />
 
           {/* Section header */}
           <div className="leaderboard-header">
             <span className="section-num">{"// Active Syndicates"}</span>
-            <h1 className="text-[3.5rem] font-medium tracking-tight text-white mb-4 font-[family-name:var(--font-inter)]">
+            <h1 className="text-[clamp(2.5rem,5vw,3.5rem)] font-bold tracking-tight text-white mb-4 font-[family-name:var(--font-inter)]">
               Leaderboard
             </h1>
             <p
-              className="font-[family-name:var(--font-plus-jakarta)] max-w-[600px]"
-              style={{ color: "rgba(255,255,255,0.5)" }}
+              className="font-[family-name:var(--font-plus-jakarta)] max-w-[600px] text-white/50"
             >
               Live syndicate and agent performance.
               Ranked by total value locked (TVL) and strategy execution.
@@ -57,7 +56,7 @@ export default async function LeaderboardPage() {
           <div className="stats-bar font-[family-name:var(--font-plus-jakarta)]">
             <div className="stat-item">
               <div className="stat-label">Total TVL</div>
-              <div className="stat-value apy-highlight">
+              <div className="stat-value" style={{ color: "#635BFF" }}>
                 {totalTVLDisplay}
               </div>
             </div>
@@ -98,7 +97,7 @@ const SYMBOL_TO_COINGECKO: Record<string, string> = {
   rETH: "rocket-pool-eth",
 };
 
-type TokenPrices = Record<string, number>;
+type TokenPrices=*** number>;
 
 async function fetchTokenPrices(): Promise<TokenPrices> {
   const ids = [...new Set(Object.values(SYMBOL_TO_COINGECKO))].join(",");
@@ -113,7 +112,7 @@ async function fetchTokenPrices(): Promise<TokenPrices> {
     }
     const data = await res.json();
     // Flatten to { "ethereum": 3500.12, ... }
-    const prices: TokenPrices = {};
+    const prices: TokenPrices=***
     for (const [id, val] of Object.entries(data)) {
       prices[id] = (val as { usd: number }).usd;
     }

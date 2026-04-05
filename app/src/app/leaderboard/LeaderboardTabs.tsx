@@ -15,10 +15,10 @@ interface LeaderboardTabsProps {
 }
 
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  ACTIVE_STRATEGY: { bg: "rgba(46,230,166,0.15)", text: "#2EE6A6" },
-  VOTING: { bg: "rgba(234,179,8,0.15)", text: "#eab308" },
-  IDLE: { bg: "rgba(255,255,255,0.08)", text: "rgba(255,255,255,0.5)" },
-  NO_AGENTS: { bg: "rgba(255,77,77,0.15)", text: "#ff4d4d" },
+  ACTIVE_STRATEGY: { bg: "rgba(0,217,36,0.12)", text: "#00D924" },
+  VOTING: { bg: "rgba(234,179,8,0.12)", text: "#eab308" },
+  IDLE: { bg: "rgba(255,255,255,0.06)", text: "rgba(255,255,255,0.5)" },
+  NO_AGENTS: { bg: "rgba(255,77,77,0.12)", text: "#ff4d4d" },
 };
 
 export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
@@ -45,12 +45,12 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
   return (
     <div className="font-[family-name:var(--font-plus-jakarta)]">
       {/* Tab switcher */}
-      <div className="flex gap-0 mb-0 border-b border-[var(--color-border)]">
+      <div className="flex gap-0 mb-0 border-b border-[rgba(255,255,255,0.08)]">
         <button
           onClick={() => setTab("syndicates")}
-          className={`px-6 py-3 text-xs uppercase tracking-[0.1em] font-semibold transition-colors border-b-2 -mb-px ${
+          className={`px-6 py-3 text-sm font-semibold transition-all border-b-2 -mb-px cursor-pointer ${
             tab === "syndicates"
-              ? "border-[var(--color-accent)] text-[var(--color-accent)]"
+              ? "border-[#635BFF] text-[#635BFF]"
               : "border-transparent text-[rgba(255,255,255,0.4)] hover:text-white"
           }`}
         >
@@ -58,9 +58,9 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
         </button>
         <button
           onClick={() => setTab("agents")}
-          className={`px-6 py-3 text-xs uppercase tracking-[0.1em] font-semibold transition-colors border-b-2 -mb-px ${
+          className={`px-6 py-3 text-sm font-semibold transition-all border-b-2 -mb-px cursor-pointer ${
             tab === "agents"
-              ? "border-[var(--color-accent)] text-[var(--color-accent)]"
+              ? "border-[#635BFF] text-[#635BFF]"
               : "border-transparent text-[rgba(255,255,255,0.4)] hover:text-white"
           }`}
         >
@@ -70,7 +70,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
 
       {/* Syndicates tab */}
       {tab === "syndicates" && (
-        <div className="table-container" style={{ borderTop: "none" }}>
+        <div className="table-container" style={{ borderTop: "none", borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
           {syndicates.length === 0 ? (
             <div className="py-16 text-center text-[rgba(255,255,255,0.3)] text-sm">
               No active syndicates found.
@@ -97,7 +97,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                     <tr key={`${s.chainId}-${s.id}`}>
                       <td
                         style={{
-                          color: "var(--color-accent)",
+                          color: "#635BFF",
                           fontWeight: 700,
                         }}
                       >
@@ -106,7 +106,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                       <td>
                         <Link
                           href={`/syndicate/${s.subdomain}`}
-                          className="text-white font-medium no-underline hover:text-[var(--color-accent)] transition-colors"
+                          className="text-white font-semibold no-underline hover:text-[#635BFF] transition-colors"
                         >
                           {s.name}
                         </Link>
@@ -128,7 +128,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                       >
                         {s.strategy || "—"}
                       </td>
-                      <td className="apy-highlight">
+                      <td style={{ color: "#635BFF", fontWeight: 600 }}>
                         {s.tvl}
                         {s.tvlUSDDisplay && !s.tvl.startsWith("$") && (
                           <span className="block mt-0.5" style={{ color: "rgba(255,255,255,0.35)", fontSize: "10px" }}>
@@ -142,11 +142,11 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                           style={{
                             background: status.bg,
                             color: status.text,
-                            padding: "2px 8px",
-                            borderRadius: "3px",
+                            padding: "3px 10px",
+                            borderRadius: "9999px",
                             fontSize: "10px",
                             fontWeight: 600,
-                            letterSpacing: "0.05em",
+                            letterSpacing: "0.02em",
                           }}
                         >
                           {s.status.replace("_", " ")}
@@ -158,8 +158,8 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                             style={{
                               background: badge.bg,
                               color: badge.color,
-                              padding: "2px 8px",
-                              borderRadius: "3px",
+                              padding: "3px 10px",
+                              borderRadius: "9999px",
                               fontSize: "10px",
                               fontWeight: 600,
                             }}
@@ -173,7 +173,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                           href={`/syndicate/${s.subdomain}`}
                           className="btn-follow"
                         >
-                          [ VIEW ]
+                          View
                         </Link>
                       </td>
                     </tr>
@@ -187,7 +187,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
 
       {/* Agents tab */}
       {tab === "agents" && (
-        <div className="table-container" style={{ borderTop: "none" }}>
+        <div className="table-container" style={{ borderTop: "none", borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
           {agents.length === 0 ? (
             <div className="py-16 text-center text-[rgba(255,255,255,0.3)] text-sm">
               No registered agents found.
@@ -212,20 +212,20 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                     <tr key={`${a.agentAddress}-${a.syndicateSubdomain}`}>
                       <td
                         style={{
-                          color: "var(--color-accent)",
+                          color: "#635BFF",
                           fontWeight: 700,
                         }}
                       >
                         {String(i + 1).padStart(2, "0")}
                       </td>
                       <td>
-                        <span className="text-white font-medium">
+                        <span className="text-white font-semibold">
                           {a.agentName || truncateAddress(a.agentAddress)}
                         </span>
                         <span
                           className="block mt-0.5"
                           style={{
-                            color: a.agentName ? "rgba(255,255,255,0.3)" : "var(--color-accent)",
+                            color: a.agentName ? "rgba(255,255,255,0.3)" : "#635BFF",
                             fontSize: "10px",
                             opacity: a.agentName ? 1 : 0.7,
                           }}
@@ -238,7 +238,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                       <td>
                         <Link
                           href={`/syndicate/${a.syndicateSubdomain}`}
-                          className="text-white font-medium no-underline hover:text-[var(--color-accent)] transition-colors"
+                          className="text-white font-semibold no-underline hover:text-[#635BFF] transition-colors"
                         >
                           {a.syndicateName}
                         </Link>
@@ -257,7 +257,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                         style={{
                           color:
                             a.totalPnlRaw > 0
-                              ? "var(--color-accent)"
+                              ? "#00D924"
                               : a.totalPnlRaw < 0
                                 ? "#ff4d4d"
                                 : "rgba(255,255,255,0.5)",
@@ -272,8 +272,8 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                             style={{
                               background: badge.bg,
                               color: badge.color,
-                              padding: "2px 8px",
-                              borderRadius: "3px",
+                              padding: "3px 10px",
+                              borderRadius: "9999px",
                               fontSize: "10px",
                               fontWeight: 600,
                             }}
@@ -287,7 +287,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                           href={`/syndicate/${a.syndicateSubdomain}/agents`}
                           className="btn-follow"
                         >
-                          [ VIEW AGENT ]
+                          View Agent
                         </Link>
                       </td>
                     </tr>

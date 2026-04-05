@@ -57,6 +57,7 @@ export default async function SyndicateDetailPage({
 
   return (
     <>
+      {/* TorusKnotBackground hidden via CSS — replaced by Stripe dark bg */}
       <TorusKnotBackground
         radius={10}
         tube={0.2}
@@ -67,9 +68,8 @@ export default async function SyndicateDetailPage({
         opacity={0.15}
         fogDensity={0.08}
       />
-      <div className="scanlines" style={{ opacity: 0.2 }} />
 
-      <div className="layout layout-normal">
+      <div className="layout layout-normal" style={{ background: "#0A2540", minHeight: "100vh" }}>
         <main className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <SiteHeader />
 
