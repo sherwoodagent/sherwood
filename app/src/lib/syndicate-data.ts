@@ -2,7 +2,7 @@
  * Server-side data fetching for the syndicate detail page.
  *
  * Multichain — tries all chains in CHAINS to resolve a subdomain,
- * then hydrates with on-chain data, IPFS metadata, and ENS text records.
+ * then hydrates with onchain data, IPFS metadata, and ENS text records.
  */
 
 import { cache } from "react";
@@ -194,7 +194,7 @@ async function fetchSubgraphAgents(
   }
 }
 
-/** On-chain agent discovery via vault.getAgentAddresses(). */
+/** Onchain agent discovery via vault.getAgentAddresses(). */
 async function fetchOnChainAgents(
   chainId: number,
   vault: Address,
@@ -319,7 +319,7 @@ async function resolveOnChain(
   const managementFeeBps = (vaultResults[7].result as bigint) ?? 0n;
   const assetAddress = (vaultResults[8].result as Address) ?? addresses.usdc;
 
-  // TVL is the on-chain totalAssets — the vault's actual asset balance
+  // TVL is the onchain totalAssets — the vault's actual asset balance
   const effectiveTotalAssets = totalAssets;
 
   // Step 2c: Get asset decimals + symbol
@@ -336,14 +336,14 @@ async function resolveOnChain(
     (assetInfoResults[1].result as string | undefined) ?? "ETH";
 
   // Step 3: Fetch agent configs
-  // Try subgraph first, fall back to on-chain getAgentAddresses
+  // Try subgraph first, fall back to onchain getAgentAddresses
   let agentAddresses: Address[];
   if (entry.subgraphUrl) {
     agentAddresses = await fetchSubgraphAgents(
       entry.subgraphUrl,
       syndicateId.toString(),
     );
-    // Fall through to on-chain if subgraph returned nothing but agentCount > 0
+    // Fall through to onchain if subgraph returned nothing but agentCount > 0
     if (agentAddresses.length === 0 && agentCount > 0n) {
       agentAddresses = await fetchOnChainAgents(chainId, vault);
     }
@@ -740,7 +740,7 @@ async function fetchEquityCurve(
       curve.push(Number(dayTVL) / 10 ** assetDecimals);
     }
 
-    // Replace last point with actual on-chain TVL for accuracy
+    // Replace last point with actual onchain TVL for accuracy
     curve[curve.length - 1] = currentTVL;
 
     return curve;

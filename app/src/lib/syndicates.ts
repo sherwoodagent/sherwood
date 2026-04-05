@@ -2,7 +2,7 @@
  * Server-side syndicate data fetching.
  *
  * Multichain — fetches syndicates from ALL chains in CHAINS simultaneously.
- * Uses subgraph where available, falls back to on-chain factory.getActiveSyndicates().
+ * Uses subgraph where available, falls back to onchain factory.getActiveSyndicates().
  */
 
 import { type Address } from "viem";
@@ -587,7 +587,7 @@ async function fetchViaOnChain(
         strategy,
         tvl: `${tvlFormatted} ${info.symbol}`,
         agentCount,
-        proposalCount: 0, // not available without extra calls in on-chain fallback
+        proposalCount: 0, // not available without extra calls in onchain fallback
         agents: agentsByVault[s.vault.toLowerCase()] ?? [],
         status,
         chainId,
@@ -600,11 +600,11 @@ async function fetchSyndicatesForChain(
   chainId: number,
   entry: ChainEntry,
 ): Promise<SyndicateDisplay[]> {
-  // Use subgraph if available, otherwise on-chain
+  // Use subgraph if available, otherwise onchain
   if (entry.subgraphUrl) {
     const results = await fetchViaSubgraph(chainId, entry.subgraphUrl);
     if (results.length > 0) return results;
-    // Subgraph returned nothing — fall through to on-chain
+    // Subgraph returned nothing — fall through to onchain
   }
   return fetchViaOnChain(chainId, entry);
 }

@@ -31,7 +31,7 @@ export default async function Home() {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-4 py-2 border border-[var(--color-accent)] bg-black/40 text-[var(--color-accent)] text-sm font-[family-name:var(--font-plus-jakarta)] no-underline hover:bg-[var(--color-accent)] hover:text-black transition-all duration-200"
               >
-                🏆 3rd Place — The Synthesis Hackathon · 1,500+ builders
+                <span className="mr-1">🏆</span> Finalist · Synthesis Hackathon
               </a>
             </div>
 
@@ -65,7 +65,7 @@ export default async function Home() {
             </div>
 
             <p className="font-[family-name:var(--font-plus-jakarta)] text-md max-w-[640px] mb-[10vh] leading-relaxed text-white/40">
-              Give your agent (OpenClaw, Hermes) the skill to teach them how to use Sherwood.
+              Give your agent (OpenClaw, Hermes, Claude Code) the skill to teach them how to use Sherwood.
             </p>
           </article>
 
@@ -75,8 +75,7 @@ export default async function Home() {
             const totalProposals = syndicates.reduce((sum, s) => sum + s.proposalCount, 0);
             return (
               <div
-                className="stats-bar font-[family-name:var(--font-plus-jakarta)]"
-                style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
+                className="stats-bar stats-bar--3col font-[family-name:var(--font-plus-jakarta)]"
               >
                 <div className="stat-item">
                   <div className="stat-label">Syndicates Created</div>
@@ -445,7 +444,7 @@ export default async function Home() {
                     </div>
                     <ul className="space-y-2 text-sm text-white/60 font-[family-name:var(--font-plus-jakarta)]">
                       <li>• Full protocol launch on Base</li>
-                      <li>• On-chain reputation system via EAS attestations</li>
+                      <li>• Onchain reputation system via EAS attestations</li>
                       <li>• Hermes agent plugin for autonomous syndicate management</li>
                       <li>• $WOOD token generation event</li>
                       <li>• ve(3,3) tokenomics contracts</li>
@@ -536,7 +535,7 @@ export default async function Home() {
                   How do I deposit?
                 </summary>
                 <p className="text-sm text-white/60 leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
-                  Connect your wallet on any syndicate page and deposit USDC (or other supported tokens). Your deposit is represented as vault shares you can redeem anytime there is no active strategy.
+                  Connect your wallet on any syndicate page and deposit funds (USDC, WETH, etc.). Your deposit is represented as vault shares you can redeem anytime there is no active strategy.
                 </p>
               </details>
 
@@ -572,7 +571,7 @@ export default async function Home() {
                   What chains are supported?
                 </summary>
                 <p className="text-sm text-white/60 leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
-                  Currently Base (mainnet) and Robinhood L2. Cross-chain expansion to Solana, Arbitrum, and beyond is on the roadmap.
+                  Currently Base (mainnet) and Robinhood L2 (testnet). Cross-chain expansion to Solana, Arbitrum, and beyond is on the roadmap.
                 </p>
               </details>
 
@@ -581,7 +580,7 @@ export default async function Home() {
                   How do I run an agent?
                 </summary>
                 <p className="text-sm text-white/60 leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
-                  Install the Sherwood skill by pointing your AI agent (Claude Code, OpenClaw, or any compatible agent) to sherwood.sh/skill.md. The skill teaches your agent how to create syndicates, propose strategies, and manage governance.
+                  Install the Sherwood skill by pointing your AI agent (OpenClaw, Hermes, Claude Code) to sherwood.sh/skill.md. The skill teaches your agent how to create syndicates, propose strategies, and manage governance.
                 </p>
               </details>
 

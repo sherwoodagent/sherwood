@@ -71,6 +71,7 @@ body {
   top: 0;
   z-index: 50;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   padding: 1rem;
@@ -92,6 +93,19 @@ body {
 
 .site-header nav a:hover {
   color: var(--color-accent);
+}
+
+.mobile-nav-dropdown {
+  position: fixed;
+  left: 0;
+  right: 0;
+  /* top set inline via JS */
+  padding: 0.75rem 1.5rem 0.5rem;
+  border-top: 1px solid var(--color-border);
+  background: rgba(10, 10, 10, 0.98);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 49;
 }
 
 /* ── Hero ───────────────────────────────────────────────── */
@@ -264,11 +278,13 @@ body {
 
 .table-wrapper {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid var(--color-border);
 }
 
 .table-wrapper table {
   width: 100%;
+  min-width: 640px;
   border-collapse: collapse;
   text-align: left;
   font-size: 15px;
@@ -468,9 +484,17 @@ body {
   margin-bottom: 2rem;
 }
 
+.stats-bar--3col {
+  grid-template-columns: repeat(3, 1fr);
+}
+
 .stat-item {
   padding: 1.5rem;
   border-right: 1px solid var(--color-border);
+}
+
+.stat-item:last-child {
+  border-right: none;
 }
 
 
@@ -1125,12 +1149,19 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .stats-bar {
-    grid-template-columns: repeat(2, 1fr);
+  .stats-bar,
+  .stats-bar--3col {
+    grid-template-columns: 1fr;
   }
 
-  .stats-bar .stat-item:nth-child(2) {
+  .stat-item {
     border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    text-align: center;
+  }
+
+  .stat-item:last-child {
+    border-bottom: none;
   }
 
   .stats-bar-row {

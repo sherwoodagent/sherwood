@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Resolve governor address from vault on-chain
+  // Resolve governor address from vault onchain
   let governor: Address;
   try {
     const client = getPublicClient(body.chainId);
