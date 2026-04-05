@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
 @theme {
-  --color-accent: #00C805;
-  --color-accent-dim: rgba(0, 200, 5, 0.2);
-  --color-metal: #0D1821;
-  --color-border: #2A3642;
+  --color-accent: #2EE6A6;
+  --color-accent-dim: rgba(46, 230, 166, 0.2);
+  --color-metal: #1a1a1a;
+  --color-border: rgba(255, 255, 255, 0.15);
   --color-fg: #E5E7EB;
   --color-fg-secondary: #9CA3AF;
-  --color-bg: #040D14;
-  --color-surface: #0D1821;
-  --color-elevated: #1A2633;
+  --color-bg: #000000;
+  --color-surface: #1a1a1a;
+  --color-elevated: #262626;
   --color-loss: #FF5000;
 }
 
@@ -25,7 +25,7 @@ body {
   line-height: 1.5;
   background: var(--color-bg);
   color: var(--color-fg);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
 }
 
 /* ── Three.js Background (hidden in Robinhood style) ───── */
@@ -69,7 +69,7 @@ body {
   padding: 0.875rem 1rem;
   margin: 0 -1rem;
   border-bottom: 1px solid var(--color-border);
-  background: rgba(4, 13, 20, 0.95);
+  background: rgba(0, 0, 0, 0.95);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
@@ -94,7 +94,7 @@ body {
   right: 0;
   padding: 0.75rem 1.5rem 0.5rem;
   border-top: 1px solid var(--color-border);
-  background: rgba(4, 13, 20, 0.98);
+  background: rgba(0, 0, 0, 0.98);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   z-index: 49;
@@ -136,7 +136,7 @@ body {
 .btn:hover {
   background: var(--color-accent);
   color: #000;
-  box-shadow: 0 2px 8px rgba(0, 200, 5, 0.2);
+  box-shadow: 0 2px 8px rgba(46, 230, 166, 0.2);
 }
 
 .btn-primary {
@@ -147,10 +147,10 @@ body {
 }
 
 .btn-primary:hover {
-  background: #00e006;
+  background: #5BEBB8;
   color: #000;
-  border-color: #00e006;
-  box-shadow: 0 4px 16px rgba(0, 200, 5, 0.3);
+  border-color: #5BEBB8;
+  box-shadow: 0 4px 16px rgba(46, 230, 166, 0.3);
 }
 
 .btn-secondary {
@@ -242,7 +242,7 @@ body {
 }
 
 .feature-block:hover {
-  border-color: rgba(42, 54, 66, 0.8);
+  border-color: rgba(255, 255, 255, 0.25);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
@@ -510,7 +510,7 @@ body {
 .btn-follow:hover {
   background: var(--color-accent);
   color: #000;
-  box-shadow: 0 2px 8px rgba(0, 200, 5, 0.15);
+  box-shadow: 0 2px 8px rgba(46, 230, 166, 0.15);
 }
 
 /* ── Syndicate Tab Navigation ─────────────────────────── */
@@ -798,7 +798,7 @@ body {
 }
 
 .btn-action:hover {
-  box-shadow: 0 4px 16px rgba(0, 200, 5, 0.25);
+  box-shadow: 0 4px 16px rgba(46, 230, 166, 0.25);
   transform: translateY(-1px);
 }
 
@@ -908,7 +908,7 @@ body {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(4, 13, 20, 0.85);
+  background: rgba(0, 0, 0, 0.85);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;

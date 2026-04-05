@@ -15,7 +15,7 @@ interface LeaderboardTabsProps {
 }
 
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  ACTIVE_STRATEGY: { bg: "rgba(0,200,5,0.12)", text: "#00C805" },
+  ACTIVE_STRATEGY: { bg: "rgba(46,230,166,0.12)", text: "#2EE6A6" },
   VOTING: { bg: "rgba(234,179,8,0.12)", text: "#eab308" },
   IDLE: { bg: "rgba(255,255,255,0.06)", text: "rgba(255,255,255,0.5)" },
   NO_AGENTS: { bg: "rgba(255,80,0,0.12)", text: "#FF5000" },
