@@ -98,11 +98,13 @@ export async function runPhase04(config: SimConfig, state: SimState, logger?: Si
 
     const creatorHome = agentHomeDir(config.baseDir, creator.index);
 
-    // List pending requests
-    console.log(`  [agent-${creator.index}] Checking requests for "${subdomain}"...`);
+    // List pending requests (EAS only — skip on chains without EAS)
     let requests: JoinRequest[] = [];
 
-    if (!config.dryRun) {
+    if (!config.hasEas) {
+      console.log(`  [agent-${creator.index}] No EAS on ${config.chain} — using direct add for "${subdomain}"`);
+    } else if (!config.dryRun) {
+      console.log(`  [agent-${creator.index}] Checking requests for "${subdomain}"...`);
       try {
         const requestsOutput = await execSherwoodAsync(
           creatorHome,
@@ -122,36 +124,66 @@ export async function runPhase04(config: SimConfig, state: SimState, logger?: Si
 
     // Approve each pending joiner — sequential within a creator (same wallet, nonce order)
     for (const joiner of pendingJoiners) {
-      if (!joiner.agentId) {
-        console.error(
-          `  [agent-${creator.index}] Joiner agent-${joiner.index} has no agentId — skipping approve`,
-        );
-        continue;
-      }
+      const agentId = joiner.agentId ?? joiner.index; // fallback to index if no ERC-8004 ID
 
       try {
-        console.log(
-          `  [agent-${creator.index}] Approving agent-${joiner.index} (id:${joiner.agentId}, ${joiner.address}) for "${subdomain}"...`,
-        );
+        if (!config.hasEas) {
+          // No EAS — use `syndicate add` (direct registration, no attestation)
+          const vault = syndicate.vault;
+          if (!vault) {
+            console.error(
+              `  [agent-${creator.index}] No vault address for "${subdomain}" — skipping add`,
+            );
+            continue;
+          }
 
-        execSherwood(
-          creatorHome,
-          [
-            "syndicate", "approve",
-            "--agent-id", String(joiner.agentId),
-            "--wallet", joiner.address,
-            "--subdomain", subdomain,
-          ],
-          config,
-          logger,
-          creator.index,
-        );
+          console.log(
+            `  [agent-${creator.index}] Adding agent-${joiner.index} (${joiner.address}) to "${subdomain}" via syndicate add...`,
+          );
+
+          execSherwood(
+            creatorHome,
+            [
+              "syndicate", "add",
+              "--vault", vault,
+              "--agent-id", String(agentId),
+              "--wallet", joiner.address,
+            ],
+            config,
+            logger,
+            creator.index,
+          );
+        } else {
+          if (!joiner.agentId) {
+            console.error(
+              `  [agent-${creator.index}] Joiner agent-${joiner.index} has no agentId — skipping approve`,
+            );
+            continue;
+          }
+
+          console.log(
+            `  [agent-${creator.index}] Approving agent-${joiner.index} (id:${joiner.agentId}, ${joiner.address}) for "${subdomain}"...`,
+          );
+
+          execSherwood(
+            creatorHome,
+            [
+              "syndicate", "approve",
+              "--agent-id", String(joiner.agentId),
+              "--wallet", joiner.address,
+              "--subdomain", subdomain,
+            ],
+            config,
+            logger,
+            creator.index,
+          );
+        }
 
         updateAgent(config.stateFile, state, joiner.index - 1, { approved: true });
-        console.log(`  [agent-${creator.index}] Approved agent-${joiner.index}`);
+        console.log(`  [agent-${creator.index}] Registered agent-${joiner.index}`);
       } catch (err) {
         console.error(
-          `  [agent-${creator.index}] Approve failed for agent-${joiner.index}: ${err instanceof Error ? err.message : String(err)}`,
+          `  [agent-${creator.index}] Registration failed for agent-${joiner.index}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

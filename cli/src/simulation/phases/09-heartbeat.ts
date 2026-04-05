@@ -16,7 +16,7 @@ import type { SimConfig, SimState } from "../types.js";
 import { agentHomeDir } from "../agent-home.js";
 import { execSherwood } from "../exec.js";
 import { updateAgent, updateSyndicate, saveState } from "../state.js";
-import { PERSONAS } from "../personas.js";
+import { getPersona } from "../personas.js";
 import type { SimLogger } from "../logger.js";
 
 /**
@@ -64,8 +64,8 @@ function hasRecentMessages(output: string, since: number): boolean {
  * Pick a contextual reply from a persona's chat lines (excluding the last
  * one already used in phase 06).
  */
-function pickReply(personaIndex: number): string {
-  const persona = PERSONAS.find((p) => p.index === personaIndex);
+function pickReply(personaIndex: number, chain?: string): string {
+  const persona = getPersona(personaIndex, chain);
   if (!persona || persona.chatLines.length === 0) {
     return "Acknowledged. Monitoring strategy progress.";
   }
@@ -129,7 +129,7 @@ export async function runHeartbeatRound(
       const lastHeartbeat = chatChecker.lastHeartbeat || 0;
       if (hasRecentMessages(logOutput, now - lastHeartbeat) && memberAgents.length > 1) {
         const replier = memberAgents[Math.floor(Math.random() * memberAgents.length)];
-        const reply = pickReply(replier.index);
+        const reply = pickReply(replier.index, config.chain);
         const replierHome = agentHomeDir(config.baseDir, replier.index);
 
         try {

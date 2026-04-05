@@ -47,6 +47,8 @@ export async function runPhase07(config: SimConfig, state: SimState, logger?: Si
       creator.index,
       vault || "0x0000000000000000000000000000000000000001",
       config.strategyDuration,
+      1,
+      config.chain,
     );
     const creatorHome = agentHomeDir(config.baseDir, creator.index);
 

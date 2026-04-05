@@ -74,9 +74,7 @@ export async function fundAgents(
   const transport = http(config.rpcUrl);
   const USDC_ADDRESS = USDC_BY_CHAIN[config.chain];
 
-  if (USDC_ADDRESS === "0x0000000000000000000000000000000000000000") {
-    throw new Error(`USDC is not available on ${config.chain} — cannot fund agents`);
-  }
+  const hasUsdc = USDC_ADDRESS !== "0x0000000000000000000000000000000000000000";
 
   const masterAccount = privateKeyToAccount(masterPrivateKey);
   const publicClient = createPublicClient({ chain, transport });
@@ -85,21 +83,22 @@ export async function fundAgents(
   console.log(`\nFunding ${agentAddresses.length} agents from master wallet: ${masterAccount.address}`);
 
   // Check master wallet balances
-  const [masterEth, masterUsdc] = await Promise.all([
-    publicClient.getBalance({ address: masterAccount.address }),
-    publicClient.readContract({
-      address: USDC_ADDRESS,
-      abi: ERC20_TRANSFER_ABI,
-      functionName: "balanceOf",
-      args: [masterAccount.address],
-    }) as Promise<bigint>,
-  ]);
+  const masterEth = await publicClient.getBalance({ address: masterAccount.address });
+  const masterUsdc = hasUsdc
+    ? await (publicClient.readContract({
+        address: USDC_ADDRESS,
+        abi: ERC20_TRANSFER_ABI,
+        functionName: "balanceOf",
+        args: [masterAccount.address],
+      }) as Promise<bigint>)
+    : 0n;
 
   console.log(`  Master ETH:  ${formatEther(masterEth)} ETH`);
-  console.log(`  Master USDC: ${formatUnits(masterUsdc, USDC_DECIMALS)} USDC`);
+  if (hasUsdc) console.log(`  Master USDC: ${formatUnits(masterUsdc, USDC_DECIMALS)} USDC`);
+  else console.log(`  USDC: not available on ${config.chain} — ETH only`);
 
   const ethAmount = parseEther(config.fundAmountEth);
-  const usdcAmount = parseUnits(config.fundAmountUsdc, USDC_DECIMALS);
+  const usdcAmount = hasUsdc ? parseUnits(config.fundAmountUsdc, USDC_DECIMALS) : 0n;
 
   const totalEthNeeded = ethAmount * BigInt(agentAddresses.length);
   const totalUsdcNeeded = usdcAmount * BigInt(agentAddresses.length);
@@ -109,7 +108,7 @@ export async function fundAgents(
       `  WARNING: Master has ${formatEther(masterEth)} ETH, need ~${formatEther(totalEthNeeded)} ETH`,
     );
   }
-  if (masterUsdc < totalUsdcNeeded) {
+  if (hasUsdc && masterUsdc < totalUsdcNeeded) {
     console.warn(
       `  WARNING: Master has ${formatUnits(masterUsdc, USDC_DECIMALS)} USDC, need ${formatUnits(totalUsdcNeeded, USDC_DECIMALS)} USDC`,
     );
@@ -128,22 +127,23 @@ export async function fundAgents(
 
     try {
       // Check current agent balance — skip if already funded
-      const [agentEth, agentUsdc] = await Promise.all([
-        publicClient.getBalance({ address: address as `0x${string}` }),
-        publicClient.readContract({
-          address: USDC_ADDRESS,
-          abi: ERC20_TRANSFER_ABI,
-          functionName: "balanceOf",
-          args: [address as `0x${string}`],
-        }) as Promise<bigint>,
-      ]);
+      const agentEth = await publicClient.getBalance({ address: address as `0x${string}` });
+      const agentUsdc = hasUsdc
+        ? await (publicClient.readContract({
+            address: USDC_ADDRESS,
+            abi: ERC20_TRANSFER_ABI,
+            functionName: "balanceOf",
+            args: [address as `0x${string}`],
+          }) as Promise<bigint>)
+        : 0n;
 
       const needsEth = agentEth < ethAmount / 2n; // fund if less than half target
-      const needsUsdc = agentUsdc < usdcAmount / 2n;
+      const needsUsdc = hasUsdc && agentUsdc < usdcAmount / 2n;
 
       if (!needsEth && !needsUsdc) {
+        const usdcDisplay = hasUsdc ? `, ${formatUnits(agentUsdc, USDC_DECIMALS)} USDC` : "";
         console.log(
-          `  [agent-${index}] already funded (${formatEther(agentEth)} ETH, ${formatUnits(agentUsdc, USDC_DECIMALS)} USDC) — skipping`,
+          `  [agent-${index}] already funded (${formatEther(agentEth)} ETH${usdcDisplay}) — skipping`,
         );
         result.skipped = true;
         results.push(result);
@@ -162,7 +162,7 @@ export async function fundAgents(
         console.log(`  [agent-${index}] ETH sent: ${ethHash}`);
       }
 
-      // Send USDC
+      // Send USDC (only if available on this chain)
       if (needsUsdc) {
         console.log(
           `  [agent-${index}] sending ${config.fundAmountUsdc} USDC → ${address}`,

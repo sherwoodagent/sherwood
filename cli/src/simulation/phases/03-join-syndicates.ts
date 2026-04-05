@@ -61,55 +61,70 @@ export async function runPhase03(config: SimConfig, state: SimState, logger?: Si
     }
   }
 
-  await runInPool(joiners, config.concurrency, async (joiner) => {
-    if (joiner.joinRequested) {
-      console.log(
-        `  [agent-${joiner.index}] Already requested join for "${joiner.syndicateSubdomain}" — skipping`,
-      );
-      return;
-    }
-
-    if (!joiner.identityMinted) {
-      console.error(`  [agent-${joiner.index}] Identity not minted yet — skipping join`);
-      return;
-    }
-
-    const subdomain = assignments.get(joiner.index);
-    if (!subdomain) {
-      console.error(`  [agent-${joiner.index}] No syndicate assigned — skipping`);
-      return;
-    }
-
-    const persona = PERSONAS.find((p) => p.index === joiner.index);
-    const message = persona
-      ? `${persona.name}: ${persona.description} Ready to contribute to the syndicate.`
-      : `Agent ${joiner.index} requesting to join ${subdomain}`;
-
-    const agentHome = agentHomeDir(config.baseDir, joiner.index);
-
-    try {
-      console.log(`  [agent-${joiner.index}] Requesting to join "${subdomain}"...`);
-
-      await execSherwoodAsync(
-        agentHome,
-        ["syndicate", "join", "--subdomain", subdomain, "--message", message],
-        config,
-        logger,
-        joiner.index,
-      );
-
+  if (!config.hasEas) {
+    // No EAS on this chain — skip join attestation, just track assignments for phase 04
+    console.log(`No EAS on ${config.chain} — recording assignments without join attestation.\n`);
+    for (const joiner of joiners) {
+      if (joiner.joinRequested) continue;
+      const subdomain = assignments.get(joiner.index);
+      if (!subdomain) continue;
       updateAgent(config.stateFile, state, joiner.index - 1, {
         joinRequested: true,
         syndicateSubdomain: subdomain,
       });
-
-      console.log(`  [agent-${joiner.index}] Join request sent to "${subdomain}"`);
-    } catch (err) {
-      console.error(
-        `  [agent-${joiner.index}] Join request failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      console.log(`  [agent-${joiner.index}] Assigned to "${subdomain}" (no EAS join needed)`);
     }
-  });
+  } else {
+    await runInPool(joiners, config.concurrency, async (joiner) => {
+      if (joiner.joinRequested) {
+        console.log(
+          `  [agent-${joiner.index}] Already requested join for "${joiner.syndicateSubdomain}" — skipping`,
+        );
+        return;
+      }
+
+      if (!joiner.identityMinted) {
+        console.error(`  [agent-${joiner.index}] Identity not minted yet — skipping join`);
+        return;
+      }
+
+      const subdomain = assignments.get(joiner.index);
+      if (!subdomain) {
+        console.error(`  [agent-${joiner.index}] No syndicate assigned — skipping`);
+        return;
+      }
+
+      const persona = PERSONAS.find((p) => p.index === joiner.index);
+      const message = persona
+        ? `${persona.name}: ${persona.description} Ready to contribute to the syndicate.`
+        : `Agent ${joiner.index} requesting to join ${subdomain}`;
+
+      const agentHome = agentHomeDir(config.baseDir, joiner.index);
+
+      try {
+        console.log(`  [agent-${joiner.index}] Requesting to join "${subdomain}"...`);
+
+        await execSherwoodAsync(
+          agentHome,
+          ["syndicate", "join", "--subdomain", subdomain, "--message", message],
+          config,
+          logger,
+          joiner.index,
+        );
+
+        updateAgent(config.stateFile, state, joiner.index - 1, {
+          joinRequested: true,
+          syndicateSubdomain: subdomain,
+        });
+
+        console.log(`  [agent-${joiner.index}] Join request sent to "${subdomain}"`);
+      } catch (err) {
+        console.error(
+          `  [agent-${joiner.index}] Join request failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
+  }
 
   logger?.info("phase 03 complete");
   console.log("\nPhase 03 complete.");

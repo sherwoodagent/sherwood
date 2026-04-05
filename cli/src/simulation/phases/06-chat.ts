@@ -10,7 +10,7 @@ import type { SimConfig, SimState } from "../types.js";
 import { agentHomeDir } from "../agent-home.js";
 import { execSherwoodAsync } from "../exec.js";
 import { runInPool } from "../pool.js";
-import { PERSONAS } from "../personas.js";
+import { getPersona } from "../personas.js";
 import type { SimLogger } from "../logger.js";
 
 /**
@@ -49,7 +49,7 @@ export async function runPhase06(config: SimConfig, state: SimState, logger?: Si
     const speakers = shuffled.slice(0, Math.min(3, memberAgents.length));
 
     await runInPool(speakers, config.concurrency, async (agent) => {
-      const persona = PERSONAS.find((p) => p.index === agent.index);
+      const persona = getPersona(agent.index, config.chain);
       if (!persona) return;
 
       const message = pickRandom(persona.chatLines);

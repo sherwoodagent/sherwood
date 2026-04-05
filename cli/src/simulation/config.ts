@@ -61,5 +61,7 @@ export function loadSimConfig(chainOverride?: Network): SimConfig {
     strategyDuration: process.env.SIM_STRATEGY_DURATION || "3h",
     concurrency: parseInt(process.env.SIM_CONCURRENCY || "4", 10),
     compiled: process.env.SIM_COMPILED === "true",
+    hasIdentityRegistry: chain !== "robinhood-testnet",
+    hasEas: chain !== "robinhood-testnet",
   };
 }

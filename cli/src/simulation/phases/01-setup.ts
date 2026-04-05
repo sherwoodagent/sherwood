@@ -18,7 +18,7 @@ import { fundAgents } from "../fund-agents.js";
 import { execSherwoodAsync, parseAgentId } from "../exec.js";
 import { runInPool } from "../pool.js";
 import { saveState, updateAgent, initState } from "../state.js";
-import { PERSONAS, getCreators, getJoiners } from "../personas.js";
+import { getPersona, getCreators, getJoiners } from "../personas.js";
 import type { SimLogger } from "../logger.js";
 
 export async function runPhase01(config: SimConfig, state: SimState | null, logger?: SimLogger): Promise<SimState> {
@@ -39,7 +39,7 @@ export async function runPhase01(config: SimConfig, state: SimState | null, logg
   if (!state) {
     const agents: AgentState[] = agentWallets.map((w, i) => {
       const agentIndex = i + 1; // 1-based
-      const persona = PERSONAS.find((p) => p.index === agentIndex);
+      const persona = getPersona(agentIndex, config.chain);
       return {
         index: agentIndex,
         address: w.address,
@@ -56,7 +56,7 @@ export async function runPhase01(config: SimConfig, state: SimState | null, logg
     });
 
     // Build syndicates from creator personas
-    const syndicates: SyndicateState[] = getCreators()
+    const syndicates: SyndicateState[] = getCreators(config.chain)
       .slice(0, config.syndicateCount)
       .map((p) => ({
         subdomain: p.syndicateSubdomain!,
@@ -101,49 +101,64 @@ export async function runPhase01(config: SimConfig, state: SimState | null, logg
 
   // 3. Mint identities for agents that don't have one
   const agentsNeedingIdentity = state.agents.filter((a) => !a.identityMinted);
-  if (agentsNeedingIdentity.length > 0) {
-    console.log(`\nMinting identities for ${agentsNeedingIdentity.length} agents...`);
-  } else {
-    console.log("\nAll agents have identities — skipping mint.");
-  }
 
-  await runInPool(agentsNeedingIdentity, config.concurrency, async (agent) => {
-    const persona = PERSONAS.find((p) => p.index === agent.index);
-    if (!persona) {
-      console.error(`  [agent-${agent.index}] No persona found — skipping`);
-      return;
-    }
-
-    const agentHome = setupAgentHome(config.baseDir, agent.index, agent.privateKey);
-
-    try {
-      const output = await execSherwoodAsync(
-        agentHome,
-        ["identity", "mint", "--name", persona.name, "--description", persona.description],
-        config,
-        logger,
-        agent.index,
-      );
-
-      // Parse agent ID from output
-      const agentId = config.dryRun ? agent.index * 100 : parseAgentId(output);
-      if (agentId !== undefined) {
+  if (!config.hasIdentityRegistry) {
+    // No ERC-8004 registry on this chain — mark all as minted with index-based IDs
+    if (agentsNeedingIdentity.length > 0) {
+      console.log(`\nNo identity registry on ${config.chain} — assigning synthetic IDs to ${agentsNeedingIdentity.length} agents...`);
+      for (const agent of agentsNeedingIdentity) {
+        const agentId = agent.index; // use index as placeholder ID
         updateAgentConfig(config.baseDir, agent.index, { agentId });
         updateAgent(config.stateFile, state, agent.index - 1, { identityMinted: true, agentId });
-        console.log(`  [agent-${agent.index}] Identity minted: #${agentId}`);
-      } else {
-        console.warn(
-          `  [agent-${agent.index}] Could not parse agent ID from output — marking minted anyway`,
-        );
-        updateAgent(config.stateFile, state, agent.index - 1, { identityMinted: true });
       }
-    } catch (err) {
-      console.error(
-        `  [agent-${agent.index}] Identity mint failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      // Continue — idempotent, will retry on next run
+    } else {
+      console.log("\nAll agents have identities — skipping.");
     }
-  });
+  } else {
+    if (agentsNeedingIdentity.length > 0) {
+      console.log(`\nMinting identities for ${agentsNeedingIdentity.length} agents...`);
+    } else {
+      console.log("\nAll agents have identities — skipping mint.");
+    }
+
+    await runInPool(agentsNeedingIdentity, config.concurrency, async (agent) => {
+      const persona = getPersona(agent.index, config.chain);
+      if (!persona) {
+        console.error(`  [agent-${agent.index}] No persona found — skipping`);
+        return;
+      }
+
+      const agentHome = setupAgentHome(config.baseDir, agent.index, agent.privateKey);
+
+      try {
+        const output = await execSherwoodAsync(
+          agentHome,
+          ["identity", "mint", "--name", persona.name, "--description", persona.description],
+          config,
+          logger,
+          agent.index,
+        );
+
+        // Parse agent ID from output
+        const agentId = config.dryRun ? agent.index * 100 : parseAgentId(output);
+        if (agentId !== undefined) {
+          updateAgentConfig(config.baseDir, agent.index, { agentId });
+          updateAgent(config.stateFile, state, agent.index - 1, { identityMinted: true, agentId });
+          console.log(`  [agent-${agent.index}] Identity minted: #${agentId}`);
+        } else {
+          console.warn(
+            `  [agent-${agent.index}] Could not parse agent ID from output — marking minted anyway`,
+          );
+          updateAgent(config.stateFile, state, agent.index - 1, { identityMinted: true });
+        }
+      } catch (err) {
+        console.error(
+          `  [agent-${agent.index}] Identity mint failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        // Continue — idempotent, will retry on next run
+      }
+    });
+  }
 
   logger?.info("phase 01 complete");
   console.log("\nPhase 01 complete.");
