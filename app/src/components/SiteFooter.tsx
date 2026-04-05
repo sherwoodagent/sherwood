@@ -48,7 +48,7 @@ function GitHubIcon() {
 
 export default function SiteFooter() {
   return (
-    <footer className="mt-0 font-[family-name:var(--font-plus-jakarta)]" style={{ background: "#0A2540" }}>
+    <footer className="mt-0 font-[family-name:var(--font-plus-jakarta)]" style={{ background: "#000" }}>
       <div className="max-w-[1400px] mx-auto px-8 md:px-16 py-16">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 md:gap-8">
           {/* Logo + tagline */}
@@ -62,7 +62,7 @@ export default function SiteFooter() {
                 href="https://x.com/sherwoodagent"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-9 h-9 rounded-full border border-[rgba(255,255,255,0.1)] flex items-center justify-center text-white/40 hover:text-[#635BFF] hover:border-[#635BFF] transition-all"
+                className="w-9 h-9 rounded-full border border-[rgba(255,255,255,0.1)] flex items-center justify-center text-white/40 hover:text-[#2EE6A6] hover:border-[#2EE6A6] transition-all"
               >
                 <XIcon />
               </a>
@@ -70,7 +70,7 @@ export default function SiteFooter() {
                 href="https://github.com/imthatcarlos/sherwood"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-9 h-9 rounded-full border border-[rgba(255,255,255,0.1)] flex items-center justify-center text-white/40 hover:text-[#635BFF] hover:border-[#635BFF] transition-all"
+                className="w-9 h-9 rounded-full border border-[rgba(255,255,255,0.1)] flex items-center justify-center text-white/40 hover:text-[#2EE6A6] hover:border-[#2EE6A6] transition-all"
               >
                 <GitHubIcon />
               </a>
@@ -89,7 +89,7 @@ export default function SiteFooter() {
                     <a
                       href={link.href}
                       {...(link.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
-                      className="text-sm text-white/70 hover:text-[#635BFF] transition-colors"
+                      className="text-sm text-white/70 hover:text-[#2EE6A6] transition-colors"
                     >
                       {link.label}
                       {link.external && <ExternalIcon />}

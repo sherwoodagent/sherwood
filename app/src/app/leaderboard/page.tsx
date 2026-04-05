@@ -34,7 +34,7 @@ export default async function LeaderboardPage() {
       {/* TorusKnotBackground hidden via CSS — replaced by Stripe dark bg */}
       <TorusKnotBackground />
 
-      <div className="layout" style={{ background: "#0A2540", minHeight: "100vh" }}>
+      <div className="layout" style={{ background: "#000", minHeight: "100vh" }}>
         <main className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <SiteHeader />
 
@@ -56,7 +56,7 @@ export default async function LeaderboardPage() {
           <div className="stats-bar font-[family-name:var(--font-plus-jakarta)]">
             <div className="stat-item">
               <div className="stat-label">Total TVL</div>
-              <div className="stat-value" style={{ color: "#635BFF" }}>
+              <div className="stat-value" style={{ color: "#2EE6A6" }}>
                 {totalTVLDisplay}
               </div>
             </div>

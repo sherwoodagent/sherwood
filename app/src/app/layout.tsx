@@ -53,7 +53,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable} ${plusJakartaSans.variable}`}>
-        <body className="bg-white text-[#0A2540] antialiased overflow-x-hidden font-[family-name:var(--font-inter)]">
+        <body className="bg-black text-[#E5E7EB] antialiased overflow-x-hidden font-[family-name:var(--font-inter)]">
         <Providers>{children}</Providers>
         {umamiWebsiteId && (
           <Script

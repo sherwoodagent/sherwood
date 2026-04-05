@@ -26,7 +26,7 @@ export default function VaultOverview({
           <div className="metric-label">Open Deposits</div>
           <div
             className="metric-val"
-            style={{ color: openDeposits ? "#00D924" : "#ff4d4d" }}
+            style={{ color: openDeposits ? "#2EE6A6" : "#ff4d4d" }}
           >
             {openDeposits ? "YES" : "NO"}
           </div>
@@ -39,7 +39,7 @@ export default function VaultOverview({
           <div className="metric-label">Redemptions</div>
           <div
             className="metric-val"
-            style={{ color: redemptionsLocked ? "#ff4d4d" : "#00D924" }}
+            style={{ color: redemptionsLocked ? "#ff4d4d" : "#2EE6A6" }}
           >
             {redemptionsLocked ? "LOCKED" : "OPEN"}
           </div>
@@ -48,7 +48,7 @@ export default function VaultOverview({
           <div className="metric-label">Status</div>
           <div
             className="metric-val"
-            style={paused ? { color: "#ff4d4d" } : { color: "#00D924" }}
+            style={paused ? { color: "#ff4d4d" } : { color: "#2EE6A6" }}
           >
             {paused ? "PAUSED" : "ACTIVE"}
           </div>

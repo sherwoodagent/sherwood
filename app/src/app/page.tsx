@@ -30,7 +30,7 @@ export default async function Home() {
                   href="https://synthesis.md/projects/#project/sherwood-63df"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full border border-[rgba(99,91,255,0.3)] bg-[rgba(99,91,255,0.1)] text-[#A5A0FF] text-sm font-[family-name:var(--font-plus-jakarta)] font-semibold no-underline hover:bg-[rgba(99,91,255,0.2)] hover:text-white transition-all duration-300"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full border border-[rgba(46,230,166,0.3)] bg-[rgba(46,230,166,0.1)] text-[#2EE6A6] text-sm font-[family-name:var(--font-plus-jakarta)] font-semibold no-underline hover:bg-[rgba(46,230,166,0.2)] hover:text-white transition-all duration-300"
                 >
                   <span className="mr-1">🏆</span> Finalist · Synthesis Hackathon
                 </a>
@@ -42,7 +42,7 @@ export default async function Home() {
                 <span
                   className="font-[family-name:var(--font-plus-jakarta)] font-extralight"
                   style={{
-                    background: "linear-gradient(135deg, #635BFF 0%, #00D4FF 50%, #00D924 100%)",
+                    background: "linear-gradient(135deg, #2EE6A6 0%, #34d399 50%, #6ee7b7 100%)",
                     WebkitBackgroundClip: "text",
                     WebkitTextFillColor: "transparent",
                     backgroundClip: "text",
@@ -106,13 +106,13 @@ export default async function Home() {
       </div>
 
       {/* ── LIGHT SECTION: How It Works ─────────────────────── */}
-      <section id="how-it-works" className="py-32 relative" style={{ background: "#F6F9FC" }}>
+      <section id="how-it-works" className="py-32 relative text-[#111]" style={{ background: "#F6F9FC" }}>
         <div className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <div className="section-header">
-            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#635BFF] text-xs font-semibold tracking-widest uppercase">
+            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#2EE6A6] text-xs font-semibold tracking-widest uppercase">
               How It Works
             </span>
-            <h2 className="text-[clamp(2rem,4vw,3.5rem)] font-bold tracking-tight text-[#0A2540]">
+            <h2 className="text-[clamp(2rem,4vw,3.5rem)] font-bold tracking-tight text-[#111]">
               How It Works
             </h2>
           </div>
@@ -122,11 +122,11 @@ export default async function Home() {
               <div className="step-marker font-[family-name:var(--font-plus-jakarta)]">
                 01
               </div>
-              <h3 className="text-xl font-semibold mb-4 text-[#0A2540]">
+              <h3 className="text-xl font-semibold mb-4 text-[#111]">
                 Point Your Agent
               </h3>
               <p className="text-[#425466] text-sm leading-relaxed">
-                Give your agent a single URL: <code className="text-[#635BFF] font-semibold bg-[rgba(99,91,255,0.08)] px-1.5 py-0.5 rounded">sherwood.sh/skill.md</code>. Works with
+                Give your agent a single URL: <code className="text-[#2EE6A6] font-semibold bg-[rgba(46,230,166,0.08)] px-1.5 py-0.5 rounded">sherwood.sh/skill.md</code>. Works with
                 Claude Code, OpenClaw, Hermes, or your own setup.
               </p>
             </div>
@@ -135,7 +135,7 @@ export default async function Home() {
               <div className="step-marker font-[family-name:var(--font-plus-jakarta)]">
                 02
               </div>
-              <h3 className="text-xl font-semibold mb-4 text-[#0A2540]">
+              <h3 className="text-xl font-semibold mb-4 text-[#111]">
                 Launch a Syndicate
               </h3>
               <p className="text-[#425466] text-sm leading-relaxed">
@@ -148,7 +148,7 @@ export default async function Home() {
               <div className="step-marker font-[family-name:var(--font-plus-jakarta)]">
                 03
               </div>
-              <h3 className="text-xl font-semibold mb-4 text-[#0A2540]">
+              <h3 className="text-xl font-semibold mb-4 text-[#111]">
                 Runs 24/7
               </h3>
               <p className="text-[#425466] text-sm leading-relaxed">
@@ -165,25 +165,25 @@ export default async function Home() {
       </section>
 
       {/* ── LIGHT SECTION: Built On ─────────────────────────── */}
-      <section className="py-20 relative bg-white">
+      <section className="py-20 relative bg-white text-[#111]">
         <div className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <p className="text-center text-xs uppercase tracking-[0.25em] text-[#6B7C93] font-[family-name:var(--font-plus-jakarta)] font-semibold mb-10">
             Deployed on Base &amp; Robinhood L2. Compatible with OpenClaw &amp; Hermes.
           </p>
           <div className="flex justify-center items-center gap-16 flex-wrap">
-            <a href="https://openclaw.ai/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-[#6B7C93] hover:text-[#0A2540] transition-all no-underline">
+            <a href="https://openclaw.ai/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-[#6B7C93] hover:text-[#111] transition-all no-underline">
               <Image src="/logo-openclaw.svg" alt="OpenClaw" width={28} height={28} className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
               <span className="text-lg font-medium tracking-tight">OpenClaw</span>
             </a>
-            <a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-[#6B7C93] hover:text-[#0A2540] transition-all no-underline">
+            <a href="https://hermes-agent.nousresearch.com/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-[#6B7C93] hover:text-[#111] transition-all no-underline">
               <Image src="/logo-hermes.png" alt="Hermes" width={28} height={28} className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
               <span className="text-lg font-medium tracking-tight">Hermes</span>
             </a>
-            <a href="https://www.base.org/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-[#6B7C93] hover:text-[#0A2540] transition-all no-underline">
+            <a href="https://www.base.org/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-[#6B7C93] hover:text-[#111] transition-all no-underline">
               <Image src="/logo-base.svg" alt="Base" width={28} height={28} className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
               <span className="text-lg font-medium tracking-tight">Base</span>
             </a>
-            <a href="https://robinhood.com/us/en/chain/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-[#6B7C93] hover:text-[#0A2540] transition-all no-underline">
+            <a href="https://robinhood.com/us/en/chain/" target="_blank" rel="noopener noreferrer" className="group flex items-center gap-3 text-[#6B7C93] hover:text-[#111] transition-all no-underline">
               <Image src="/logo-robinhood.svg" alt="Robinhood" width={28} height={28} className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all" />
               <span className="text-lg font-medium tracking-tight">Robinhood</span>
             </a>
@@ -192,10 +192,10 @@ export default async function Home() {
       </section>
 
       {/* ── DARK SECTION: Security ─────────────────────────── */}
-      <section className="py-24 relative" style={{ background: "#0A2540" }}>
+      <section className="py-24 relative" style={{ background: "#000" }}>
         <div className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <div className="section-header">
-            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#635BFF] text-xs font-semibold tracking-widest uppercase">
+            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#2EE6A6] text-xs font-semibold tracking-widest uppercase">
               Security
             </span>
             <h2 className="text-[clamp(2rem,4vw,3.5rem)] font-bold tracking-tight text-white">
@@ -205,7 +205,7 @@ export default async function Home() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
             <div className="text-center p-6 rounded-2xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <h3 className="text-sm font-semibold text-[#635BFF] mb-3 uppercase tracking-wider font-[family-name:var(--font-plus-jakarta)]">
+              <h3 className="text-sm font-semibold text-[#2EE6A6] mb-3 uppercase tracking-wider font-[family-name:var(--font-plus-jakarta)]">
                 Non-Custodial
               </h3>
               <p className="text-sm text-white/60 font-[family-name:var(--font-plus-jakarta)] leading-relaxed">
@@ -214,7 +214,7 @@ export default async function Home() {
             </div>
 
             <div className="text-center p-6 rounded-2xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <h3 className="text-sm font-semibold text-[#635BFF] mb-3 uppercase tracking-wider font-[family-name:var(--font-plus-jakarta)]">
+              <h3 className="text-sm font-semibold text-[#2EE6A6] mb-3 uppercase tracking-wider font-[family-name:var(--font-plus-jakarta)]">
                 Guardian Protected
               </h3>
               <p className="text-sm text-white/60 font-[family-name:var(--font-plus-jakarta)] leading-relaxed">
@@ -223,7 +223,7 @@ export default async function Home() {
             </div>
 
             <div className="text-center p-6 rounded-2xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <h3 className="text-sm font-semibold text-[#635BFF] mb-3 uppercase tracking-wider font-[family-name:var(--font-plus-jakarta)]">
+              <h3 className="text-sm font-semibold text-[#2EE6A6] mb-3 uppercase tracking-wider font-[family-name:var(--font-plus-jakarta)]">
                 Onchain Governance
               </h3>
               <p className="text-sm text-white/60 font-[family-name:var(--font-plus-jakarta)] leading-relaxed">
@@ -232,7 +232,7 @@ export default async function Home() {
             </div>
 
             <div className="text-center p-6 rounded-2xl" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <h3 className="text-sm font-semibold text-[#635BFF] mb-3 uppercase tracking-wider font-[family-name:var(--font-plus-jakarta)]">
+              <h3 className="text-sm font-semibold text-[#2EE6A6] mb-3 uppercase tracking-wider font-[family-name:var(--font-plus-jakarta)]">
                 Open Source
               </h3>
               <p className="text-sm text-white/60 font-[family-name:var(--font-plus-jakarta)] leading-relaxed">
@@ -244,10 +244,10 @@ export default async function Home() {
       </section>
 
       {/* ── DARK SECTION: Features ──────────────────────────── */}
-      <section id="agents" className="py-32 relative" style={{ background: "#0A2540" }}>
+      <section id="agents" className="py-32 relative" style={{ background: "#000" }}>
         <div className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <div className="section-header">
-            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#635BFF] text-xs font-semibold tracking-widest uppercase">
+            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#2EE6A6] text-xs font-semibold tracking-widest uppercase">
               Features
             </span>
             <h2 className="text-[clamp(2rem,4vw,3.5rem)] font-bold tracking-tight text-white">
@@ -257,7 +257,7 @@ export default async function Home() {
 
           <FeatureCarousel>
             <div className="feature-block feature-block-accent font-[family-name:var(--font-plus-jakarta)]">
-              <h3 className="text-xs uppercase tracking-widest mb-8 text-[#635BFF] font-semibold">
+              <h3 className="text-xs uppercase tracking-widest mb-8 text-[#2EE6A6] font-semibold">
                 For Agents
               </h3>
               <ul className="feature-list font-[family-name:var(--font-inter)]">
@@ -350,13 +350,13 @@ export default async function Home() {
       </section>
 
       {/* ── LIGHT SECTION: Live Syndicates ─────────────────── */}
-      <section id="syndicates" className="py-32 relative" style={{ background: "#F6F9FC" }}>
+      <section id="syndicates" className="py-32 relative text-[#111]" style={{ background: "#F6F9FC" }}>
         <div className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <div className="section-header">
-            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#635BFF] text-xs font-semibold tracking-widest uppercase">
+            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#2EE6A6] text-xs font-semibold tracking-widest uppercase">
               Syndicates
             </span>
-            <h2 className="text-[clamp(2rem,4vw,3.5rem)] font-bold tracking-tight text-[#0A2540]">
+            <h2 className="text-[clamp(2rem,4vw,3.5rem)] font-bold tracking-tight text-[#111]">
               Live Syndicates
             </h2>
           </div>
@@ -379,7 +379,7 @@ export default async function Home() {
                     return (
                       <tr key={`${s.chainId}-${s.id}`} className="syndicate-row hover:bg-[#F6F9FC] transition-colors">
                         <td className="px-6 py-4 border-b border-[#E3E8EE]">
-                          <Link href={`/syndicate/${s.subdomain}`} className="syndicate-row-link text-[#0A2540] font-semibold hover:text-[#635BFF] no-underline">
+                          <Link href={`/syndicate/${s.subdomain}`} className="syndicate-row-link text-[#111] font-semibold hover:text-[#2EE6A6] no-underline">
                             {s.name}{" "}
                             <span className="text-[#A3ACB9] ml-2 font-normal">
                               {"// "}0x{s.vault.slice(2, 6)}...
@@ -394,11 +394,11 @@ export default async function Home() {
                             {badge.label}
                           </span>
                         </td>
-                        <td className="px-6 py-4 border-b border-[#E3E8EE] tabular-nums font-semibold text-[#0A2540]">{s.tvl}</td>
+                        <td className="px-6 py-4 border-b border-[#E3E8EE] tabular-nums font-semibold text-[#111]">{s.tvl}</td>
                         <td className="px-6 py-4 border-b border-[#E3E8EE] tabular-nums text-[#425466]">{s.agentCount}</td>
                         <td className="px-6 py-4 border-b border-[#E3E8EE]">
                           {s.status === "ACTIVE_STRATEGY" ? (
-                            <span className="inline-flex items-center gap-1.5 text-[#00D924] text-xs font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-[#00D924]" />ACTIVE STRATEGY</span>
+                            <span className="inline-flex items-center gap-1.5 text-[#2EE6A6] text-xs font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-[#2EE6A6]" />ACTIVE STRATEGY</span>
                           ) : s.status === "VOTING" ? (
                             <span className="inline-flex items-center gap-1.5 text-[#eab308] text-xs font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-[#eab308]" />VOTING</span>
                           ) : s.status === "IDLE" ? (
@@ -418,7 +418,7 @@ export default async function Home() {
               <p className="text-sm mb-2">No active syndicates yet.</p>
               <p className="text-xs">
                 Create the first one with{" "}
-                <code className="text-[#635BFF] font-semibold bg-[rgba(99,91,255,0.08)] px-1.5 py-0.5 rounded">
+                <code className="text-[#2EE6A6] font-semibold bg-[rgba(46,230,166,0.08)] px-1.5 py-0.5 rounded">
                   sherwood syndicate create
                 </code>
               </p>
@@ -428,7 +428,7 @@ export default async function Home() {
           <div className="mt-8 text-center font-[family-name:var(--font-plus-jakarta)]">
             <Link
               href="/leaderboard"
-              className="text-[#635BFF] text-sm font-semibold hover:underline no-underline"
+              className="text-[#2EE6A6] text-sm font-semibold hover:underline no-underline"
             >
               View Leaderboard &rarr;
             </Link>
@@ -437,13 +437,13 @@ export default async function Home() {
       </section>
 
       {/* ── LIGHT SECTION: Roadmap ─────────────────────────── */}
-      <section id="roadmap" className="py-32 relative bg-white">
+      <section id="roadmap" className="py-32 relative bg-white text-[#111]">
         <div className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <div className="section-header">
-            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#635BFF] text-xs font-semibold tracking-widest uppercase">
+            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#2EE6A6] text-xs font-semibold tracking-widest uppercase">
               Roadmap
             </span>
-            <h2 className="text-[clamp(2rem,4vw,3.5rem)] font-bold tracking-tight text-[#0A2540]">
+            <h2 className="text-[clamp(2rem,4vw,3.5rem)] font-bold tracking-tight text-[#111]">
               Roadmap
             </h2>
           </div>
@@ -453,15 +453,15 @@ export default async function Home() {
               {/* Phase 1 */}
               <div className="flex gap-6 md:gap-8">
                 <div className="flex flex-col items-center flex-shrink-0">
-                  <div className="w-12 h-12 rounded-full bg-[#635BFF] flex items-center justify-center font-[family-name:var(--font-plus-jakarta)] font-bold text-white text-sm shadow-[0_4px_16px_rgba(99,91,255,0.3)]">
+                  <div className="w-12 h-12 rounded-full bg-[#2EE6A6] flex items-center justify-center font-[family-name:var(--font-plus-jakarta)] font-bold text-white text-sm shadow-[0_4px_16px_rgba(46,230,166,0.3)]">
                     01
                   </div>
                   <div className="w-px bg-[#E3E8EE] h-16 mt-4"></div>
                 </div>
                 <div className="pt-2">
                   <div className="flex items-center gap-3 mb-4">
-                    <h3 className="text-xl font-semibold text-[#0A2540]">Phase 1 — Foundation</h3>
-                    <span className="px-3 py-1 bg-[#635BFF] text-white text-xs font-bold font-[family-name:var(--font-plus-jakarta)] rounded-full">
+                    <h3 className="text-xl font-semibold text-[#111]">Phase 1 — Foundation</h3>
+                    <span className="px-3 py-1 bg-[#2EE6A6] text-white text-xs font-bold font-[family-name:var(--font-plus-jakarta)] rounded-full">
                       NOW
                     </span>
                   </div>
@@ -485,7 +485,7 @@ export default async function Home() {
                   <div className="w-px bg-[#E3E8EE] h-16 mt-4"></div>
                 </div>
                 <div className="pt-2">
-                  <h3 className="text-xl font-semibold mb-4 text-[#0A2540]">Phase 2 — Growth</h3>
+                  <h3 className="text-xl font-semibold mb-4 text-[#111]">Phase 2 — Growth</h3>
                   <ul className="space-y-2 text-sm text-[#425466] font-[family-name:var(--font-plus-jakarta)]">
                     <li>• Strategy marketplace — publish & discover community strategies</li>
                     <li>• Syndicate templates — one-click deploy pre-configured vaults</li>
@@ -504,7 +504,7 @@ export default async function Home() {
                   <div className="w-px bg-[#E3E8EE] h-16 mt-4"></div>
                 </div>
                 <div className="pt-2">
-                  <h3 className="text-xl font-semibold mb-4 text-[#0A2540]">Phase 3 — Distribution</h3>
+                  <h3 className="text-xl font-semibold mb-4 text-[#111]">Phase 3 — Distribution</h3>
                   <ul className="space-y-2 text-sm text-[#425466] font-[family-name:var(--font-plus-jakarta)]">
                     <li>• Telegram mini-app — deposit, vote & browse without a CLI</li>
                     <li>• SDK & API for agent framework integrations</li>
@@ -521,7 +521,7 @@ export default async function Home() {
                   </div>
                 </div>
                 <div className="pt-2">
-                  <h3 className="text-xl font-semibold mb-4 text-[#0A2540]">Phase 4 — Intelligence</h3>
+                  <h3 className="text-xl font-semibold mb-4 text-[#111]">Phase 4 — Intelligence</h3>
                   <ul className="space-y-2 text-sm text-[#425466] font-[family-name:var(--font-plus-jakarta)]">
                     <li>• Strategy backtesting engine</li>
                     <li>• Risk scoring & DeFi insurance integrations</li>
@@ -534,20 +534,20 @@ export default async function Home() {
       </section>
 
       {/* ── LIGHT SECTION: FAQ ──────────────────────────────── */}
-      <section className="py-32 relative" style={{ background: "#F6F9FC" }}>
+      <section className="py-32 relative text-[#111]" style={{ background: "#F6F9FC" }}>
         <div className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <div className="section-header">
-            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#635BFF] text-xs font-semibold tracking-widest uppercase">
+            <span className="font-[family-name:var(--font-plus-jakarta)] text-[#2EE6A6] text-xs font-semibold tracking-widest uppercase">
               FAQ
             </span>
-            <h2 className="text-[clamp(2rem,4vw,3.5rem)] font-bold tracking-tight text-[#0A2540]">
+            <h2 className="text-[clamp(2rem,4vw,3.5rem)] font-bold tracking-tight text-[#111]">
               FAQ
             </h2>
           </div>
 
           <div className="grid gap-8 md:grid-cols-2 lg:gap-12 max-w-6xl mx-auto">
-            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(99,91,255,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
-              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#0A2540] hover:text-[#635BFF] transition-colors font-[family-name:var(--font-plus-jakarta)]">
+            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(46,230,166,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
+              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#111] hover:text-[#2EE6A6] transition-colors font-[family-name:var(--font-plus-jakarta)]">
                 What is Sherwood?
               </summary>
               <p className="text-sm text-[#425466] leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
@@ -555,8 +555,8 @@ export default async function Home() {
               </p>
             </details>
 
-            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(99,91,255,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
-              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#0A2540] hover:text-[#635BFF] transition-colors font-[family-name:var(--font-plus-jakarta)]">
+            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(46,230,166,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
+              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#111] hover:text-[#2EE6A6] transition-colors font-[family-name:var(--font-plus-jakarta)]">
                 How do I deposit?
               </summary>
               <p className="text-sm text-[#425466] leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
@@ -564,8 +564,8 @@ export default async function Home() {
               </p>
             </details>
 
-            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(99,91,255,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
-              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#0A2540] hover:text-[#635BFF] transition-colors font-[family-name:var(--font-plus-jakarta)]">
+            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(46,230,166,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
+              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#111] hover:text-[#2EE6A6] transition-colors font-[family-name:var(--font-plus-jakarta)]">
                 What happens if an agent makes a bad trade?
               </summary>
               <p className="text-sm text-[#425466] leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
@@ -573,8 +573,8 @@ export default async function Home() {
               </p>
             </details>
 
-            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(99,91,255,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
-              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#0A2540] hover:text-[#635BFF] transition-colors font-[family-name:var(--font-plus-jakarta)]">
+            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(46,230,166,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
+              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#111] hover:text-[#2EE6A6] transition-colors font-[family-name:var(--font-plus-jakarta)]">
                 What are the fees?
               </summary>
               <p className="text-sm text-[#425466] leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
@@ -582,8 +582,8 @@ export default async function Home() {
               </p>
             </details>
 
-            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(99,91,255,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
-              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#0A2540] hover:text-[#635BFF] transition-colors font-[family-name:var(--font-plus-jakarta)]">
+            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(46,230,166,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
+              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#111] hover:text-[#2EE6A6] transition-colors font-[family-name:var(--font-plus-jakarta)]">
                 Is the code audited?
               </summary>
               <p className="text-sm text-[#425466] leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
@@ -591,8 +591,8 @@ export default async function Home() {
               </p>
             </details>
 
-            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(99,91,255,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
-              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#0A2540] hover:text-[#635BFF] transition-colors font-[family-name:var(--font-plus-jakarta)]">
+            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(46,230,166,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
+              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#111] hover:text-[#2EE6A6] transition-colors font-[family-name:var(--font-plus-jakarta)]">
                 What chains are supported?
               </summary>
               <p className="text-sm text-[#425466] leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
@@ -600,8 +600,8 @@ export default async function Home() {
               </p>
             </details>
 
-            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(99,91,255,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
-              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#0A2540] hover:text-[#635BFF] transition-colors font-[family-name:var(--font-plus-jakarta)]">
+            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(46,230,166,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
+              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#111] hover:text-[#2EE6A6] transition-colors font-[family-name:var(--font-plus-jakarta)]">
                 How do I run an agent?
               </summary>
               <p className="text-sm text-[#425466] leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
@@ -609,8 +609,8 @@ export default async function Home() {
               </p>
             </details>
 
-            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(99,91,255,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
-              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#0A2540] hover:text-[#635BFF] transition-colors font-[family-name:var(--font-plus-jakarta)]">
+            <details className="group bg-white p-6 rounded-2xl border border-[#E3E8EE] hover:border-[rgba(46,230,166,0.2)] transition-all" style={{ boxShadow: "0 2px 8px rgba(50,50,93,0.06)" }}>
+              <summary className="cursor-pointer text-lg font-semibold mb-4 text-[#111] hover:text-[#2EE6A6] transition-colors font-[family-name:var(--font-plus-jakarta)]">
                 What is $WOOD?
               </summary>
               <p className="text-sm text-[#425466] leading-relaxed font-[family-name:var(--font-plus-jakarta)] pl-4">
@@ -622,9 +622,9 @@ export default async function Home() {
       </section>
 
       {/* ── DARK SECTION: Closing CTA ──────────────────────── */}
-      <section className="text-center py-40 relative" style={{ background: "#0A2540" }}>
+      <section className="text-center py-40 relative" style={{ background: "#000" }}>
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] opacity-30" style={{ background: "radial-gradient(ellipse at center, rgba(99,91,255,0.3) 0%, transparent 60%)" }} />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] opacity-30" style={{ background: "radial-gradient(ellipse at center, rgba(46,230,166,0.3) 0%, transparent 60%)" }} />
         </div>
         <div className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px] relative z-10">
           <h2 className="text-[clamp(3rem,6vw,5rem)] font-bold tracking-tight mb-8 text-white">

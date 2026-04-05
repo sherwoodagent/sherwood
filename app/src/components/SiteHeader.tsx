@@ -50,7 +50,7 @@ export default function SiteHeader() {
         {/* Syndicates button — always visible */}
         <Link
           href="/leaderboard"
-          className="!bg-[#635BFF] !text-white px-5 py-2.5 text-sm font-semibold no-underline hover:!bg-[#7A73FF] transition-all rounded-full shadow-[0_2px_8px_rgba(99,91,255,0.3)]"
+          className="!bg-[#2EE6A6] !text-white px-5 py-2.5 text-sm font-semibold no-underline hover:!bg-[#2EE6A6] transition-all rounded-full shadow-[0_2px_8px_rgba(46,230,166,0.3)]"
         >
           Syndicates
         </Link>

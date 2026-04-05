@@ -69,7 +69,7 @@ export default async function SyndicateDetailPage({
         fogDensity={0.08}
       />
 
-      <div className="layout layout-normal" style={{ background: "#0A2540", minHeight: "100vh" }}>
+      <div className="layout layout-normal" style={{ background: "#000", minHeight: "100vh" }}>
         <main className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <SiteHeader />
 

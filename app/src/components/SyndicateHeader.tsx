@@ -47,7 +47,7 @@ function InlineCopy({ value }: { value: string }) {
       style={{
         background: "none",
         border: "none",
-        color: copied ? "#635BFF" : "rgba(255,255,255,0.4)",
+        color: copied ? "#2EE6A6" : "rgba(255,255,255,0.4)",
         cursor: "pointer",
         padding: "2px",
         fontSize: "13px",
@@ -110,7 +110,7 @@ export default function SyndicateHeader({
         className="font-[family-name:var(--font-plus-jakarta)] text-sm flex flex-wrap items-center gap-x-6 gap-y-2"
         style={{ color: "rgba(255,255,255,0.4)" }}
       >
-        <span style={{ color: "#635BFF", fontWeight: 600 }}>
+        <span style={{ color: "#2EE6A6", fontWeight: 600 }}>
           {subdomain}.sherwoodagent.eth
         </span>
         <span className="flex items-center gap-1">
