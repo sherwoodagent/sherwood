@@ -169,11 +169,11 @@ interface IVotingEscrow {
 
 ```solidity
 interface IFeeDistributor {
-    /// @notice Deposit protocol fees for distribution in the current epoch
-    /// @param token The fee token to deposit (auto-converted to USDC if not already)
-    /// @param amount The fee amount
-    /// @dev Swaps non-USDC tokens to USDC via Aerodrome SwapRouter before accounting
-    function depositFees(address token, uint256 amount) external;
+    /// @notice Deposit USDC protocol fees for distribution in the current epoch
+    /// @param amount The USDC amount to deposit
+    /// @dev Only accepts USDC. Non-USDC fees must be converted off-chain before deposit.
+    ///      Callable by multisig or authorized keeper after off-chain conversion.
+    function depositFees(uint256 amount) external;
 
     /// @notice Claim earned USDC fees for a veNFT across one or more epochs
     /// @param tokenId The veNFT to claim for
@@ -212,7 +212,20 @@ function _calculateReward(uint256 tokenId, uint256 epoch) internal view returns 
 
 **Claim window:** Fees are claimable for 52 epochs (1 year). Unclaimed fees after expiry are returned to the protocol treasury.
 
-**Single-token settlement (USDC).** All incoming protocol fees are auto-converted to USDC at `depositFees()` time via the Aerodrome SwapRouter on Base (`0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5`). FeeDistributor is a single-token contract — simpler interface, simpler audit, simpler claim UX. veWOOD holders always claim in USDC regardless of which vault asset generated the fees. If a syndicate settles in WETH, the governor's `_distributeFees()` call routes the protocol fee share through FeeDistributor's `depositFees()`, which swaps to USDC before entering epoch accounting.
+**Single-token settlement (USDC).** FeeDistributor is a pure USDC-in/USDC-out contract — it accepts only USDC deposits, with no on-chain swap logic. This eliminates MEV/sandwich attack risk that would exist if the contract swapped tokens on-chain via a DEX router.
+
+**Fee conversion flow (off-chain, MEV-free):**
+
+```
+Strategy settles → SyndicateGovernor._distributeFees()
+  → Protocol fee share sent to FeeStaging multisig address (in original token: WETH, USDC, etc.)
+  → Multisig converts non-USDC tokens to USDC off-chain via CoW Protocol (batch auction, MEV-resistant)
+  → Multisig calls FeeDistributor.depositFees(usdcAmount) with the converted USDC
+```
+
+The conversion is an **operational step, not a smart contract concern.** This is simpler and safer — FeeDistributor doesn't need swap logic, router approvals, or slippage handling. The multisig (or an authorized keeper) handles conversion at their discretion using CoW's MEV-protected batch auctions.
+
+veWOOD holders always claim in USDC regardless of which vault asset generated the fees.
 
 ### 3. Bootstrapping Incentives (BootstrapRewards.sol)
 
@@ -411,9 +424,14 @@ Gross Profit (from strategy settlement)
 ### 2. Fee Distribution (new — replaces emissions)
 
 ```
+SyndicateGovernor._distributeFees()
+  → Protocol fee share → FeeStaging multisig (in original vault asset)
+  → Off-chain conversion to USDC via CoW Protocol (MEV-free)
+  → FeeDistributor.depositFees(usdcAmount)
+
 FeeDistributor (each epoch)
-  ├─ 60% → veWOOD holders (claim in vault asset — USDC/WETH)
-  ├─ 20% → BuybackEngine (CoW TWAP → veWOOD)
+  ├─ 60% → veWOOD holders (claim in USDC)
+  ├─ 20% → BuybackEngine (CoW TWAP → WOOD → veWOOD)
   └─ 20% → Protocol treasury multisig
 ```
 
@@ -509,7 +527,7 @@ All fund allocations are managed by the protocol multisig (3-of-5). No token hol
 |----------|-------------|-----------------|
 | `WoodToken.sol` | ERC-20 (LayerZero OFT), 500M hard cap. **No mint function** — all tokens minted at genesis in constructor. | LZ OFT, OpenZeppelin ERC20 |
 | `VotingEscrow.sol` | Lock WOOD → veWOOD NFT. Time-weighted fee share: linear decay, auto-max-lock, 4wk-1yr range. **Not used for governance** — purely economic. | ERC721, ReentrancyGuard |
-| `FeeDistributor.sol` | Collects protocol fees from strategy settlement. Distributes to veWOOD holders (60%), buyback (20%), treasury (20%). Claims in vault asset. | VotingEscrow, BuybackEngine |
+| `FeeDistributor.sol` | USDC-only fee distribution. Receives USDC from multisig after off-chain conversion. Distributes 60% to veWOOD holders, 20% to buyback, 20% to treasury. No swap logic — MEV-free by design. | VotingEscrow, BuybackEngine, USDC |
 | `BootstrapRewards.sol` | Non-transferable WOOD incentives for months 1-12. Steep decay schedule. Converts to transferable after 6 months. Supports lock-into-veWOOD before unlock. | WoodToken, VotingEscrow |
 | `BuybackEngine.sol` | CoW Protocol TWAP buyback. Sells fee revenue for WOOD, locks as protocol veWOOD. | CoW Protocol, VotingEscrow, Aerodrome (price reference) |
 
@@ -579,9 +597,10 @@ The epoch lifecycle is significantly simplified from v3. No gauge voting, no emi
 ```
 Thursday 00:00 UTC — Epoch N starts
 │
+├── Multisig deposits converted USDC into FeeDistributor (if not already done)
+│
 ├── FeeDistributor.distributeEpoch(N-1)
-│   ├── Collect all protocol fees deposited during epoch N-1
-│   ├── Split: 60% veWOOD / 20% buyback / 20% treasury
+│   ├── Split deposited USDC: 60% veWOOD / 20% buyback / 20% treasury
 │   ├── Transfer treasury share to multisig
 │   └── Queue buyback share for BuybackEngine
 │
@@ -612,7 +631,7 @@ Wednesday 23:59 UTC — Epoch N ends
 
 4. **Oracle manipulation:** WOOD/WETH pool price can be manipulated via flash loans. **Never use spot pool price on-chain.** BuybackEngine uses a 30-minute TWAP via Aerodrome Slipstream's `observe()`.
 
-5. **Fee token handling:** FeeDistributor auto-converts all incoming fees to USDC via Aerodrome SwapRouter. The swap must use SafeERC20 for approvals/transfers. Slippage protection via TWAP-based minimum output. If a fee token has no liquid route to USDC on Aerodrome, the deposit reverts — multisig must add a route or handle manually.
+5. **Fee token handling:** FeeDistributor accepts only USDC — no on-chain swap logic, no router approvals, no MEV/sandwich risk. Non-USDC fee conversion happens off-chain via CoW Protocol (MEV-protected batch auctions) before deposit. FeeDistributor uses SafeERC20 for USDC transfers. Access control: `depositFees()` callable only by multisig or authorized keeper to prevent griefing.
 
 6. **BuybackEngine MEV protection:** CoW TWAP orders are MEV-resistant by design (batch auction settlement). The `minWoodOut` parameter provides additional slippage protection.
 
@@ -806,7 +825,7 @@ Reduced from 5 phases (v3) to 2 phases. Fewer contracts = faster deployment.
 
 1. **WOOD token launch mechanism:** Same options as v3 (Fjord Foundry LBP recommended, direct Aerodrome pool as fallback). Decision: TBD.
 
-2. ~~**Multi-token fee distribution UX:**~~ **Resolved** — auto-convert all fees to USDC at `depositFees()` time via Aerodrome SwapRouter. Single-token contract.
+2. ~~**Multi-token fee distribution UX:**~~ **Resolved** — FeeDistributor is USDC-only. Non-USDC fees converted off-chain via CoW Protocol (MEV-free) before deposit. No on-chain swap logic.
 
 3. **BootstrapRewards lock-while-non-transferable:** Can non-transferable bootstrapping WOOD be locked into veWOOD before the 6-month unlock? **Recommendation:** Yes — `lockIntoVeWOOD()` creates a veWOOD position directly. This is desirable: fee sharing alignment without sell pressure.
 
