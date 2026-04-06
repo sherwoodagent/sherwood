@@ -1400,6 +1400,41 @@ export const PORTFOLIO_STRATEGY_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "bytes[]" }],
   },
+  // Events
+  {
+    name: "WeightsUpdated",
+    type: "event",
+    inputs: [
+      { name: "tokens", type: "address[]", indexed: false },
+      { name: "oldWeights", type: "uint256[]", indexed: false },
+      { name: "newWeights", type: "uint256[]", indexed: false },
+    ],
+  },
+  {
+    name: "Rebalanced",
+    type: "event",
+    inputs: [
+      { name: "tokens", type: "address[]", indexed: false },
+      { name: "oldWeights", type: "uint256[]", indexed: false },
+      { name: "newWeights", type: "uint256[]", indexed: false },
+      { name: "oldBalances", type: "uint256[]", indexed: false },
+      { name: "newBalances", type: "uint256[]", indexed: false },
+      { name: "totalAssetValue", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    name: "RebalancedDelta",
+    type: "event",
+    inputs: [
+      { name: "tokens", type: "address[]", indexed: false },
+      { name: "oldWeights", type: "uint256[]", indexed: false },
+      { name: "newWeights", type: "uint256[]", indexed: false },
+      { name: "oldBalances", type: "uint256[]", indexed: false },
+      { name: "newBalances", type: "uint256[]", indexed: false },
+      { name: "totalAssetValue", type: "uint256", indexed: false },
+      { name: "swapsExecuted", type: "uint256", indexed: false },
+    ],
+  },
 ] as const;
 
 // ── Synthra QuoterV2 (Robinhood testnet — different ABI from Uniswap) ──

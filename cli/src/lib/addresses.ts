@@ -253,7 +253,7 @@ const ROBINHOOD_TESTNET_STRATEGY_TEMPLATES = {
   VENICE_INFERENCE: ZERO as Address,
   WSTETH_MOONWELL: ZERO as Address,
   MAMO_YIELD: ZERO as Address,
-  PORTFOLIO: "0x5C3F9F1498f86Ac148dF95bAA69C6c1EB1a5bF5F" as Address,
+  PORTFOLIO: "0xAe981882923E0C76A7F10E7cAa3782023c0abd9B" as Address,
 } as const;
 
 // ── EAS (Ethereum Attestation Service) — Base predeploys ──

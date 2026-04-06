@@ -88,8 +88,24 @@ contract PortfolioStrategy is BaseStrategy {
     bool private _rebalancing;
 
     // ── Events ──
-    event Rebalanced(uint256 totalAssetValue);
-    event RebalancedDelta(uint256 totalAssetValue, uint256 swapsExecuted);
+    event WeightsUpdated(address[] tokens, uint256[] oldWeights, uint256[] newWeights);
+    event Rebalanced(
+        address[] tokens,
+        uint256[] oldWeights,
+        uint256[] newWeights,
+        uint256[] oldBalances,
+        uint256[] newBalances,
+        uint256 totalAssetValue
+    );
+    event RebalancedDelta(
+        address[] tokens,
+        uint256[] oldWeights,
+        uint256[] newWeights,
+        uint256[] oldBalances,
+        uint256[] newBalances,
+        uint256 totalAssetValue,
+        uint256 swapsExecuted
+    );
 
     /// @inheritdoc IStrategy
     function name() external pure returns (string memory) {
@@ -188,11 +204,16 @@ contract PortfolioStrategy is BaseStrategy {
         if (newWeightsBps.length > 0) {
             if (newWeightsBps.length != _allocations.length) revert LengthMismatch();
             uint256 weightSum;
+            uint256[] memory oldWeights = new uint256[](newWeightsBps.length);
+            address[] memory tokens = new address[](newWeightsBps.length);
             for (uint256 i; i < newWeightsBps.length; ++i) {
+                tokens[i] = _allocations[i].token;
+                oldWeights[i] = _allocations[i].targetWeightBps;
                 weightSum += newWeightsBps[i];
                 _allocations[i].targetWeightBps = newWeightsBps[i];
             }
             if (weightSum != BPS_DENOMINATOR) revert InvalidWeights();
+            emit WeightsUpdated(tokens, oldWeights, newWeightsBps);
         }
 
         if (newMaxSlippageBps > 0) {
@@ -216,8 +237,21 @@ contract PortfolioStrategy is BaseStrategy {
         if (_rebalancing) revert RebalancingInProgress();
         _rebalancing = true;
 
-        // 1. Sell all positions back to asset
         uint256 len = _allocations.length;
+
+        // Snapshot before state for event
+        address[] memory tokens = new address[](len);
+        uint256[] memory oldWeights = new uint256[](len);
+        uint256[] memory newWeights = new uint256[](len);
+        uint256[] memory oldBalances = new uint256[](len);
+        for (uint256 i; i < len; ++i) {
+            tokens[i] = _allocations[i].token;
+            oldWeights[i] = _allocations[i].targetWeightBps;
+            newWeights[i] = _allocations[i].targetWeightBps;
+            oldBalances[i] = IERC20(_allocations[i].token).balanceOf(address(this));
+        }
+
+        // 1. Sell all positions back to asset
         for (uint256 i; i < len; ++i) {
             TokenAllocation storage alloc = _allocations[i];
             uint256 bal = IERC20(alloc.token).balanceOf(address(this));
@@ -244,8 +278,14 @@ contract PortfolioStrategy is BaseStrategy {
             alloc.investedAmount = allocation;
         }
 
+        // Snapshot after balances for event
+        uint256[] memory newBalances = new uint256[](len);
+        for (uint256 i; i < len; ++i) {
+            newBalances[i] = IERC20(_allocations[i].token).balanceOf(address(this));
+        }
+
         _rebalancing = false;
-        emit Rebalanced(assetBalance);
+        emit Rebalanced(tokens, oldWeights, newWeights, oldBalances, newBalances, assetBalance);
     }
 
     /// @notice Delta-based rebalance using Chainlink Data Streams prices.
@@ -259,6 +299,18 @@ contract PortfolioStrategy is BaseStrategy {
         uint256 len = _allocations.length;
         if (priceReports.length != len) revert LengthMismatch();
 
+        // Snapshot before state for event
+        address[] memory tokens = new address[](len);
+        uint256[] memory oldWeights = new uint256[](len);
+        uint256[] memory newWeights = new uint256[](len);
+        uint256[] memory oldBalances = new uint256[](len);
+        for (uint256 i; i < len; ++i) {
+            tokens[i] = _allocations[i].token;
+            oldWeights[i] = _allocations[i].targetWeightBps;
+            newWeights[i] = _allocations[i].targetWeightBps;
+            oldBalances[i] = IERC20(_allocations[i].token).balanceOf(address(this));
+        }
+
         // 1. Verify prices and compute current portfolio value
         uint256[] memory prices = new uint256[](len);
         uint256[] memory currentValues = new uint256[](len);
@@ -266,8 +318,7 @@ contract PortfolioStrategy is BaseStrategy {
 
         for (uint256 i; i < len; ++i) {
             prices[i] = _verifyPrice(priceReports[i]);
-            uint256 bal = IERC20(_allocations[i].token).balanceOf(address(this));
-            currentValues[i] = (bal * prices[i]) / PRICE_PRECISION;
+            currentValues[i] = (oldBalances[i] * prices[i]) / PRICE_PRECISION;
             totalValue += currentValues[i];
         }
 
@@ -313,13 +364,15 @@ contract PortfolioStrategy is BaseStrategy {
             }
         }
 
-        // 4. Update stored token amounts
+        // 4. Update stored token amounts and snapshot after balances
+        uint256[] memory newBalances = new uint256[](len);
         for (uint256 i; i < len; ++i) {
             _allocations[i].tokenAmount = IERC20(_allocations[i].token).balanceOf(address(this));
+            newBalances[i] = _allocations[i].tokenAmount;
         }
 
         _rebalancing = false;
-        emit RebalancedDelta(totalValue, swapsExecuted);
+        emit RebalancedDelta(tokens, oldWeights, newWeights, oldBalances, newBalances, totalValue, swapsExecuted);
     }
 
     // ── Chainlink price verification ──
