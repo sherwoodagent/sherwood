@@ -1318,3 +1318,86 @@ export const BASE_STRATEGY_ABI = [
     outputs: [{ name: "", type: "uint8" }],
   },
 ] as const;
+
+// ── PortfolioStrategy (extends BaseStrategy with rebalancing + views) ──
+
+export const PORTFOLIO_STRATEGY_ABI = [
+  // Inherited from BaseStrategy
+  ...BASE_STRATEGY_ABI,
+  // Rebalancing
+  {
+    name: "rebalance",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: "rebalanceDelta",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "priceReports", type: "bytes[]" }],
+    outputs: [],
+  },
+  // View functions
+  {
+    name: "getAllocations",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "token", type: "address" },
+          { name: "targetWeightBps", type: "uint256" },
+          { name: "tokenAmount", type: "uint256" },
+          { name: "investedAmount", type: "uint256" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "allocationCount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "asset",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "totalAmount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "maxSlippageBps",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "swapAdapter",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "getSwapExtraData",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes[]" }],
+  },
+] as const;

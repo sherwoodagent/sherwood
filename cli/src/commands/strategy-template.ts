@@ -1,15 +1,17 @@
 /**
- * Strategy template commands — clone, build calls, propose.
+ * Strategy template commands — clone, build calls, propose, rebalance, status.
  *
  * Replaces the old strategy registry commands with template-based workflow:
- *   sherwood strategy list     — show available templates
- *   sherwood strategy clone    — clone + initialize a template
- *   sherwood strategy propose  — clone + init + build calls + submit proposal (all-in-one)
+ *   sherwood strategy list      — show available templates
+ *   sherwood strategy clone     — clone + initialize a template
+ *   sherwood strategy propose   — clone + init + build calls + submit proposal (all-in-one)
+ *   sherwood strategy status    — read portfolio allocations + state
+ *   sherwood strategy rebalance — sell-all/re-buy at current target weights (Portfolio only)
  */
 
 import type { Command } from "commander";
 import type { Address, Hex } from "viem";
-import { parseUnits, isAddress, erc20Abi } from "viem";
+import { parseUnits, formatUnits, isAddress, erc20Abi, encodeAbiParameters } from "viem";
 import chalk from "chalk";
 import ora from "ora";
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -18,7 +20,7 @@ import { resolve } from "node:path";
 import { getPublicClient, getAccount, writeContractWithRetry, waitForReceipt, formatContractError } from "../lib/client.js";
 import { getChain, getExplorerUrl, getNetwork } from "../lib/network.js";
 import { TOKENS, MOONWELL, VENICE, AERODROME, UNISWAP, STRATEGY_TEMPLATES, SYNTHRA, CHAINLINK } from "../lib/addresses.js";
-import { BASE_STRATEGY_ABI } from "../lib/abis.js";
+import { BASE_STRATEGY_ABI, PORTFOLIO_STRATEGY_ABI } from "../lib/abis.js";
 import { cloneTemplate } from "../lib/clone.js";
 import type { BatchCall } from "../lib/batch.js";
 import { formatBatch } from "../lib/batch.js";
@@ -907,5 +909,331 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
       }
 
       console.log();
+    });
+
+  // ── strategy status ──
+
+  strategy
+    .command("status")
+    .description("Show portfolio strategy status — allocations, balances, drift (Portfolio only)")
+    .argument("<clone>", "Strategy clone address")
+    .action(async (cloneArg: string) => {
+      if (!isAddress(cloneArg)) {
+        console.error(chalk.red("Invalid clone address"));
+        process.exit(1);
+      }
+      const clone = cloneArg as Address;
+      const publicClient = getPublicClient();
+      const network = getNetwork();
+
+      const spinner = ora("Reading strategy state...").start();
+      try {
+        // Read strategy state
+        const [stateRaw, vault, proposer, assetAddr, totalAmount, maxSlippage, allocations] = await Promise.all([
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "state" }),
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "vault" }) as Promise<Address>,
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "proposer" }) as Promise<Address>,
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "asset" }) as Promise<Address>,
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "totalAmount" }) as Promise<bigint>,
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "maxSlippageBps" }) as Promise<bigint>,
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "getAllocations" }) as Promise<readonly { token: Address; targetWeightBps: bigint; tokenAmount: bigint; investedAmount: bigint }[]>,
+        ]);
+
+        const stateNames = ["Pending", "Executed", "Settled"];
+        const stateStr = stateNames[Number(stateRaw)] || `Unknown(${stateRaw})`;
+
+        // Read asset decimals & symbol
+        const [assetDecimals, assetSymbol] = await Promise.all([
+          publicClient.readContract({ address: assetAddr, abi: erc20Abi, functionName: "decimals" }),
+          publicClient.readContract({ address: assetAddr, abi: erc20Abi, functionName: "symbol" }),
+        ]);
+
+        // Read current token balances & symbols in parallel
+        const tokenReads = allocations.map((a) => Promise.all([
+          publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "balanceOf", args: [clone] }),
+          publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "symbol" }),
+          publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "decimals" }),
+        ]));
+        const tokenData = await Promise.all(tokenReads);
+
+        // Also read asset balance held by strategy
+        const assetBalance = await publicClient.readContract({
+          address: assetAddr,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [clone],
+        });
+
+        spinner.succeed("Strategy state loaded");
+
+        // Display
+        const stateColor = stateStr === "Executed" ? chalk.green : stateStr === "Settled" ? chalk.blue : chalk.yellow;
+
+        console.log();
+        console.log(chalk.bold("Portfolio Strategy Status"));
+        console.log(chalk.dim("─".repeat(60)));
+        console.log(`  Clone:       ${chalk.cyan(clone)}`);
+        console.log(`  Vault:       ${chalk.cyan(vault)}`);
+        console.log(`  Proposer:    ${chalk.cyan(proposer)}`);
+        console.log(`  State:       ${stateColor(stateStr)}`);
+        console.log(`  Asset:       ${assetSymbol} (${assetAddr})`);
+        console.log(`  Deployed:    ${formatUnits(totalAmount, assetDecimals)} ${assetSymbol}`);
+        console.log(`  Max Slip:    ${Number(maxSlippage) / 100}%`);
+        console.log(`  Asset held:  ${formatUnits(assetBalance as bigint, assetDecimals)} ${assetSymbol}`);
+
+        console.log();
+        console.log(chalk.bold("Allocations"));
+        console.log(chalk.dim("─".repeat(60)));
+        console.log(
+          chalk.dim("  Token".padEnd(12)) +
+          chalk.dim("Weight".padEnd(10)) +
+          chalk.dim("Invested".padEnd(18)) +
+          chalk.dim("Balance".padEnd(18)) +
+          chalk.dim("Address"),
+        );
+
+        let totalInvested = 0n;
+
+        for (let i = 0; i < allocations.length; i++) {
+          const alloc = allocations[i];
+          const [balance, symbol, decimals] = tokenData[i];
+          const weightPct = (Number(alloc.targetWeightBps) / 100).toFixed(1) + "%";
+          const investedStr = formatUnits(alloc.investedAmount, assetDecimals);
+          const balanceStr = formatUnits(balance as bigint, decimals);
+
+          totalInvested += alloc.investedAmount;
+
+          console.log(
+            `  ${chalk.bold((symbol as string).padEnd(10))}` +
+            `${weightPct.padEnd(10)}` +
+            `${investedStr.padEnd(18)}` +
+            `${balanceStr.padEnd(18)}` +
+            `${chalk.dim(alloc.token)}`,
+          );
+        }
+
+        console.log(chalk.dim("─".repeat(60)));
+        console.log(`  Total invested: ${formatUnits(totalInvested, assetDecimals)} ${assetSymbol}`);
+
+        if (stateStr === "Executed") {
+          console.log();
+          console.log(chalk.dim("Rebalance:  sherwood strategy rebalance " + clone));
+          console.log(chalk.dim("With new weights: sherwood strategy rebalance " + clone + " --new-weights 2500,2500,2000,1500,1500"));
+        }
+
+        console.log();
+      } catch (err) {
+        spinner.fail("Failed to read strategy state");
+        console.error(chalk.red(formatContractError(err)));
+        process.exit(1);
+      }
+    });
+
+  // ── strategy rebalance ──
+
+  strategy
+    .command("rebalance")
+    .description("Rebalance a portfolio strategy — sell all positions, re-buy at target weights (Portfolio only)")
+    .argument("<clone>", "Strategy clone address")
+    .option("--new-weights <list>", "Comma-separated new weights in bps (must sum to 10000). Updates weights before rebalancing.")
+    .option("--max-slippage <bps>", "New max slippage bps (used with --new-weights)")
+    .option("--dry-run", "Show what would happen without executing")
+    .action(async (cloneArg: string, opts) => {
+      if (!isAddress(cloneArg)) {
+        console.error(chalk.red("Invalid clone address"));
+        process.exit(1);
+      }
+      const clone = cloneArg as Address;
+      const publicClient = getPublicClient();
+      const account = getAccount();
+      const chain = getChain();
+
+      // 1. Verify strategy state
+      const verifySpinner = ora("Verifying strategy state...").start();
+      try {
+        const [stateRaw, proposer, assetAddr, allocations] = await Promise.all([
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "state" }),
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "proposer" }) as Promise<Address>,
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "asset" }) as Promise<Address>,
+          publicClient.readContract({ address: clone, abi: PORTFOLIO_STRATEGY_ABI, functionName: "getAllocations" }) as Promise<readonly { token: Address; targetWeightBps: bigint; tokenAmount: bigint; investedAmount: bigint }[]>,
+        ]);
+
+        // Check state
+        if (Number(stateRaw) !== 1) { // State.Executed = 1
+          const stateNames = ["Pending", "Executed", "Settled"];
+          verifySpinner.fail(`Strategy is ${stateNames[Number(stateRaw)] || "Unknown"}, must be Executed to rebalance`);
+          process.exit(1);
+        }
+
+        // Check proposer
+        if (proposer.toLowerCase() !== account.address.toLowerCase()) {
+          verifySpinner.fail(`Only the proposer (${proposer}) can rebalance. Your wallet: ${account.address}`);
+          process.exit(1);
+        }
+
+        const [assetDecimals, assetSymbol] = await Promise.all([
+          publicClient.readContract({ address: assetAddr, abi: erc20Abi, functionName: "decimals" }),
+          publicClient.readContract({ address: assetAddr, abi: erc20Abi, functionName: "symbol" }),
+        ]);
+
+        // Read current balances
+        const tokenReads = allocations.map((a) => Promise.all([
+          publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "balanceOf", args: [clone] }),
+          publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "symbol" }),
+          publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "decimals" }),
+        ]));
+        const tokenData = await Promise.all(tokenReads);
+
+        verifySpinner.succeed("Strategy is Executed — ready to rebalance");
+
+        // Show current allocations
+        console.log();
+        console.log(chalk.bold("Current Allocations"));
+        console.log(chalk.dim("─".repeat(50)));
+        for (let i = 0; i < allocations.length; i++) {
+          const alloc = allocations[i];
+          const [balance, symbol, decimals] = tokenData[i];
+          const weightPct = (Number(alloc.targetWeightBps) / 100).toFixed(1) + "%";
+          console.log(
+            `  ${chalk.bold((symbol as string).padEnd(8))} ` +
+            `${weightPct.padEnd(8)} ` +
+            `bal: ${formatUnits(balance as bigint, decimals)}`,
+          );
+        }
+
+        // Parse new weights if provided
+        let newWeightsBps: number[] | undefined;
+        if (opts.newWeights) {
+          newWeightsBps = (opts.newWeights as string).split(",").map((w) => Number(w.trim()));
+          if (newWeightsBps.length !== allocations.length) {
+            console.error(chalk.red(`--new-weights must have ${allocations.length} values (one per token)`));
+            process.exit(1);
+          }
+          const weightSum = newWeightsBps.reduce((a, b) => a + b, 0);
+          if (weightSum !== 10000) {
+            console.error(chalk.red(`Weights must sum to 10000, got ${weightSum}`));
+            process.exit(1);
+          }
+
+          console.log();
+          console.log(chalk.bold("New Target Weights"));
+          console.log(chalk.dim("─".repeat(50)));
+          for (let i = 0; i < allocations.length; i++) {
+            const [, symbol] = tokenData[i];
+            const oldPct = (Number(allocations[i].targetWeightBps) / 100).toFixed(1);
+            const newPct = (newWeightsBps[i] / 100).toFixed(1);
+            const arrow = oldPct !== newPct ? chalk.yellow("→") : chalk.dim("→");
+            console.log(`  ${chalk.bold((symbol as string).padEnd(8))} ${oldPct}% ${arrow} ${newPct}%`);
+          }
+        }
+
+        if (opts.dryRun) {
+          console.log();
+          console.log(chalk.yellow("Dry run — no transactions sent."));
+          console.log(chalk.dim("The rebalance would:"));
+          console.log(chalk.dim("  1. Sell all current token positions back to " + assetSymbol));
+          console.log(chalk.dim("  2. Re-buy at " + (newWeightsBps ? "new" : "current") + " target weights"));
+          console.log();
+          return;
+        }
+
+        // 2. Update weights first (if specified)
+        if (newWeightsBps) {
+          const maxSlip = Number((opts.maxSlippage as string) || "0");
+          const swapData = await publicClient.readContract({
+            address: clone,
+            abi: PORTFOLIO_STRATEGY_ABI,
+            functionName: "getSwapExtraData",
+          }) as Hex[];
+
+          const updateSpinner = ora("Updating target weights...").start();
+          try {
+            const innerData = encodeAbiParameters(
+              [{ type: "uint256[]" }, { type: "uint256" }, { type: "bytes[]" }],
+              [newWeightsBps.map((w: number) => BigInt(w)), BigInt(maxSlip), swapData],
+            );
+
+            const updateHash = await writeContractWithRetry({
+              account,
+              chain,
+              address: clone,
+              abi: PORTFOLIO_STRATEGY_ABI,
+              functionName: "updateParams",
+              args: [innerData],
+            });
+
+            const receipt = await waitForReceipt(updateHash);
+            if (receipt.status === "reverted") throw new Error("updateParams reverted");
+            updateSpinner.succeed("Target weights updated");
+            console.log(chalk.dim(`  Tx: ${getExplorerUrl(updateHash)}`));
+          } catch (err) {
+            updateSpinner.fail("Failed to update weights");
+            console.error(chalk.red(formatContractError(err)));
+            process.exit(1);
+          }
+        }
+
+        // 3. Execute rebalance
+        const rebalanceSpinner = ora("Rebalancing portfolio (sell all → re-buy at targets)...").start();
+        try {
+          const rebalanceHash = await writeContractWithRetry({
+            account,
+            chain,
+            address: clone,
+            abi: PORTFOLIO_STRATEGY_ABI,
+            functionName: "rebalance",
+          });
+
+          const receipt = await waitForReceipt(rebalanceHash);
+          if (receipt.status === "reverted") throw new Error("rebalance() reverted on-chain");
+          rebalanceSpinner.succeed("Portfolio rebalanced");
+          console.log(chalk.dim(`  Tx: ${getExplorerUrl(rebalanceHash)}`));
+        } catch (err) {
+          rebalanceSpinner.fail("Rebalance failed");
+          console.error(chalk.red(formatContractError(err)));
+          process.exit(1);
+        }
+
+        // 4. Show updated balances
+        const postSpinner = ora("Reading updated allocations...").start();
+        const postAllocations = await publicClient.readContract({
+          address: clone,
+          abi: PORTFOLIO_STRATEGY_ABI,
+          functionName: "getAllocations",
+        }) as readonly { token: Address; targetWeightBps: bigint; tokenAmount: bigint; investedAmount: bigint }[];
+
+        const postReads = postAllocations.map((a) => Promise.all([
+          publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "balanceOf", args: [clone] }),
+          publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "symbol" }),
+          publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "decimals" }),
+        ]));
+        const postData = await Promise.all(postReads);
+        postSpinner.succeed("Updated allocations");
+
+        console.log();
+        console.log(chalk.bold("Post-Rebalance Allocations"));
+        console.log(chalk.dim("─".repeat(50)));
+        for (let i = 0; i < postAllocations.length; i++) {
+          const alloc = postAllocations[i];
+          const [balance, symbol, decimals] = postData[i];
+          const weightPct = (Number(alloc.targetWeightBps) / 100).toFixed(1) + "%";
+          const investedStr = formatUnits(alloc.investedAmount, assetDecimals);
+          console.log(
+            `  ${chalk.bold((symbol as string).padEnd(8))} ` +
+            `${weightPct.padEnd(8)} ` +
+            `invested: ${investedStr.padEnd(14)} ` +
+            `bal: ${formatUnits(balance as bigint, decimals)}`,
+          );
+        }
+
+        console.log();
+        console.log(chalk.green("✓ Rebalance complete"));
+        console.log();
+      } catch (err: any) {
+        if (err.code === "ERR_MODULE_NOT_FOUND" || err instanceof TypeError) throw err;
+        verifySpinner.fail("Pre-flight check failed");
+        console.error(chalk.red(formatContractError(err)));
+        process.exit(1);
+      }
     });
 }

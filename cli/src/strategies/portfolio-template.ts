@@ -127,3 +127,42 @@ export function buildUpdateParamsCalls(
     },
   ];
 }
+
+// ── Rebalancing ──
+
+import { PORTFOLIO_STRATEGY_ABI } from "../lib/abis.js";
+
+/**
+ * Encode calldata for the simple `rebalance()` call.
+ * This is called directly by the proposer (not via vault batch).
+ */
+export function encodeRebalanceCalldata(): Hex {
+  return encodeFunctionData({
+    abi: PORTFOLIO_STRATEGY_ABI,
+    functionName: "rebalance",
+  });
+}
+
+/**
+ * Encode calldata for `updateParams()` to change weights before rebalancing.
+ */
+export function encodeUpdateWeightsCalldata(
+  newWeightsBps: number[],
+  newMaxSlippageBps: number,
+  newSwapExtraData: Hex[],
+): Hex {
+  const data = encodeAbiParameters(
+    [{ type: "uint256[]" }, { type: "uint256" }, { type: "bytes[]" }],
+    [
+      newWeightsBps.map((w) => BigInt(w)),
+      BigInt(newMaxSlippageBps),
+      newSwapExtraData,
+    ],
+  );
+
+  return encodeFunctionData({
+    abi: PORTFOLIO_STRATEGY_ABI,
+    functionName: "updateParams",
+    args: [data],
+  });
+}
