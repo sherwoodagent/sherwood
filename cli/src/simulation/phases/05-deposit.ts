@@ -59,7 +59,12 @@ export async function runPhase05(config: SimConfig, state: SimState, logger?: Si
     const isWethVault = syn?.asset === "WETH";
 
     const persona = getPersona(agent.index, config.chain);
-    const amount = isWethVault ? "0.004" : (persona?.depositAmount || "10");
+    // For WETH vaults: use persona's depositAmount if ETH-denominated (< 1.0),
+    // otherwise fall back to 0.004 (Base personas have USDC-denominated amounts like "10")
+    const wethDeposit = persona?.depositAmount && parseFloat(persona.depositAmount) < 1
+      ? persona.depositAmount
+      : "0.004";
+    const amount = isWethVault ? wethDeposit : (persona?.depositAmount || "10");
     const assetLabel = isWethVault ? "ETH (->WETH)" : "USDC";
 
     const agentHome = agentHomeDir(config.baseDir, agent.index);

@@ -98,7 +98,7 @@ export function getProposalSpec(
         strategy: "portfolio",
         args: [
           "--vault", vault,
-          "--amount", "0.003",
+          "--amount", "0.0003",
           "--tokens", spec.tokens,
           "--weights", spec.weights,
           "--fee-tier", "3000",

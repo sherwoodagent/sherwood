@@ -84,6 +84,10 @@ contract DeployRobinhoodTestnet is ScriptBase {
         SyndicateFactory factory = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInitData)));
         console.log("SyndicateFactory:", address(factory));
 
+        // 5. Register factory on governor so addVault() works during createSyndicate
+        SyndicateGovernor(governorProxy).setFactory(address(factory));
+        console.log("Governor.setFactory:", address(factory));
+
         vm.stopBroadcast();
 
         // ── Validate on-chain state matches expected values ──

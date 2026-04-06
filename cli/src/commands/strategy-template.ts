@@ -401,7 +401,7 @@ function resolveSwapAdapter(): Address {
   const network = getNetwork();
   if (network === "robinhood-testnet") {
     if (SYNTHRA().ROUTER === ZERO) { console.error(chalk.red("Synthra DEX not available")); process.exit(1); }
-    return "0xD875EF9467DbC8B30Dcad38C46bB863EC6a74b43" as Address;
+    return "0xdae81cDCfcB14c56fCeB788A147Fcd6CbEdfEeca" as Address;
   }
   if (UNISWAP().SWAP_ROUTER === ZERO) { console.error(chalk.red("No swap adapter available")); process.exit(1); }
   console.error(chalk.red("UniswapSwapAdapter not deployed yet. Use --swap-adapter to specify manually."));

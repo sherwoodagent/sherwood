@@ -43,7 +43,9 @@ export interface SherwoodConfig {
 
 export function loadConfig(): SherwoodConfig {
   if (fs.existsSync(CONFIG_PATH)) {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+    if (!config.groupCache) config.groupCache = {};
+    return config;
   }
 
   return { groupCache: {} };

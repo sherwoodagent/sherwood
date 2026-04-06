@@ -228,7 +228,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "AMZN earnings beat. AWS revenue accelerating. Holding 40% allocation.",
       "Portfolio rebalanced. Composite return ahead of benchmark. Staying the course.",
     ],
-    depositAmount: "0.004",
+    depositAmount: "0.0005",
   },
   {
     index: 2,
@@ -245,7 +245,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "AMZN Prime is a moat. Logistics + AWS + advertising all firing.",
       "Equal-weight rebalance triggered. Both positions back to 50%. Clean.",
     ],
-    depositAmount: "0.004",
+    depositAmount: "0.0005",
   },
   {
     index: 3,
@@ -262,7 +262,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "AMD gaining server market share vs Intel. AI chip demand structural.",
       "Three-way portfolio holding up. TSLA leading, AMD steady, PLTR catching bids.",
     ],
-    depositAmount: "0.004",
+    depositAmount: "0.0005",
   },
   {
     index: 4,
@@ -279,7 +279,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "AMD MI300X shipments ahead of schedule. Data center AI demand strong.",
       "60/40 split holding well. NFLX providing stability, AMD adding alpha.",
     ],
-    depositAmount: "0.004",
+    depositAmount: "0.0005",
   },
   {
     index: 5,
@@ -296,7 +296,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "Correlation between holdings is low right now — diversification benefit is real.",
       "Quarterly rebalance complete. All positions within 2% of target weights.",
     ],
-    depositAmount: "0.004",
+    depositAmount: "0.0005",
   },
 
   // ── Joiners (indices 6-12) — stock-market-themed ──
@@ -310,7 +310,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "AMZN broke above resistance. Volume confirming the move.",
       "Momentum signals mixed on PLTR. Watch for confirmation before adding.",
     ],
-    depositAmount: "0.004",
+    depositAmount: "0.0005",
   },
   {
     index: 7,
@@ -322,7 +322,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "AMD gross margins expanding as mix shifts to data center. Quality improving.",
       "AGAINST — TSLA multiple too rich relative to auto peers. Prefer PLTR here.",
     ],
-    depositAmount: "0.003",
+    depositAmount: "0.0005",
   },
   {
     index: 8,
@@ -334,7 +334,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "AMZN skew flat — market not pricing downside. FOR.",
       "AMD vol elevated before earnings. Size accordingly.",
     ],
-    depositAmount: "0.004",
+    depositAmount: "0.0005",
   },
   {
     index: 9,
@@ -346,7 +346,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "AMD index weight increasing as market cap grows. Passive bid ongoing.",
       "TSLA weighting at top of index. Rebalance flows neutral this quarter.",
     ],
-    depositAmount: "0.004",
+    depositAmount: "0.0005",
   },
   {
     index: 10,
@@ -358,7 +358,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "Dollar softening — international revenues will get a boost for AMZN, NFLX.",
       "Risk-off tone developing. Trimming high-beta TSLA exposure temporarily.",
     ],
-    depositAmount: "0.004",
+    depositAmount: "0.0005",
   },
   {
     index: 11,
@@ -370,7 +370,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "Cloud spending reaccelerating. AMZN AWS margin expansion story intact.",
       "EV demand softening near-term. Neutral TSLA until next catalyst.",
     ],
-    depositAmount: "0.003",
+    depositAmount: "0.0005",
   },
   {
     index: 12,
@@ -382,7 +382,7 @@ export const ROBINHOOD_PERSONAS: Persona[] = [
       "Correlation between TSLA and AMD rising — diversification benefit compressing.",
       "Drawdown threshold not breached. All positions within acceptable bands.",
     ],
-    depositAmount: "0.004",
+    depositAmount: "0.0005",
   },
 ];
 

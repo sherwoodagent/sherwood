@@ -185,8 +185,8 @@ const BASE_SEPOLIA_SHERWOOD = {
 } as const;
 
 const ROBINHOOD_TESTNET_SHERWOOD = {
-  FACTORY: "0xe57065f473CD040eF047B02F2a0C335a6C020aC7" as Address,
-  GOVERNOR: "0x4Bd42923b1Dd9604414Ef8ad23b8a243B350CcCf" as Address,
+  FACTORY: "0x6d026e2f5Ff0C34A01690EC46Cb601B8fF391985" as Address,
+  GOVERNOR: "0xd882056ba6b0aEd8908c541884B327121E2f2C9C" as Address,
 } as const;
 
 // ── Venice (VVV governance + sVVV staking + DIEM compute) ──

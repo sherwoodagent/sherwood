@@ -379,8 +379,10 @@ syndicate
         const xmtp = await loadXmtp();
         const xmtpClient = await xmtp.getXmtpClient();
         const groupId = await xmtp.createSyndicateGroup(xmtpClient, subdomain, opts.publicChat);
-        await setTextRecord(subdomain, "xmtpGroupId", groupId, result.vault as Address);
         cacheGroupId(subdomain, groupId);
+        try {
+          await setTextRecord(subdomain, "xmtpGroupId", groupId, result.vault as Address);
+        } catch { /* ENS not available on all chains */ }
       } catch {
         console.warn(chalk.yellow("\n  ⚠ Could not create XMTP chat group"));
         console.warn(chalk.dim(`    Recover later with: sherwood chat ${subdomain} init`));
