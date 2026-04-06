@@ -226,6 +226,7 @@ contract PortfolioStrategy is BaseStrategy {
             IERC20(alloc.token).forceApprove(address(swapAdapter), bal);
             swapAdapter.swap(alloc.token, asset, bal, 0, _swapExtraData[i]);
             alloc.tokenAmount = 0;
+            alloc.investedAmount = 0;
         }
 
         // 2. Re-buy at current target weights

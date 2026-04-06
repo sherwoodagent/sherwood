@@ -573,6 +573,410 @@ contract PortfolioStrategyTest is Test {
         assertEq(strategy2.totalAmount(), 5e18);
     }
 
+    // ==================== EDGE CASES ====================
+
+    /// @notice Single-token portfolio: 100% TSLA — execute, rebalance, settle
+    function test_singleTokenPortfolio() public {
+        address clone = Clones.clone(address(template));
+        PortfolioStrategy s = PortfolioStrategy(clone);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(tsla);
+        uint256[] memory weights = new uint256[](1);
+        weights[0] = 10000; // 100%
+        bytes[] memory extraData = new bytes[](1);
+        extraData[0] = "";
+
+        bytes memory initData = abi.encode(
+            address(weth), address(adapter), address(verifier), tokens, weights, 5e18, MAX_SLIPPAGE, extraData
+        );
+        s.initialize(vault, proposer, initData);
+
+        assertEq(s.allocationCount(), 1);
+
+        // Execute: 5 WETH → 500 TSLA
+        vm.prank(vault);
+        weth.approve(address(s), 5e18);
+        vm.prank(vault);
+        s.execute();
+
+        PortfolioStrategy.TokenAllocation[] memory allocs = s.getAllocations();
+        assertEq(allocs[0].tokenAmount, 500e18); // 5 WETH * 100 rate
+        assertEq(allocs[0].investedAmount, 5e18);
+        assertEq(tsla.balanceOf(address(s)), 500e18);
+
+        // Rebalance (same weight, just sell/re-buy)
+        vm.prank(proposer);
+        s.rebalance();
+
+        allocs = s.getAllocations();
+        assertEq(allocs[0].tokenAmount, 500e18); // same — no price change
+
+        // Settle
+        uint256 vaultBefore = weth.balanceOf(vault);
+        vm.prank(vault);
+        s.settle();
+
+        uint256 returned = weth.balanceOf(vault) - vaultBefore;
+        assertEq(returned, 5e18); // no profit/loss
+        assertEq(tsla.balanceOf(address(s)), 0);
+    }
+
+    /// @notice Max basket size (20 tokens) — should succeed
+    function test_maxBasketSize_20tokens() public {
+        address clone = Clones.clone(address(template));
+        PortfolioStrategy s = PortfolioStrategy(clone);
+
+        uint256 count = 20;
+        address[] memory tokens = new address[](count);
+        uint256[] memory weights = new uint256[](count);
+        bytes[] memory extraData = new bytes[](count);
+
+        // Create 20 mock tokens, set rates, fund adapter
+        for (uint256 i; i < count; ++i) {
+            ERC20Mock token = new ERC20Mock(
+                string(abi.encodePacked("Token", vm.toString(i))), string(abi.encodePacked("T", vm.toString(i))), 18
+            );
+            tokens[i] = address(token);
+            weights[i] = 500; // 5% each, 20 * 500 = 10000
+            extraData[i] = "";
+
+            // Set swap rates: 1 WETH → 10 token, 1 token → 0.1 WETH
+            adapter.setRate(address(weth), address(token), 10e18);
+            adapter.setRate(address(token), address(weth), 0.1e18);
+            token.mint(address(adapter), 1_000_000e18);
+        }
+
+        bytes memory initData = abi.encode(
+            address(weth), address(adapter), address(verifier), tokens, weights, 20e18, MAX_SLIPPAGE, extraData
+        );
+        s.initialize(vault, proposer, initData);
+
+        assertEq(s.allocationCount(), 20);
+
+        // Execute: 20 WETH split equally
+        weth.mint(vault, 20e18); // extra WETH for this test
+        vm.prank(vault);
+        weth.approve(address(s), 20e18);
+        vm.prank(vault);
+        s.execute();
+
+        // Each token: 5% of 20 WETH = 1 WETH * 10 rate = 10 tokens
+        PortfolioStrategy.TokenAllocation[] memory allocs = s.getAllocations();
+        for (uint256 i; i < count; ++i) {
+            assertEq(allocs[i].tokenAmount, 10e18);
+            assertEq(allocs[i].investedAmount, 1e18);
+        }
+
+        // Settle: all sold back at same rates → 20 WETH returned
+        uint256 vaultBefore = weth.balanceOf(vault);
+        vm.prank(vault);
+        s.settle();
+
+        uint256 returned = weth.balanceOf(vault) - vaultBefore;
+        assertEq(returned, 20e18);
+    }
+
+    /// @notice Zero-weight token at initialization — valid (sum=10000), token skipped during execute
+    function test_zeroWeightToken_execute() public {
+        address clone = Clones.clone(address(template));
+        PortfolioStrategy s = PortfolioStrategy(clone);
+
+        address[] memory tokens = new address[](3);
+        tokens[0] = address(tsla);
+        tokens[1] = address(amzn);
+        tokens[2] = address(nflx);
+
+        uint256[] memory weights = new uint256[](3);
+        weights[0] = 6000; // 60%
+        weights[1] = 4000; // 40%
+        weights[2] = 0; // 0% — intentionally excluded
+
+        bytes[] memory extraData = new bytes[](3);
+        extraData[0] = "";
+        extraData[1] = "";
+        extraData[2] = "";
+
+        bytes memory initData = abi.encode(
+            address(weth), address(adapter), address(verifier), tokens, weights, TOTAL_AMOUNT, MAX_SLIPPAGE, extraData
+        );
+
+        // 6000 + 4000 + 0 = 10000 → valid init
+        s.initialize(vault, proposer, initData);
+        assertEq(s.allocationCount(), 3);
+
+        // Execute: NFLX should get 0 allocation
+        vm.prank(vault);
+        weth.approve(address(s), TOTAL_AMOUNT);
+        vm.prank(vault);
+        s.execute();
+
+        PortfolioStrategy.TokenAllocation[] memory allocs = s.getAllocations();
+
+        // TSLA: 60% of 10 WETH = 6 WETH * 100 = 600 TSLA
+        assertEq(allocs[0].tokenAmount, 600e18);
+        assertEq(allocs[0].investedAmount, 6e18);
+
+        // AMZN: 40% of 10 WETH = 4 WETH * 50 = 200 AMZN
+        assertEq(allocs[1].tokenAmount, 200e18);
+        assertEq(allocs[1].investedAmount, 4e18);
+
+        // NFLX: 0% → skipped, no tokens bought
+        assertEq(allocs[2].tokenAmount, 0);
+        assertEq(allocs[2].investedAmount, 0);
+        assertEq(nflx.balanceOf(address(s)), 0);
+    }
+
+    /// @notice Rebalance to zero weight — move a token from active to 0%, sell its position
+    function test_rebalance_zeroWeightRemoval() public {
+        _executeStrategy();
+
+        // Initial: TSLA 40%, AMZN 35%, NFLX 25%
+        PortfolioStrategy.TokenAllocation[] memory before_ = strategy.getAllocations();
+        assertGt(before_[2].tokenAmount, 0); // NFLX has tokens
+
+        // Update: move NFLX to 0%, redistribute to TSLA 60%, AMZN 40%
+        uint256[] memory newWeights = new uint256[](3);
+        newWeights[0] = 6000; // 60%
+        newWeights[1] = 4000; // 40%
+        newWeights[2] = 0; // 0% — remove NFLX
+
+        vm.prank(proposer);
+        strategy.updateParams(abi.encode(newWeights, uint256(0), new bytes[](0)));
+
+        // Rebalance — should sell NFLX and not re-buy
+        vm.prank(proposer);
+        strategy.rebalance();
+
+        PortfolioStrategy.TokenAllocation[] memory after_ = strategy.getAllocations();
+
+        // NFLX: 0 weight → sold, no re-buy
+        assertEq(after_[2].tokenAmount, 0);
+        assertEq(after_[2].investedAmount, 0);
+        assertEq(nflx.balanceOf(address(strategy)), 0);
+
+        // TSLA: 60% of recovered WETH
+        assertGt(after_[0].tokenAmount, before_[0].tokenAmount); // more TSLA now
+        assertEq(after_[0].targetWeightBps, 6000);
+
+        // AMZN: 40% of recovered WETH
+        assertGt(after_[1].tokenAmount, before_[1].tokenAmount); // more AMZN now
+        assertEq(after_[1].targetWeightBps, 4000);
+    }
+
+    /// @notice Settle after rebalancing to zero weight — only 2 active tokens sell
+    function test_settle_afterZeroWeightRebalance() public {
+        _executeStrategy();
+
+        // Remove NFLX
+        uint256[] memory newWeights = new uint256[](3);
+        newWeights[0] = 6000;
+        newWeights[1] = 4000;
+        newWeights[2] = 0;
+
+        vm.prank(proposer);
+        strategy.updateParams(abi.encode(newWeights, uint256(0), new bytes[](0)));
+
+        vm.prank(proposer);
+        strategy.rebalance();
+
+        // Settle — should succeed even with a zero-balance token
+        uint256 vaultBefore = weth.balanceOf(vault);
+        vm.prank(vault);
+        strategy.settle();
+
+        uint256 returned = weth.balanceOf(vault) - vaultBefore;
+        assertGt(returned, 0);
+        assertEq(nflx.balanceOf(address(strategy)), 0);
+        assertEq(tsla.balanceOf(address(strategy)), 0);
+        assertEq(amzn.balanceOf(address(strategy)), 0);
+    }
+
+    /// @notice Rebalance multiple times — weights can change between rebalances
+    function test_multipleRebalances() public {
+        _executeStrategy();
+
+        // First rebalance: 60/30/10
+        uint256[] memory w1 = new uint256[](3);
+        w1[0] = 6000;
+        w1[1] = 3000;
+        w1[2] = 1000;
+        vm.prank(proposer);
+        strategy.updateParams(abi.encode(w1, uint256(0), new bytes[](0)));
+        vm.prank(proposer);
+        strategy.rebalance();
+
+        PortfolioStrategy.TokenAllocation[] memory r1 = strategy.getAllocations();
+        assertEq(r1[0].tokenAmount, 600e18); // 60% of 10 WETH * 100
+
+        // Second rebalance: 33/34/33
+        uint256[] memory w2 = new uint256[](3);
+        w2[0] = 3300;
+        w2[1] = 3400;
+        w2[2] = 3300;
+        vm.prank(proposer);
+        strategy.updateParams(abi.encode(w2, uint256(0), new bytes[](0)));
+        vm.prank(proposer);
+        strategy.rebalance();
+
+        PortfolioStrategy.TokenAllocation[] memory r2 = strategy.getAllocations();
+        assertEq(r2[0].targetWeightBps, 3300);
+        assertEq(r2[1].targetWeightBps, 3400);
+        assertEq(r2[2].targetWeightBps, 3300);
+        // TSLA: 33% of 10 WETH = 3.3 WETH * 100 = 330 TSLA
+        assertEq(r2[0].tokenAmount, 330e18);
+
+        // Third rebalance: back to equal 34/33/33
+        uint256[] memory w3 = new uint256[](3);
+        w3[0] = 3400;
+        w3[1] = 3300;
+        w3[2] = 3300;
+        vm.prank(proposer);
+        strategy.updateParams(abi.encode(w3, uint256(0), new bytes[](0)));
+        vm.prank(proposer);
+        strategy.rebalance();
+
+        PortfolioStrategy.TokenAllocation[] memory r3 = strategy.getAllocations();
+        assertEq(r3[0].tokenAmount, 340e18); // 34% of 10 * 100
+
+        // Settle should still work after 3 rebalances
+        uint256 vaultBefore = weth.balanceOf(vault);
+        vm.prank(vault);
+        strategy.settle();
+        uint256 returned = weth.balanceOf(vault) - vaultBefore;
+        assertEq(returned, TOTAL_AMOUNT); // no price change
+    }
+
+    // ==================== GAS BENCHMARKS ====================
+
+    /// @notice Gas cost comparison: sell-all/re-buy vs delta rebalance at 3 tokens
+    function test_gas_rebalance_3tokens() public {
+        _executeStrategy();
+
+        // Update weights for rebalance
+        uint256[] memory newWeights = new uint256[](3);
+        newWeights[0] = 6000;
+        newWeights[1] = 3000;
+        newWeights[2] = 1000;
+        vm.prank(proposer);
+        strategy.updateParams(abi.encode(newWeights, uint256(0), new bytes[](0)));
+
+        // Measure sell-all/re-buy gas
+        vm.prank(proposer);
+        uint256 gasBefore = gasleft();
+        strategy.rebalance();
+        uint256 gasSimple = gasBefore - gasleft();
+
+        // --- Setup fresh clone for delta comparison ---
+        address clone2 = Clones.clone(address(template));
+        PortfolioStrategy s2 = PortfolioStrategy(clone2);
+        _initStrategy(s2);
+
+        vm.prank(vault);
+        weth.approve(address(s2), TOTAL_AMOUNT);
+        vm.prank(vault);
+        s2.execute();
+
+        vm.prank(proposer);
+        s2.updateParams(abi.encode(newWeights, uint256(0), new bytes[](0)));
+
+        bytes[] memory reports = new bytes[](3);
+        reports[0] = abi.encode(int192(int256(0.01e18)));
+        reports[1] = abi.encode(int192(int256(0.02e18)));
+        reports[2] = abi.encode(int192(int256(0.005e18)));
+
+        vm.prank(proposer);
+        uint256 gasBefore2 = gasleft();
+        s2.rebalanceDelta(reports);
+        uint256 gasDelta = gasBefore2 - gasleft();
+
+        // Log gas costs (visible in forge test -vvv output)
+        emit log_named_uint("Gas: rebalance (sell-all/re-buy) 3 tokens", gasSimple);
+        emit log_named_uint("Gas: rebalanceDelta (Chainlink)   3 tokens", gasDelta);
+    }
+
+    /// @notice Gas cost at max basket size (20 tokens) — sell-all/re-buy
+    function test_gas_rebalance_20tokens() public {
+        address clone = Clones.clone(address(template));
+        PortfolioStrategy s = PortfolioStrategy(clone);
+
+        uint256 count = 20;
+        address[] memory tokens = new address[](count);
+        uint256[] memory weights = new uint256[](count);
+        uint256[] memory newWeights = new uint256[](count);
+        bytes[] memory extraData = new bytes[](count);
+
+        for (uint256 i; i < count; ++i) {
+            ERC20Mock token = new ERC20Mock(
+                string(abi.encodePacked("Token", vm.toString(i))), string(abi.encodePacked("T", vm.toString(i))), 18
+            );
+            tokens[i] = address(token);
+            weights[i] = 500; // 5% each
+            extraData[i] = "";
+
+            adapter.setRate(address(weth), address(token), 10e18);
+            adapter.setRate(address(token), address(weth), 0.1e18);
+            token.mint(address(adapter), 1_000_000e18);
+
+            // New weights: first token gets 50%, rest share remaining (263 bps each)
+            if (i == 0) {
+                newWeights[i] = 5000;
+            } else {
+                newWeights[i] = 263;
+            }
+        }
+        // Fix rounding: 5000 + (263 * 19) = 5000 + 4997 = 9997, need 3 more
+        newWeights[1] += 3;
+
+        bytes memory initData = abi.encode(
+            address(weth), address(adapter), address(verifier), tokens, weights, 20e18, MAX_SLIPPAGE, extraData
+        );
+        s.initialize(vault, proposer, initData);
+
+        weth.mint(vault, 20e18);
+        vm.prank(vault);
+        weth.approve(address(s), 20e18);
+        vm.prank(vault);
+        s.execute();
+
+        vm.prank(proposer);
+        s.updateParams(abi.encode(newWeights, uint256(0), new bytes[](0)));
+
+        // Measure gas
+        vm.prank(proposer);
+        uint256 gasBefore = gasleft();
+        s.rebalance();
+        uint256 gasUsed = gasBefore - gasleft();
+
+        emit log_named_uint("Gas: rebalance (sell-all/re-buy) 20 tokens", gasUsed);
+
+        // --- Delta rebalance for 20 tokens ---
+        address clone2 = Clones.clone(address(template));
+        PortfolioStrategy s2 = PortfolioStrategy(clone2);
+
+        s2.initialize(vault, proposer, initData);
+        weth.mint(vault, 20e18);
+        vm.prank(vault);
+        weth.approve(address(s2), 20e18);
+        vm.prank(vault);
+        s2.execute();
+
+        vm.prank(proposer);
+        s2.updateParams(abi.encode(newWeights, uint256(0), new bytes[](0)));
+
+        bytes[] memory reports = new bytes[](count);
+        for (uint256 i; i < count; ++i) {
+            reports[i] = abi.encode(int192(int256(0.1e18))); // 1 token = 0.1 WETH
+        }
+
+        vm.prank(proposer);
+        uint256 gasBefore2 = gasleft();
+        s2.rebalanceDelta(reports);
+        uint256 gasDelta = gasBefore2 - gasleft();
+
+        emit log_named_uint("Gas: rebalanceDelta (Chainlink)   20 tokens", gasDelta);
+    }
+
     // ==================== HELPERS ====================
 
     function _executeStrategy() internal {
