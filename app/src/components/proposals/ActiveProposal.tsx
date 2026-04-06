@@ -4,6 +4,13 @@ import {
   formatTimeRemaining,
 } from "@/lib/governor-data";
 import { truncateAddress, formatAsset, formatBps } from "@/lib/contracts";
+import PortfolioAllocation from "./PortfolioAllocation";
+
+interface PortfolioAllocProps {
+  allocations: { symbol: string; weightPct: number }[];
+  totalAmount: string;
+  assetSymbol: string;
+}
 
 interface ActiveProposalProps {
   proposal: ProposalData | null;
@@ -11,6 +18,7 @@ interface ActiveProposalProps {
   addressNames?: Record<string, string>;
   assetDecimals: number;
   assetSymbol: string;
+  portfolioAllocations?: PortfolioAllocProps | null;
 }
 
 export default function ActiveProposal({
@@ -19,6 +27,7 @@ export default function ActiveProposal({
   addressNames,
   assetDecimals,
   assetSymbol,
+  portfolioAllocations,
 }: ActiveProposalProps) {
   const now = BigInt(Math.floor(Date.now() / 1000));
 
@@ -136,6 +145,15 @@ export default function ActiveProposal({
           </div>
         </div>
       </div>
+
+      {/* Portfolio allocation donut chart + token list */}
+      {portfolioAllocations && (
+        <PortfolioAllocation
+          allocations={portfolioAllocations.allocations}
+          totalAmount={portfolioAllocations.totalAmount}
+          assetSymbol={portfolioAllocations.assetSymbol}
+        />
+      )}
     </div>
   );
 }

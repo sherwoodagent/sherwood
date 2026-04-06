@@ -578,6 +578,72 @@ export const SYNDICATE_GOVERNOR_ABI = [
     inputs: [{ name: "vault", type: "address" }],
     outputs: [{ name: "", type: "bool" }],
   },
+  {
+    name: "getExecuteCalls",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "proposalId", type: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "data", type: "bytes" },
+          { name: "value", type: "uint256" },
+        ],
+      },
+    ],
+  },
+] as const;
+
+export const PORTFOLIO_STRATEGY_ABI = [
+  {
+    name: "name",
+    type: "function",
+    stateMutability: "pure",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    name: "getAllocations",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "token", type: "address" },
+          { name: "targetWeightBps", type: "uint256" },
+          { name: "tokenAmount", type: "uint256" },
+          { name: "investedAmount", type: "uint256" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "totalAmount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "asset",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "maxSlippageBps",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
 ] as const;
 
 export const ERC20_ABI = [
