@@ -55,13 +55,11 @@ contract SynthraDirectAdapter is ISwapAdapter {
     }
 
     /// @inheritdoc ISwapAdapter
-    function swap(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 amountOutMin,
-        bytes calldata extraData
-    ) external override returns (uint256 amountOut) {
+    function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, bytes calldata extraData)
+        external
+        override
+        returns (uint256 amountOut)
+    {
         uint24 fee = abi.decode(extraData, (uint24));
 
         address pool = factory.getPool(tokenIn, tokenOut, fee);
@@ -79,13 +77,14 @@ contract SynthraDirectAdapter is ISwapAdapter {
         _callbackAmount = amountIn;
 
         // Execute swap — positive amountSpecified = exact input
-        (int256 amount0, int256 amount1) = ISynthraPool(pool).swap(
-            msg.sender, // recipient gets output tokens
-            zeroForOne,
-            int256(amountIn),
-            zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
-            ""
-        );
+        (int256 amount0, int256 amount1) = ISynthraPool(pool)
+            .swap(
+                msg.sender, // recipient gets output tokens
+                zeroForOne,
+                int256(amountIn),
+                zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1,
+                ""
+            );
 
         // Calculate output amount (the negative delta is the output)
         amountOut = zeroForOne ? uint256(-amount1) : uint256(-amount0);
@@ -103,12 +102,11 @@ contract SynthraDirectAdapter is ISwapAdapter {
     }
 
     /// @inheritdoc ISwapAdapter
-    function quote(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        bytes calldata extraData
-    ) external override returns (uint256) {
+    function quote(address tokenIn, address tokenOut, uint256 amountIn, bytes calldata extraData)
+        external
+        override
+        returns (uint256)
+    {
         // Not needed for execution — return 0
         return 0;
     }
