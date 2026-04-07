@@ -49,11 +49,7 @@ export default async function SyndicateDetailPage({
     agentNames[agent.agentId.toString()] = displayName;
     addressNames[agent.agentAddress.toLowerCase()] = displayName;
   }
-  // Add creator only if not already mapped via agent identity
   const creatorKey = data.creator.toLowerCase();
-  if (!addressNames[creatorKey]) {
-    addressNames[creatorKey] = data.metadata?.name || `Syndicate #${data.syndicateId.toString()}`;
-  }
 
   return (
     <>

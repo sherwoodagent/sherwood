@@ -267,9 +267,6 @@ export default async function ProposalsPage({
     addressNames[agent.agentAddress.toLowerCase()] = displayName;
   }
   const creatorKey = data.creator.toLowerCase();
-  if (!addressNames[creatorKey]) {
-    addressNames[creatorKey] = data.metadata?.name || `Syndicate #${data.syndicateId.toString()}`;
-  }
 
   const liveGovernor = await fetchGovernorData(data.vault);
   const isMock = !liveGovernor;

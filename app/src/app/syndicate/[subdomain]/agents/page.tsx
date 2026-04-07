@@ -43,9 +43,6 @@ export default async function AgentsPage({
     agentNames[agent.agentId.toString()] = displayName;
   }
   const creatorKey = data.creator.toLowerCase();
-  if (!addressNames[creatorKey]) {
-    addressNames[creatorKey] = name;
-  }
 
   return (
     <>

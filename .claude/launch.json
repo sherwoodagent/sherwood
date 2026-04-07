@@ -3,10 +3,14 @@
   "configurations": [
     {
       "name": "app",
-      "runtimeExecutable": "npm",
+      "runtimeExecutable": "/opt/homebrew/bin/npm",
       "runtimeArgs": ["run", "dev"],
       "port": 3000,
-      "cwd": "app"
+      "cwd": "app",
+      "env": {
+        "NEXT_PUBLIC_TESTNET": "true",
+        "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+      }
     }
   ]
 }
