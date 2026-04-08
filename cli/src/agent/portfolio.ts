@@ -216,31 +216,39 @@ const idx = this.state.positions.findIndex((p) => p.tokenId === tokenId);
     const totalPnlUsd = trades.reduce((s, t) => s + t.pnlUsd, 0);
     const avgPnlPercent = pnls.reduce((s, p) => s + p, 0) / pnls.length;
 
-    // Sharpe ratio (annualized, assuming daily returns)
+    // Sharpe ratio: annualize returns based on average holding period
     // Standard formula: (mean return - risk-free rate) / stddev of returns
-    const riskFreeDaily = 0.05 / 252; // ~5% annual risk-free rate
+    const avgHoldingDays = trades.length > 0
+      ? trades.reduce((sum, t) => sum + t.duration, 0) / trades.length / (24 * 60 * 60)
+      : 1;
+    const tradesPerYear = Math.max(252 / Math.max(avgHoldingDays, 1), 1);
+
+    const riskFreePerTrade = 0.05 / tradesPerYear; // Risk-free rate per trade
     const mean = avgPnlPercent;
-    const excessMean = mean - riskFreeDaily;
+    const excessMean = mean - riskFreePerTrade;
     const variance = pnls.length > 1
       ? pnls.reduce((s, p) => s + (p - mean) ** 2, 0) / (pnls.length - 1)
       : 0;
     const stdDev = Math.sqrt(variance);
-    const sharpeRatio = stdDev > 0 ? (excessMean / stdDev) * Math.sqrt(252) : 0;
+    const sharpeRatio = stdDev > 0 ? (excessMean / stdDev) * Math.sqrt(tradesPerYear) : 0;
 
     // Max drawdown from cumulative equity curve (peak-to-trough)
-    // Use initial portfolio value as the base to compute percentage drawdowns
-    const initialValue = trades.length > 0
-      ? (trades[0]!.entryPrice * trades[0]!.quantity) / Math.max(Math.abs(trades[0]!.pnlPercent), 0.0001)
-      : 10000; // fallback
+    // Start with a reasonable initial portfolio value
+    const initialValue = 10000; // Start with default $10k portfolio
     let equityPeak = initialValue;
     let equity = initialValue;
     let maxDrawdown = 0;
+
     for (const t of trades) {
       equity += t.pnlUsd;
-      if (equity > equityPeak) equityPeak = equity;
-      if (equityPeak > 0) {
-        const dd = (equityPeak - equity) / equityPeak;
-        if (dd > maxDrawdown) maxDrawdown = dd;
+      if (equity > equityPeak) {
+        equityPeak = equity;
+      }
+      if (equityPeak > 0 && equity < equityPeak) {
+        const drawdown = (equityPeak - equity) / equityPeak;
+        if (drawdown > maxDrawdown) {
+          maxDrawdown = drawdown;
+        }
       }
     }
 

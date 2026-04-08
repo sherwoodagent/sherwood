@@ -166,13 +166,13 @@ export class Reporter {
     lines.push('');
 
     // Best/worst trade
-    if (metrics.bestTrade.tokenId) {
+    if (metrics.bestTrade?.tokenId) {
       const best = metrics.bestTrade;
-      lines.push(chalk.green(`  Best Trade:      ${best.symbol} ${best.pnlUsd >= 0 ? '+' : ''}$${best.pnlUsd.toFixed(2)} (${(best.pnlPercent * 100).toFixed(1)}%)`));
+      lines.push(chalk.green(`  Best Trade:      ${best.symbol || best.tokenId} ${best.pnlUsd >= 0 ? '+' : ''}$${best.pnlUsd.toFixed(2)} (${(best.pnlPercent * 100).toFixed(1)}%)`));
     }
-    if (metrics.worstTrade.tokenId) {
+    if (metrics.worstTrade?.tokenId) {
       const worst = metrics.worstTrade;
-      lines.push(chalk.red(`  Worst Trade:     ${worst.symbol} ${worst.pnlUsd >= 0 ? '+' : ''}$${worst.pnlUsd.toFixed(2)} (${(worst.pnlPercent * 100).toFixed(1)}%)`));
+      lines.push(chalk.red(`  Worst Trade:     ${worst.symbol || worst.tokenId} ${worst.pnlUsd >= 0 ? '+' : ''}$${worst.pnlUsd.toFixed(2)} (${(worst.pnlPercent * 100).toFixed(1)}%)`));
     }
 
     lines.push('');

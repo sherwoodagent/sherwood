@@ -91,14 +91,27 @@ export class RiskManager {
       }
     }
 
-    // Check total portfolio risk
-    const totalExposure = this.portfolio.positions.reduce(
-      (sum, p) => sum + p.quantity * p.currentPrice,
-      0,
-    );
-    if (portfolioValue > 0 && (totalExposure + sizeUsd) / portfolioValue > this.config.maxPortfolioRisk + 1) {
-      // maxPortfolioRisk is the "at risk" portion; total exposure can be > 100% but risk should be bounded
-      // Simplified: check that risk (potential loss) doesn't exceed limit
+    // Check total portfolio risk by evaluating potential aggregate loss
+    if (portfolioValue > 0) {
+      const currentRiskExposure = this.portfolio.positions.reduce(
+        (sum, p) => {
+          // Estimate max loss per position using stop loss distance
+          const maxLossPerPosition = Math.abs(p.entryPrice - p.stopLoss) * p.quantity;
+          return sum + maxLossPerPosition;
+        },
+        0,
+      );
+
+      // Estimate new position risk (assuming 8% stop loss)
+      const newPositionRisk = sizeUsd * 0.08;
+      const totalRiskExposure = currentRiskExposure + newPositionRisk;
+
+      if (totalRiskExposure / portfolioValue > this.config.maxPortfolioRisk) {
+        return {
+          allowed: false,
+          reason: `Total portfolio risk ${(totalRiskExposure / portfolioValue * 100).toFixed(1)}% would exceed max ${(this.config.maxPortfolioRisk * 100).toFixed(0)}%`,
+        };
+      }
     }
 
     // Check if we already have a position in this token

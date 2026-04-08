@@ -107,10 +107,14 @@ export class Backtester {
     const windowSize = 30; // min candles needed for indicators
 
     for (let i = windowSize; i < allCandles.length; i += step) {
-      const windowCandles = allCandles.slice(Math.max(0, i - 200), i + 1);
+      // Use historical data only (excluding current candle to avoid look-ahead bias)
+      const windowCandles = allCandles.slice(Math.max(0, i - 200), i);
       const currentCandle = allCandles[i]!;
       const currentDate = new Date(currentCandle.timestamp).toISOString().split('T')[0]!;
       const currentPrice = currentCandle.close;
+
+      // Skip if insufficient data for indicators
+      if (windowCandles.length < windowSize) continue;
 
       // Track equity
       const equity = position
@@ -118,7 +122,7 @@ export class Backtester {
         : capital;
       equityCurve.push({ date: currentDate, value: equity });
 
-      // Compute indicators
+      // Compute indicators using only historical data
       let decision: TradeDecision;
       try {
         const technicals = getLatestSignals(windowCandles);

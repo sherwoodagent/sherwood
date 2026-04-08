@@ -218,20 +218,40 @@ export class TradingAgent {
     }
 
     // 6. Run strategy modules for additional signals
+    let nansenData: any = undefined;
+    let messariData: any = undefined;
+    let marketData: any = undefined;
+
     try {
       // Resolve token symbol from CoinGecko for accurate DEX search
       let tokenSymbol: string | undefined;
-      let dexData: any;
       try {
         const coinDetails = await this.coingecko.getCoinDetails(tokenId);
         tokenSymbol = coinDetails?.symbol?.toUpperCase();
+        // Also get market data for strategies
+        marketData = await this.coingecko.getMarketData(tokenId, 7);
       } catch {
         // symbol resolution failed — strategies will fall back to static map
       }
 
-      // DEX data is now fetched inside dex-flow strategy using KNOWN_TOKENS
-      // for accurate chain-specific pair lookups (address-based for major tokens).
-      // Setting dexData = undefined so the strategy handles it.
+      // Re-fetch research data for strategies if x402 is enabled
+      if (this.config.useX402) {
+        try {
+          const nansen = getResearchProvider("nansen");
+          const smResult = await nansen.query({ type: "smart-money", target: tokenId });
+          nansenData = smResult.data;
+        } catch {
+          // Nansen data optional for strategies
+        }
+
+        try {
+          const messari = getResearchProvider("messari");
+          const tokenResult = await messari.query({ type: "token", target: tokenId });
+          messariData = tokenResult.data;
+        } catch {
+          // Messari data optional for strategies
+        }
+      }
 
       const stratCtx: StrategyContext = {
         tokenId,
@@ -242,10 +262,10 @@ export class TradingAgent {
           : undefined,
         sentimentZScore, // reuse from step 2
         tvlData: tvl,
-        marketData: undefined,
-        nansenData: undefined,
-        messariData: undefined,
-        dexData,
+        marketData,
+        nansenData,
+        messariData,
+        dexData: undefined, // DexFlowStrategy fetches this internally
         tokenSymbol,
       };
 

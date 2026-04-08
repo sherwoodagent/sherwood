@@ -25,6 +25,8 @@ export interface TechnicalSignals {
 // ── Simple Moving Average ──
 
 export function calculateSMA(values: number[], period: number): number[] {
+  if (values.length === 0) return [];
+
   const result: number[] = [];
   for (let i = 0; i < values.length; i++) {
     if (i < period - 1) {
@@ -43,6 +45,8 @@ export function calculateSMA(values: number[], period: number): number[] {
 // ── Exponential Moving Average ──
 
 export function calculateEMA(values: number[], period: number): number[] {
+  if (values.length === 0) return [];
+
   const result: number[] = [];
   const k = 2 / (period + 1);
 
@@ -50,13 +54,28 @@ export function calculateEMA(values: number[], period: number): number[] {
     if (i < period - 1) {
       result.push(NaN);
     } else if (i === period - 1) {
-      // Seed with SMA of first `period` values
+      // Seed with SMA of first `period` valid values
       let sum = 0;
-      for (let j = 0; j < period; j++) sum += values[j]!;
-      result.push(sum / period);
+      let count = 0;
+      for (let j = 0; j < period; j++) {
+        if (!isNaN(values[j]!)) {
+          sum += values[j]!;
+          count++;
+        }
+      }
+      if (count > 0) {
+        result.push(sum / count);
+      } else {
+        result.push(NaN);
+      }
     } else {
       const prev = result[i - 1]!;
-      result.push(values[i]! * k + prev * (1 - k));
+      const current = values[i]!;
+      if (!isNaN(current) && !isNaN(prev)) {
+        result.push(current * k + prev * (1 - k));
+      } else {
+        result.push(NaN);
+      }
     }
   }
   return result;
@@ -65,6 +84,8 @@ export function calculateEMA(values: number[], period: number): number[] {
 // ── RSI (Relative Strength Index) ──
 
 export function calculateRSI(candles: Candle[], period: number = 14): number[] {
+  if (candles.length < 2) return [];
+
   const closes = candles.map((c) => c.close);
   const result: number[] = [];
 
@@ -99,9 +120,11 @@ export function calculateRSI(candles: Candle[], period: number = 14): number[] {
       avgGain = sumGain / period;
       avgLoss = sumLoss / period;
     } else {
+      // Use Wilder's smoothing (exponential smoothing with alpha = 1/period)
       const change = changes[i]!;
-      avgGain = (avgGain * (period - 1) + Math.max(change, 0)) / period;
-      avgLoss = (avgLoss * (period - 1) + Math.max(-change, 0)) / period;
+      const alpha = 1 / period;
+      avgGain = (1 - alpha) * avgGain + alpha * Math.max(change, 0);
+      avgLoss = (1 - alpha) * avgLoss + alpha * Math.max(-change, 0);
     }
 
     if (avgLoss === 0) {
@@ -136,14 +159,9 @@ export function calculateMACD(
     }
   }
 
-  // Signal line = EMA of MACD line (only over valid values)
-  // We need to handle NaN prefix: find first valid index
-  const firstValid = macdLine.findIndex((v) => !isNaN(v));
-  const validMacd = firstValid >= 0 ? macdLine.slice(firstValid) : [];
-  const signalOfValid = calculateEMA(validMacd, signalPeriod);
-
-  const signalLine: number[] = new Array(firstValid >= 0 ? firstValid : macdLine.length).fill(NaN);
-  signalLine.push(...signalOfValid);
+  // Signal line = EMA of MACD line
+  // Calculate EMA directly on the MACD line, which will handle NaN values internally
+  const signalLine = calculateEMA(macdLine, signalPeriod);
 
   const histogram: number[] = [];
   for (let i = 0; i < macdLine.length; i++) {
@@ -164,6 +182,10 @@ export function calculateBollingerBands(
   period: number = 20,
   stdDevMult: number = 2.0,
 ): { upper: number[]; middle: number[]; lower: number[]; width: number[] } {
+  if (candles.length === 0) {
+    return { upper: [], middle: [], lower: [], width: [] };
+  }
+
   const closes = candles.map((c) => c.close);
   const middle = calculateSMA(closes, period);
 
@@ -194,6 +216,8 @@ export function calculateBollingerBands(
 // ── Average True Range ──
 
 export function calculateATR(candles: Candle[], period: number = 14): number[] {
+  if (candles.length === 0) return [];
+
   const trueRanges: number[] = [];
   for (let i = 0; i < candles.length; i++) {
     const c = candles[i]!;
