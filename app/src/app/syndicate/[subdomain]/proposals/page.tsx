@@ -296,6 +296,25 @@ export default async function ProposalsPage({
     assetSymbol: string;
   } | null = null;
 
+  let enrichedPortfolio: {
+    allocations: {
+      token: Address;
+      symbol: string;
+      decimals: number;
+      weightPct: number;
+      tokenAmount: string;
+      investedAmount: string;
+      feeTier: number;
+      logo: string | null;
+      marketCap: number | null;
+    }[];
+    totalAmount: string;
+    assetSymbol: string;
+    assetAddress: Address;
+    assetDecimals: number;
+    chainId: number;
+  } | null = null;
+
   if (activeProposal && liveGovernor) {
     const portfolioData = await fetchPortfolioData(
       liveGovernor.governorAddress,
@@ -312,6 +331,26 @@ export default async function ProposalsPage({
         })),
         totalAmount: portfolioData.totalAmount,
         assetSymbol: portfolioData.assetSymbol,
+      };
+
+      // Build enriched data for PortfolioDashboard
+      enrichedPortfolio = {
+        allocations: portfolioData.allocations.map((a) => ({
+          token: a.token,
+          symbol: a.symbol,
+          decimals: a.decimals,
+          weightPct: a.targetWeightBps / 100,
+          tokenAmount: a.tokenAmount,
+          investedAmount: a.investedAmount,
+          feeTier: a.feeTier,
+          logo: a.logo,
+          marketCap: a.marketCap,
+        })),
+        totalAmount: portfolioData.totalAmount,
+        assetSymbol: portfolioData.assetSymbol,
+        assetAddress: portfolioData.assetAddress,
+        assetDecimals: portfolioData.assetDecimals,
+        chainId: data.chainId,
       };
     }
   }
@@ -413,6 +452,7 @@ export default async function ProposalsPage({
               assetDecimals={data.assetDecimals}
               assetSymbol={data.assetSymbol}
               portfolioAllocations={portfolioAllocations}
+              enrichedPortfolio={enrichedPortfolio}
             />
           </div>
 

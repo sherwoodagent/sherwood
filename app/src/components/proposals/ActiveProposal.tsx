@@ -5,11 +5,32 @@ import {
 } from "@/lib/governor-data";
 import { truncateAddress, formatAsset, formatBps } from "@/lib/contracts";
 import PortfolioAllocation from "./PortfolioAllocation";
+import PortfolioDashboard from "./PortfolioDashboard";
+import type { Address } from "viem";
 
 interface PortfolioAllocProps {
   allocations: { symbol: string; weightPct: number }[];
   totalAmount: string;
   assetSymbol: string;
+}
+
+interface EnrichedPortfolioProps {
+  allocations: {
+    token: Address;
+    symbol: string;
+    decimals: number;
+    weightPct: number;
+    tokenAmount: string;
+    investedAmount: string;
+    feeTier: number;
+    logo: string | null;
+    marketCap: number | null;
+  }[];
+  totalAmount: string;
+  assetSymbol: string;
+  assetAddress: Address;
+  assetDecimals: number;
+  chainId: number;
 }
 
 interface ActiveProposalProps {
@@ -19,6 +40,7 @@ interface ActiveProposalProps {
   assetDecimals: number;
   assetSymbol: string;
   portfolioAllocations?: PortfolioAllocProps | null;
+  enrichedPortfolio?: EnrichedPortfolioProps | null;
 }
 
 export default function ActiveProposal({
@@ -28,6 +50,7 @@ export default function ActiveProposal({
   assetDecimals,
   assetSymbol,
   portfolioAllocations,
+  enrichedPortfolio,
 }: ActiveProposalProps) {
   const now = BigInt(Math.floor(Date.now() / 1000));
 
@@ -110,7 +133,7 @@ export default function ActiveProposal({
         )}
       </div>
 
-      <div className="metrics-grid">
+      <div className="metrics-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="metric-card">
           <div className="metric-label">Agent</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
@@ -146,14 +169,23 @@ export default function ActiveProposal({
         </div>
       </div>
 
-      {/* Portfolio allocation donut chart + token list */}
-      {portfolioAllocations && (
+      {/* Portfolio dashboard (enriched) or simple allocation chart */}
+      {enrichedPortfolio ? (
+        <PortfolioDashboard
+          allocations={enrichedPortfolio.allocations}
+          totalInvested={enrichedPortfolio.totalAmount}
+          assetSymbol={enrichedPortfolio.assetSymbol}
+          assetAddress={enrichedPortfolio.assetAddress}
+          assetDecimals={enrichedPortfolio.assetDecimals}
+          chainId={enrichedPortfolio.chainId}
+        />
+      ) : portfolioAllocations ? (
         <PortfolioAllocation
           allocations={portfolioAllocations.allocations}
           totalAmount={portfolioAllocations.totalAmount}
           assetSymbol={portfolioAllocations.assetSymbol}
         />
-      )}
+      ) : null}
     </div>
   );
 }

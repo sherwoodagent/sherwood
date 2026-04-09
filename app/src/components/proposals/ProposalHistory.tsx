@@ -104,9 +104,9 @@ export default function ProposalHistory({
     <div className="panel">
       <div className="panel-title">
         <span>Proposal History</span>
-        <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "9px" }}>
+        {/* <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "9px" }}>
           {proposals.length} TOTAL
-        </span>
+        </span> */}
       </div>
 
       {proposals.length === 0 ? (

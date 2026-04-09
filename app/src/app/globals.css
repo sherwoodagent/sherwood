@@ -898,6 +898,111 @@ body {
   width: 100%;
 }
 
+/* ── Portfolio Dashboard (compact) ────────────────────── */
+
+.portfolio-dashboard-compact {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.portfolio-value-inline {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.portfolio-value-amount {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.portfolio-value-delta {
+  font-size: 0.85rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.ticker-strip-horizontal {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+  border-left: 1px solid var(--color-border);
+  padding-left: 1.5rem;
+  margin-left: 1.5rem;
+}
+
+.ticker-logo-ring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid;
+  padding: 1px;
+  flex-shrink: 0;
+}
+
+.ticker-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.ticker-item .ticker-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ticker-item .ticker-symbol {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  font-family: var(--font-plus-jakarta), sans-serif;
+}
+
+.ticker-item .ticker-weight {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  font-family: var(--font-plus-jakarta), sans-serif;
+}
+
+.ticker-item .ticker-delta {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-plus-jakarta), sans-serif;
+}
+
+.ticker-item .ticker-mcap {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-plus-jakarta), sans-serif;
+}
+
+.delta-positive { color: #2EE6A6; }
+.delta-negative { color: #ff4d4d; }
+
+@media (max-width: 768px) {
+  .portfolio-dashboard-compact {
+    flex-direction: column;
+  }
+  .ticker-strip-horizontal {
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+    padding-left: 0;
+    padding-top: 1rem;
+    margin-left: 0;
+  }
+}
+
 /* ── Agent Cards ───────────────────────────────────────── */
 
 .agent-card {

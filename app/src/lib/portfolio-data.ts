@@ -12,6 +12,7 @@ import {
   PORTFOLIO_STRATEGY_ABI,
   ERC20_ABI,
 } from "./contracts";
+import { fetchAllTokenMetadata } from "./token-metadata";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -22,6 +23,9 @@ export interface TokenAllocation {
   targetWeightBps: number;
   tokenAmount: string;
   investedAmount: string;
+  feeTier: number;
+  logo: string | null;
+  marketCap: number | null;
 }
 
 export interface PortfolioData {
@@ -29,6 +33,8 @@ export interface PortfolioData {
   allocations: TokenAllocation[];
   totalAmount: string;
   assetSymbol: string;
+  assetAddress: Address;
+  assetDecimals: number;
 }
 
 // ── Main fetch ─────────────────────────────────────────────
@@ -81,7 +87,7 @@ export async function fetchPortfolioData(
     if (!strategyAddress) return null;
 
     // Step 3: Read strategy data
-    const [allocationsRaw, totalAmountRaw] = await client.multicall({
+    const [allocationsRaw, totalAmountRaw, swapExtraDataRaw, assetRaw] = await client.multicall({
       contracts: [
         {
           address: strategyAddress,
@@ -92,6 +98,16 @@ export async function fetchPortfolioData(
           address: strategyAddress,
           abi: PORTFOLIO_STRATEGY_ABI,
           functionName: "totalAmount",
+        },
+        {
+          address: strategyAddress,
+          abi: PORTFOLIO_STRATEGY_ABI,
+          functionName: "getSwapExtraData",
+        },
+        {
+          address: strategyAddress,
+          abi: PORTFOLIO_STRATEGY_ABI,
+          functionName: "asset",
         },
       ],
     });
@@ -111,6 +127,16 @@ export async function fetchPortfolioData(
         ? (totalAmountRaw.result as bigint)
         : 0n;
 
+    const swapExtraData =
+      swapExtraDataRaw.status === "success"
+        ? (swapExtraDataRaw.result as `0x${string}`[])
+        : [];
+
+    const assetAddress =
+      assetRaw.status === "success"
+        ? (assetRaw.result as Address)
+        : ("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as Address); // fallback USDC
+
     if (rawAllocations.length === 0) return null;
 
     // Step 4: Batch-read token metadata (symbol + decimals)
@@ -129,19 +155,36 @@ export async function fetchPortfolioData(
 
     const metaResults = await client.multicall({ contracts: tokenMetaCalls });
 
-    // Step 5: Assemble allocation data
+    // Step 5: Fetch token metadata (logos) via Alchemy + Codex
+    const tokenAddresses = rawAllocations.map((a) => a.token);
+    const metadataMap = await fetchAllTokenMetadata(tokenAddresses, chainId);
+
+    // Step 6: Assemble allocation data
     const allocations: TokenAllocation[] = rawAllocations.map((a, i) => {
       const symbolResult = metaResults[i * 2];
       const decimalsResult = metaResults[i * 2 + 1];
 
-      const symbol =
-        symbolResult.status === "success"
-          ? (symbolResult.result as string)
-          : `0x${a.token.slice(2, 8)}`;
-      const decimals =
-        decimalsResult.status === "success"
-          ? Number(decimalsResult.result)
-          : 18;
+      const meta = metadataMap.get(a.token.toLowerCase());
+      const symbol = meta?.symbol
+        ?? (symbolResult.status === "success" ? (symbolResult.result as string) : `0x${a.token.slice(2, 8)}`);
+      const decimals = meta?.decimals
+        ?? (decimalsResult.status === "success" ? Number(decimalsResult.result) : 18);
+
+      // Parse fee tier from swapExtraData
+      let feeTier = 3000; // default
+      if (swapExtraData[i]) {
+        try {
+          const bytes = swapExtraData[i];
+          const mode = parseInt(bytes.slice(2, 4), 16);
+          if (mode === 0 && bytes.length >= 68) {
+            // Single-hop: 0x00 + abi.encode(uint24) — fee is in last 3 bytes of 32-byte word
+            feeTier = parseInt(bytes.slice(bytes.length - 6), 16);
+          }
+          // mode 1 = multi-hop, default fee tier is fine for quoting
+        } catch {
+          // keep default
+        }
+      }
 
       return {
         token: a.token,
@@ -150,6 +193,9 @@ export async function fetchPortfolioData(
         targetWeightBps: Number(a.targetWeightBps),
         tokenAmount: formatUnits(a.tokenAmount, decimals),
         investedAmount: formatUnits(a.investedAmount, assetDecimals),
+        feeTier,
+        logo: meta?.logo ?? null,
+        marketCap: meta?.marketCap ?? null,
       };
     });
 
@@ -158,6 +204,8 @@ export async function fetchPortfolioData(
       allocations,
       totalAmount: formatUnits(totalAmount, assetDecimals),
       assetSymbol,
+      assetAddress,
+      assetDecimals,
     };
   } catch {
     // Graceful failure — governor may not support getExecuteCalls or RPC may be down

@@ -18,7 +18,8 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { getPublicClient, getAccount, writeContractWithRetry, waitForReceipt, formatContractError } from "../lib/client.js";
-import { getChain, getExplorerUrl, getNetwork } from "../lib/network.js";
+import { getChain, getExplorerUrl, getNetwork, CHAIN_REGISTRY } from "../lib/network.js";
+import { getCachedSwapRoute, cacheSwapRoute, type SwapRoute } from "../lib/config.js";
 import { TOKENS, MOONWELL, VENICE, AERODROME, UNISWAP, STRATEGY_TEMPLATES, SYNTHRA, CHAINLINK } from "../lib/addresses.js";
 import { BASE_STRATEGY_ABI, PORTFOLIO_STRATEGY_ABI } from "../lib/abis.js";
 import { cloneTemplate } from "../lib/clone.js";
@@ -33,7 +34,176 @@ import * as mamoBuilder from "../strategies/mamo-yield-template.js";
 import * as portfolioBuilder from "../strategies/portfolio-template.js";
 import * as hyperliquidPerpBuilder from "../strategies/hyperliquid-perp-template.js";
 
+import { concat, numberToHex, size } from "viem";
+
 const ZERO: Address = "0x0000000000000000000000000000000000000000";
+
+// ── Uniswap V3 swap routing helpers ──
+
+/**
+ * Encode Uniswap V3 packed path: token (20 bytes) + fee (3 bytes) + token (20 bytes) [+ fee + token ...]
+ */
+function encodeV3Path(tokens: Address[], fees: number[]): Hex {
+  if (tokens.length !== fees.length + 1) throw new Error("tokens.length must be fees.length + 1");
+  const parts: Hex[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    parts.push(tokens[i].toLowerCase() as Hex);
+    if (i < fees.length) {
+      // fee as 3 bytes (uint24)
+      parts.push(numberToHex(fees[i], { size: 3 }));
+    }
+  }
+  return concat(parts);
+}
+
+/**
+ * Build swapExtraData for the UniswapSwapAdapter.
+ *
+ * Mode 0 — single-hop: 0x00 + abi.encode(uint24 fee)
+ * Mode 1 — multi-hop:  0x01 + abi.encode(bytes path)
+ *
+ * For Synthra (Robinhood), extraData is just abi.encode(uint24 fee) with no mode prefix.
+ */
+function buildSwapExtraData(
+  network: string,
+  tokenIn: Address,
+  tokenOut: Address,
+  feeTier: number,
+  hop?: { via: Address; feeIn: number; feeOut: number },
+): Hex {
+  if (network === "robinhood-testnet") {
+    // SynthraDirectAdapter: plain abi.encode(uint24 fee)
+    return encodeAbiParameters([{ type: "uint24" }], [feeTier]);
+  }
+
+  if (hop) {
+    // Multi-hop: tokenIn → hop.via → tokenOut
+    const path = encodeV3Path([tokenIn, hop.via, tokenOut], [hop.feeIn, hop.feeOut]);
+    const encoded = encodeAbiParameters([{ type: "bytes" }], [path]);
+    return `0x01${encoded.slice(2)}` as Hex;
+  }
+
+  // Single-hop: mode 0
+  const encoded = encodeAbiParameters([{ type: "uint24" }], [feeTier]);
+  return `0x00${encoded.slice(2)}` as Hex;
+}
+
+/**
+ * Auto-detect swap route for a token pair on Uniswap V3.
+ * Returns { direct: true, feeTier } or { direct: false, hop } or null if no route found.
+ */
+async function detectSwapRoute(
+  asset: Address,
+  token: Address,
+  preferredFeeTier: number,
+): Promise<{ extraData: Hex; routeDesc: string } | null> {
+  const network = getNetwork();
+  if (network === "robinhood-testnet") {
+    return {
+      extraData: buildSwapExtraData(network, asset, token, preferredFeeTier),
+      routeDesc: `direct (fee ${preferredFeeTier})`,
+    };
+  }
+
+  const chainId = CHAIN_REGISTRY[network].chain.id;
+
+  // Check config cache first
+  const cached = getCachedSwapRoute(chainId, asset, token);
+  if (cached) {
+    const extraData = cached.hop
+      ? buildSwapExtraData(network, asset, token, 0, {
+          via: cached.hop.via as Address,
+          feeIn: cached.hop.feeIn,
+          feeOut: cached.hop.feeOut,
+        })
+      : buildSwapExtraData(network, asset, token, cached.feeTier);
+    const desc = cached.hop
+      ? `cached multi-hop: ${cached.hop.feeIn}→WETH→${cached.hop.feeOut}`
+      : `cached direct (fee ${cached.feeTier})`;
+    return { extraData, routeDesc: desc };
+  }
+
+  const publicClient = getPublicClient();
+  const quoterAddr = UNISWAP().QUOTER_V2;
+  const quoterAbi = [{
+    type: "function",
+    name: "quoteExactInputSingle",
+    inputs: [{ type: "tuple", components: [
+      { type: "address", name: "tokenIn" },
+      { type: "address", name: "tokenOut" },
+      { type: "uint256", name: "amountIn" },
+      { type: "uint24", name: "fee" },
+      { type: "uint160", name: "sqrtPriceLimitX96" },
+    ]}],
+    outputs: [
+      { type: "uint256" }, { type: "uint160" }, { type: "uint32" }, { type: "uint256" },
+    ],
+    stateMutability: "nonpayable",
+  }] as const;
+
+  // 1. Try direct at preferred fee tier
+  const testAmount = asset.toLowerCase() === TOKENS().USDC.toLowerCase() ? 1_000_000n : 1_000_000_000_000_000n; // 1 USDC or 0.001 WETH
+  const feeTiers = [preferredFeeTier, 10000, 3000, 500].filter((v, i, a) => a.indexOf(v) === i);
+
+  for (const fee of feeTiers) {
+    try {
+      await publicClient.simulateContract({
+        address: quoterAddr,
+        abi: quoterAbi,
+        functionName: "quoteExactInputSingle",
+        args: [{ tokenIn: asset, tokenOut: token, amountIn: testAmount, fee, sqrtPriceLimitX96: 0n }],
+      });
+      cacheSwapRoute(chainId, asset, token, { mode: "direct", feeTier: fee, detectedAt: Math.floor(Date.now() / 1000) });
+      return {
+        extraData: buildSwapExtraData(network, asset, token, fee),
+        routeDesc: `direct (fee ${fee})`,
+      };
+    } catch {
+      // No pool at this fee tier
+    }
+  }
+
+  // 2. Try multi-hop via WETH
+  const weth = TOKENS().WETH;
+  if (asset.toLowerCase() === weth.toLowerCase()) return null; // Already tried direct with WETH
+
+  // Find best USDC→WETH fee
+  let bestAssetToWethFee: number | null = null;
+  for (const fee of [500, 3000, 10000]) {
+    try {
+      await publicClient.simulateContract({
+        address: quoterAddr,
+        abi: quoterAbi,
+        functionName: "quoteExactInputSingle",
+        args: [{ tokenIn: asset, tokenOut: weth, amountIn: testAmount, fee, sqrtPriceLimitX96: 0n }],
+      });
+      bestAssetToWethFee = fee;
+      break; // 500 is cheapest, prefer it
+    } catch {}
+  }
+  if (!bestAssetToWethFee) return null;
+
+  // Find best WETH→token fee
+  const wethTestAmount = 1_000_000_000_000_000n; // 0.001 WETH
+  for (const fee of feeTiers) {
+    try {
+      await publicClient.simulateContract({
+        address: quoterAddr,
+        abi: quoterAbi,
+        functionName: "quoteExactInputSingle",
+        args: [{ tokenIn: weth, tokenOut: token, amountIn: wethTestAmount, fee, sqrtPriceLimitX96: 0n }],
+      });
+      const hop = { via: weth, feeIn: bestAssetToWethFee, feeOut: fee };
+      cacheSwapRoute(chainId, asset, token, { mode: "multi-hop", feeTier: 0, hop, detectedAt: Math.floor(Date.now() / 1000) });
+      return {
+        extraData: buildSwapExtraData(network, asset, token, 0, hop),
+        routeDesc: `multi-hop: ${bestAssetToWethFee}→WETH→${fee}`,
+      };
+    } catch {}
+  }
+
+  return null; // No route found
+}
 
 // ── Template definitions ──
 
@@ -317,8 +487,10 @@ async function buildInitDataForTemplate(
       process.exit(1);
     }
     const tokens = TOKENS();
-    const asset = resolveToken((opts.asset as string) || "WETH");
-    const decimals = (opts.asset as string)?.toUpperCase() === "USDC" ? 6 : 18;
+    const defaultAsset = getNetwork() === "robinhood-testnet" ? "WETH" : "USDC";
+    const assetSymbol = (opts.asset as string) || defaultAsset;
+    const asset = resolveToken(assetSymbol);
+    const decimals = assetSymbol.toUpperCase() === "USDC" ? 6 : 18;
     const totalAmount = parseUnits(opts.amount as string, decimals);
     const maxSlippageBps = Number((opts.maxSlippage as string) || "500");
     const feeTier = (opts.feeTier as string) || "3000";
@@ -337,10 +509,23 @@ async function buildInitDataForTemplate(
 
     const swapAdapter = (opts.swapAdapter as Address) || resolveSwapAdapter();
     const chainlinkVerifier = CHAINLINK().VERIFIER_PROXY;
-    const allocations: portfolioBuilder.BasketAllocation[] = tokenAddrs.map((token, i) => ({
-      token, weightBps: weightsBps[i],
-      swapExtraData: encodeAbiParameters([{ type: "uint24" }], [Number(feeTier)]),
-    }));
+
+    // Auto-detect swap routes for each token
+    console.log(chalk.dim("  Detecting swap routes..."));
+    const allocations: portfolioBuilder.BasketAllocation[] = [];
+    for (let i = 0; i < tokenAddrs.length; i++) {
+      const token = tokenAddrs[i];
+      const route = await detectSwapRoute(asset, token, Number(feeTier));
+      if (!route) {
+        console.error(chalk.red(`No swap route found for ${token}. No Uniswap V3 pool (direct or via WETH).`));
+        process.exit(1);
+      }
+      console.log(chalk.dim(`    ${token.slice(0, 10)}... → ${route.routeDesc}`));
+      allocations.push({
+        token, weightBps: weightsBps[i],
+        swapExtraData: route.extraData,
+      });
+    }
     return {
       initData: portfolioBuilder.buildInitData(asset, swapAdapter, chainlinkVerifier, allocations, totalAmount, maxSlippageBps),
       asset, assetAmount: totalAmount,
@@ -436,7 +621,8 @@ function resolveSwapAdapter(): Address {
     if (SYNTHRA().ROUTER === ZERO) { console.error(chalk.red("Synthra DEX not available")); process.exit(1); }
     return "0xdae81cDCfcB14c56fCeB788A147Fcd6CbEdfEeca" as Address;
   }
-  if (UNISWAP().SWAP_ROUTER === ZERO) { console.error(chalk.red("No swap adapter available")); process.exit(1); }
+  const adapterAddr = UNISWAP().SWAP_ADAPTER;
+  if (adapterAddr !== ZERO) return adapterAddr;
   console.error(chalk.red("UniswapSwapAdapter not deployed yet. Use --swap-adapter to specify manually."));
   process.exit(1);
 }
