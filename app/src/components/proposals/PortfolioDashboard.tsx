@@ -113,14 +113,18 @@ export default function PortfolioDashboard({
   const doughnutOptions = {
     responsive: true,
     maintainAspectRatio: true,
-    cutout: "70%",
+    cutout: "72%",
     plugins: {
       legend: { display: false },
       tooltip: {
-        backgroundColor: "rgba(0,0,0,0.8)",
+        backgroundColor: "rgba(0,0,0,0.9)",
+        bodyFont: { size: 11, family: "Plus Jakarta Sans" },
+        padding: 6,
+        caretSize: 4,
+        position: "nearest" as const,
         callbacks: {
           label: (ctx: { label: string; parsed: number }) =>
-            `${ctx.label}: ${ctx.parsed.toFixed(1)}%`,
+            ` ${ctx.label}: ${ctx.parsed.toFixed(1)}%`,
         },
       },
     },
@@ -130,7 +134,7 @@ export default function PortfolioDashboard({
     <div className="portfolio-dashboard-compact">
       {/* Left: doughnut + value */}
       <div className="portfolio-left">
-        <div style={{ width: "100px", height: "100px", flexShrink: 0 }}>
+        <div style={{ width: "64px", height: "64px", flexShrink: 0 }}>
           <Doughnut data={doughnutData} options={doughnutOptions} />
         </div>
         <div className="portfolio-value-block">
