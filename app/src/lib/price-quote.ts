@@ -15,6 +15,7 @@ import {
   parseUnits,
   http,
 } from "viem";
+import { type Chain } from "viem";
 import { base, baseSepolia } from "viem/chains";
 import { getAddresses, UNISWAP_QUOTER_V2_ABI, robinhoodTestnet } from "./contracts";
 
@@ -36,7 +37,7 @@ const WETH: Record<number, Address> = {
 
 const ZERO: Address = "0x0000000000000000000000000000000000000000";
 
-const CHAIN_MAP: Record<number, typeof base> = {
+const CHAIN_MAP: Record<number, Chain> = {
   8453: base,
   84532: baseSepolia,
   46630: robinhoodTestnet,
