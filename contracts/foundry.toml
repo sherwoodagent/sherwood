@@ -27,5 +27,4 @@ hyperevm = "${HYPEREVM_RPC_URL}"
 hyperevm_testnet = "${HYPEREVM_TESTNET_RPC_URL}"
 
 [etherscan]
-hyperevm = { key = "verifyContract", url = "https://api.routescan.io/v2/network/mainnet/evm/999/etherscan/api" }
-hyperevm_testnet = { key = "verifyContract", url = "https://api.routescan.io/v2/network/testnet/evm/998/etherscan/api" }
+hyperevm = { key = "${ETHERSCAN_API_KEY}", url = "https://api.etherscan.io/v2/api?chainid=999" }
