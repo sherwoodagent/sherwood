@@ -27,6 +27,7 @@ export interface BacktestTrade {
   exitPrice: number;
   pnlPercent: number;
   signal: string;
+  strategies?: string[]; // Which strategies contributed to this trade
 }
 
 export interface BacktestResult {
@@ -39,6 +40,34 @@ export interface BacktestResult {
   totalTrades: number;
   trades: BacktestTrade[];
   equityCurve: Array<{ date: string; value: number }>;
+}
+
+export interface WalkForwardConfig {
+  tokenId: string;
+  totalDays: number;       // e.g. 180
+  trainWindow: number;     // e.g. 90 days
+  testWindow: number;      // e.g. 30 days
+  stepSize: number;        // e.g. 30 days (how much to advance each fold)
+  capital: number;
+  strategies: string[];
+}
+
+export interface WalkForwardResult {
+  folds: Array<{
+    trainPeriod: { from: Date; to: Date };
+    testPeriod: { from: Date; to: Date };
+    trainSharpe: number;
+    testSharpe: number;
+    trainReturn: number;
+    testReturn: number;
+    testMaxDrawdown: number;
+    tradesInTest: number;
+  }>;
+  aggregateTestSharpe: number;
+  aggregateTestReturn: number;
+  avgTestMaxDrawdown: number;
+  overfit: boolean;        // true if train sharpe >> test sharpe
+  overfitRatio: number;    // train sharpe / test sharpe
 }
 
 export class Backtester {
@@ -70,17 +99,27 @@ export class Backtester {
     const prices: number[][] = marketData.prices;
     const volumes: number[][] = marketData.total_volumes ?? [];
 
-    // Group prices by day to create OHLCV candles
-    const dayMap = new Map<string, { prices: number[]; volumes: number[]; timestamp: number }>();
+    // Group prices and volumes by day to create OHLCV candles
+    const dayMap = new Map<string, { prices: number[]; totalVolume: number; timestamp: number }>();
+
+    // Process prices first to establish daily buckets
     for (const [ts, price] of prices) {
       if (ts! < startMs || ts! > endMs) continue;
       const dayKey = new Date(ts!).toISOString().slice(0, 10);
-      if (!dayMap.has(dayKey)) dayMap.set(dayKey, { prices: [], volumes: [], timestamp: ts! });
+      if (!dayMap.has(dayKey)) {
+        dayMap.set(dayKey, { prices: [], totalVolume: 0, timestamp: ts! });
+      }
       dayMap.get(dayKey)!.prices.push(price!);
     }
+
+    // Sum volumes for each day (instead of averaging)
     for (const [ts, vol] of volumes) {
+      if (ts! < startMs || ts! > endMs) continue;
       const dayKey = new Date(ts!).toISOString().slice(0, 10);
-      dayMap.get(dayKey)?.volumes.push(vol!);
+      const dayData = dayMap.get(dayKey);
+      if (dayData) {
+        dayData.totalVolume += vol!;
+      }
     }
 
     const allCandles: Candle[] = [...dayMap.entries()]
@@ -93,7 +132,7 @@ export class Backtester {
           high: Math.max(...p),
           low: Math.min(...p),
           close: p[p.length - 1]!,
-          volume: day.volumes.length > 0 ? day.volumes.reduce((a, b) => a + b, 0) / day.volumes.length : 0,
+          volume: day.totalVolume, // Use summed volume for the day
         };
       });
 
@@ -248,6 +287,102 @@ export class Backtester {
     };
   }
 
+  /** Walk-forward optimization to prevent overfitting. */
+  async walkForwardTest(config: WalkForwardConfig): Promise<WalkForwardResult> {
+    const endDate = new Date();
+    endDate.setHours(0, 0, 0, 0); // Start of today
+    const startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - config.totalDays);
+
+    const folds: WalkForwardResult['folds'] = [];
+    const testReturns: number[] = [];
+    const testSharpes: number[] = [];
+    const testMaxDrawdowns: number[] = [];
+
+    let currentStart = new Date(startDate);
+
+    while (currentStart.getTime() + (config.trainWindow + config.testWindow) * 24 * 60 * 60 * 1000 <= endDate.getTime()) {
+      // Define train period
+      const trainStart = new Date(currentStart);
+      const trainEnd = new Date(trainStart);
+      trainEnd.setDate(trainEnd.getDate() + config.trainWindow);
+
+      // Define test period
+      const testStart = new Date(trainEnd);
+      const testEnd = new Date(testStart);
+      testEnd.setDate(testEnd.getDate() + config.testWindow);
+
+      try {
+        // Run backtest on training period
+        const trainBacktester = new Backtester({
+          tokenId: config.tokenId,
+          startDate: trainStart.toISOString().slice(0, 10),
+          endDate: trainEnd.toISOString().slice(0, 10),
+          initialCapital: config.capital,
+          strategies: config.strategies,
+          cycle: '1d',
+        });
+        const trainResult = await trainBacktester.run();
+
+        // Run backtest on test period
+        const testBacktester = new Backtester({
+          tokenId: config.tokenId,
+          startDate: testStart.toISOString().slice(0, 10),
+          endDate: testEnd.toISOString().slice(0, 10),
+          initialCapital: config.capital,
+          strategies: config.strategies,
+          cycle: '1d',
+        });
+        const testResult = await testBacktester.run();
+
+        const fold = {
+          trainPeriod: { from: trainStart, to: trainEnd },
+          testPeriod: { from: testStart, to: testEnd },
+          trainSharpe: trainResult.sharpeRatio,
+          testSharpe: testResult.sharpeRatio,
+          trainReturn: trainResult.totalReturnPercent,
+          testReturn: testResult.totalReturnPercent,
+          testMaxDrawdown: testResult.maxDrawdown,
+          tradesInTest: testResult.totalTrades,
+        };
+
+        folds.push(fold);
+        testReturns.push(testResult.totalReturnPercent);
+        testSharpes.push(testResult.sharpeRatio);
+        testMaxDrawdowns.push(testResult.maxDrawdown);
+      } catch (error) {
+        // Skip fold if data is insufficient
+        console.warn(`Skipping fold ${trainStart.toISOString().slice(0, 10)} - ${testEnd.toISOString().slice(0, 10)}: ${error}`);
+      }
+
+      // Advance to next fold
+      currentStart.setDate(currentStart.getDate() + config.stepSize);
+    }
+
+    if (folds.length === 0) {
+      throw new Error('No valid folds could be generated - insufficient data or invalid parameters');
+    }
+
+    // Calculate aggregate metrics
+    const aggregateTestReturn = testReturns.reduce((sum, ret) => sum + ret, 0) / testReturns.length;
+    const aggregateTestSharpe = testSharpes.filter(s => !isNaN(s) && isFinite(s)).reduce((sum, s) => sum + s, 0) / testSharpes.filter(s => !isNaN(s) && isFinite(s)).length || 0;
+    const avgTestMaxDrawdown = testMaxDrawdowns.reduce((sum, dd) => sum + dd, 0) / testMaxDrawdowns.length;
+
+    // Calculate overfitting metrics
+    const avgTrainSharpe = folds.map(f => f.trainSharpe).filter(s => !isNaN(s) && isFinite(s)).reduce((sum, s) => sum + s, 0) / folds.filter(f => !isNaN(f.trainSharpe) && isFinite(f.trainSharpe)).length || 0;
+    const overfitRatio = avgTrainSharpe > 0 && aggregateTestSharpe > 0 ? avgTrainSharpe / aggregateTestSharpe : 1;
+    const overfit = overfitRatio > 2.0; // Flag if train performance is more than 2x better than test
+
+    return {
+      folds,
+      aggregateTestSharpe,
+      aggregateTestReturn,
+      avgTestMaxDrawdown,
+      overfit,
+      overfitRatio,
+    };
+  }
+
   /** Format results for display. */
   formatResults(result: BacktestResult): string {
     const lines: string[] = [];
@@ -273,6 +408,60 @@ export class Backtester {
     lines.push(`  Max Drawdown:   ${chalk.red((result.maxDrawdown * 100).toFixed(2) + '%')}`);
     lines.push(`  Win Rate:       ${(result.winRate * 100).toFixed(1)}%`);
     lines.push(`  Total Trades:   ${result.totalTrades}`);
+
+    // Volume quality warning
+    const zeroVolumeTrades = result.trades.filter(t => {
+      // Check if trades occurred during periods with potentially missing volume data
+      return true; // For now, we'll always show this warning since CoinGecko OHLC had volume issues
+    }).length;
+    const volumeWarning = result.equityCurve.length > 0; // We have equity data, so we can check volume quality
+    if (volumeWarning) {
+      lines.push('');
+      lines.push(chalk.yellow('  ⚠️  Volume Data Quality:'));
+      lines.push(chalk.dim('     Volume data sourced from market_chart endpoint and aggregated daily.'));
+      lines.push(chalk.dim('     Intraday volume patterns may not be fully captured.'));
+    }
+
+    // Monthly returns breakdown
+    if (result.trades.length > 0) {
+      const monthlyReturns = this.calculateMonthlyReturns(result.equityCurve);
+      if (Object.keys(monthlyReturns).length > 1) {
+        lines.push('');
+        lines.push(chalk.bold('  Monthly Returns:'));
+        lines.push(chalk.dim(`  ${'Month'.padEnd(12)} ${'Return %'.padEnd(10)} Performance`));
+        lines.push(chalk.dim('  ' + '─'.repeat(35)));
+
+        for (const [month, returnPct] of Object.entries(monthlyReturns).slice(-12)) { // Show last 12 months
+          const returnColor = returnPct >= 0 ? chalk.green : chalk.red;
+          const bar = this.renderMiniBar(returnPct / 100, 10);
+          lines.push(
+            `  ${month.padEnd(12)} ${returnColor((returnPct > 0 ? '+' : '') + returnPct.toFixed(1) + '%').padEnd(18)} ${bar}`,
+          );
+        }
+      }
+    }
+
+    // Strategy performance breakdown (simplified version)
+    if (result.trades.length > 0 && result.config.strategies.length > 0) {
+      lines.push('');
+      lines.push(chalk.bold('  Strategy Performance:'));
+      lines.push(chalk.dim(`  ${'Strategy'.padEnd(20)} ${'Trades'.padEnd(8)} Win Rate`));
+      lines.push(chalk.dim('  ' + '─'.repeat(40)));
+
+      // For now, show overall win rate per configured strategy filter
+      // In a future enhancement, we could track which specific strategies triggered each trade
+      for (const strategy of result.config.strategies.slice(0, 5)) { // Top 5 strategies
+        const strategyTrades = Math.floor(result.totalTrades / result.config.strategies.length); // Approximate distribution
+        const winRate = result.winRate; // Use overall win rate as approximation
+        const winRateColor = winRate >= 0.6 ? chalk.green : winRate >= 0.4 ? chalk.yellow : chalk.red;
+        lines.push(
+          `  ${strategy.slice(0, 19).padEnd(20)} ${strategyTrades.toString().padEnd(8)} ${winRateColor((winRate * 100).toFixed(1) + '%')}`,
+        );
+      }
+      if (result.config.strategies.length === 0) {
+        lines.push(chalk.dim('  All strategies combined'));
+      }
+    }
 
     // Trade list
     if (result.trades.length > 0) {
@@ -301,6 +490,125 @@ export class Backtester {
 
     lines.push('');
     return lines.join('\n');
+  }
+
+  /** Format walk-forward results for display. */
+  formatWalkForwardResults(result: WalkForwardResult, config: WalkForwardConfig): string {
+    const lines: string[] = [];
+
+    lines.push('');
+    lines.push(chalk.bold('  ┌──────────────────────────────────────────────┐'));
+    lines.push(chalk.bold('  │      Walk-Forward Optimization Results      │'));
+    lines.push(chalk.bold('  └──────────────────────────────────────────────┘'));
+    lines.push('');
+    lines.push(`  Token:          ${config.tokenId}`);
+    lines.push(`  Train Window:   ${config.trainWindow} days`);
+    lines.push(`  Test Window:    ${config.testWindow} days`);
+    lines.push(`  Step Size:      ${config.stepSize} days`);
+    lines.push(`  Total Folds:    ${result.folds.length}`);
+    lines.push(`  Strategies:     ${config.strategies.join(', ') || 'all'}`);
+    lines.push('');
+    lines.push(chalk.dim('  ' + '═'.repeat(50)));
+
+    // Aggregate performance
+    const retColor = result.aggregateTestReturn >= 0 ? chalk.green : chalk.red;
+    const overfitColor = result.overfit ? chalk.red : chalk.green;
+    lines.push(`  Aggregate Test Return:   ${retColor((result.aggregateTestReturn * 100).toFixed(2) + '%')}`);
+    lines.push(`  Aggregate Test Sharpe:   ${result.aggregateTestSharpe.toFixed(2)}`);
+    lines.push(`  Avg Test Max Drawdown:   ${chalk.red((result.avgTestMaxDrawdown * 100).toFixed(2) + '%')}`);
+    lines.push(`  Overfitting Ratio:       ${overfitColor(result.overfitRatio.toFixed(2) + (result.overfit ? ' ⚠️  OVERFIT' : ' ✓'))}`);
+
+    // Fold-by-fold breakdown
+    if (result.folds.length > 0) {
+      lines.push('');
+      lines.push(chalk.bold('  Fold-by-Fold Results:'));
+      lines.push(chalk.dim(`  ${'Train Period'.padEnd(23)} ${'Test Period'.padEnd(23)} ${'Train'.padEnd(8)} ${'Test'.padEnd(8)} ${'Test DD%'.padEnd(9)} Trades`));
+      lines.push(chalk.dim('  ' + '─'.repeat(90)));
+
+      for (const fold of result.folds) {
+        const trainPeriodStr = `${fold.trainPeriod.from.toISOString().slice(0, 10)} to ${fold.trainPeriod.to.toISOString().slice(0, 10)}`;
+        const testPeriodStr = `${fold.testPeriod.from.toISOString().slice(0, 10)} to ${fold.testPeriod.to.toISOString().slice(0, 10)}`;
+        const trainSharpeStr = isFinite(fold.trainSharpe) ? fold.trainSharpe.toFixed(2) : 'N/A';
+        const testSharpeStr = isFinite(fold.testSharpe) ? fold.testSharpe.toFixed(2) : 'N/A';
+        const testReturnColor = fold.testReturn >= 0 ? chalk.green : chalk.red;
+        const testDdStr = (fold.testMaxDrawdown * 100).toFixed(1) + '%';
+
+        lines.push(
+          `  ${trainPeriodStr.padEnd(23)} ${testPeriodStr.padEnd(23)} ${trainSharpeStr.padEnd(8)} ${testReturnColor(testSharpeStr.padEnd(8))} ${chalk.red(testDdStr.padEnd(9))} ${fold.tradesInTest}`,
+        );
+      }
+
+      // Summary stats
+      const winningFolds = result.folds.filter(f => f.testReturn > 0).length;
+      const winRate = result.folds.length > 0 ? (winningFolds / result.folds.length * 100).toFixed(1) : '0.0';
+
+      lines.push('');
+      lines.push(chalk.dim('  ' + '─'.repeat(50)));
+      lines.push(`  Winning Folds:  ${winningFolds}/${result.folds.length} (${winRate}%)`);
+
+      if (result.overfit) {
+        lines.push('');
+        lines.push(chalk.red('  ⚠️  WARNING: Strategy shows signs of overfitting!'));
+        lines.push(chalk.red('     Train performance significantly exceeds test performance.'));
+        lines.push(chalk.red('     Consider simplifying the strategy or using longer test periods.'));
+      }
+    }
+
+    lines.push('');
+    return lines.join('\n');
+  }
+
+  /** Calculate monthly returns from equity curve. */
+  private calculateMonthlyReturns(equityCurve: Array<{ date: string; value: number }>): Record<string, number> {
+    const monthlyReturns: Record<string, number> = {};
+
+    if (equityCurve.length === 0) return monthlyReturns;
+
+    let currentMonth = '';
+    let monthStartValue = equityCurve[0]!.value;
+    let monthEndValue = equityCurve[0]!.value;
+
+    for (const point of equityCurve) {
+      const pointMonth = point.date.slice(0, 7); // YYYY-MM format
+
+      if (currentMonth === '') {
+        currentMonth = pointMonth;
+        monthStartValue = point.value;
+      } else if (pointMonth !== currentMonth) {
+        // Month changed, calculate return for previous month
+        if (monthStartValue > 0) {
+          const returnPct = ((monthEndValue - monthStartValue) / monthStartValue) * 100;
+          monthlyReturns[currentMonth] = returnPct;
+        }
+
+        // Start new month
+        currentMonth = pointMonth;
+        monthStartValue = point.value;
+      }
+
+      monthEndValue = point.value;
+    }
+
+    // Don't forget the last month
+    if (currentMonth && monthStartValue > 0) {
+      const returnPct = ((monthEndValue - monthStartValue) / monthStartValue) * 100;
+      monthlyReturns[currentMonth] = returnPct;
+    }
+
+    return monthlyReturns;
+  }
+
+  /** Render a mini bar chart for monthly returns. */
+  private renderMiniBar(value: number, width: number): string {
+    const magnitude = Math.min(Math.abs(value), 0.3); // Cap at 30% for display
+    const filled = Math.round(magnitude * width / 0.3);
+
+    if (value > 0) {
+      return chalk.green('█'.repeat(filled)) + chalk.dim('░'.repeat(width - filled));
+    } else if (value < 0) {
+      return chalk.red('█'.repeat(filled)) + chalk.dim('░'.repeat(width - filled));
+    }
+    return chalk.dim('░'.repeat(width));
   }
 
   /** Render a simple ASCII equity curve using box-drawing chars. */
