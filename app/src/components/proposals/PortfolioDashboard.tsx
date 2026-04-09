@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -39,6 +39,7 @@ interface Allocation {
   investedAmount: string;
   feeTier: number;
   logo: string | null;
+  marketCap: number | null;
 }
 
 interface PortfolioDashboardProps {
@@ -51,16 +52,31 @@ interface PortfolioDashboardProps {
   equityCurve: number[];
 }
 
-function formatPrice(price: number): string {
-  if (price === 0) return "$0";
-  if (price >= 1) return `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  if (price >= 0.0001) return `$${price.toFixed(6)}`;
-  return `$${price.toExponential(2)}`;
+function formatMarketCap(mcap: number): string {
+  if (mcap >= 1_000_000_000) return `$${(mcap / 1_000_000_000).toFixed(1)}B`;
+  if (mcap >= 1_000_000) return `$${(mcap / 1_000_000).toFixed(1)}M`;
+  if (mcap >= 1_000) return `$${(mcap / 1_000).toFixed(1)}K`;
+  return `$${mcap.toFixed(0)}`;
 }
 
 function formatDelta(delta: number): string {
   const sign = delta >= 0 ? "+" : "";
   return `${sign}${delta.toFixed(2)}%`;
+}
+
+/**
+ * Subsample an equity curve array to fit the selected timeframe granularity.
+ * Since the source data is 7 daily points, shorter timeframes show fewer points.
+ */
+function sampleCurve(data: number[], timeframe: typeof TIMEFRAMES[number]): number[] {
+  if (data.length <= 1) return data;
+  switch (timeframe) {
+    case "15m": return data.slice(-2); // last 2 points
+    case "1h": return data.slice(-3);
+    case "4h": return data.slice(-5);
+    case "1d":
+    default: return data;
+  }
 }
 
 export default function PortfolioDashboard({
@@ -128,7 +144,9 @@ export default function PortfolioDashboard({
     ? ((portfolioValue - totalInvestedNum) / totalInvestedNum) * 100
     : 0;
 
-  const labels = Array.from({ length: equityCurve.length }, (_, i) => i + 1);
+  // Subsample curve for selected timeframe
+  const chartData = useMemo(() => sampleCurve(equityCurve, selectedTf), [equityCurve, selectedTf]);
+  const labels = Array.from({ length: chartData.length }, (_, i) => i + 1);
 
   return (
     <div className="portfolio-dashboard">
@@ -168,7 +186,7 @@ export default function PortfolioDashboard({
               datasets: [
                 {
                   label: "Portfolio Value",
-                  data: equityCurve,
+                  data: chartData,
                   borderColor: "#2EE6A6",
                   borderWidth: 2,
                   fill: true,
@@ -218,61 +236,41 @@ export default function PortfolioDashboard({
         <div className="allocation-bar">
           {allocations.map((a, i) => (
             <div key={a.token} className="allocation-tag">
-              <span className="dot" style={{ background: PALETTE[i % PALETTE.length] }} />
+              {a.logo ? (
+                <img src={a.logo} alt="" width={12} height={12} style={{ borderRadius: "50%" }} />
+              ) : (
+                <span className="dot" style={{ background: PALETTE[i % PALETTE.length] }} />
+              )}
               <span style={{ color: "#fff", fontWeight: 500 }}>{a.symbol}</span>
               <span>{a.weightPct.toFixed(1)}%</span>
             </div>
           ))}
         </div>
-
-        <div className="deployed-label">
-          <span>Deployed</span>
-          <span className="amount">{totalInvested} {assetSymbol}</span>
-        </div>
       </div>
 
       {/* Right: ticker strip */}
       <div className="ticker-strip">
-        {allocations.map((a, i) => {
-          const tv = tokenValues[i];
-          const delta = tv && tv.invested > 0
-            ? ((tv.value - tv.invested) / tv.invested) * 100
-            : 0;
-          const hasPrices = !loading && tv?.price > 0;
-
-          return (
-            <div key={a.token} className="ticker-item">
-              <div className="ticker-header">
-                {a.logo ? (
-                  <img
-                    src={a.logo}
-                    alt={a.symbol}
-                    width={16}
-                    height={16}
-                    style={{ borderRadius: "50%", flexShrink: 0 }}
-                  />
-                ) : (
-                  <span className="dot" style={{ width: 10, height: 10, borderRadius: "50%", background: PALETTE[i % PALETTE.length], display: "inline-block", flexShrink: 0 }} />
-                )}
-                <span className="ticker-symbol">{a.symbol}</span>
-                <span className="ticker-weight">{a.weightPct.toFixed(0)}%</span>
-              </div>
-              {hasPrices ? (
-                <>
-                  <span className="ticker-price">{formatPrice(tv.price)}</span>
-                  <span className={`ticker-delta ${delta >= 0 ? "delta-positive" : "delta-negative"}`}>
-                    {formatDelta(delta)}
-                  </span>
-                </>
+        {allocations.map((a, i) => (
+          <div key={a.token} className="ticker-item">
+            <div className="ticker-header">
+              {a.logo ? (
+                <img
+                  src={a.logo}
+                  alt={a.symbol}
+                  width={20}
+                  height={20}
+                  style={{ borderRadius: "50%", flexShrink: 0 }}
+                />
               ) : (
-                <>
-                  <div className="ticker-skeleton" />
-                  <div className="ticker-skeleton" style={{ width: 40 }} />
-                </>
+                <span className="dot" style={{ width: 12, height: 12, borderRadius: "50%", background: PALETTE[i % PALETTE.length], display: "inline-block", flexShrink: 0 }} />
               )}
+              <span className="ticker-symbol">{a.symbol}</span>
             </div>
-          );
-        })}
+            <span className="ticker-mcap">
+              {a.marketCap ? `MCap ${formatMarketCap(a.marketCap)}` : "—"}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -24,6 +24,7 @@ interface EnrichedPortfolioProps {
     investedAmount: string;
     feeTier: number;
     logo: string | null;
+    marketCap: number | null;
   }[];
   totalAmount: string;
   assetSymbol: string;

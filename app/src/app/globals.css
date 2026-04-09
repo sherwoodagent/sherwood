@@ -1002,60 +1002,22 @@ body {
 }
 
 .ticker-item .ticker-symbol {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: #fff;
   font-family: var(--font-plus-jakarta), sans-serif;
 }
 
-.ticker-item .ticker-weight {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
-}
-
-.ticker-item .ticker-price {
+.ticker-item .ticker-mcap {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.5);
   font-variant-numeric: tabular-nums;
   font-family: var(--font-plus-jakarta), sans-serif;
-}
-
-.ticker-item .ticker-delta {
-  font-size: 11px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
 }
 
 .delta-positive { color: #2EE6A6; }
 .delta-negative { color: #ff4d4d; }
 
-.ticker-skeleton {
-  height: 12px;
-  width: 60px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 2px;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
-}
-
-.deployed-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
-  font-family: var(--font-plus-jakarta), sans-serif;
-  color: rgba(255, 255, 255, 0.3);
-  margin-top: 0.25rem;
-}
-
-.deployed-label .amount {
-  color: var(--color-accent);
-  font-weight: 500;
-}
 
 @media (max-width: 768px) {
   .portfolio-dashboard {

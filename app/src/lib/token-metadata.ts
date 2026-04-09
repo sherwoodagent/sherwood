@@ -15,6 +15,7 @@ export interface TokenMetadata {
   symbol: string;
   decimals: number;
   logo: string;
+  marketCap: number | null;
 }
 
 // ── Codex GraphQL ──
@@ -46,18 +47,24 @@ const FILTER_TOKENS_QUERY = `
           info {
             imageSmallUrl
           }
+          marketCap
         }
       }
     }
   }
 `;
 
-async function fetchTokenImageFromCodex(
+interface CodexTokenData {
+  logo: string | null;
+  marketCap: number | null;
+}
+
+async function fetchTokenFromCodex(
   tokenAddress: string,
   chainId: number,
-): Promise<string | null> {
+): Promise<CodexTokenData> {
   const codexKey = process.env.CODEX_API_KEY;
-  if (!codexKey) return null;
+  if (!codexKey) return { logo: null, marketCap: null };
 
   try {
     const res = await fetch(CODEX_API_URL, {
@@ -79,23 +86,31 @@ async function fetchTokenImageFromCodex(
 
     const data = await res.json();
     const result = data?.data?.filterTokens?.results?.[0];
-    return result?.token?.info?.imageSmallUrl || null;
+    const token = result?.token;
+    return {
+      logo: token?.info?.imageSmallUrl || null,
+      marketCap: token?.marketCap ? Number(token.marketCap) : null,
+    };
   } catch {
-    return null;
+    return { logo: null, marketCap: null };
   }
 }
 
 // ── Alchemy ──
 
 function getAlchemyUrl(chainId: number): string | null {
-  // Extract Alchemy key from the RPC URL env vars
+  const apiKey = process.env.ALCHEMY_API_KEY;
+  if (apiKey) {
+    const host = chainId === 84532 ? "base-sepolia" : "base-mainnet";
+    return `https://${host}.g.alchemy.com/v2/${apiKey}`;
+  }
+  // Fallback: extract from RPC URL env vars
   const rpcUrl =
     chainId === 8453
       ? process.env.NEXT_PUBLIC_RPC_URL_BASE
       : chainId === 84532
         ? process.env.NEXT_PUBLIC_RPC_URL_BASE_SEPOLIA
         : null;
-
   if (!rpcUrl || !rpcUrl.includes("alchemy.com")) return null;
   return rpcUrl;
 }
@@ -129,15 +144,19 @@ export async function fetchTokenMetadata(
     if (!data.result) return null;
 
     let logo = data.result.logo;
-    if (!logo) {
-      logo = await fetchTokenImageFromCodex(tokenAddress, chainId);
-    }
+    let marketCap: number | null = null;
+
+    // Fetch from Codex for logo fallback + market cap
+    const codexData = await fetchTokenFromCodex(tokenAddress, chainId);
+    if (!logo) logo = codexData.logo;
+    marketCap = codexData.marketCap;
 
     return {
       name: data.result.name || "Unknown",
       symbol: data.result.symbol || "???",
       decimals: data.result.decimals ?? 18,
       logo: logo || LOGO_PLACEHOLDER,
+      marketCap,
     };
   } catch {
     return null;

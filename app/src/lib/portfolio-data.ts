@@ -25,6 +25,7 @@ export interface TokenAllocation {
   investedAmount: string;
   feeTier: number;
   logo: string | null;
+  marketCap: number | null;
 }
 
 export interface PortfolioData {
@@ -194,6 +195,7 @@ export async function fetchPortfolioData(
         investedAmount: formatUnits(a.investedAmount, assetDecimals),
         feeTier,
         logo: meta?.logo ?? null,
+        marketCap: meta?.marketCap ?? null,
       };
     });
 
