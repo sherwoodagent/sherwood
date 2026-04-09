@@ -57,12 +57,34 @@ export class Backtester {
     const endMs = new Date(this.config.endDate).getTime();
     const totalDays = Math.ceil((endMs - startMs) / (24 * 60 * 60 * 1000));
 
-    // CoinGecko OHLC supports: 1, 7, 14, 30, 90, 180, 365, max
-    // For longer ranges use market_chart
-    const cgDays = Math.min(Math.max(totalDays, 1), 365);
+    // CoinGecko free OHLC only accepts specific values: 1, 7, 14, 30, 90, 180, 365, max
+    // For ranges > 180 days, fetch in 180-day chunks to avoid 400 errors
+    const VALID_DAYS = [1, 7, 14, 30, 90, 180];
+    const chunkSize = 180;
 
-    const ohlcRaw = await this.cg.getOHLC(this.config.tokenId, cgDays);
-    const marketData = await this.cg.getMarketData(this.config.tokenId, cgDays);
+    let ohlcRaw: number[][] = [];
+    let marketData: any = null;
+
+    if (totalDays <= 180) {
+      // Single fetch — pick the smallest valid bucket that covers the range
+      const cgDays = VALID_DAYS.find((d) => d >= totalDays) ?? 180;
+      ohlcRaw = await this.cg.getOHLC(this.config.tokenId, cgDays);
+      marketData = await this.cg.getMarketData(this.config.tokenId, cgDays);
+    } else {
+      // Fetch in 180-day chunks
+      for (let chunkStart = startMs; chunkStart < endMs; chunkStart += chunkSize * 24 * 60 * 60 * 1000) {
+        const chunk = await this.cg.getOHLC(this.config.tokenId, chunkSize);
+        ohlcRaw.push(...chunk);
+      }
+      // Deduplicate by timestamp
+      const seen = new Set<number>();
+      ohlcRaw = ohlcRaw.filter((c) => {
+        if (seen.has(c[0]!)) return false;
+        seen.add(c[0]!);
+        return true;
+      });
+      marketData = await this.cg.getMarketData(this.config.tokenId, chunkSize);
+    }
 
     // Build candle array with volume
     const allCandles: Candle[] = ohlcRaw
