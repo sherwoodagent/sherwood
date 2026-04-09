@@ -955,32 +955,6 @@ body {
   color: var(--color-accent);
 }
 
-.allocation-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1.25rem;
-  align-items: center;
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--color-border);
-}
-
-.allocation-tag {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  font-family: var(--font-plus-jakarta), sans-serif;
-}
-
-.allocation-tag .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
 .ticker-strip {
   display: flex;
   flex-direction: column;
@@ -1005,6 +979,12 @@ body {
   font-size: 14px;
   font-weight: 600;
   color: #fff;
+  font-family: var(--font-plus-jakarta), sans-serif;
+}
+
+.ticker-item .ticker-weight {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
   font-family: var(--font-plus-jakarta), sans-serif;
 }
 

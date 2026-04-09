@@ -232,20 +232,6 @@ export default function PortfolioDashboard({
           />
         </div>
 
-        {/* Compact allocation bar */}
-        <div className="allocation-bar">
-          {allocations.map((a, i) => (
-            <div key={a.token} className="allocation-tag">
-              {a.logo ? (
-                <img src={a.logo} alt="" width={12} height={12} style={{ borderRadius: "50%" }} />
-              ) : (
-                <span className="dot" style={{ background: PALETTE[i % PALETTE.length] }} />
-              )}
-              <span style={{ color: "#fff", fontWeight: 500 }}>{a.symbol}</span>
-              <span>{a.weightPct.toFixed(1)}%</span>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* Right: ticker strip */}
@@ -265,6 +251,7 @@ export default function PortfolioDashboard({
                 <span className="dot" style={{ width: 12, height: 12, borderRadius: "50%", background: PALETTE[i % PALETTE.length], display: "inline-block", flexShrink: 0 }} />
               )}
               <span className="ticker-symbol">{a.symbol}</span>
+              <span className="ticker-weight">{a.weightPct.toFixed(0)}%</span>
             </div>
             <span className="ticker-mcap">
               {a.marketCap ? `MCap ${formatMarketCap(a.marketCap)}` : "—"}
