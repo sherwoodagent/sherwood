@@ -18,7 +18,8 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { getPublicClient, getAccount, writeContractWithRetry, waitForReceipt, formatContractError } from "../lib/client.js";
-import { getChain, getExplorerUrl, getNetwork } from "../lib/network.js";
+import { getChain, getExplorerUrl, getNetwork, CHAIN_REGISTRY } from "../lib/network.js";
+import { getCachedSwapRoute, cacheSwapRoute, type SwapRoute } from "../lib/config.js";
 import { TOKENS, MOONWELL, VENICE, AERODROME, UNISWAP, STRATEGY_TEMPLATES, SYNTHRA, CHAINLINK } from "../lib/addresses.js";
 import { BASE_STRATEGY_ABI, PORTFOLIO_STRATEGY_ABI } from "../lib/abis.js";
 import { cloneTemplate } from "../lib/clone.js";
@@ -103,6 +104,24 @@ async function detectSwapRoute(
     };
   }
 
+  const chainId = CHAIN_REGISTRY[network].chain.id;
+
+  // Check config cache first
+  const cached = getCachedSwapRoute(chainId, asset, token);
+  if (cached) {
+    const extraData = cached.hop
+      ? buildSwapExtraData(network, asset, token, 0, {
+          via: cached.hop.via as Address,
+          feeIn: cached.hop.feeIn,
+          feeOut: cached.hop.feeOut,
+        })
+      : buildSwapExtraData(network, asset, token, cached.feeTier);
+    const desc = cached.hop
+      ? `cached multi-hop: ${cached.hop.feeIn}→WETH→${cached.hop.feeOut}`
+      : `cached direct (fee ${cached.feeTier})`;
+    return { extraData, routeDesc: desc };
+  }
+
   const publicClient = getPublicClient();
   const quoterAddr = UNISWAP().QUOTER_V2;
   const quoterAbi = [{
@@ -133,6 +152,7 @@ async function detectSwapRoute(
         functionName: "quoteExactInputSingle",
         args: [{ tokenIn: asset, tokenOut: token, amountIn: testAmount, fee, sqrtPriceLimitX96: 0n }],
       });
+      cacheSwapRoute(chainId, asset, token, { mode: "direct", feeTier: fee, detectedAt: Math.floor(Date.now() / 1000) });
       return {
         extraData: buildSwapExtraData(network, asset, token, fee),
         routeDesc: `direct (fee ${fee})`,
@@ -172,12 +192,10 @@ async function detectSwapRoute(
         functionName: "quoteExactInputSingle",
         args: [{ tokenIn: weth, tokenOut: token, amountIn: wethTestAmount, fee, sqrtPriceLimitX96: 0n }],
       });
+      const hop = { via: weth, feeIn: bestAssetToWethFee, feeOut: fee };
+      cacheSwapRoute(chainId, asset, token, { mode: "multi-hop", feeTier: 0, hop, detectedAt: Math.floor(Date.now() / 1000) });
       return {
-        extraData: buildSwapExtraData(network, asset, token, 0, {
-          via: weth,
-          feeIn: bestAssetToWethFee,
-          feeOut: fee,
-        }),
+        extraData: buildSwapExtraData(network, asset, token, 0, hop),
         routeDesc: `multi-hop: ${bestAssetToWethFee}→WETH→${fee}`,
       };
     } catch {}

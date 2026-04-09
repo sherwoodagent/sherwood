@@ -238,22 +238,112 @@ export async function fetchPortfolioPriceHistory(
 }
 
 /**
- * Fetch metadata for multiple tokens in parallel.
- * Returns a Map from token address (lowercased) to metadata.
+ * Batch-fetch Codex data for multiple tokens in a single GraphQL call.
+ * Uses multiple filterTokens queries aliased per token.
+ */
+async function fetchBatchCodexData(
+  tokens: string[],
+  chainId: number,
+): Promise<Map<string, CodexTokenData>> {
+  const codexKey = process.env.CODEX_API_KEY;
+  const result = new Map<string, CodexTokenData>();
+  if (!codexKey || tokens.length === 0) return result;
+
+  // Build a single query with aliased sub-queries
+  const fragments = tokens.map((addr, i) =>
+    `t${i}: filterTokens(filters: { network: [${chainId}], liquidity: { gt: 0 }, marketCap: { gt: 0 } }, phrase: "${addr}", limit: 1, rankings: [{ attribute: liquidity, direction: DESC }]) { results { token { info { imageSmallUrl } } marketCap } }`
+  );
+
+  try {
+    const res = await fetch(CODEX_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: codexKey },
+      body: JSON.stringify({ query: `{ ${fragments.join("\n")} }` }),
+    });
+    const data = await res.json();
+    for (let i = 0; i < tokens.length; i++) {
+      const entry = data?.data?.[`t${i}`]?.results?.[0];
+      result.set(tokens[i].toLowerCase(), {
+        logo: entry?.token?.info?.imageSmallUrl || null,
+        marketCap: entry?.marketCap ? Number(entry.marketCap) : null,
+      });
+    }
+  } catch {
+    // Non-fatal
+  }
+  return result;
+}
+
+/**
+ * Batch-fetch Alchemy token metadata for multiple tokens in parallel.
+ */
+async function fetchBatchAlchemyMetadata(
+  tokens: string[],
+  chainId: number,
+): Promise<Map<string, { name: string; symbol: string; decimals: number; logo: string | null }>> {
+  const alchemyUrl = getAlchemyUrl(chainId);
+  const result = new Map<string, { name: string; symbol: string; decimals: number; logo: string | null }>();
+  if (!alchemyUrl || tokens.length === 0) return result;
+
+  // Alchemy supports JSON-RPC batch
+  const batch = tokens.map((addr, i) => ({
+    jsonrpc: "2.0",
+    method: "alchemy_getTokenMetadata",
+    params: [addr],
+    id: i,
+  }));
+
+  try {
+    const res = await fetch(alchemyUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(batch),
+    });
+    const responses = await res.json() as { id: number; result?: { name: string; symbol: string; decimals: number; logo: string | null } }[];
+    for (const r of responses) {
+      if (r.result) {
+        result.set(tokens[r.id].toLowerCase(), {
+          name: r.result.name || "Unknown",
+          symbol: r.result.symbol || "???",
+          decimals: r.result.decimals ?? 18,
+          logo: r.result.logo || null,
+        });
+      }
+    }
+  } catch {
+    // Non-fatal
+  }
+  return result;
+}
+
+/**
+ * Fetch metadata for multiple tokens with batched API calls.
+ * 1 Alchemy batch call + 1 Codex batch query (instead of N+N).
  */
 export async function fetchAllTokenMetadata(
   tokens: string[],
   chainId: number,
 ): Promise<Map<string, TokenMetadata>> {
-  const results = await Promise.allSettled(
-    tokens.map((t) => fetchTokenMetadata(t, chainId)),
-  );
+  // Run both batch calls in parallel
+  const [alchemyMap, codexMap] = await Promise.all([
+    fetchBatchAlchemyMetadata(tokens, chainId),
+    fetchBatchCodexData(tokens, chainId),
+  ]);
 
   const metaMap = new Map<string, TokenMetadata>();
-  for (let i = 0; i < tokens.length; i++) {
-    const result = results[i];
-    if (result.status === "fulfilled" && result.value) {
-      metaMap.set(tokens[i].toLowerCase(), result.value);
+  for (const addr of tokens) {
+    const key = addr.toLowerCase();
+    const alchemy = alchemyMap.get(key);
+    const codex = codexMap.get(key);
+
+    if (alchemy || codex) {
+      metaMap.set(key, {
+        name: alchemy?.name || "Unknown",
+        symbol: alchemy?.symbol || "???",
+        decimals: alchemy?.decimals ?? 18,
+        logo: alchemy?.logo || codex?.logo || LOGO_PLACEHOLDER,
+        marketCap: codex?.marketCap ?? null,
+      });
     }
   }
 

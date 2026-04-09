@@ -163,8 +163,8 @@ export async function quoteTokenPrice(
 }
 
 /**
- * Quote prices for multiple tokens in parallel.
- * Returns a Map from token address (lowercased) to price.
+ * Quote prices for multiple tokens in parallel (server-side, direct RPC).
+ * Used by the /api/prices route.
  */
 export async function quoteAllTokenPrices(
   chainId: number,
@@ -187,4 +187,32 @@ export async function quoteAllTokenPrices(
   }
 
   return priceMap;
+}
+
+/**
+ * Client-side: fetch prices via the /api/prices route (server caches for 30s).
+ * No RPC calls from the browser.
+ */
+export async function fetchPricesFromApi(
+  chainId: number,
+  tokens: { token: Address; decimals: number; feeTier?: number }[],
+  asset: Address,
+  assetDecimals: number,
+): Promise<Map<string, TokenPrice>> {
+  try {
+    const res = await fetch("/api/prices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chainId, tokens, asset, assetDecimals }),
+    });
+    if (!res.ok) return new Map();
+    const data = await res.json() as Record<string, { price: number }>;
+    const map = new Map<string, TokenPrice>();
+    for (const [addr, val] of Object.entries(data)) {
+      map.set(addr, { price: val.price, amountOut: 0n });
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
 }
