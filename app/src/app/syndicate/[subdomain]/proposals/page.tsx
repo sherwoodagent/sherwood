@@ -313,7 +313,6 @@ export default async function ProposalsPage({
     assetAddress: Address;
     assetDecimals: number;
     chainId: number;
-    priceHistory: { timestamp: number; value: number }[];
   } | null = null;
 
   if (activeProposal && liveGovernor) {
@@ -353,7 +352,6 @@ export default async function ProposalsPage({
         assetAddress: portfolioData.assetAddress,
         assetDecimals: portfolioData.assetDecimals,
         chainId: data.chainId,
-        priceHistory: portfolioData.priceHistory,
       };
     }
   }

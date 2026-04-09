@@ -12,7 +12,7 @@ import {
   PORTFOLIO_STRATEGY_ABI,
   ERC20_ABI,
 } from "./contracts";
-import { fetchAllTokenMetadata, fetchPortfolioPriceHistory, type PriceBar } from "./token-metadata";
+import { fetchAllTokenMetadata } from "./token-metadata";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -35,7 +35,6 @@ export interface PortfolioData {
   assetSymbol: string;
   assetAddress: Address;
   assetDecimals: number;
-  priceHistory: PriceBar[];
 }
 
 // ── Main fetch ─────────────────────────────────────────────
@@ -201,16 +200,8 @@ export async function fetchPortfolioData(
       };
     });
 
-    // Step 7: Fetch price history for portfolio chart (Codex getBars)
-    const priceHistoryFrom = executedAt ?? Math.floor(Date.now() / 1000) - 86400;
-    const priceHistory = await fetchPortfolioPriceHistory(
-      allocations.map((a) => ({
-        address: a.token,
-        amount: parseFloat(a.tokenAmount),
-      })),
-      chainId,
-      priceHistoryFrom,
-    );
+    // Note: price history (Codex getBars) disabled for now — re-enable when chart is ready
+    // const priceHistory = await fetchPortfolioPriceHistory(tokens, chainId, executedAt);
 
     return {
       strategyAddress,
@@ -219,7 +210,6 @@ export async function fetchPortfolioData(
       assetSymbol,
       assetAddress,
       assetDecimals,
-      priceHistory,
     };
   } catch {
     // Graceful failure — governor may not support getExecuteCalls or RPC may be down

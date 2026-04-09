@@ -898,75 +898,60 @@ body {
   width: 100%;
 }
 
-/* ── Portfolio Dashboard ──────────────────────────────── */
+/* ── Portfolio Dashboard (compact) ────────────────────── */
 
-.portfolio-dashboard {
-  display: grid;
-  grid-template-columns: 1fr 200px;
-  gap: 1rem;
+.portfolio-dashboard-compact {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.5rem;
   margin-top: 1.5rem;
 }
 
-.portfolio-value-header {
+.portfolio-left {
   display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
+  align-items: center;
+  gap: 1rem;
+  flex-shrink: 0;
 }
 
-.portfolio-value-header .value {
-  font-size: 1.5rem;
+.portfolio-value-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.portfolio-value-amount {
+  font-size: 1.25rem;
   font-weight: 600;
   color: #fff;
   font-variant-numeric: tabular-nums;
 }
 
-.portfolio-value-header .delta {
-  font-size: 0.875rem;
+.portfolio-value-delta {
+  font-size: 0.8rem;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
-.time-selector {
-  display: flex;
-  gap: 0.25rem;
-  margin-bottom: 0.75rem;
-}
-
-.time-selector button {
-  padding: 0.25rem 0.75rem;
+.portfolio-invested {
   font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
   font-family: var(--font-plus-jakarta), sans-serif;
-  letter-spacing: 0.05em;
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: rgba(255, 255, 255, 0.4);
-  cursor: pointer;
-  transition: all 0.15s ease;
 }
 
-.time-selector button:hover {
-  color: rgba(255, 255, 255, 0.7);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.time-selector button.active {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.ticker-strip {
+.ticker-strip-horizontal {
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  gap: 1.25rem;
+  flex-wrap: wrap;
   border-left: 1px solid var(--color-border);
-  padding-left: 1rem;
+  padding-left: 1.25rem;
+  margin-left: auto;
 }
 
 .ticker-item {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.2rem;
 }
 
 .ticker-item .ticker-header {
@@ -976,28 +961,28 @@ body {
 }
 
 .ticker-item .ticker-symbol {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #fff;
   font-family: var(--font-plus-jakarta), sans-serif;
 }
 
 .ticker-item .ticker-weight {
-  font-size: 11px;
+  font-size: 10px;
   color: rgba(255, 255, 255, 0.3);
   font-family: var(--font-plus-jakarta), sans-serif;
 }
 
 .ticker-item .ticker-delta {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   font-family: var(--font-plus-jakarta), sans-serif;
 }
 
 .ticker-item .ticker-mcap {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
   font-variant-numeric: tabular-nums;
   font-family: var(--font-plus-jakarta), sans-serif;
 }
@@ -1005,21 +990,16 @@ body {
 .delta-positive { color: #2EE6A6; }
 .delta-negative { color: #ff4d4d; }
 
-
 @media (max-width: 768px) {
-  .portfolio-dashboard {
-    grid-template-columns: 1fr;
+  .portfolio-dashboard-compact {
+    flex-direction: column;
   }
-  .ticker-strip {
+  .ticker-strip-horizontal {
     border-left: none;
     border-top: 1px solid var(--color-border);
     padding-left: 0;
     padding-top: 1rem;
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-  .ticker-item {
-    min-width: 100px;
+    margin-left: 0;
   }
 }
 

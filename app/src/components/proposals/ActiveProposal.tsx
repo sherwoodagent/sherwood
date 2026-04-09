@@ -31,7 +31,6 @@ interface EnrichedPortfolioProps {
   assetAddress: Address;
   assetDecimals: number;
   chainId: number;
-  priceHistory: { timestamp: number; value: number }[];
 }
 
 interface ActiveProposalProps {
@@ -179,7 +178,6 @@ export default function ActiveProposal({
           assetAddress={enrichedPortfolio.assetAddress}
           assetDecimals={enrichedPortfolio.assetDecimals}
           chainId={enrichedPortfolio.chainId}
-          priceHistory={enrichedPortfolio.priceHistory}
         />
       ) : portfolioAllocations ? (
         <PortfolioAllocation
