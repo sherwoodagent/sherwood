@@ -22,6 +22,7 @@ export interface TokenAllocation {
   targetWeightBps: number;
   tokenAmount: string;
   investedAmount: string;
+  feeTier: number;
 }
 
 export interface PortfolioData {
@@ -29,6 +30,8 @@ export interface PortfolioData {
   allocations: TokenAllocation[];
   totalAmount: string;
   assetSymbol: string;
+  assetAddress: Address;
+  assetDecimals: number;
 }
 
 // ── Main fetch ─────────────────────────────────────────────
@@ -81,7 +84,7 @@ export async function fetchPortfolioData(
     if (!strategyAddress) return null;
 
     // Step 3: Read strategy data
-    const [allocationsRaw, totalAmountRaw] = await client.multicall({
+    const [allocationsRaw, totalAmountRaw, swapExtraDataRaw, assetRaw] = await client.multicall({
       contracts: [
         {
           address: strategyAddress,
@@ -92,6 +95,16 @@ export async function fetchPortfolioData(
           address: strategyAddress,
           abi: PORTFOLIO_STRATEGY_ABI,
           functionName: "totalAmount",
+        },
+        {
+          address: strategyAddress,
+          abi: PORTFOLIO_STRATEGY_ABI,
+          functionName: "getSwapExtraData",
+        },
+        {
+          address: strategyAddress,
+          abi: PORTFOLIO_STRATEGY_ABI,
+          functionName: "asset",
         },
       ],
     });
@@ -110,6 +123,16 @@ export async function fetchPortfolioData(
       totalAmountRaw.status === "success"
         ? (totalAmountRaw.result as bigint)
         : 0n;
+
+    const swapExtraData =
+      swapExtraDataRaw.status === "success"
+        ? (swapExtraDataRaw.result as `0x${string}`[])
+        : [];
+
+    const assetAddress =
+      assetRaw.status === "success"
+        ? (assetRaw.result as Address)
+        : ("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as Address); // fallback USDC
 
     if (rawAllocations.length === 0) return null;
 
@@ -143,6 +166,22 @@ export async function fetchPortfolioData(
           ? Number(decimalsResult.result)
           : 18;
 
+      // Parse fee tier from swapExtraData
+      let feeTier = 3000; // default
+      if (swapExtraData[i]) {
+        try {
+          const bytes = swapExtraData[i];
+          const mode = parseInt(bytes.slice(2, 4), 16);
+          if (mode === 0 && bytes.length >= 68) {
+            // Single-hop: 0x00 + abi.encode(uint24) — fee is in last 3 bytes of 32-byte word
+            feeTier = parseInt(bytes.slice(bytes.length - 6), 16);
+          }
+          // mode 1 = multi-hop, default fee tier is fine for quoting
+        } catch {
+          // keep default
+        }
+      }
+
       return {
         token: a.token,
         symbol,
@@ -150,6 +189,7 @@ export async function fetchPortfolioData(
         targetWeightBps: Number(a.targetWeightBps),
         tokenAmount: formatUnits(a.tokenAmount, decimals),
         investedAmount: formatUnits(a.investedAmount, assetDecimals),
+        feeTier,
       };
     });
 
@@ -158,6 +198,8 @@ export async function fetchPortfolioData(
       allocations,
       totalAmount: formatUnits(totalAmount, assetDecimals),
       assetSymbol,
+      assetAddress,
+      assetDecimals,
     };
   } catch {
     // Graceful failure — governor may not support getExecuteCalls or RPC may be down

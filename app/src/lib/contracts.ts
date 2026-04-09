@@ -68,6 +68,7 @@ export interface ChainAddresses {
   identityRegistry: Address;
   eas: Address;
   schemaRegistry: Address;
+  quoterV2: Address;
   easSchemas: {
     joinRequest: `0x${string}`;
     agentApproved: `0x${string}`;
@@ -88,6 +89,7 @@ const BASE_ADDRESSES: ChainAddresses = {
   usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   l2Registry: "0x7a019ce699e27b0ad1e5b51344a58116b9f3b9b1",
   identityRegistry: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+  quoterV2: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
   eas: "0x4200000000000000000000000000000000000021",
   schemaRegistry: "0x4200000000000000000000000000000000000020",
   easSchemas: {
@@ -111,6 +113,7 @@ const BASE_SEPOLIA_ADDRESSES: ChainAddresses = {
   usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
   l2Registry: "0x06eb7b85b59bc3e50fe4837be776cdd26de602cf",
   identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+  quoterV2: "0xC5290058841028F1614F3A6F0F5816cAd0df5E27",
   eas: "0x4200000000000000000000000000000000000021",
   schemaRegistry: "0x4200000000000000000000000000000000000020",
   easSchemas: {
@@ -134,6 +137,7 @@ const ROBINHOOD_TESTNET_ADDRESSES: ChainAddresses = {
   usdc: ZERO,
   l2Registry: ZERO,
   identityRegistry: ZERO,
+  quoterV2: ZERO,
   eas: ZERO,
   schemaRegistry: ZERO,
   easSchemas: {
@@ -643,6 +647,40 @@ export const PORTFOLIO_STRATEGY_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "getSwapExtraData",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes[]" }],
+  },
+] as const;
+
+export const UNISWAP_QUOTER_V2_ABI = [
+  {
+    name: "quoteExactInputSingle",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "params",
+        type: "tuple",
+        components: [
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "fee", type: "uint24" },
+          { name: "sqrtPriceLimitX96", type: "uint160" },
+        ],
+      },
+    ],
+    outputs: [
+      { name: "amountOut", type: "uint256" },
+      { name: "sqrtPriceX96After", type: "uint160" },
+      { name: "initializedTicksCrossed", type: "uint32" },
+      { name: "gasEstimate", type: "uint256" },
+    ],
   },
 ] as const;
 

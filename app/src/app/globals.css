@@ -898,6 +898,182 @@ body {
   width: 100%;
 }
 
+/* ── Portfolio Dashboard ──────────────────────────────── */
+
+.portfolio-dashboard {
+  display: grid;
+  grid-template-columns: 1fr 200px;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.portfolio-value-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.portfolio-value-header .value {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.portfolio-value-header .delta {
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-selector {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.time-selector button {
+  padding: 0.25rem 0.75rem;
+  font-size: 11px;
+  font-family: var(--font-plus-jakarta), sans-serif;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.time-selector button:hover {
+  color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.time-selector button.active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.allocation-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.allocation-tag {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: var(--font-plus-jakarta), sans-serif;
+}
+
+.allocation-tag .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ticker-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  border-left: 1px solid var(--color-border);
+  padding-left: 1rem;
+}
+
+.ticker-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ticker-item .ticker-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ticker-item .ticker-symbol {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  font-family: var(--font-plus-jakarta), sans-serif;
+}
+
+.ticker-item .ticker-weight {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.ticker-item .ticker-price {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-plus-jakarta), sans-serif;
+}
+
+.ticker-item .ticker-delta {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.delta-positive { color: #2EE6A6; }
+.delta-negative { color: #ff4d4d; }
+
+.ticker-skeleton {
+  height: 12px;
+  width: 60px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.deployed-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-family: var(--font-plus-jakarta), sans-serif;
+  color: rgba(255, 255, 255, 0.3);
+  margin-top: 0.25rem;
+}
+
+.deployed-label .amount {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+@media (max-width: 768px) {
+  .portfolio-dashboard {
+    grid-template-columns: 1fr;
+  }
+  .ticker-strip {
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+    padding-left: 0;
+    padding-top: 1rem;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .ticker-item {
+    min-width: 100px;
+  }
+}
+
 /* ── Agent Cards ───────────────────────────────────────── */
 
 .agent-card {
