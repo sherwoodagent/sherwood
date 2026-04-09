@@ -84,11 +84,42 @@ export class PortfolioTracker {
     this.state = { ...DEFAULT_PORTFOLIO };
   }
 
-  /** Load portfolio state from disk */
+  /** Load portfolio state from disk with validation */
   async load(): Promise<PortfolioState> {
     try {
       const data = await readFile(this.statePath, 'utf-8');
-      this.state = JSON.parse(data) as PortfolioState;
+      const parsed = JSON.parse(data) as PortfolioState;
+
+      // Validate critical numeric fields are finite and non-negative
+      if (
+        !Number.isFinite(parsed.totalValue) || parsed.totalValue < 0
+        || !Number.isFinite(parsed.cash) || parsed.cash < 0
+        || !Number.isFinite(parsed.dailyPnl)
+        || !Number.isFinite(parsed.weeklyPnl)
+        || !Number.isFinite(parsed.monthlyPnl)
+        || !Array.isArray(parsed.positions)
+      ) {
+        console.error('Portfolio file has invalid data — resetting to defaults');
+        this.state = { ...DEFAULT_PORTFOLIO };
+        return this.state;
+      }
+
+      // Validate each position
+      for (const p of parsed.positions) {
+        if (
+          !Number.isFinite(p.entryPrice) || p.entryPrice <= 0
+          || !Number.isFinite(p.quantity) || p.quantity <= 0
+          || !Number.isFinite(p.currentPrice) || p.currentPrice <= 0
+          || !Number.isFinite(p.stopLoss) || p.stopLoss <= 0
+          || !Number.isFinite(p.takeProfit) || p.takeProfit <= 0
+        ) {
+          console.error(`Invalid position data for ${p.tokenId} — resetting portfolio`);
+          this.state = { ...DEFAULT_PORTFOLIO };
+          return this.state;
+        }
+      }
+
+      this.state = parsed;
     } catch {
       // File doesn't exist or is invalid — start fresh
       this.state = { ...DEFAULT_PORTFOLIO };
@@ -140,7 +171,7 @@ export class PortfolioTracker {
   ): Promise<{ pnl: number; pnlPercent: number; duration: number }> {
     await this.load();
 
-const idx = this.state.positions.findIndex((p) => p.tokenId === tokenId);
+    const idx = this.state.positions.findIndex((p) => p.tokenId === tokenId);
     if (idx === -1) {
       throw new Error(`No open position for ${tokenId}`);
     }
@@ -355,6 +386,8 @@ const idx = this.state.positions.findIndex((p) => p.tokenId === tokenId);
 
     records.push(record);
     await mkdir(dirname(this.historyPath), { recursive: true });
-    await writeFile(this.historyPath, JSON.stringify(records, null, 2), 'utf-8');
+    const tmpPath = this.historyPath + '.tmp';
+    await writeFile(tmpPath, JSON.stringify(records, null, 2), 'utf-8');
+    await rename(tmpPath, this.historyPath);
   }
 }

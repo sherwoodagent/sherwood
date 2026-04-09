@@ -143,8 +143,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     function initialize(InitParams calldata p) external initializer {
         if (p.executorImpl == address(0)) revert InvalidExecutorImpl();
         if (p.vaultImpl == address(0)) revert InvalidVaultImpl();
-        if (p.ensRegistrar == address(0)) revert InvalidENSRegistrar();
-        if (p.agentRegistry == address(0)) revert InvalidAgentRegistry();
+        // ensRegistrar and agentRegistry are optional (zero on chains without ENS/Durin)
         if (p.governor == address(0)) revert InvalidGovernor();
 
         __Ownable_init(p.owner);
@@ -175,8 +174,10 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
             creationFeeToken.safeTransferFrom(msg.sender, creationFeeRecipient, creationFee);
         }
 
-        // Verify ERC-8004 identity
-        if (agentRegistry.ownerOf(creatorAgentId) != msg.sender) revert NotAgentOwner();
+        // Verify ERC-8004 identity (skipped on chains without agent registry)
+        if (address(agentRegistry) != address(0)) {
+            if (agentRegistry.ownerOf(creatorAgentId) != msg.sender) revert NotAgentOwner();
+        }
 
         // Validate subdomain
         if (bytes(config.subdomain).length < 3) revert SubdomainTooShort();
@@ -203,7 +204,10 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         ISyndicateGovernor(governor).addVault(vault);
 
         // Register ENS subname — vault is both address record + NFT owner
-        ensRegistrar.register(config.subdomain, vault);
+        // Skipped on chains without ENS/Durin (e.g. Robinhood, Hyperliquid)
+        if (address(ensRegistrar) != address(0)) {
+            ensRegistrar.register(config.subdomain, vault);
+        }
 
         syndicates[syndicateId] = Syndicate({
             id: syndicateId,
@@ -301,6 +305,9 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
 
     /// @notice Check if a subdomain is available for registration
     function isSubdomainAvailable(string calldata subdomain) external view returns (bool) {
+        if (address(ensRegistrar) == address(0)) {
+            return subdomainToSyndicate[subdomain] == 0;
+        }
         return subdomainToSyndicate[subdomain] == 0 && ensRegistrar.available(subdomain);
     }
 

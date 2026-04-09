@@ -1318,3 +1318,37 @@ export const BASE_STRATEGY_ABI = [
     outputs: [{ name: "", type: "uint8" }],
   },
 ] as const;
+
+// ── HyperliquidPerpStrategy (extends BaseStrategy with sweepToVault) ──
+
+export const HYPERLIQUID_PERP_STRATEGY_ABI = [
+  ...BASE_STRATEGY_ABI,
+  {
+    name: "sweepToVault",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: "settlePhase",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint8" }],
+  },
+  {
+    name: "positionOpen",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "minReturnAmount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;

@@ -11,10 +11,7 @@
 
 import type { Signal } from '../scoring.js';
 import type { Strategy, StrategyContext } from './types.js';
-
-function clamp(v: number, min: number = -1, max: number = 1): number {
-  return Math.max(min, Math.min(max, v));
-}
+import { clamp } from '../utils.js';
 
 export class MeanReversionStrategy implements Strategy {
   name = 'meanReversion';

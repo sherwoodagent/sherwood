@@ -32,17 +32,18 @@ interface DexPairsResponse {
   pair?: DexPair;
 }
 
-export class DexScreenerProvider {
-  private lastCallTime = 0;
-  private readonly minInterval = 200; // 200ms = 300 req/min
+// Module-level throttle shared across all instances to enforce rate limit
+let sharedLastCallTime = 0;
+const SHARED_MIN_INTERVAL = 200; // 200ms = 300 req/min
 
+export class DexScreenerProvider {
   private async throttle(): Promise<void> {
     const now = Date.now();
-    const elapsed = now - this.lastCallTime;
-    if (elapsed < this.minInterval) {
-      await new Promise((resolve) => setTimeout(resolve, this.minInterval - elapsed));
+    const elapsed = now - sharedLastCallTime;
+    if (elapsed < SHARED_MIN_INTERVAL) {
+      await new Promise((resolve) => setTimeout(resolve, SHARED_MIN_INTERVAL - elapsed));
     }
-    this.lastCallTime = Date.now();
+    sharedLastCallTime = Date.now();
   }
 
   private async fetchJson<T>(url: string): Promise<T> {

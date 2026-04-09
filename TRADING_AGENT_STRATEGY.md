@@ -1,5 +1,7 @@
 # Sherwood Trading Agent — Strategy Specification
 
+> **Note:** This is a design/planning document. Features described here (x402 micropayments, Nansen, Messari, LunarCrush integrations) are aspirational and not yet implemented. The current implementation uses CoinGecko, Fear&Greed, and technical analysis scoring. See `cli/src/agent/` for the actual code.
+
 > Autonomous trading agent that combines on-chain intelligence (Nansen/Messari via x402), technical analysis, sentiment data, and DeFi-native signals to make high-conviction trades.
 
 ## Architecture Overview

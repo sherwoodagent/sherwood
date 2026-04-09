@@ -214,7 +214,8 @@ export class Backtester {
       ? dailyReturns.reduce((sum, r) => sum + (r - meanReturn) ** 2, 0) / (dailyReturns.length - 1)
       : 0;
     const stdDev = Math.sqrt(variance);
-    const sharpeRatio = stdDev > 0 ? (meanReturn / stdDev) * Math.sqrt(252) : 0;
+    const riskFreeDaily = 0.05 / 252; // 5% annual risk-free rate
+    const sharpeRatio = stdDev > 0 ? ((meanReturn - riskFreeDaily) / stdDev) * Math.sqrt(252) : 0;
 
     // Max drawdown
     let maxDrawdown = 0;

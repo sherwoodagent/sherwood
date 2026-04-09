@@ -3,7 +3,6 @@ pragma solidity 0.8.28;
 
 import {BaseStrategy} from "./BaseStrategy.sol";
 import {IStrategy} from "../interfaces/IStrategy.sol";
-import {IHyperliquidPerpStrategy} from "../interfaces/IHyperliquidPerpStrategy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {L1Write, TimeInForce, NO_CLOID} from "../hyperliquid/L1Write.sol";
@@ -44,6 +43,8 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     error NoOpenPosition();
     error DepositAmountTooLarge();
     error NotSweepable();
+    error InsufficientReturn(uint256 actual, uint256 minimum);
+    error CloidNonceExhausted();
 
     // ── Action types ──
     uint8 constant ACTION_UPDATE_MIN_RETURN = 0;
@@ -53,15 +54,16 @@ contract HyperliquidPerpStrategy is BaseStrategy {
 
     // ── Settlement phase tracking (C1) ──
     enum SettlePhase {
-        NONE,     // Not settling
-        CLOSING,  // Phase 1 done: position closed, USD transfer requested, waiting for USDC
-        SWEEPING  // Phase 2 done: funds pushed to vault (terminal)
+        NONE, // Not settling
+        CLOSING, // Phase 1 done: position closed, USD transfer requested, waiting for USDC
+        SWEEPING // Phase 2 done: funds pushed to vault (terminal)
     }
 
     // ── CLOID constants for order tracking (C2) ──
     // We use deterministic CLOIDs so we can cancel by CLOID instead of relying on OIDs.
     // Stop-loss orders use a fixed CLOID pattern based on a counter.
     uint128 constant STOP_LOSS_CLOID_BASE = 0x53544F504C4F53530000000000000000; // "STOPLOSS" prefix
+    uint64 constant MAX_CLOID_NONCE = 200; // Hard cap to prevent gas DoS on cancel loops
 
     // ── Storage (per-clone) ──
     IERC20 public asset;
@@ -69,10 +71,19 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     uint256 public minReturnAmount;
     uint32 public perpAssetIndex;
     uint32 public leverage;
+
+    /// @notice Whether a perp position is currently open on the EVM side.
+    /// @dev WARNING: This flag can desync from actual HyperCore position state.
+    ///      - If a GTC stop-loss order fills on HyperCore, the position closes there
+    ///        but positionOpen remains true on-chain until ACTION_CLOSE_POSITION is called.
+    ///      - If an IOC buy order in ACTION_OPEN_LONG does not fill (insufficient liquidity),
+    ///        positionOpen is set to true even though no position exists on HyperCore.
+    ///      The proposer MUST read L1Read.position2() before acting to confirm actual state.
     bool public positionOpen;
     SettlePhase public settlePhase;
     uint64 public stopLossCloidNonce; // Incrementing nonce for stop-loss CLOIDs (C2)
-    bool public leverageSentToCore;   // Whether leverage has been set on HyperCore (H1)
+    bool public leverageSentToCore; // Whether leverage has been set on HyperCore (H1)
+    uint256 public settleTimestamp; // When _settle() was called (for vault fallback sweep)
 
     /// @inheritdoc IStrategy
     function name() external pure returns (string memory) {
@@ -81,18 +92,15 @@ contract HyperliquidPerpStrategy is BaseStrategy {
 
     /// @notice Decode: (address asset, uint256 depositAmount, uint256 minReturnAmount, uint32 perpAssetIndex, uint32 leverage)
     function _initialize(bytes calldata data) internal override {
-        (
-            address asset_,
-            uint256 depositAmount_,
-            uint256 minReturnAmount_,
-            uint32 perpAssetIndex_,
-            uint32 leverage_
-        ) = abi.decode(data, (address, uint256, uint256, uint32, uint32));
+        (address asset_, uint256 depositAmount_, uint256 minReturnAmount_, uint32 perpAssetIndex_, uint32 leverage_) =
+            abi.decode(data, (address, uint256, uint256, uint32, uint32));
 
         if (asset_ == address(0)) revert ZeroAddress();
         if (depositAmount_ == 0) revert InvalidAmount();
         // C3: Prevent silent truncation when casting to uint64
         if (depositAmount_ > type(uint64).max) revert DepositAmountTooLarge();
+        // Validate leverage bounds (Hyperliquid supports 1x–50x)
+        if (leverage_ == 0 || leverage_ > 50) revert InvalidAmount();
 
         asset = IERC20(asset_);
         depositAmount = depositAmount_;
@@ -127,7 +135,9 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     ///   action=2: (uint8 action, uint64 limitPx, uint64 sz)
     ///   action=3: (uint8 action, uint64 triggerPx, uint64 sz)
     function _updateParams(bytes calldata data) internal override {
-        uint8 action = uint8(bytes1(data[:1]));
+        if (data.length < 32) revert InvalidAction();
+        // Action byte is the first ABI-encoded uint8 (padded to 32 bytes)
+        uint8 action = abi.decode(data[:32], (uint8));
 
         if (action == ACTION_UPDATE_MIN_RETURN) {
             (, uint256 newMinReturn) = abi.decode(data, (uint8, uint256));
@@ -231,12 +241,12 @@ contract HyperliquidPerpStrategy is BaseStrategy {
             // C2: Cancel ALL orders first (stop-losses, etc.)
             _cancelAllOrdersForAsset();
 
-            // H2: Use aggressive price for force-close instead of limitPx=1
-            // For selling (closing a long), use 0 as the limit price to ensure fill
+            // Force-close: IOC sell at minimum price (1) to fill at any market price.
+            // Using 1 instead of 0 because HyperCore may reject zero-price orders.
             L1Write.sendLimitOrder(
                 perpAssetIndex,
                 false, // isSell
-                0, // H2: price 0 for sell ensures fill at any price as IOC
+                1, // minimum valid price — IOC will fill at best available
                 type(uint64).max, // max size to close full position
                 true, // reduceOnly
                 TimeInForce.Ioc,
@@ -254,6 +264,7 @@ contract HyperliquidPerpStrategy is BaseStrategy {
         // C1: Mark as phase 1 complete — do NOT push to vault yet.
         // USDC transfer is async (event-based) and hasn't arrived.
         settlePhase = SettlePhase.CLOSING;
+        settleTimestamp = block.timestamp;
 
         emit SettlePhase1Complete();
     }
@@ -261,18 +272,28 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     /// @notice Phase 2: Push all USDC back to the vault.
     /// @dev Must be called in a separate transaction after _settle(), once USDC
     ///      has arrived on the EVM side from the async L1Write transfer.
-    ///      Can be called by the proposer (since the strategy is in Settled state,
-    ///      updateParams won't work, so we expose this as a separate public function).
+    ///      Proposer can call immediately. After 24 hours, the vault itself can call
+    ///      as a fallback to prevent permanent fund lock if the proposer is unresponsive.
     function sweepToVault() external {
         // C1: Only callable after phase 1 (CLOSING)
         if (settlePhase != SettlePhase.CLOSING) revert NotSweepable();
 
-        settlePhase = SettlePhase.SWEEPING;
+        // Access: proposer immediately, vault after 24h grace period
+        bool isProposer = msg.sender == this.proposer();
+        bool isVaultFallback = msg.sender == vault() && block.timestamp >= settleTimestamp + 24 hours;
+        if (!isProposer && !isVaultFallback) revert NotProposer();
 
         uint256 bal = IERC20(asset).balanceOf(address(this));
-        _pushAllToVault(address(asset));
+        if (bal == 0) revert InvalidAmount();
+        if (minReturnAmount > 0 && bal < minReturnAmount) revert InsufficientReturn(bal, minReturnAmount);
 
-        emit SettlePhase2Complete(bal);
+        settlePhase = SettlePhase.SWEEPING;
+
+        uint256 vaultBefore = IERC20(asset).balanceOf(vault());
+        _pushAllToVault(address(asset));
+        uint256 actualTransferred = IERC20(asset).balanceOf(vault()) - vaultBefore;
+
+        emit SettlePhase2Complete(actualTransferred);
     }
 
     // ── H3: L1Read-based view functions ──
@@ -300,9 +321,11 @@ contract HyperliquidPerpStrategy is BaseStrategy {
 
     // ── Internal helpers ──
 
-    /// @dev C2: Cancel all orders for the perp asset by cancelling via the current stop-loss CLOID.
-    ///      Since L1Write is fire-and-forget and doesn't return OIDs, we track orders via CLOIDs.
-    ///      We cancel the most recent stop-loss CLOID (only GTC orders remain; IOC orders auto-expire).
+    /// @dev Cancel the current stop-loss GTC order by its CLOID.
+    ///      Only GTC orders persist (IOC auto-expire), and only one stop-loss is live at
+    ///      a time — each new ACTION_OPEN_LONG or ACTION_UPDATE_STOP_LOSS cancels the
+    ///      current one before placing a new one. We cancel only the latest CLOID to keep
+    ///      gas cost O(1) and avoid block-gas-limit DoS on settlement.
     function _cancelAllOrdersForAsset() internal {
         if (stopLossCloidNonce > 0) {
             uint128 currentCloid = STOP_LOSS_CLOID_BASE + uint128(stopLossCloidNonce);
@@ -311,7 +334,9 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     }
 
     /// @dev Generate the next stop-loss CLOID and increment the nonce.
+    ///      Capped at MAX_CLOID_NONCE to prevent unbounded nonce growth.
     function _nextStopLossCloid() internal returns (uint128) {
+        if (stopLossCloidNonce >= MAX_CLOID_NONCE) revert CloidNonceExhausted();
         stopLossCloidNonce++;
         return STOP_LOSS_CLOID_BASE + uint128(stopLossCloidNonce);
     }

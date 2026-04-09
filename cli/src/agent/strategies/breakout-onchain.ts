@@ -5,10 +5,7 @@
 
 import type { Signal } from '../scoring.js';
 import type { Strategy, StrategyContext, Candle } from './types.js';
-
-function clamp(v: number, min: number = -1, max: number = 1): number {
-  return Math.max(min, Math.min(max, v));
-}
+import { clamp } from '../utils.js';
 
 function detect20DayBreakout(candles: Candle[]): { direction: 'up' | 'down' | 'none'; volumeConfirmed: boolean } {
   if (candles.length < 21) return { direction: 'none', volumeConfirmed: false };

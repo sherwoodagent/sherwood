@@ -224,6 +224,25 @@ export function registerAgentCommands(program: Command): void {
       const tokenList = options.tokens ? options.tokens.split(",").map((t) => t.trim()) : DEFAULT_TOKENS;
       const cycle = (options.cycle ?? "4h") as AgentConfig["cycle"];
 
+      // Load persisted risk config from disk (written by `agent config --set`)
+      let savedRiskConfig: Partial<RiskConfig> = {};
+      try {
+        const configPath = join(homedir(), '.sherwood', 'agent', 'config.json');
+        const data = await readFile(configPath, 'utf-8');
+        const parsed = JSON.parse(data) as Record<string, unknown>;
+        // Only pick known risk keys with valid numeric values
+        for (const [k, v] of Object.entries(parsed)) {
+          if (k in DEFAULT_RISK_CONFIG && typeof v === 'number' && Number.isFinite(v)) {
+            (savedRiskConfig as Record<string, number>)[k] = v;
+          }
+        }
+        if (Object.keys(savedRiskConfig).length > 0) {
+          console.log(chalk.dim(`  Loaded ${Object.keys(savedRiskConfig).length} risk config overrides from ~/.sherwood/agent/config.json`));
+        }
+      } catch {
+        // No saved config — use defaults
+      }
+
       const loopConfig: LoopConfig = {
         agent: makeConfig({ tokens: tokenList, cycle, dryRun: options.dryRun ?? true }),
         execution: {
@@ -231,6 +250,7 @@ export function registerAgentCommands(program: Command): void {
           mevProtection: false,
           chain: 'ethereum',
         },
+        riskConfig: savedRiskConfig,
         logPath: options.log,
       };
 
@@ -294,7 +314,7 @@ export function registerAgentCommands(program: Command): void {
     .action(async (options: { days?: string }) => {
       const portfolio = new PortfolioTracker();
       const reporter = new Reporter();
-      const days = parseInt(options.days ?? "30", 10);
+      const days = Math.max(1, parseInt(options.days ?? "30", 10) || 30);
 
       try {
         const trades = await portfolio.getHistory(days);
@@ -337,11 +357,43 @@ export function registerAgentCommands(program: Command): void {
     .action(async (options: { set?: string }) => {
       const riskConfig = { ...DEFAULT_RISK_CONFIG };
 
+      // Bounds for risk config values to prevent disabling guardrails
+      const RISK_BOUNDS: Record<string, [number, number]> = {
+        maxPortfolioRisk: [0.01, 0.50],
+        maxSinglePosition: [0.01, 0.25],
+        maxCorrelatedExposure: [0.05, 0.50],
+        maxConcurrentTrades: [1, 20],
+        hardStopPercent: [0.01, 0.30],
+        trailingStopAtr: [0.5, 5.0],
+        dailyLossLimit: [0.01, 0.30],
+        weeklyLossLimit: [0.01, 0.50],
+        monthlyLossLimit: [0.01, 0.60],
+        riskPerTrade: [0.005, 0.05],
+      };
+
       if (options.set) {
         const [key, value] = options.set.split('=');
         if (key && value && key in riskConfig) {
+          if (key === 'maxSlippage') {
+            console.log(chalk.red(`  maxSlippage must be set per tier (not supported via --set)`));
+            console.log('');
+            return;
+          }
           const numVal = parseFloat(value);
           if (!isNaN(numVal)) {
+            // Integer-type fields must not be fractional
+            const INTEGER_KEYS = new Set(['maxConcurrentTrades']);
+            if (INTEGER_KEYS.has(key) && !Number.isInteger(numVal)) {
+              console.log(chalk.red(`  ${key} must be a whole number (got ${numVal})`));
+              console.log('');
+              return;
+            }
+            const bounds = RISK_BOUNDS[key];
+            if (bounds && (numVal < bounds[0] || numVal > bounds[1])) {
+              console.log(chalk.red(`  Value ${numVal} out of bounds for ${key}: [${bounds[0]}, ${bounds[1]}]`));
+              console.log('');
+              return;
+            }
             (riskConfig as Record<string, unknown>)[key] = numVal;
             console.log(chalk.green(`  Set ${key} = ${numVal}`));
 

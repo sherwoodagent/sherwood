@@ -59,7 +59,7 @@ export const DEFAULT_RISK_CONFIG: RiskConfig = {
   riskPerTrade: 0.02,
 };
 
-const DEFAULT_PORTFOLIO: PortfolioState = {
+const EMPTY_PORTFOLIO: PortfolioState = {
   totalValue: 0,
   positions: [],
   cash: 0,
@@ -74,7 +74,7 @@ export class RiskManager {
 
   constructor(config?: Partial<RiskConfig>) {
     this.config = { ...DEFAULT_RISK_CONFIG, ...config };
-    this.portfolio = { ...DEFAULT_PORTFOLIO };
+    this.portfolio = { ...EMPTY_PORTFOLIO };
   }
 
   /** Check if we can open a new position */
@@ -120,7 +120,7 @@ export class RiskManager {
     }
 
     // Check if we already have a position in this token
-const existing = this.portfolio.positions.find((p) => p.tokenId === token);
+    const existing = this.portfolio.positions.find((p) => p.tokenId === token);
     if (existing) {
       return { allowed: false, reason: `Already have an open position in ${token}` };
     }

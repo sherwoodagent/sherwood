@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity 0.8.28;
 
-import { CoreWriter } from "./CoreWriter.sol";
+import {CoreWriter} from "./CoreWriter.sol";
 
 // ============ Enums ============
 
@@ -37,7 +37,6 @@ uint128 constant NO_CLOID = 0;
 // ============ Library ============
 
 library L1Write {
-
     address constant CORE_WRITER_ADDRESS = 0x3333333333333333333333333333333333333333;
 
     // Action selectors (version byte 0x01 + 3-byte action ID)
@@ -62,15 +61,7 @@ library L1Write {
     /// @param asset The perp asset index
     /// @param isCross Whether to use cross margin (true) or isolated margin (false)
     /// @param leverage The leverage multiplier
-    function encodeUpdateLeverage(
-        uint32 asset,
-        bool isCross,
-        uint32 leverage
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function encodeUpdateLeverage(uint32 asset, bool isCross, uint32 leverage) internal pure returns (bytes memory) {
         return abi.encodePacked(ACTION_UPDATE_LEVERAGE, abi.encode(asset, isCross, leverage));
     }
 
@@ -98,14 +89,9 @@ library L1Write {
         bool reduceOnly,
         TimeInForce tif,
         uint128 cloid
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
+    ) internal pure returns (bytes memory) {
         return abi.encodePacked(
-            ACTION_LIMIT_ORDER,
-            abi.encode(asset, isBuy, limitPx, sz, reduceOnly, uint8(tif) + 1, cloid)
+            ACTION_LIMIT_ORDER, abi.encode(asset, isBuy, limitPx, sz, reduceOnly, uint8(tif) + 1, cloid)
         );
     }
 
@@ -125,9 +111,7 @@ library L1Write {
         bool reduceOnly,
         TimeInForce tif,
         uint128 cloid
-    )
-        internal
-    {
+    ) internal {
         _sendAction(encodeLimitOrder(asset, isBuy, limitPx, sz, reduceOnly, tif, cloid));
     }
 
@@ -135,15 +119,7 @@ library L1Write {
     /// @param vault The vault address
     /// @param isDeposit Whether this is a deposit (true) or withdrawal (false)
     /// @param usd Raw USD amount in HyperCore units (protocol-defined precision)
-    function encodeVaultTransfer(
-        address vault,
-        bool isDeposit,
-        uint64 usd
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function encodeVaultTransfer(address vault, bool isDeposit, uint64 usd) internal pure returns (bytes memory) {
         return abi.encodePacked(ACTION_VAULT_TRANSFER, abi.encode(vault, isDeposit, usd));
     }
 
@@ -159,11 +135,7 @@ library L1Write {
     /// @param validator The validator address
     /// @param amount Amount to delegate/undelegate
     /// @param isUndelegate Whether this is an undelegate operation
-    function encodeTokenDelegate(
-        address validator,
-        uint64 amount,
-        bool isUndelegate
-    )
+    function encodeTokenDelegate(address validator, uint64 amount, bool isUndelegate)
         internal
         pure
         returns (bytes memory)
@@ -207,15 +179,7 @@ library L1Write {
     /// @param destination Destination address
     /// @param token Token index
     /// @param amount Amount to send
-    function encodeSpotSend(
-        address destination,
-        uint64 token,
-        uint64 amount
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function encodeSpotSend(address destination, uint64 token, uint64 amount) internal pure returns (bytes memory) {
         return abi.encodePacked(ACTION_SPOT_SEND, abi.encode(destination, token, amount));
     }
 
@@ -245,45 +209,26 @@ library L1Write {
     /// @param token Token index
     /// @param variant Finalize variant
     /// @param createNonce Create nonce (used if variant is Create)
-    function encodeFinalizeEvmContract(
-        uint64 token,
-        FinalizeVariant variant,
-        uint64 createNonce
-    )
+    function encodeFinalizeEvmContract(uint64 token, FinalizeVariant variant, uint64 createNonce)
         internal
         pure
         returns (bytes memory)
     {
-        return abi.encodePacked(
-            ACTION_FINALIZE_EVM_CONTRACT, abi.encode(token, uint8(variant) + 1, createNonce)
-        );
+        return abi.encodePacked(ACTION_FINALIZE_EVM_CONTRACT, abi.encode(token, uint8(variant) + 1, createNonce));
     }
 
     /// @notice Sends a finalize EVM contract action
     /// @param token Token index
     /// @param variant Finalize variant
     /// @param createNonce Create nonce (used if variant is Create)
-    function sendFinalizeEvmContract(
-        uint64 token,
-        FinalizeVariant variant,
-        uint64 createNonce
-    )
-        internal
-    {
+    function sendFinalizeEvmContract(uint64 token, FinalizeVariant variant, uint64 createNonce) internal {
         _sendAction(encodeFinalizeEvmContract(token, variant, createNonce));
     }
 
     /// @notice Encodes an add API wallet action
     /// @param apiWallet The API wallet address
     /// @param apiWalletName The API wallet name (empty string makes this the main API wallet/agent)
-    function encodeAddApiWallet(
-        address apiWallet,
-        string memory apiWalletName
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function encodeAddApiWallet(address apiWallet, string memory apiWalletName) internal pure returns (bytes memory) {
         return abi.encodePacked(ACTION_ADD_API_WALLET, abi.encode(apiWallet, apiWalletName));
     }
 
@@ -311,14 +256,7 @@ library L1Write {
     /// @notice Encodes a cancel order by cloid action
     /// @param asset The perp asset index
     /// @param cloid The client order ID to cancel
-    function encodeCancelOrderByCloid(
-        uint32 asset,
-        uint128 cloid
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function encodeCancelOrderByCloid(uint32 asset, uint128 cloid) internal pure returns (bytes memory) {
         return abi.encodePacked(ACTION_CANCEL_ORDER_BY_CLOID, abi.encode(asset, cloid));
     }
 
@@ -332,14 +270,7 @@ library L1Write {
     /// @notice Encodes an approve builder fee action
     /// @param maxFeeRate Maximum fee rate in decibps (e.g., 10 for 0.01%)
     /// @param builder The builder address
-    function encodeApproveBuilderFee(
-        uint64 maxFeeRate,
-        address builder
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function encodeApproveBuilderFee(uint64 maxFeeRate, address builder) internal pure returns (bytes memory) {
         return abi.encodePacked(ACTION_APPROVE_BUILDER_FEE, abi.encode(maxFeeRate, builder));
     }
 
@@ -364,14 +295,9 @@ library L1Write {
         uint32 destinationDex,
         uint64 token,
         uint64 amount
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
+    ) internal pure returns (bytes memory) {
         return abi.encodePacked(
-            ACTION_SEND_ASSET,
-            abi.encode(destination, subAccount, sourceDex, destinationDex, token, amount)
+            ACTION_SEND_ASSET, abi.encode(destination, subAccount, sourceDex, destinationDex, token, amount)
         );
     }
 
@@ -389,9 +315,7 @@ library L1Write {
         uint32 destinationDex,
         uint64 token,
         uint64 amount
-    )
-        internal
-    {
+    ) internal {
         _sendAction(encodeAsset(destination, subAccount, sourceDex, destinationDex, token, amount));
     }
 
@@ -399,11 +323,7 @@ library L1Write {
     /// @param token Token index
     /// @param amount Amount to mint/burn
     /// @param isMint Whether this is a mint (true) or burn (false)
-    function encodeReflectEvmSupplyChange(
-        uint64 token,
-        uint64 amount,
-        bool isMint
-    )
+    function encodeReflectEvmSupplyChange(uint64 token, uint64 amount, bool isMint)
         internal
         pure
         returns (bytes memory)
@@ -423,31 +343,19 @@ library L1Write {
     /// @param operation Operation type
     /// @param token Token index
     /// @param amount Amount (BORROW_LEND_MAX_AMOUNT means maximally apply the operation)
-    function encodeBorrowLendOperation(
-        BorrowLendOperation operation,
-        uint64 token,
-        uint64 amount
-    )
+    function encodeBorrowLendOperation(BorrowLendOperation operation, uint64 token, uint64 amount)
         internal
         pure
         returns (bytes memory)
     {
-        return abi.encodePacked(
-            ACTION_BORROW_LEND_OPERATION, abi.encode(uint8(operation), token, amount)
-        );
+        return abi.encodePacked(ACTION_BORROW_LEND_OPERATION, abi.encode(uint8(operation), token, amount));
     }
 
     /// @notice Sends a borrow lend operation action (Testnet-only)
     /// @param operation Operation type
     /// @param token Token index
     /// @param amount Amount (BORROW_LEND_MAX_AMOUNT means maximally apply the operation)
-    function sendBorrowLendOperation(
-        BorrowLendOperation operation,
-        uint64 token,
-        uint64 amount
-    )
-        internal
-    {
+    function sendBorrowLendOperation(BorrowLendOperation operation, uint64 token, uint64 amount) internal {
         _sendAction(encodeBorrowLendOperation(operation, token, amount));
     }
 
@@ -456,5 +364,4 @@ library L1Write {
     function _sendAction(bytes memory data) private {
         CoreWriter(CORE_WRITER_ADDRESS).sendRawAction(data);
     }
-
 }

@@ -12,6 +12,7 @@ import type { Signal } from '../scoring.js';
 import type { Strategy, StrategyContext } from './types.js';
 import { DexScreenerProvider } from '../../providers/data/dexscreener.js';
 import type { DexPair } from '../../providers/data/dexscreener.js';
+import { clamp } from '../utils.js';
 
 /** Well-known CoinGecko ID → ticker symbol mapping. */
 const TOKEN_SYMBOL_MAP: Record<string, string> = {
@@ -98,10 +99,6 @@ function pickBestPair(pairs: DexPair[]): DexPair | undefined {
   // Sort by liquidity descending
   viable.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
   return viable[0];
-}
-
-function clamp(v: number, min: number = -1, max: number = 1): number {
-  return Math.max(min, Math.min(max, v));
 }
 
 export class DexFlowStrategy implements Strategy {

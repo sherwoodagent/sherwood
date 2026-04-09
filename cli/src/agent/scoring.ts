@@ -3,6 +3,7 @@
  */
 
 import type { TechnicalSignals } from "./technical.js";
+import { clamp } from "./utils.js";
 
 export interface Signal {
   name: string;
@@ -38,11 +39,6 @@ export interface TradeDecision {
   reasoning: string;
   confidence: number;
   timestamp: number;
-}
-
-// ── Helper: clamp value to [-1, 1] ──
-function clamp(v: number, min: number = -1, max: number = 1): number {
-  return Math.max(min, Math.min(max, v));
 }
 
 // ── Score Technical Signals ──
