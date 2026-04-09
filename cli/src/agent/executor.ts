@@ -3,16 +3,27 @@
  */
 
 import chalk from 'chalk';
+import type { Address, Hex } from 'viem';
+import { createWalletClient, http, encodeFunctionData, encodeAbiParameters } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 import type { TradeDecision } from './scoring.js';
 import type { Position } from './risk.js';
 import { RiskManager } from './risk.js';
 import { PortfolioTracker } from './portfolio.js';
+import { BASE_STRATEGY_ABI } from '../lib/abis.js';
+import { hyperevm, hyperevmTestnet } from '../lib/network.js';
 
 export interface ExecutionConfig {
   dryRun: boolean;
   mevProtection: boolean;
   maxGasPrice?: bigint;
   chain: string;
+  /** Execution mode: 'dry-run' (default) or 'hyperliquid-perp' (live on-chain) */
+  mode?: 'dry-run' | 'hyperliquid-perp';
+  /** Strategy clone address on HyperEVM (required for hyperliquid-perp mode) */
+  strategyClone?: Address;
+  /** Proposer private key (read from SHERWOOD_PROPOSER_KEY env) */
+  proposerPrivateKey?: Hex;
 }
 
 export interface OrderParams {
@@ -219,12 +230,58 @@ export class TradeExecutor {
     return position;
   }
 
-  /** Live execution via DEX — placeholder */
-  private async executeLive(_order: OrderParams): Promise<{ txHash: string; executedPrice: number }> {
+  /** Live execution — dispatches to the configured mode */
+  private async executeLive(order: OrderParams): Promise<{ txHash: string; executedPrice: number }> {
+    if (this.config.mode === 'hyperliquid-perp') {
+      return this.executeHyperliquidPerp(order);
+    }
     throw new Error(
-      'Live execution not yet implemented. Use --dry-run for paper trading. ' +
-      'Chain-specific DEX integration (Uniswap, Aerodrome, etc.) coming in Phase 4.',
+      'Live execution requires --mode hyperliquid-perp. ' +
+      'Use --dry-run for paper trading.',
     );
+  }
+
+  /** Execute a trade on HyperEVM via the HyperliquidPerpStrategy contract */
+  private async executeHyperliquidPerp(order: OrderParams): Promise<{ txHash: string; executedPrice: number }> {
+    if (!this.config.strategyClone) throw new Error('--strategy-clone is required for hyperliquid-perp mode');
+    if (!this.config.proposerPrivateKey) throw new Error('SHERWOOD_PROPOSER_KEY env var is required for live execution');
+
+    const account = privateKeyToAccount(this.config.proposerPrivateKey);
+    const chain = this.config.chain === 'hyperevm-testnet' ? hyperevmTestnet : hyperevm;
+    const client = createWalletClient({
+      account,
+      chain,
+      transport: http(),
+    });
+
+    const limitPx = priceToUint64(order.stopLoss > 0 ? order.amountUsd / (order.amountUsd / order.stopLoss) : order.amountUsd);
+    const sz = sizeToUint64(order.amountUsd);
+    const stopLossPx = priceToUint64(order.stopLoss);
+    const stopLossSz = sz;
+
+    // Encode ACTION_OPEN_LONG (action=1)
+    const actionData = encodeAbiParameters(
+      [{ type: 'uint8' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint64' }],
+      [1, limitPx, sz, stopLossPx, stopLossSz],
+    );
+
+    const txData = encodeFunctionData({
+      abi: BASE_STRATEGY_ABI,
+      functionName: 'updateParams',
+      args: [actionData],
+    });
+
+    const txHash = await client.sendTransaction({
+      to: this.config.strategyClone,
+      data: txData,
+    });
+
+    console.error(chalk.green(`[LIVE] Transaction sent: ${txHash}`));
+
+    return {
+      txHash,
+      executedPrice: order.amountUsd / Number(sz) * 1e6, // approximate
+    };
   }
 
   /** Format execution result for display */
@@ -259,4 +316,16 @@ export class TradeExecutor {
 
     return lines.join('\n');
   }
+}
+
+// ── HyperCore conversion helpers ──
+
+/** Convert a USD price (e.g. 3000.50) to HyperCore uint64 format (6-decimal fixed point). */
+function priceToUint64(priceUsd: number): bigint {
+  return BigInt(Math.round(priceUsd * 1e6));
+}
+
+/** Convert a USD size (e.g. 1000.00) to HyperCore uint64 format (6-decimal fixed point). */
+function sizeToUint64(amountUsd: number): bigint {
+  return BigInt(Math.round(amountUsd * 1e6));
 }

@@ -356,8 +356,10 @@ async function buildInitDataForTemplate(
     const minReturn = parseUnits((opts.minReturn as string) || opts.amount as string, decimals);
     const leverage = Number((opts.leverage as string) || "10");
     const assetIndex = Number((opts.assetIndex as string) || "0");
+    const maxPosition = parseUnits((opts.maxPosition as string) || "100000", decimals);
+    const maxTradesDay = Number((opts.maxTradesPerDay as string) || "50");
     return {
-      initData: hyperliquidPerpBuilder.buildInitData(asset, depositAmount, minReturn, assetIndex, leverage),
+      initData: hyperliquidPerpBuilder.buildInitData(asset, depositAmount, minReturn, assetIndex, leverage, maxPosition, maxTradesDay),
       asset, assetAmount: depositAmount,
     };
   }
@@ -573,6 +575,8 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--leverage <number>", "Leverage multiplier (Hyperliquid Perp, default: 10)")
     .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
     .option("--min-return <n>", "Min return amount on settlement (Hyperliquid Perp)")
+    .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
+    .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
     .action(async (templateKey: string, opts) => {
       const vault = opts.vault as Address;
       if (!isAddress(vault)) {
@@ -671,6 +675,8 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--leverage <number>", "Leverage multiplier (Hyperliquid Perp, default: 10)")
     .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
     .option("--min-return <n>", "Min return amount on settlement (Hyperliquid Perp)")
+    .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
+    .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
     .action(async (templateKey: string, opts) => {
       const clone = opts.clone as Address;
       const vault = opts.vault as Address;
@@ -782,6 +788,8 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--leverage <number>", "Leverage multiplier (Hyperliquid Perp, default: 10)")
     .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
     .option("--min-return <n>", "Min return amount on settlement (Hyperliquid Perp)")
+    .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
+    .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
     .action(async (templateKey: string, opts) => {
       const vault = opts.vault as Address;
       if (!isAddress(vault)) {

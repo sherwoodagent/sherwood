@@ -220,7 +220,10 @@ export function registerAgentCommands(program: Command): void {
     .option("--dry-run", "Paper trading mode", true)
     .option("--tokens <tokens>", "Comma-separated token list")
     .option("--log <path>", "Path to write cycle logs")
-    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; log?: string }) => {
+    .option("--mode <mode>", "Execution mode: dry-run (default), hyperliquid-perp", "dry-run")
+    .option("--strategy-clone <address>", "Strategy clone address on HyperEVM (required for hyperliquid-perp)")
+    .option("--chain <chain>", "Chain for live execution (hyperevm, hyperevm-testnet)", "ethereum")
+    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; log?: string; mode?: string; strategyClone?: string; chain?: string }) => {
       const tokenList = options.tokens ? options.tokens.split(",").map((t) => t.trim()) : DEFAULT_TOKENS;
       const cycle = (options.cycle ?? "4h") as AgentConfig["cycle"];
 
@@ -243,12 +246,28 @@ export function registerAgentCommands(program: Command): void {
         // No saved config — use defaults
       }
 
+      const isLive = options.mode === 'hyperliquid-perp';
+      if (isLive && !options.strategyClone) {
+        console.error(chalk.red('  --strategy-clone is required for hyperliquid-perp mode'));
+        process.exitCode = 1;
+        return;
+      }
+      const proposerKey = process.env.SHERWOOD_PROPOSER_KEY as `0x${string}` | undefined;
+      if (isLive && !proposerKey) {
+        console.error(chalk.red('  SHERWOOD_PROPOSER_KEY env var is required for live execution'));
+        process.exitCode = 1;
+        return;
+      }
+
       const loopConfig: LoopConfig = {
-        agent: makeConfig({ tokens: tokenList, cycle, dryRun: options.dryRun ?? true }),
+        agent: makeConfig({ tokens: tokenList, cycle, dryRun: !isLive }),
         execution: {
-          dryRun: options.dryRun ?? true,
+          dryRun: !isLive,
+          mode: (options.mode ?? 'dry-run') as 'dry-run' | 'hyperliquid-perp',
           mevProtection: false,
-          chain: 'ethereum',
+          chain: options.chain ?? 'ethereum',
+          strategyClone: options.strategyClone as `0x${string}` | undefined,
+          proposerPrivateKey: proposerKey,
         },
         riskConfig: savedRiskConfig,
         logPath: options.log,

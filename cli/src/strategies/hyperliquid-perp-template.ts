@@ -1,7 +1,7 @@
 /**
  * HyperliquidPerpStrategy call builder.
  *
- * InitParams (Solidity): (address asset, uint256 depositAmount, uint256 minReturnAmount, uint32 perpAssetIndex, uint32 leverage)
+ * InitParams (Solidity): (address asset, uint256 depositAmount, uint256 minReturnAmount, uint32 perpAssetIndex, uint32 leverage, uint256 maxPositionSize, uint32 maxTradesPerDay)
  */
 
 import type { Address, Hex } from "viem";
@@ -15,6 +15,8 @@ export function buildInitData(
   minReturnAmount: bigint,
   perpAssetIndex: number,
   leverage: number,
+  maxPositionSize: bigint,
+  maxTradesPerDay: number,
 ): Hex {
   return encodeAbiParameters(
     [
@@ -23,8 +25,10 @@ export function buildInitData(
       { type: "uint256" },
       { type: "uint32" },
       { type: "uint32" },
+      { type: "uint256" },
+      { type: "uint32" },
     ],
-    [asset, depositAmount, minReturnAmount, perpAssetIndex, leverage],
+    [asset, depositAmount, minReturnAmount, perpAssetIndex, leverage, maxPositionSize, maxTradesPerDay],
   );
 }
 
