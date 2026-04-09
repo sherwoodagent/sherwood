@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {console} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Create3Factory} from "../src/Create3Factory.sol";
 import {Create3} from "../src/Create3.sol";
 import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
@@ -15,12 +16,13 @@ import {ScriptBase} from "./ScriptBase.sol";
 /**
  * @notice Generic Sherwood protocol deployment via CREATE3.
  *
- *         Works on any EVM chain. Deterministic addresses based on
- *         (deployer, salt) — same deployer + same salts = same addresses
- *         on Base, HyperEVM, Arbitrum, or any future chain.
+ *         Deploys a Create3Factory first (regular CREATE), then uses it for
+ *         all subsequent deploys. Each deploy is a single CALL transaction,
+ *         avoiding the 2-tx problem where Foundry splits create2 into
+ *         CREATE2+CALL broadcast pairs that desync on some RPCs.
  *
- *         Chain-specific features (ENS, ERC-8004) are passed via env vars.
- *         If not set, they default to address(0) (disabled).
+ *         Deterministic addresses based on (factory, salt). Same factory
+ *         address + same salts = same protocol addresses on any chain.
  *
  *   Environment variables:
  *     ENS_REGISTRAR     — L2 Registrar address (default: 0x0 = no ENS)
@@ -30,20 +32,11 @@ import {ScriptBase} from "./ScriptBase.sol";
  *     MAX_STRATEGY_DAYS — Max strategy duration in days (default: 30)
  *
  *   Usage:
- *     # HyperEVM (no ENS, no identity)
  *     forge script script/Deploy.s.sol:DeploySherwood \
- *       --rpc-url hyperevm --account <acct> --sender <addr> --broadcast
- *
- *     # Base (with ENS + identity)
- *     ENS_REGISTRAR=0x866996c808E6244216a3d0df15464FCF5d495394 \
- *     AGENT_REGISTRY=0x8004A169FB4a3325136EB29fA0ceB6D2e539a432 \
- *       forge script script/Deploy.s.sol:DeploySherwood \
- *       --rpc-url base --account <acct> --sender <addr> --broadcast --verify
+ *       --rpc-url <chain> --account <acct> --sender <addr> --broadcast --slow
  */
 contract DeploySherwood is ScriptBase {
     // ── CREATE3 salts ──
-    // Same deployer + same salts = same addresses on any chain.
-    // If a salt gets burned (failed deploy leaves dead trampoline), bump the version suffix.
     bytes32 constant SALT_EXECUTOR = keccak256("sherwood.deploy.executor.1");
     bytes32 constant SALT_VAULT_IMPL = keccak256("sherwood.deploy.vault-impl.1");
     bytes32 constant SALT_GOVERNOR_IMPL = keccak256("sherwood.deploy.governor-impl.1");
@@ -82,27 +75,27 @@ contract DeploySherwood is ScriptBase {
         d.deployer = msg.sender;
         console.log("Deployer:", d.deployer);
         console.log("Chain ID:", block.chainid);
-        console.log("ENS Registrar:", cfg.ensRegistrar);
-        console.log("Agent Registry:", cfg.agentRegistry);
+
+        // 0. Deploy Create3Factory (regular CREATE — one tx)
+        Create3Factory c3 = new Create3Factory();
+        console.log("\nCreate3Factory:", address(c3));
 
         // 1. BatchExecutorLib
-        d.executorLib = Create3.deploy(SALT_EXECUTOR, abi.encodePacked(type(BatchExecutorLib).creationCode));
-        console.log("\nBatchExecutorLib:", d.executorLib);
+        d.executorLib = c3.deploy(SALT_EXECUTOR, abi.encodePacked(type(BatchExecutorLib).creationCode));
+        console.log("BatchExecutorLib:", d.executorLib);
 
         // 2. SyndicateVault implementation
-        d.vaultImpl = Create3.deploy(SALT_VAULT_IMPL, abi.encodePacked(type(SyndicateVault).creationCode));
+        d.vaultImpl = c3.deploy(SALT_VAULT_IMPL, abi.encodePacked(type(SyndicateVault).creationCode));
         console.log("VaultImpl:", d.vaultImpl);
 
         // 3. SyndicateGovernor implementation + proxy
-        address govImpl =
-            Create3.deploy(SALT_GOVERNOR_IMPL, abi.encodePacked(type(SyndicateGovernor).creationCode));
-        d.governorProxy = _deployGovernorProxy(govImpl, d.deployer, cfg);
+        address govImpl = c3.deploy(SALT_GOVERNOR_IMPL, abi.encodePacked(type(SyndicateGovernor).creationCode));
+        d.governorProxy = _deployGovernorProxy(c3, govImpl, d.deployer, cfg);
         console.log("GovernorProxy:", d.governorProxy);
 
         // 4. SyndicateFactory implementation + proxy
-        address factoryImpl =
-            Create3.deploy(SALT_FACTORY_IMPL, abi.encodePacked(type(SyndicateFactory).creationCode));
-        d.factoryProxy = _deployFactoryProxy(factoryImpl, d, cfg);
+        address factoryImpl = c3.deploy(SALT_FACTORY_IMPL, abi.encodePacked(type(SyndicateFactory).creationCode));
+        d.factoryProxy = _deployFactoryProxy(c3, factoryImpl, d, cfg);
         console.log("FactoryProxy:", d.factoryProxy);
 
         // 5. Register factory on governor
@@ -113,17 +106,20 @@ contract DeploySherwood is ScriptBase {
 
         // ── Validate ──
         _validateGovernor(d.deployer, d.governorProxy, d.factoryProxy, cfg.maxStrategyDays);
-        _validateFactory(d.deployer, d.governorProxy, d.factoryProxy, d.executorLib, d.vaultImpl,
-            cfg.ensRegistrar, cfg.agentRegistry, cfg.managementFeeBps);
+        _validateFactory(
+            d.deployer, d.governorProxy, d.factoryProxy, d.executorLib, d.vaultImpl, cfg.ensRegistrar,
+            cfg.agentRegistry, cfg.managementFeeBps
+        );
 
         // ── Persist ──
         _writeAddresses(_chainName(), d.deployer, d.factoryProxy, d.governorProxy, d.executorLib, d.vaultImpl);
 
         console.log("\nDeployment complete on %s (chain %s)", _chainName(), block.chainid);
+        console.log("Create3Factory: %s (save for future deploys)", address(c3));
         console.log("Next: forge script script/DeployTemplates.s.sol --rpc-url <chain> --broadcast");
     }
 
-    function _deployGovernorProxy(address govImpl, address deployer, Config memory cfg)
+    function _deployGovernorProxy(Create3Factory c3, address govImpl, address deployer, Config memory cfg)
         internal
         returns (address)
     {
@@ -147,13 +143,13 @@ contract DeploySherwood is ScriptBase {
                 })
             )
         );
-        return Create3.deploy(
+        return c3.deploy(
             SALT_GOVERNOR_PROXY,
             abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(govImpl, initData))
         );
     }
 
-    function _deployFactoryProxy(address factoryImpl, Deployed memory d, Config memory cfg)
+    function _deployFactoryProxy(Create3Factory c3, address factoryImpl, Deployed memory d, Config memory cfg)
         internal
         returns (address)
     {
@@ -171,7 +167,7 @@ contract DeploySherwood is ScriptBase {
                 })
             )
         );
-        return Create3.deploy(
+        return c3.deploy(
             SALT_FACTORY_PROXY,
             abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(factoryImpl, initData))
         );
