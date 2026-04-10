@@ -53,8 +53,8 @@ export class CoinGeckoProvider implements Provider {
    * Generate cache key from endpoint and params.
    */
   private getCacheKey(endpoint: string, params: string): string {
-    const hash = createHash('sha1').update(params).digest('hex').substring(0, 8);
-    return `${endpoint}-${hash}.json`;
+    const hash = createHash('sha1').update(endpoint + params).digest('hex').substring(0, 12);
+    return `${hash}.json`;
   }
 
   /**
@@ -109,11 +109,9 @@ export class CoinGeckoProvider implements Provider {
    * Checks cache first, then uses shared promise chain for API calls.
    */
   private async fetchJson(url: string): Promise<any> {
-    // Extract cache key from URL
+    // Extract cache key from full URL path (includes token ID)
     const urlObj = new URL(url);
-    const endpoint = urlObj.pathname.split('/').pop() || 'unknown';
-    const params = urlObj.search;
-    const cacheKey = this.getCacheKey(endpoint, params);
+    const cacheKey = this.getCacheKey(urlObj.pathname, urlObj.search);
     const ttl = this.getCacheTTL(url);
 
     // Check cache first — if hit, return immediately without touching rate limiter
