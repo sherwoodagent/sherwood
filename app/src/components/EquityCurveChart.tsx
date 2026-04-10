@@ -26,7 +26,10 @@ interface EquityCurveChartProps {
   hwm: string;
 }
 
-export default function EquityCurveChart({ data, hwm }: EquityCurveChartProps) {
+export default function EquityCurveChart({ data: rawData, hwm }: EquityCurveChartProps) {
+  // Chart.js needs at least 2 points to draw a line
+  const data = rawData.length < 2 ? [rawData[0] ?? 0, rawData[0] ?? 0] : rawData;
+
   const chartRef = useRef<ChartJS<"line">>(null);
   const [gradient, setGradient] = useState<CanvasGradient | string>(
     "rgba(46, 230, 166, 0.1)"
