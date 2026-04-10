@@ -751,13 +751,30 @@ async function fetchEquityCurve(
 
 // ── ENS text record ────────────────────────────────────────
 
+/**
+ * XMTP group ID overrides for chains without ENS L2 Registry.
+ * Set via XMTP_GROUP_OVERRIDES env var as JSON: {"subdomain":"groupId",...}
+ * Example: XMTP_GROUP_OVERRIDES='{"hyperliquid-algo":"60ce1048f1283fd17dcd56aeffa597f9"}'
+ */
+function getXmtpGroupOverride(subdomain: string): string | null {
+  const raw = process.env.XMTP_GROUP_OVERRIDES;
+  if (!raw) return null;
+  try {
+    const overrides = JSON.parse(raw) as Record<string, string>;
+    return overrides[subdomain] || null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchXmtpGroupId(
   chainId: number,
   subdomain: string,
   l2Registry: Address,
 ): Promise<string | null> {
+  // Chains without ENS — check env-based overrides
   if (l2Registry === "0x0000000000000000000000000000000000000000")
-    return null;
+    return getXmtpGroupOverride(subdomain);
 
   const client = getPublicClient(chainId);
   const node = namehash(`${subdomain}.sherwoodagent.eth`);
