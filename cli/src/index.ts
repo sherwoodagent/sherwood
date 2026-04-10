@@ -1483,6 +1483,7 @@ configCmd
   .option("--notify-to <id>", "Destination for cron summaries (Telegram chat ID, phone, etc.)")
   .option("--uniswap-api-key <key>", "Uniswap Trading API key (from developers.uniswap.org)")
   .option("--venice-api-key <key>", "Venice AI inference API key")
+  .option("--xmtp-group <subdomain:groupId>", "Cache an XMTP group ID for a syndicate (e.g. my-fund:abc123)")
   .action((opts) => {
     let saved = false;
 
@@ -1529,8 +1530,20 @@ configCmd
       saved = true;
     }
 
+    if (opts.xmtpGroup) {
+      const parts = opts.xmtpGroup.split(":");
+      if (parts.length !== 2 || !parts[0] || !parts[1]) {
+        console.log(chalk.red("Format: --xmtp-group <subdomain>:<groupId>"));
+        process.exit(1);
+      }
+      cacheGroupId(parts[0], parts[1]);
+      console.log(chalk.green(`XMTP group ID cached for ${parts[0]}`));
+      console.log(chalk.dim(`  Group ID: ${parts[1]}`));
+      saved = true;
+    }
+
     if (!saved) {
-      console.log(chalk.red("Provide at least one of: --private-key, --vault, --rpc, --notify-to, --uniswap-api-key, --venice-api-key"));
+      console.log(chalk.red("Provide at least one of: --private-key, --vault, --rpc, --notify-to, --uniswap-api-key, --venice-api-key, --xmtp-group"));
       process.exit(1);
     }
   });
