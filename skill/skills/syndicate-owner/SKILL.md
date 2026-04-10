@@ -6,7 +6,7 @@ model: sonnet
 license: MIT
 metadata:
   author: sherwood
-  version: '0.3.0'
+  version: '0.4.0'
 ---
 
 # Syndicate Vault Owner — Guardian Agent
@@ -255,6 +255,129 @@ As vault owner, you have these emergency powers:
 | **Rescue ETH** | `sherwood vault rescue-eth <to> <amount>` | Recover stuck ETH from the vault |
 | **Rescue ERC-721** | `sherwood vault rescue-erc721 <token> <id> <to>` | Recover stuck NFTs from the vault |
 
+### Recovering a stuck Executed proposal (LP funds locked)
+
+**Symptom.** A proposal is in state `Executed` (5), its `strategyDuration` has elapsed, `redemptionsLocked()` on the vault returns `true`, and calling `settleProposal(id)` reverts. LPs cannot withdraw because `_activeProposal[vault]` still points at the stale proposal.
+
+Common root causes:
+
+- Pre-committed settlement calls target an address that now rejects the call (broken adapter, deprecated router, contract with a reverting `receive()`).
+- Pre-committed calls assume a pool/position state that no longer exists (liquidity moved, position liquidated, decimal mismatch).
+- Settlement calldata was encoded against a router/adapter that has since been replaced.
+
+**Key insight — `emergencySettle` has a built-in fallback.** `SyndicateGovernor._tryPrecommittedThenFallback` (`contracts/src/SyndicateGovernor.sol`) runs the pre-committed settlement batch inside a `try/catch`. If it reverts, the caller's fallback `calls[]` are executed instead. So a stuck `Executed` proposal is **not** permanently locked — the vault owner can always unstick it with `emergencySettle(id, fallbackCalls)` as long as:
+
+1. `block.timestamp >= executedAt + strategyDuration` (duration must have elapsed)
+2. The caller is the vault owner
+3. The fallback calls array is non-empty **and** does not revert (empty arrays re-raise the original revert, see line 667-671)
+4. The vault holds enough of the asset to cover any outbound transfers in the fallback — `_finishSettlement` recomputes PnL as `asset.balanceOf(vault) - capitalSnapshot`, so negative PnL is fine (no fees are charged), but the call must not pay out more than the vault holds
+
+#### Recovery playbook
+
+**Step 1 — Confirm the proposal is stuck, not just mid-strategy.**
+
+```bash
+# Is redemptionsLocked because of *this* proposal?
+cast call $VAULT_ADDRESS "redemptionsLocked()(bool)" --rpc-url $RPC_URL
+cast call $GOVERNOR_ADDRESS "getActiveProposal(address)(uint256)" $VAULT_ADDRESS --rpc-url $RPC_URL
+
+# Fetch the proposal — confirm state == 5 (Executed) and duration has elapsed
+cast call $GOVERNOR_ADDRESS "getProposal(uint256)((uint256,address,address,string,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint8))" <ID> --rpc-url $RPC_URL
+# Last field = state. executedAt + strategyDuration must be in the past.
+```
+
+**Step 2 — Simulate `settleProposal` to diagnose the revert.**
+
+```bash
+cast call $GOVERNOR_ADDRESS "settleProposal(uint256)" <ID> --rpc-url $RPC_URL --trace 2>&1 | tail -30
+```
+
+Look at the innermost `Revert` frame. Typical patterns:
+
+- `WETH::withdraw` → ETH transfer to broken contract → recipient's fallback reverts
+- Router `exactInput` / `swapExactTokensForTokens` → pool doesn't exist / wrong fee tier
+- Approval on token with "approve from nonzero" semantics (USDT-style)
+
+**Step 3 — Check the vault's actual asset balance.**
+
+```bash
+cast call $VAULT_ADDRESS "asset()(address)" --rpc-url $RPC_URL
+cast call <asset> "balanceOf(address)(uint256)" $VAULT_ADDRESS --rpc-url $RPC_URL
+cast call $GOVERNOR_ADDRESS "getCapitalSnapshot(uint256)(uint256)" <ID> --rpc-url $RPC_URL
+```
+
+If the vault already holds enough of the asset (the position was partially unwound already or the deposit never moved), no actual unwind is needed — you just need the proposal marked `Settled` so redemptions unlock.
+
+**Step 4 — Craft a safe fallback `calls[]`.**
+
+If **no unwind is needed** (asset already sitting in the vault), use a guaranteed-success no-op. Calls run via `delegatecall` from the vault, so they execute **as the vault**:
+
+```json
+[
+  {
+    "target": "<asset address, e.g. WETH 0x4200000000000000000000000000000000000006>",
+    "data":   "0x70a08231000000000000000000000000<vault address, zero-padded>",
+    "value":  "0"
+  }
+]
+```
+
+This is just `asset.balanceOf(vault)` — a view call that cannot revert and costs ~2.5k gas. It is enough to satisfy the `fallbackCalls.length > 0` requirement.
+
+If an **actual unwind is needed**, build the minimal call list that moves the position back to the vault's asset. Examples:
+
+- WETH held by vault but proposal tried to unwrap it to ETH somewhere broken → empty fallback call list won't work (need ≥1 call), so use the no-op above; the WETH stays as the vault's asset.
+- Moonwell `mToken` balance stuck → `[mToken.redeem(mToken.balanceOf(vault))]`
+- Aerodrome LP stuck → `[gauge.withdraw(balance), router.removeLiquidity(..., deadline)]`
+- Uniswap V3 position NFT stuck → `[nftManager.decreaseLiquidity(...), nftManager.collect(...)]`
+
+Always dry-run the fallback calls via `sherwood proposal simulate --vault $VAULT_ADDRESS --settle-calls fallback.json` before broadcasting.
+
+**Step 5 — Broadcast `emergencySettle`.**
+
+Using the CLI (preferred — writes the call file and handles encoding):
+
+```bash
+# fallback.json format matches BatchExecutorLib.Call[]:
+# [{ "target": "0x...", "data": "0x...", "value": "0" }]
+sherwood proposal settle <ID> --calls fallback.json
+```
+
+Or directly via cast (when the CLI isn't available — e.g. a bricked CLI build, or non-default vault owner wallet):
+
+```bash
+# Minimal no-op fallback = asset.balanceOf(vault)
+NOOP_DATA=$(cast calldata "balanceOf(address)" $VAULT_ADDRESS)
+cast send $GOVERNOR_ADDRESS \
+  "emergencySettle(uint256,(address,bytes,uint256)[])" \
+  <ID> "[($ASSET_ADDRESS,$NOOP_DATA,0)]" \
+  --private-key $PRIVATE_KEY --rpc-url $RPC_URL
+```
+
+**Step 6 — Verify unlock and let LPs exit.**
+
+```bash
+cast call $VAULT_ADDRESS "redemptionsLocked()(bool)" --rpc-url $RPC_URL        # expect: false
+cast call $GOVERNOR_ADDRESS "getActiveProposal(address)(uint256)" $VAULT_ADDRESS --rpc-url $RPC_URL  # expect: 0
+
+# Share holders can now redeem
+sherwood vault redeem --vault $VAULT_ADDRESS            # from a holder wallet
+```
+
+#### What `emergencySettle` **cannot** recover
+
+| State | Recovery path | Notes |
+|---|---|---|
+| `Draft` (0) | `cancelProposal(id)` by proposer, or wait for collaboration window to expire | Not locked — no funds at risk |
+| `Pending` (1) | `vetoProposal(id)` or `cancelProposal(id)` during voting | Normal flow |
+| `Approved` (2) | `vetoProposal(id)` or let execution window expire → `Expired` | Normal flow |
+| `Expired` (4) | Nothing — vault was never locked | N/A |
+| **`Executed` (5)** | **`emergencySettle(id, fallbackCalls)` — this section** | Duration must have elapsed |
+| `Settled` (6) | Already settled | N/A |
+| `Cancelled` (7) | ⚠️ Known bug: `cancelProposal` does not clear `_activeProposal` (see sherwood#177). If a vault gets locked via Cancelled state, a governor upgrade is required. | Only affects `Cancelled` — not `Executed` |
+
+> **Important distinction.** Earlier versions of this runbook assumed stuck `Executed` proposals required a governor upgrade. They do not. Only stuck `Cancelled` proposals (issue #177) do — and `cancelProposal` can only transition from `Draft` or `Pending`, so this is much rarer.
+
 ### Governor parameter changes (owner only)
 
 ```bash
@@ -342,14 +465,17 @@ cast call $GOVERNOR_ADDRESS "getGovernorParams()((uint256,uint256,uint256,uint25
 ### ProposalState enum
 
 ```
-0 = Pending      (voting active — CAN VETO)
-1 = Approved     (voting ended, awaiting execution — CAN VETO)
-2 = Rejected     (vetoed or threshold reached)
-3 = Expired      (execution window passed)
-4 = Executed     (strategy is live)
-5 = Settled      (P&L calculated, fee distributed)
-6 = Cancelled    (proposer or owner cancelled)
+0 = Draft        (collaborative proposal awaiting co-proposer consent)
+1 = Pending      (voting active — CAN VETO)
+2 = Approved     (voting ended, awaiting execution — CAN VETO)
+3 = Rejected     (vetoed or threshold reached)
+4 = Expired      (execution window passed without execution)
+5 = Executed     (strategy is live — can be settled after duration elapses)
+6 = Settled      (P&L calculated, fees distributed)
+7 = Cancelled    (proposer cancelled during Draft or Pending)
 ```
+
+When decoding `getProposal(id)` the last field is this uint8. **Always read the integer against this table, not position order** — the canonical source is `ISyndicateGovernor.sol`.
 
 ### BatchExecutorLib.Call
 
