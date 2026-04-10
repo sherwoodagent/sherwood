@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { version: CLI_VERSION } = require("../package.json");
 import { Command, Option } from "commander";
-import { parseUnits, isAddress } from "viem";
+import { parseUnits, formatUnits, isAddress } from "viem";
 import type { Address } from "viem";
 import chalk from "chalk";
 import ora from "ora";
@@ -1276,6 +1276,65 @@ vaultCmd
       console.log();
     } catch (err) {
       spinner.fail("Failed to load balance");
+      console.error(chalk.red(formatContractError(err)));
+      process.exit(1);
+    }
+  });
+
+vaultCmd
+  .command("redeem")
+  .description("Redeem vault shares for the underlying asset (ERC-4626)")
+  .option("--vault <address>", "Vault address (default: from config)")
+  .option("--shares <amount>", "Shares to redeem in whole-share units (default: all)")
+  .option("--receiver <address>", "Receiver of the underlying asset (default: your wallet)")
+  .action(async (opts) => {
+    resolveVault(opts);
+
+    // Vault shares use (assetDecimals + _decimalsOffset) where offset = assetDecimals.
+    // For USDC (6) this is 12. Treat --shares as whole-share units and scale by decimals * 2.
+    const assetDecimals = await vaultLib.getAssetDecimals();
+    const shareDecimals = assetDecimals * 2;
+
+    let shares: bigint;
+    try {
+      if (opts.shares) {
+        shares = parseUnits(opts.shares, shareDecimals);
+      } else {
+        shares = await vaultLib.getShareBalance();
+        if (shares === 0n) {
+          console.error(chalk.red("\n  ✖ No shares to redeem.\n"));
+          process.exit(1);
+        }
+      }
+    } catch (err) {
+      console.error(chalk.red(`\n  ✖ ${err instanceof Error ? err.message : String(err)}\n`));
+      process.exit(1);
+    }
+
+    if (opts.receiver && !isAddress(opts.receiver)) {
+      console.error(chalk.red(`\n  ✖ Invalid receiver address: ${opts.receiver}\n`));
+      process.exit(1);
+    }
+
+    try {
+      await vaultLib.preflightRedeem(shares);
+    } catch (err) {
+      console.error(chalk.red(`\n  ✖ ${err instanceof Error ? err.message : String(err)}\n`));
+      process.exit(1);
+    }
+
+    const sharesDisplay = formatUnits(shares, shareDecimals);
+    const spinner = ora(`Redeeming ${sharesDisplay} shares...`).start();
+    try {
+      const { hash, assetsOut } = await vaultLib.redeem(
+        shares,
+        opts.receiver as Address | undefined,
+      );
+      spinner.succeed(`Redeemed: ${hash}`);
+      console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
+      console.log(`  Assets received: ${formatUnits(assetsOut, assetDecimals)}`);
+    } catch (err) {
+      spinner.fail("Redeem failed");
       console.error(chalk.red(formatContractError(err)));
       process.exit(1);
     }

@@ -263,6 +263,114 @@ export async function deposit(amount: bigint): Promise<Hex> {
   return depositHash;
 }
 
+// ── Redeem ──
+
+/**
+ * Pre-flight check for redeem. Validates that the caller has enough shares
+ * and that the vault allows redemption right now.
+ */
+export async function preflightRedeem(shares: bigint): Promise<void> {
+  const client = getPublicClient();
+  const vaultAddress = getVaultAddress();
+  const account = getAccount();
+
+  if (shares === 0n) {
+    throw new Error("No shares to redeem.");
+  }
+
+  // 1. Check share balance
+  const balance = (await client.readContract({
+    address: vaultAddress,
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "balanceOf",
+    args: [account.address],
+  })) as bigint;
+
+  if (balance < shares) {
+    throw new Error(
+      `Insufficient shares. Have ${balance.toString()}, need ${shares.toString()}.`,
+    );
+  }
+
+  // 2. Check vault not paused
+  const paused = (await client.readContract({
+    address: vaultAddress,
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "paused",
+  })) as boolean;
+  if (paused) {
+    throw new Error("Vault is paused — redemptions are temporarily disabled.");
+  }
+
+  // 3. Check redemptions not locked (active proposal blocks redemptions)
+  const locked = (await client.readContract({
+    address: vaultAddress,
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "redemptionsLocked",
+  })) as boolean;
+  if (locked) {
+    throw new Error(
+      "Redemptions are locked while a strategy is executing. Wait for the proposal to be settled.",
+    );
+  }
+
+  // 4. Check ETH for gas
+  const ethBalance = await client.getBalance({ address: account.address });
+  const minGas = parseEther("0.0005");
+  if (ethBalance < minGas) {
+    throw new Error(
+      `Insufficient ETH for gas. Have ${formatUnits(ethBalance, 18)} ETH, need at least 0.0005 ETH.`,
+    );
+  }
+}
+
+/**
+ * Redeem shares for the underlying asset (standard ERC-4626 redeem).
+ * Returns the tx hash and the assets received.
+ */
+export async function redeem(
+  shares: bigint,
+  receiver?: Address,
+): Promise<{ hash: Hex; assetsOut: bigint }> {
+  const client = getPublicClient();
+  const vaultAddress = getVaultAddress();
+  const account = getAccount();
+  const to = receiver ?? account.address;
+
+  // Preview so we can report assets received
+  const assetsOut = (await client.readContract({
+    address: vaultAddress,
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "previewRedeem",
+    args: [shares],
+  })) as bigint;
+
+  const hash = await writeContractWithRetry({
+    account,
+    chain: getChain(),
+    address: vaultAddress,
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "redeem",
+    args: [shares, to, account.address],
+  });
+  await waitForReceipt(hash);
+  return { hash, assetsOut };
+}
+
+/**
+ * Read the current share balance for an address (defaults to the caller).
+ */
+export async function getShareBalance(address?: Address): Promise<bigint> {
+  const client = getPublicClient();
+  const owner = address ?? getAccount().address;
+  return client.readContract({
+    address: getVaultAddress(),
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "balanceOf",
+    args: [owner],
+  }) as Promise<bigint>;
+}
+
 // ── Batch Execution ──
 
 /**
