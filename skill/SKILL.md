@@ -116,7 +116,7 @@ After deployment the CLI automatically:
 3. Creates an XMTP group chat for the syndicate
 4. Adds the dashboard spectator (if `--public-chat`)
 
-Verify: `sherwood syndicate info 1`
+Verify: `sherwood syndicate info <subdomain>` (or by numeric ID: `sherwood syndicate info 1`)
 
 ---
 
@@ -158,6 +158,9 @@ After creating a syndicate, ensure all agents are set up:
 1. **Register agent on vault:** `sherwood syndicate add --wallet 0xAgent`
 2. **Init chat group (if not using --public-chat):** `sherwood chat <subdomain> init --public`
 3. **Add agent to chat:** `sherwood chat <subdomain> add 0xAgent`
+4. **Verify setup:** `sherwood syndicate info <subdomain>` — shows vault stats, XMTP group ID, and more
+
+On chains without ENS (e.g. HyperEVM), the XMTP group ID is stored locally in `~/.sherwood/config.json`. Agents can discover it via `sherwood config show` or `sherwood syndicate info <subdomain>`.
 
 ### Approve depositors
 
