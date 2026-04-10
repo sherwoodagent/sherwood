@@ -139,6 +139,41 @@ const ROBINHOOD_TESTNET_INFRA = {
   MULTICALL3: "0xcA11bde05977b3631167028862bE2a173976CA11" as Address, // Deterministic, same everywhere
 } as const;
 
+// ── HyperEVM (chain 999) ──
+// No Moonwell, no Uniswap, no Venice, no ENS/Durin, no ERC-8004, no EAS.
+// USDC: native USDC on HyperEVM.
+
+const HYPEREVM_TOKENS = {
+  USDC: "0xb88339CB7199b77E23DB6E890353E22632Ba630f" as Address,
+  WETH: ZERO,
+  cbETH: ZERO,
+  wstETH: ZERO,
+  cbBTC: ZERO,
+  DAI: ZERO,
+  AERO: ZERO,
+} as const;
+
+const HYPEREVM_TESTNET_TOKENS = {
+  USDC: ZERO,
+  WETH: ZERO,
+  cbETH: ZERO,
+  wstETH: ZERO,
+  cbBTC: ZERO,
+  DAI: ZERO,
+  AERO: ZERO,
+} as const;
+
+const HYPEREVM_MOONWELL = {
+  COMPTROLLER: ZERO, mUSDC: ZERO, mWETH: ZERO, mCbETH: ZERO,
+  mWstETH: ZERO, mCbBTC: ZERO, mDAI: ZERO, mAERO: ZERO,
+} as const;
+
+const HYPEREVM_UNISWAP = { SWAP_ROUTER: ZERO, QUOTER_V2: ZERO, SWAP_ADAPTER: ZERO as Address } as const;
+
+const HYPEREVM_INFRA = {
+  MULTICALL3: "0xcA11bde05977b3631167028862bE2a173976CA11" as Address,
+} as const;
+
 // ── ENS / Durin ──
 
 const BASE_ENS = {
@@ -155,6 +190,8 @@ const ROBINHOOD_TESTNET_ENS = {
   L2_REGISTRAR: ZERO,
   L2_REGISTRY: ZERO,
 } as const;
+
+const HYPEREVM_ENS = { L2_REGISTRAR: ZERO, L2_REGISTRY: ZERO } as const;
 
 // ── ERC-8004 Agent Identity ──
 
@@ -175,6 +212,8 @@ const ROBINHOOD_TESTNET_AGENT_REGISTRY = {
   REPUTATION_REGISTRY: ZERO,
 } as const;
 
+const HYPEREVM_AGENT_REGISTRY = { IDENTITY_REGISTRY: ZERO, REPUTATION_REGISTRY: ZERO } as const;
+
 // ── Sherwood Protocol (our deployed contracts) ──
 
 const BASE_SHERWOOD = {
@@ -190,6 +229,11 @@ const BASE_SEPOLIA_SHERWOOD = {
 const ROBINHOOD_TESTNET_SHERWOOD = {
   FACTORY: "0x6d026e2f5Ff0C34A01690EC46Cb601B8fF391985" as Address,
   GOVERNOR: "0xd882056ba6b0aEd8908c541884B327121E2f2C9C" as Address,
+} as const;
+
+const HYPEREVM_SHERWOOD = {
+  FACTORY: "0x4085EEa1E6d3D20E84D8Ae14964FAb8b899DA40a" as Address,
+  GOVERNOR: "0x7B4a2f3480FE101f88b2e3547A1bCf3eaaDE46bc" as Address,
 } as const;
 
 // ── Venice (VVV governance + sVVV staking + DIEM compute) ──
@@ -212,6 +256,8 @@ const ROBINHOOD_TESTNET_VENICE = {
   DIEM: ZERO,
 } as const;
 
+const HYPEREVM_VENICE = { VVV: ZERO, STAKING: ZERO, DIEM: ZERO } as const;
+
 // ── Aerodrome (Base ve(3,3) DEX) ──
 
 const BASE_AERODROME = {
@@ -229,6 +275,8 @@ const ROBINHOOD_TESTNET_AERODROME = {
   FACTORY: ZERO,
 } as const;
 
+const HYPEREVM_AERODROME = { ROUTER: ZERO, FACTORY: ZERO } as const;
+
 // ── Strategy Templates (ERC-1167 clonable singletons) ──
 // Populated after running script/DeployTemplates.s.sol
 
@@ -238,6 +286,7 @@ const BASE_STRATEGY_TEMPLATES = {
   VENICE_INFERENCE: "0xd882056ba6b0aEd8908c541884B327121E2f2C9C" as Address,
   WSTETH_MOONWELL: "0x6d026e2f5Ff0C34A01690EC46Cb601B8fF391985" as Address,
   MAMO_YIELD: "0x5c98808Ce5e51767ba2d969F75312eEFF0b14a6A" as Address,
+  HYPERLIQUID_PERP: ZERO as Address,
   PORTFOLIO: "0x7865eEA4063c22d0F55FdD412D345495c7b73f64" as Address,
 } as const;
 
@@ -247,6 +296,7 @@ const BASE_SEPOLIA_STRATEGY_TEMPLATES = {
   VENICE_INFERENCE: ZERO as Address,
   WSTETH_MOONWELL: ZERO as Address,
   MAMO_YIELD: ZERO as Address,
+  HYPERLIQUID_PERP: ZERO as Address,
   PORTFOLIO: ZERO as Address,
 } as const;
 
@@ -256,7 +306,18 @@ const ROBINHOOD_TESTNET_STRATEGY_TEMPLATES = {
   VENICE_INFERENCE: ZERO as Address,
   WSTETH_MOONWELL: ZERO as Address,
   MAMO_YIELD: ZERO as Address,
+  HYPERLIQUID_PERP: ZERO as Address,
   PORTFOLIO: "0xAe981882923E0C76A7F10E7cAa3782023c0abd9B" as Address,
+} as const;
+
+const HYPEREVM_STRATEGY_TEMPLATES = {
+  MOONWELL_SUPPLY: ZERO as Address,
+  AERODROME_LP: ZERO as Address,
+  VENICE_INFERENCE: ZERO as Address,
+  WSTETH_MOONWELL: ZERO as Address,
+  MAMO_YIELD: ZERO as Address,
+  HYPERLIQUID_PERP: "0x1E831aB61Dc423bF678a2Ff8d9ce768E1e6D2338" as Address,
+  PORTFOLIO: ZERO as Address,
 } as const;
 
 // ── EAS (Ethereum Attestation Service) — Base predeploys ──
@@ -275,6 +336,8 @@ const ROBINHOOD_TESTNET_EAS = {
   EAS: ZERO,
   SCHEMA_REGISTRY: ZERO,
 } as const;
+
+const HYPEREVM_EAS = { EAS: ZERO, SCHEMA_REGISTRY: ZERO } as const;
 
 // ── EAS Schema UIDs (populated after running scripts/register-eas-schemas.ts) ──
 
@@ -317,90 +380,127 @@ const ROBINHOOD_TESTNET_EAS_SCHEMAS = {
   TRADE_EXECUTED: ZERO_BYTES32,
 } as const;
 
+const HYPEREVM_EAS_SCHEMAS = {
+  SYNDICATE_JOIN_REQUEST: ZERO_BYTES32, AGENT_APPROVED: ZERO_BYTES32,
+  X402_RESEARCH: ZERO_BYTES32, VENICE_PROVISION: ZERO_BYTES32,
+  VENICE_INFERENCE: ZERO_BYTES32, TRADE_EXECUTED: ZERO_BYTES32,
+} as const;
+
 // ── Registries (map-based lookup) ──
 
 const TOKEN_REGISTRY: Record<Network, typeof BASE_TOKENS> = {
   base: BASE_TOKENS,
   "base-sepolia": BASE_SEPOLIA_TOKENS,
   "robinhood-testnet": ROBINHOOD_TESTNET_TOKENS,
+  hyperevm: HYPEREVM_TOKENS,
+  "hyperevm-testnet": HYPEREVM_TESTNET_TOKENS,
 };
 
 const MOONWELL_REGISTRY: Record<Network, typeof BASE_MOONWELL> = {
   base: BASE_MOONWELL,
   "base-sepolia": BASE_SEPOLIA_MOONWELL,
   "robinhood-testnet": ROBINHOOD_TESTNET_MOONWELL,
+  hyperevm: HYPEREVM_MOONWELL,
+  "hyperevm-testnet": HYPEREVM_MOONWELL,
 };
 
 const UNISWAP_REGISTRY: Record<Network, typeof BASE_UNISWAP> = {
   base: BASE_UNISWAP,
   "base-sepolia": BASE_SEPOLIA_UNISWAP,
   "robinhood-testnet": ROBINHOOD_TESTNET_UNISWAP,
+  hyperevm: HYPEREVM_UNISWAP,
+  "hyperevm-testnet": HYPEREVM_UNISWAP,
 };
 
 const INFRA_REGISTRY: Record<Network, typeof BASE_INFRA> = {
   base: BASE_INFRA,
   "base-sepolia": BASE_SEPOLIA_INFRA,
   "robinhood-testnet": ROBINHOOD_TESTNET_INFRA,
+  hyperevm: HYPEREVM_INFRA,
+  "hyperevm-testnet": HYPEREVM_INFRA,
 };
 
 const ENS_REGISTRY: Record<Network, typeof BASE_ENS> = {
   base: BASE_ENS,
   "base-sepolia": BASE_SEPOLIA_ENS,
   "robinhood-testnet": ROBINHOOD_TESTNET_ENS,
+  hyperevm: HYPEREVM_ENS,
+  "hyperevm-testnet": HYPEREVM_ENS,
 };
 
 const AGENT_REGISTRY_MAP: Record<Network, typeof BASE_AGENT_REGISTRY> = {
   base: BASE_AGENT_REGISTRY,
   "base-sepolia": BASE_SEPOLIA_AGENT_REGISTRY,
   "robinhood-testnet": ROBINHOOD_TESTNET_AGENT_REGISTRY,
+  hyperevm: HYPEREVM_AGENT_REGISTRY,
+  "hyperevm-testnet": HYPEREVM_AGENT_REGISTRY,
 };
 
 const SHERWOOD_REGISTRY: Record<Network, typeof BASE_SHERWOOD> = {
   base: BASE_SHERWOOD,
   "base-sepolia": BASE_SEPOLIA_SHERWOOD,
   "robinhood-testnet": ROBINHOOD_TESTNET_SHERWOOD,
+  hyperevm: HYPEREVM_SHERWOOD,
+  "hyperevm-testnet": HYPEREVM_SHERWOOD,
 };
 
 const VENICE_REGISTRY: Record<Network, typeof BASE_VENICE> = {
   base: BASE_VENICE,
   "base-sepolia": BASE_SEPOLIA_VENICE,
   "robinhood-testnet": ROBINHOOD_TESTNET_VENICE,
+  hyperevm: HYPEREVM_VENICE,
+  "hyperevm-testnet": HYPEREVM_VENICE,
 };
 
 const AERODROME_REGISTRY: Record<Network, typeof BASE_AERODROME> = {
   base: BASE_AERODROME,
   "base-sepolia": BASE_SEPOLIA_AERODROME,
   "robinhood-testnet": ROBINHOOD_TESTNET_AERODROME,
+  hyperevm: HYPEREVM_AERODROME,
+  "hyperevm-testnet": HYPEREVM_AERODROME,
 };
 
 const STRATEGY_TEMPLATE_REGISTRY: Record<Network, typeof BASE_STRATEGY_TEMPLATES> = {
   base: BASE_STRATEGY_TEMPLATES,
   "base-sepolia": BASE_SEPOLIA_STRATEGY_TEMPLATES,
   "robinhood-testnet": ROBINHOOD_TESTNET_STRATEGY_TEMPLATES,
+  hyperevm: HYPEREVM_STRATEGY_TEMPLATES,
+  "hyperevm-testnet": HYPEREVM_STRATEGY_TEMPLATES,
 };
+
+const HYPEREVM_SYNTHRA = { ROUTER: ZERO, QUOTER: ZERO, FACTORY: ZERO } as const;
+const HYPEREVM_CHAINLINK = { VERIFIER_PROXY: ZERO } as const;
 
 const SYNTHRA_REGISTRY: Record<Network, typeof BASE_SYNTHRA> = {
   base: BASE_SYNTHRA,
   "base-sepolia": BASE_SEPOLIA_SYNTHRA,
   "robinhood-testnet": ROBINHOOD_TESTNET_SYNTHRA,
+  hyperevm: HYPEREVM_SYNTHRA,
+  "hyperevm-testnet": HYPEREVM_SYNTHRA,
 };
 
 const CHAINLINK_REGISTRY: Record<Network, typeof BASE_CHAINLINK> = {
   base: BASE_CHAINLINK,
   "base-sepolia": BASE_SEPOLIA_CHAINLINK,
   "robinhood-testnet": ROBINHOOD_TESTNET_CHAINLINK,
+  hyperevm: HYPEREVM_CHAINLINK,
+  "hyperevm-testnet": HYPEREVM_CHAINLINK,
 };
 
 const EAS_CONTRACT_REGISTRY: Record<Network, typeof BASE_EAS> = {
   base: BASE_EAS,
   "base-sepolia": BASE_SEPOLIA_EAS,
   "robinhood-testnet": ROBINHOOD_TESTNET_EAS,
+  hyperevm: HYPEREVM_EAS,
+  "hyperevm-testnet": HYPEREVM_EAS,
 };
 
 const EAS_SCHEMA_REGISTRY: Record<Network, typeof BASE_EAS_SCHEMAS> = {
   base: BASE_EAS_SCHEMAS,
   "base-sepolia": BASE_SEPOLIA_EAS_SCHEMAS,
   "robinhood-testnet": ROBINHOOD_TESTNET_EAS_SCHEMAS,
+  hyperevm: HYPEREVM_EAS_SCHEMAS,
+  "hyperevm-testnet": HYPEREVM_EAS_SCHEMAS,
 };
 
 // ── Exports (functions, resolved at call time) ──

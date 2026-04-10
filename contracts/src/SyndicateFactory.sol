@@ -143,6 +143,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     function initialize(InitParams calldata p) external initializer {
         if (p.executorImpl == address(0)) revert InvalidExecutorImpl();
         if (p.vaultImpl == address(0)) revert InvalidVaultImpl();
+        // NOTE: ensRegistrar and agentRegistry can be address(0) on chains without ENS/ERC-8004
         if (p.governor == address(0)) revert InvalidGovernor();
 
         __Ownable_init(p.owner);
@@ -203,7 +204,6 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         ISyndicateGovernor(governor).addVault(vault);
 
         // Register ENS subname — vault is both address record + NFT owner
-        // Skipped on chains without ENS/Durin (e.g. Robinhood, Hyperliquid)
         if (address(ensRegistrar) != address(0)) {
             ensRegistrar.register(config.subdomain, vault);
         }
@@ -304,10 +304,8 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
 
     /// @notice Check if a subdomain is available for registration
     function isSubdomainAvailable(string calldata subdomain) external view returns (bool) {
-        if (address(ensRegistrar) == address(0)) {
-            return subdomainToSyndicate[subdomain] == 0;
-        }
-        return subdomainToSyndicate[subdomain] == 0 && ensRegistrar.available(subdomain);
+        return subdomainToSyndicate[subdomain] == 0
+            && (address(ensRegistrar) == address(0) || ensRegistrar.available(subdomain));
     }
 
     /// @notice Get active syndicates with pagination (for dashboard)

@@ -1398,6 +1398,10 @@ registerGovernorCommands(program);
 const { registerResearchCommands } = await import("./commands/research.js");
 registerResearchCommands(program);
 
+// ── Agent commands ──
+const { registerAgentCommands } = await import("./commands/agent.js");
+registerAgentCommands(program);
+
 // ── Trade commands ──
 const { registerTradeCommands } = await import("./commands/trade.js");
 registerTradeCommands(program);

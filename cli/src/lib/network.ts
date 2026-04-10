@@ -27,9 +27,45 @@ export const robinhoodTestnet = defineChain({
   testnet: true,
 });
 
+// ── HyperEVM (Hyperliquid L1, chain ID 999) ──
+
+export const hyperevm = defineChain({
+  id: 999,
+  name: "HyperEVM",
+  nativeCurrency: { name: "Ethereum", symbol: "ETH", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.hyperliquid.xyz/evm"] },
+  },
+  blockExplorers: {
+    default: {
+      name: "Routescan",
+      url: "https://explorer.hyperliquid.xyz",
+    },
+  },
+  testnet: false,
+});
+
+// ── HyperEVM Testnet (chain ID 998) ──
+
+export const hyperevmTestnet = defineChain({
+  id: 998,
+  name: "HyperEVM Testnet",
+  nativeCurrency: { name: "Ethereum", symbol: "ETH", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.hyperliquid-testnet.xyz/evm"] },
+  },
+  blockExplorers: {
+    default: {
+      name: "Routescan",
+      url: "https://explorer.hyperliquid-testnet.xyz",
+    },
+  },
+  testnet: true,
+});
+
 // ── Types ──
 
-export type Network = "base" | "base-sepolia" | "robinhood-testnet";
+export type Network = "base" | "base-sepolia" | "robinhood-testnet" | "hyperevm" | "hyperevm-testnet";
 
 export interface ChainConfig {
   chain: Chain;
@@ -72,6 +108,26 @@ export const CHAIN_REGISTRY: Record<Network, ChainConfig> = {
     chain: robinhoodTestnet,
     rpcFallback: "https://rpc.testnet.chain.robinhood.com",
     explorerHost: "explorer.testnet.chain.robinhood.com",
+    easGraphqlUrl: null,
+    easScanHost: null,
+    xmtpEnv: "dev",
+    isTestnet: true,
+  },
+  hyperevm: {
+    chain: hyperevm,
+    rpcFallback: "https://rpc.hyperliquid.xyz/evm",
+    rpcEnvVar: "HYPEREVM_RPC_URL",
+    explorerHost: "explorer.hyperliquid.xyz",
+    easGraphqlUrl: null,
+    easScanHost: null,
+    xmtpEnv: "production",
+    isTestnet: false,
+  },
+  "hyperevm-testnet": {
+    chain: hyperevmTestnet,
+    rpcFallback: "https://rpc.hyperliquid-testnet.xyz/evm",
+    rpcEnvVar: "HYPEREVM_TESTNET_RPC_URL",
+    explorerHost: "explorer.hyperliquid-testnet.xyz",
     easGraphqlUrl: null,
     easScanHost: null,
     xmtpEnv: "dev",

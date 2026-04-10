@@ -32,6 +32,7 @@ import * as aerodromeBuilder from "../strategies/aerodrome-lp-template.js";
 import * as wstethBuilder from "../strategies/wsteth-moonwell-template.js";
 import * as mamoBuilder from "../strategies/mamo-yield-template.js";
 import * as portfolioBuilder from "../strategies/portfolio-template.js";
+import * as hyperliquidPerpBuilder from "../strategies/hyperliquid-perp-template.js";
 
 import { concat, numberToHex, size } from "viem";
 
@@ -249,6 +250,12 @@ const TEMPLATES: TemplateDef[] = [
     key: "portfolio",
     description: "Weighted portfolio of tokens (stock tokens, crypto) with rebalancing",
     addressKey: "PORTFOLIO",
+  },
+  {
+    name: "Hyperliquid Perp",
+    key: "hyperliquid-perp",
+    description: "Leveraged perp trading on Hyperliquid via HyperEVM precompiles",
+    addressKey: "HYPERLIQUID_PERP",
   },
 ];
 
@@ -525,6 +532,23 @@ async function buildInitDataForTemplate(
     };
   }
 
+  if (templateKey === "hyperliquid-perp") {
+    if (!opts.amount) { console.error(chalk.red("--amount is required for hyperliquid-perp template")); process.exit(1); }
+    const token = (opts.token as string) || "USDC";
+    const asset = resolveToken(token);
+    const decimals = token.toUpperCase() === "USDC" ? 6 : 18;
+    const depositAmount = parseUnits(opts.amount as string, decimals);
+    const minReturn = parseUnits((opts.minReturn as string) || opts.amount as string, decimals);
+    const leverage = Number((opts.leverage as string) || "10");
+    const assetIndex = Number((opts.assetIndex as string) || "0");
+    const maxPosition = parseUnits((opts.maxPosition as string) || "100000", decimals);
+    const maxTradesDay = Number((opts.maxTradesPerDay as string) || "50");
+    return {
+      initData: hyperliquidPerpBuilder.buildInitData(asset, depositAmount, minReturn, assetIndex, leverage, maxPosition, maxTradesDay),
+      asset, assetAmount: depositAmount,
+    };
+  }
+
   throw new Error(`No init builder for template: ${templateKey}`);
 }
 
@@ -576,6 +600,13 @@ function buildCallsForTemplate(
     return {
       executeCalls: portfolioBuilder.buildExecuteCalls(clone, asset, assetAmount),
       settleCalls: portfolioBuilder.buildSettleCalls(clone),
+    };
+  }
+
+  if (templateKey === "hyperliquid-perp") {
+    return {
+      executeCalls: hyperliquidPerpBuilder.buildExecuteCalls(clone, asset, assetAmount),
+      settleCalls: hyperliquidPerpBuilder.buildSettleCalls(clone),
     };
   }
 
@@ -695,7 +726,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("clone")
     .description("Clone a strategy template and initialize it")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp")
     .requiredOption("--vault <address>", "Vault address")
     // moonwell-supply / wsteth-moonwell
     .option("--amount <n>", "Asset amount to deploy")
@@ -726,6 +757,12 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--max-slippage <bps>", "Max slippage bps (Portfolio, default: 500)")
     .option("--fee-tier <n>", "Pool fee tier (Portfolio, default: 3000)")
     .option("--swap-adapter <address>", "Swap adapter address (Portfolio)")
+    // hyperliquid-perp
+    .option("--leverage <number>", "Leverage multiplier (Hyperliquid Perp, default: 10)")
+    .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
+    .option("--min-return <n>", "Min return amount on settlement (Hyperliquid Perp)")
+    .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
+    .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
     .action(async (templateKey: string, opts) => {
       const vault = opts.vault as Address;
       if (!isAddress(vault)) {
@@ -788,7 +825,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("init")
     .description("Initialize an already-deployed but uninitialized strategy clone")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp")
     .requiredOption("--clone <address>", "Clone address to initialize")
     .requiredOption("--vault <address>", "Vault address")
     // moonwell-supply / wsteth-moonwell
@@ -820,6 +857,12 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--max-slippage <bps>", "Max slippage bps (Portfolio, default: 500)")
     .option("--fee-tier <n>", "Pool fee tier (Portfolio, default: 3000)")
     .option("--swap-adapter <address>", "Swap adapter address (Portfolio)")
+    // hyperliquid-perp
+    .option("--leverage <number>", "Leverage multiplier (Hyperliquid Perp, default: 10)")
+    .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
+    .option("--min-return <n>", "Min return amount on settlement (Hyperliquid Perp)")
+    .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
+    .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
     .action(async (templateKey: string, opts) => {
       const clone = opts.clone as Address;
       const vault = opts.vault as Address;
@@ -892,7 +935,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("propose")
     .description("Clone + init + build calls + submit governance proposal (all-in-one)")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp")
     .requiredOption("--vault <address>", "Vault address")
     .option("--write-calls <dir>", "Write execute/settle JSON to directory (skip proposal submission)")
     // proposal metadata (required unless --write-calls)
@@ -927,6 +970,12 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--max-slippage <bps>", "Max slippage bps (Portfolio, default: 500)")
     .option("--fee-tier <n>", "Pool fee tier (Portfolio, default: 3000)")
     .option("--swap-adapter <address>", "Swap adapter address (Portfolio)")
+    // hyperliquid-perp
+    .option("--leverage <number>", "Leverage multiplier (Hyperliquid Perp, default: 10)")
+    .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
+    .option("--min-return <n>", "Min return amount on settlement (Hyperliquid Perp)")
+    .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
+    .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
     .action(async (templateKey: string, opts) => {
       const vault = opts.vault as Address;
       if (!isAddress(vault)) {

@@ -1352,6 +1352,47 @@ export const BASE_STRATEGY_ABI = [
   },
 ] as const;
 
+// ── HyperliquidPerpStrategy (extends BaseStrategy with sweepToVault) ──
+
+export const HYPERLIQUID_PERP_STRATEGY_ABI = [
+  ...BASE_STRATEGY_ABI,
+  {
+    name: "sweepToVault",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: "settled",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "swept",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "hasActiveStopLoss",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "minReturnAmount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
 // ── PortfolioStrategy (extends BaseStrategy with rebalancing + views) ──
 
 export const PORTFOLIO_STRATEGY_ABI = [

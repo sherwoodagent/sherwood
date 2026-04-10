@@ -21,7 +21,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Path to the CLI entry point (cli/src/index.ts), relative to this file
 const DEFAULT_SHERWOOD_BIN = path.resolve(__dirname, "..", "index.ts");
 
-const VALID_CHAINS: Network[] = ["base", "base-sepolia", "robinhood-testnet"];
+const VALID_CHAINS: Network[] = ["base", "base-sepolia", "robinhood-testnet", "hyperevm", "hyperevm-testnet"];
 
 export function loadSimConfig(chainOverride?: Network): SimConfig {
   const mnemonic = process.env.SIM_MNEMONIC;

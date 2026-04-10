@@ -4,6 +4,8 @@ pragma solidity 0.8.28;
 import {console} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Create3Factory} from "../src/Create3Factory.sol";
+import {Create3} from "../src/Create3.sol";
 import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../src/SyndicateFactory.sol";
@@ -12,64 +14,122 @@ import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
 import {ScriptBase} from "./ScriptBase.sol";
 
 /**
- * @notice Deploy Sherwood infrastructure to Base:
- *         1. BatchExecutorLib (shared, stateless)
- *         2. SyndicateVault implementation
- *         3. SyndicateGovernor (UUPS proxy)
- *         4. SyndicateFactory (UUPS proxy)
+ * @notice Generic Sherwood protocol deployment via CREATE3.
  *
- *         After deployment, validates on-chain state and writes addresses
- *         to chains/{chainId}.json.
+ *         Deploys a Create3Factory first (regular CREATE), then uses it for
+ *         all subsequent deploys. Each deploy is a single CALL transaction,
+ *         avoiding the 2-tx problem where Foundry splits create2 into
+ *         CREATE2+CALL broadcast pairs that desync on some RPCs.
+ *
+ *         Deterministic addresses based on (factory, salt). Same factory
+ *         address + same salts = same protocol addresses on any chain.
+ *
+ *   Environment variables:
+ *     ENS_REGISTRAR     — L2 Registrar address (default: 0x0 = no ENS)
+ *     AGENT_REGISTRY    — ERC-8004 Identity Registry (default: 0x0 = no identity)
+ *     MANAGEMENT_FEE    — Management fee in bps (default: 50 = 0.5%)
+ *     PROTOCOL_FEE      — Protocol fee in bps (default: 200 = 2%)
+ *     MAX_STRATEGY_DAYS — Max strategy duration in days (default: 30)
  *
  *   Usage:
- *     forge script script/Deploy.s.sol:Deploy \
- *       --rpc-url base \
- *       --account sherwood-agent \
- *       --sender <DEPLOYER_ADDRESS> \
- *       --broadcast \
- *       --verify
+ *     forge script script/Deploy.s.sol:DeploySherwood \
+ *       --rpc-url <chain> --account <acct> --sender <addr> --broadcast --slow
  */
-contract Deploy is ScriptBase {
-    // Base mainnet USDC
-    address constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+contract DeploySherwood is ScriptBase {
+    // ── CREATE3 salts ──
+    bytes32 constant SALT_EXECUTOR = keccak256("sherwood.deploy.executor.1");
+    bytes32 constant SALT_VAULT_IMPL = keccak256("sherwood.deploy.vault-impl.1");
+    bytes32 constant SALT_GOVERNOR_IMPL = keccak256("sherwood.deploy.governor-impl.1");
+    bytes32 constant SALT_GOVERNOR_PROXY = keccak256("sherwood.deploy.governor-proxy.1");
+    bytes32 constant SALT_FACTORY_IMPL = keccak256("sherwood.deploy.factory-impl.1");
+    bytes32 constant SALT_FACTORY_PROXY = keccak256("sherwood.deploy.factory-proxy.1");
 
-    // Moonwell (Base)
-    address constant MOONWELL_COMPTROLLER = 0xfBb21d0380beE3312B33c4353c8936a0F13EF26C;
-    address constant MOONWELL_MUSDC = 0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22;
+    struct Config {
+        address ensRegistrar;
+        address agentRegistry;
+        uint256 managementFeeBps;
+        uint256 protocolFeeBps;
+        uint256 maxStrategyDays;
+    }
 
-    // Uniswap V3 SwapRouter02 (Base)
-    address constant UNISWAP_SWAP_ROUTER = 0x2626664c2603336E57B271c5C0b26F421741e481;
-
-    // Tokens to allowlist (for swaps)
-    address constant WETH = 0x4200000000000000000000000000000000000006;
-    address constant CB_ETH = 0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22;
-    address constant WST_ETH = 0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452;
-    address constant CB_BTC = 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf;
-    address constant AERO = 0x940181a94A35A4569E4529A3CDfB74e38FD98631;
-
-    // Durin L2 Registrar (ENS subnames for sherwoodagent.eth)
-    address constant L2_REGISTRAR = 0x866996c808E6244216a3d0df15464FCF5d495394;
-
-    // ERC-8004 Agent Identity Registry (Base Mainnet)
-    address constant AGENT_REGISTRY = 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432;
+    struct Deployed {
+        address deployer;
+        address executorLib;
+        address vaultImpl;
+        address governorProxy;
+        address factoryProxy;
+    }
 
     function run() external {
+        Config memory cfg = Config({
+            ensRegistrar: vm.envOr("ENS_REGISTRAR", address(0)),
+            agentRegistry: vm.envOr("AGENT_REGISTRY", address(0)),
+            managementFeeBps: vm.envOr("MANAGEMENT_FEE", uint256(50)),
+            protocolFeeBps: vm.envOr("PROTOCOL_FEE", uint256(200)),
+            maxStrategyDays: vm.envOr("MAX_STRATEGY_DAYS", uint256(30))
+        });
+
         vm.startBroadcast();
 
-        address deployer = msg.sender;
-        console.log("Deployer:", deployer);
+        Deployed memory d;
+        d.deployer = msg.sender;
+        console.log("Deployer:", d.deployer);
+        console.log("Chain ID:", block.chainid);
 
-        // 1. Deploy BatchExecutorLib (shared, stateless — deploy once)
-        BatchExecutorLib executorLib = new BatchExecutorLib();
-        console.log("BatchExecutorLib:", address(executorLib));
+        // 0. Deploy Create3Factory (regular CREATE — one tx)
+        Create3Factory c3 = new Create3Factory();
+        console.log("\nCreate3Factory:", address(c3));
 
-        // 2. Deploy SyndicateVault implementation
-        SyndicateVault vaultImpl = new SyndicateVault();
-        console.log("Vault implementation:", address(vaultImpl));
+        // 1. BatchExecutorLib
+        d.executorLib = c3.deploy(SALT_EXECUTOR, abi.encodePacked(type(BatchExecutorLib).creationCode));
+        console.log("BatchExecutorLib:", d.executorLib);
 
-        // 3. Deploy SyndicateGovernor (UUPS proxy)
-        SyndicateGovernor govImpl = new SyndicateGovernor();
-        bytes memory govInitData = abi.encodeCall(
+        // 2. SyndicateVault implementation
+        d.vaultImpl = c3.deploy(SALT_VAULT_IMPL, abi.encodePacked(type(SyndicateVault).creationCode));
+        console.log("VaultImpl:", d.vaultImpl);
+
+        // 3. SyndicateGovernor implementation + proxy
+        address govImpl = c3.deploy(SALT_GOVERNOR_IMPL, abi.encodePacked(type(SyndicateGovernor).creationCode));
+        d.governorProxy = _deployGovernorProxy(c3, govImpl, d.deployer, cfg);
+        console.log("GovernorProxy:", d.governorProxy);
+
+        // 4. SyndicateFactory implementation + proxy
+        address factoryImpl = c3.deploy(SALT_FACTORY_IMPL, abi.encodePacked(type(SyndicateFactory).creationCode));
+        d.factoryProxy = _deployFactoryProxy(c3, factoryImpl, d, cfg);
+        console.log("FactoryProxy:", d.factoryProxy);
+
+        // 5. Register factory on governor
+        SyndicateGovernor(d.governorProxy).setFactory(d.factoryProxy);
+        console.log("Governor.setFactory done");
+
+        vm.stopBroadcast();
+
+        // ── Validate ──
+        _validateGovernor(d.deployer, d.governorProxy, d.factoryProxy, cfg.maxStrategyDays);
+        _validateFactory(
+            d.deployer,
+            d.governorProxy,
+            d.factoryProxy,
+            d.executorLib,
+            d.vaultImpl,
+            cfg.ensRegistrar,
+            cfg.agentRegistry,
+            cfg.managementFeeBps
+        );
+
+        // ── Persist ──
+        _writeAddresses(_chainName(), d.deployer, d.factoryProxy, d.governorProxy, d.executorLib, d.vaultImpl);
+
+        console.log("\nDeployment complete on %s (chain %s)", _chainName(), block.chainid);
+        console.log("Create3Factory: %s (save for future deploys)", address(c3));
+        console.log("Next: forge script script/DeployTemplates.s.sol --rpc-url <chain> --broadcast");
+    }
+
+    function _deployGovernorProxy(Create3Factory c3, address govImpl, address deployer, Config memory cfg)
+        internal
+        returns (address)
+    {
+        bytes memory initData = abi.encodeCall(
             SyndicateGovernor.initialize,
             (ISyndicateGovernor.InitParams({
                     owner: deployer,
@@ -81,54 +141,44 @@ contract Deploy is ScriptBase {
                     collaborationWindow: 48 hours,
                     maxCoProposers: 5,
                     minStrategyDuration: 1 hours,
-                    maxStrategyDuration: 30 days,
+                    maxStrategyDuration: cfg.maxStrategyDays * 1 days,
                     parameterChangeDelay: 1 days,
-                    protocolFeeBps: 200,
+                    protocolFeeBps: cfg.protocolFeeBps,
                     protocolFeeRecipient: deployer
                 }))
         );
-        address governorProxy = address(new ERC1967Proxy(address(govImpl), govInitData));
-        console.log("SyndicateGovernor:", governorProxy);
-
-        // 4. Deploy SyndicateFactory (UUPS proxy)
-        SyndicateFactory factoryImpl = new SyndicateFactory();
-        bytes memory factoryInitData = abi.encodeCall(
-            SyndicateFactory.initialize,
-            (SyndicateFactory.InitParams({
-                    owner: deployer,
-                    executorImpl: address(executorLib),
-                    vaultImpl: address(vaultImpl),
-                    ensRegistrar: L2_REGISTRAR,
-                    agentRegistry: AGENT_REGISTRY,
-                    governor: governorProxy,
-                    managementFeeBps: 50
-                }))
+        return c3.deploy(
+            SALT_GOVERNOR_PROXY, abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(govImpl, initData))
         );
-        SyndicateFactory factory = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInitData)));
-        console.log("SyndicateFactory:", address(factory));
-
-        vm.stopBroadcast();
-
-        // ── Validate on-chain state matches expected values ──
-        _validate(deployer, governorProxy, address(factory), address(executorLib), address(vaultImpl));
-
-        // ── Persist addresses to chains/{chainId}.json ──
-        _writeAddresses("Base", deployer, address(factory), governorProxy, address(executorLib), address(vaultImpl));
     }
 
-    function _validate(
-        address deployer,
-        address governorAddr,
-        address factoryAddr,
-        address executorLibAddr,
-        address vaultImplAddr
-    ) internal view {
-        console.log("\n=== Validating on-chain state ===");
+    function _deployFactoryProxy(Create3Factory c3, address factoryImpl, Deployed memory d, Config memory cfg)
+        internal
+        returns (address)
+    {
+        bytes memory initData = abi.encodeCall(
+            SyndicateFactory.initialize,
+            (SyndicateFactory.InitParams({
+                    owner: d.deployer,
+                    executorImpl: d.executorLib,
+                    vaultImpl: d.vaultImpl,
+                    ensRegistrar: cfg.ensRegistrar,
+                    agentRegistry: cfg.agentRegistry,
+                    governor: d.governorProxy,
+                    managementFeeBps: cfg.managementFeeBps
+                }))
+        );
+        return c3.deploy(
+            SALT_FACTORY_PROXY, abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(factoryImpl, initData))
+        );
+    }
 
+    function _validateGovernor(address deployer, address governorAddr, address factoryAddr, uint256 maxDays)
+        internal
+        view
+    {
+        console.log("\n=== Validating Governor ===");
         SyndicateGovernor governor = SyndicateGovernor(governorAddr);
-        SyndicateFactory factory = SyndicateFactory(factoryAddr);
-
-        // ── Governor ──
         ISyndicateGovernor.GovernorParams memory p = governor.getGovernorParams();
 
         _checkAddr("gov.owner", Ownable(governorAddr).owner(), deployer);
@@ -140,19 +190,43 @@ contract Deploy is ScriptBase {
         _checkUint("gov.collaborationWindow", p.collaborationWindow, 48 hours);
         _checkUint("gov.maxCoProposers", p.maxCoProposers, 5);
         _checkUint("gov.minStrategyDuration", p.minStrategyDuration, 1 hours);
-        _checkUint("gov.maxStrategyDuration", p.maxStrategyDuration, 30 days);
+        _checkUint("gov.maxStrategyDuration", p.maxStrategyDuration, maxDays * 1 days);
         _checkUint("gov.protocolFeeBps", governor.protocolFeeBps(), 200);
         _checkAddr("gov.protocolFeeRecipient", governor.protocolFeeRecipient(), deployer);
+        _checkAddr("gov.factory", governor.factory(), factoryAddr);
+    }
 
-        // ── Factory ──
+    function _validateFactory(
+        address deployer,
+        address governorAddr,
+        address factoryAddr,
+        address executorLibAddr,
+        address vaultImplAddr,
+        address ensRegistrar,
+        address agentRegistry,
+        uint256 mgmtFeeBps
+    ) internal view {
+        console.log("=== Validating Factory ===");
+        SyndicateFactory factory = SyndicateFactory(factoryAddr);
+
         _checkAddr("factory.owner", Ownable(factoryAddr).owner(), deployer);
         _checkAddr("factory.governor", factory.governor(), governorAddr);
         _checkAddr("factory.executorImpl", factory.executorImpl(), executorLibAddr);
         _checkAddr("factory.vaultImpl", factory.vaultImpl(), vaultImplAddr);
-        _checkAddr("factory.ensRegistrar", address(factory.ensRegistrar()), L2_REGISTRAR);
-        _checkAddr("factory.agentRegistry", address(factory.agentRegistry()), AGENT_REGISTRY);
-        _checkUint("factory.managementFeeBps", factory.managementFeeBps(), 50);
+        _checkAddr("factory.ensRegistrar", address(factory.ensRegistrar()), ensRegistrar);
+        _checkAddr("factory.agentRegistry", address(factory.agentRegistry()), agentRegistry);
+        _checkUint("factory.managementFeeBps", factory.managementFeeBps(), mgmtFeeBps);
 
         console.log("=== All checks passed ===");
+    }
+
+    function _chainName() internal view returns (string memory) {
+        if (block.chainid == 8453) return "Base";
+        if (block.chainid == 84532) return "Base Sepolia";
+        if (block.chainid == 999) return "HyperEVM";
+        if (block.chainid == 998) return "HyperEVM Testnet";
+        if (block.chainid == 46630) return "Robinhood L2 Testnet";
+        if (block.chainid == 42161) return "Arbitrum";
+        return "Unknown";
     }
 }

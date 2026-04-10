@@ -4,7 +4,7 @@
 
 export interface SimConfig {
   mnemonic: string; // from SIM_MNEMONIC env
-  chain: "base" | "base-sepolia" | "robinhood-testnet"; // from --chain or SIM_CHAIN
+  chain: "base" | "base-sepolia" | "robinhood-testnet" | "hyperevm" | "hyperevm-testnet"; // from --chain or SIM_CHAIN
   agentCount: number; // default 12
   syndicateCount: number; // default 5
   baseDir: string; // default /tmp/sherwood-sim/agents

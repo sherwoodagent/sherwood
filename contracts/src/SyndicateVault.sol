@@ -92,6 +92,7 @@ contract SyndicateVault is
     function initialize(InitParams memory p) external initializer {
         if (p.owner == address(0)) revert InvalidOwner();
         if (p.executorImpl == address(0)) revert InvalidExecutorImpl();
+        // NOTE: agentRegistry can be address(0) on chains without ERC-8004
 
         __ERC4626_init(IERC20(p.asset));
         __ERC20_init(p.name, p.symbol);
