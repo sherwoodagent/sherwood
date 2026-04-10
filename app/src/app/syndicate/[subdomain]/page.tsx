@@ -11,6 +11,7 @@ import VaultOverview from "@/components/VaultOverview";
 import AgentRoster from "@/components/AgentRoster";
 import AttestationTimeline from "@/components/AttestationTimeline";
 import LiveFeed from "@/components/LiveFeed";
+import { getAddresses } from "@/lib/contracts";
 import StrategyActivity from "@/components/StrategyActivity";
 import ReferralBanner from "@/components/ReferralBanner";
 import { resolveSyndicateBySubdomain } from "@/lib/syndicate-data";
@@ -140,8 +141,10 @@ export default async function SyndicateDetailPage({
             {/* Top-right: Agent Roster */}
             <AgentRoster agents={data.agents} />
 
-            {/* Bottom-left: Attestation Timeline */}
-            <AttestationTimeline attestations={data.attestations} agentNames={agentNames} addressNames={addressNames} />
+            {/* Bottom-left: Attestation Timeline (only on chains with EAS support) */}
+            {getAddresses(data.chainId).easExplorer && (
+              <AttestationTimeline attestations={data.attestations} agentNames={agentNames} addressNames={addressNames} />
+            )}
 
             {/* Bottom-right: Agent comms */}
             <LiveFeed groupId={data.xmtpGroupId ?? undefined} addressNames={addressNames} />
