@@ -624,7 +624,7 @@ syndicate
   .command("add")
   .description("Register an agent on a syndicate vault (creator only)")
   .option("--vault <address>", "Vault address (default: from config)")
-  .requiredOption("--agent-id <id>", "Agent's ERC-8004 identity token ID")
+  .option("--agent-id <id>", "Agent's ERC-8004 identity token ID (resolved from wallet if omitted)")
   .requiredOption("--wallet <address>", "Agent wallet address")
   .action(async (opts) => {
     const spinner = ora("Verifying creator...").start();
@@ -642,11 +642,55 @@ syndicate
       }
 
       const agentWallet = validateAddress(opts.wallet, "wallet");
+
+      // Resolve agent ID: use --agent-id if provided, otherwise look up from wallet
+      let agentId: bigint;
+      if (opts.agentId) {
+        agentId = BigInt(opts.agentId);
+      } else {
+        spinner.text = "Looking up ERC-8004 identity from wallet...";
+        const { AGENT_REGISTRY } = await import("./lib/addresses.js");
+        const registry = AGENT_REGISTRY().IDENTITY_REGISTRY;
+        const client = getPublicClient();
+
+        const balance = await client.readContract({
+          address: registry,
+          abi: [{
+            name: "balanceOf",
+            type: "function",
+            stateMutability: "view",
+            inputs: [{ name: "owner", type: "address" }],
+            outputs: [{ name: "", type: "uint256" }],
+          }] as const,
+          functionName: "balanceOf",
+          args: [agentWallet],
+        }) as bigint;
+
+        if (balance === 0n) {
+          spinner.fail("Agent wallet does not own an ERC-8004 identity NFT");
+          console.error(chalk.dim("  Mint one first: sherwood identity mint --name <name>"));
+          process.exit(1);
+        }
+
+        const tokenId = await client.readContract({
+          address: registry,
+          abi: [{
+            name: "tokenOfOwnerByIndex",
+            type: "function",
+            stateMutability: "view",
+            inputs: [{ name: "owner", type: "address" }, { name: "index", type: "uint256" }],
+            outputs: [{ name: "", type: "uint256" }],
+          }] as const,
+          functionName: "tokenOfOwnerByIndex",
+          args: [agentWallet, 0n],
+        }) as bigint;
+
+        agentId = tokenId;
+        console.log(chalk.dim(`  Resolved agent ID: #${agentId}`));
+      }
+
       spinner.text = "Registering agent...";
-      const hash = await vaultLib.registerAgent(
-        BigInt(opts.agentId),
-        agentWallet,
-      );
+      const hash = await vaultLib.registerAgent(agentId, agentWallet);
       spinner.succeed(`Agent registered: ${hash}`);
       console.log(chalk.dim(`  ${getExplorerUrl(hash)}`));
 
@@ -658,7 +702,7 @@ syndicate
         await xmtp.addMember(group, opts.wallet);
         await xmtp.sendEnvelope(group, {
           type: "AGENT_REGISTERED",
-          agent: { erc8004Id: Number(opts.agentId), address: opts.wallet },
+          agent: { erc8004Id: Number(agentId), address: opts.wallet },
           syndicate: subdomain,
           timestamp: Math.floor(Date.now() / 1000),
         });
