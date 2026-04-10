@@ -486,12 +486,19 @@ syndicate
 
 syndicate
   .command("info")
-  .description("Display syndicate details by ID")
-  .argument("<id>", "Syndicate ID")
+  .description("Display syndicate details by ID or subdomain")
+  .argument("<id>", "Syndicate ID or subdomain name")
   .action(async (idStr) => {
     const spinner = ora("Loading syndicate info...").start();
     try {
-      const id = BigInt(idStr);
+      let id: bigint;
+      if (/^\d+$/.test(idStr)) {
+        id = BigInt(idStr);
+      } else {
+        // Resolve subdomain to syndicate ID
+        const resolved = await resolveSyndicate(idStr);
+        id = resolved.id;
+      }
       const info = await factoryLib.getSyndicate(id);
       spinner.stop();
 
