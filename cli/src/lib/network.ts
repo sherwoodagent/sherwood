@@ -39,7 +39,7 @@ export const hyperevm = defineChain({
   blockExplorers: {
     default: {
       name: "Routescan",
-      url: "https://explorer.hyperliquid.xyz",
+      url: "https://hyperevmscan.io",
     },
   },
   testnet: false,
@@ -117,7 +117,7 @@ export const CHAIN_REGISTRY: Record<Network, ChainConfig> = {
     chain: hyperevm,
     rpcFallback: "https://rpc.hyperliquid.xyz/evm",
     rpcEnvVar: "HYPEREVM_RPC_URL",
-    explorerHost: "explorer.hyperliquid.xyz",
+    explorerHost: "hyperevmscan.io",
     easGraphqlUrl: null,
     easScanHost: null,
     xmtpEnv: "production",

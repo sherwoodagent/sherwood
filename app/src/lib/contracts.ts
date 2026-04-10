@@ -52,7 +52,7 @@ export const hyperevm = defineChain({
   blockExplorers: {
     default: {
       name: "Routescan",
-      url: "https://explorer.hyperliquid.xyz",
+      url: "https://hyperevmscan.io",
     },
   },
   contracts: {
@@ -193,7 +193,7 @@ const HYPEREVM_ADDRESSES: ChainAddresses = {
     tradeExecuted: ZERO_BYTES32,
     x402Research: ZERO_BYTES32,
   },
-  blockExplorer: "https://explorer.hyperliquid.xyz",
+  blockExplorer: "https://hyperevmscan.io",
   easExplorer: "",
 };
 
