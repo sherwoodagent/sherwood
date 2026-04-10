@@ -51,7 +51,9 @@ export default async function SyndicateDetailPage({
     addressNames[agent.agentAddress.toLowerCase()] = displayName;
   }
   const creatorKey = data.creator.toLowerCase();
-  const hasIdentityRegistry = getAddresses(data.chainId).identityRegistry !== "0x0000000000000000000000000000000000000000";
+  const chainAddrs = getAddresses(data.chainId);
+  const hasIdentityRegistry = chainAddrs.identityRegistry !== "0x0000000000000000000000000000000000000000";
+  const hasEAS = !!chainAddrs.easExplorer;
 
   return (
     <>
@@ -130,7 +132,7 @@ export default async function SyndicateDetailPage({
 
           {/* Dashboard grid */}
           <div className="grid-dashboard">
-            {/* Top-left: Vault Configuration */}
+            {/* Vault Configuration */}
             <VaultOverview
               openDeposits={data.openDeposits}
               totalSupply={data.totalSupply}
@@ -140,18 +142,23 @@ export default async function SyndicateDetailPage({
               assetDecimals={data.assetDecimals}
             />
 
-            {/* Top-right: Agent Roster (only on chains with ERC-8004) */}
-            {hasIdentityRegistry && <AgentRoster agents={data.agents} />}
+            {/* Agent Roster (only on chains with ERC-8004) — or LiveFeed side-by-side when no ERC-8004 and no EAS */}
+            {hasIdentityRegistry ? (
+              <AgentRoster agents={data.agents} />
+            ) : !hasEAS ? (
+              <LiveFeed groupId={data.xmtpGroupId ?? undefined} addressNames={addressNames} />
+            ) : null}
 
-            {/* Bottom-left: Attestation Timeline (only on chains with EAS support) */}
-            {getAddresses(data.chainId).easExplorer ? (
+            {/* Attestation + Agent comms row (only on chains with EAS) */}
+            {hasEAS && (
               <>
                 <AttestationTimeline attestations={data.attestations} agentNames={agentNames} addressNames={addressNames} />
-                {/* Bottom-right: Agent comms */}
                 <LiveFeed groupId={data.xmtpGroupId ?? undefined} addressNames={addressNames} />
               </>
-            ) : (
-              /* No EAS — Agent comms spans full width */
+            )}
+
+            {/* LiveFeed full-width when we have ERC-8004 but no EAS */}
+            {hasIdentityRegistry && !hasEAS && (
               <div style={{ gridColumn: "1 / -1" }}>
                 <LiveFeed groupId={data.xmtpGroupId ?? undefined} addressNames={addressNames} />
               </div>
