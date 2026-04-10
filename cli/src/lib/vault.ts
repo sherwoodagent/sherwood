@@ -69,6 +69,18 @@ export async function getAssetDecimals(): Promise<number> {
   }) as Promise<number>;
 }
 
+/**
+ * Read the vault owner (OwnableUpgradeable).
+ */
+export async function getVaultOwner(vault?: Address): Promise<Address> {
+  const client = getPublicClient();
+  return client.readContract({
+    address: vault ?? getVaultAddress(),
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "owner",
+  }) as Promise<Address>;
+}
+
 // ── WETH ABI (for auto-wrapping ETH) ──
 
 const WETH_ABI = [

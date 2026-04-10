@@ -217,6 +217,14 @@ export const SYNDICATE_VAULT_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "bool" }],
   },
+  // OwnableUpgradeable
+  {
+    name: "owner",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
   // ERC-4626 views for LP balance
   {
     name: "convertToAssets",

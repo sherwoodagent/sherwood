@@ -337,6 +337,10 @@ sherwood vault rescue-erc721 --token <nft> --id <tokenId> --to <addr>
 
 Guards prevent rescuing the vault's own asset token.
 
+### Stuck proposal recovery (guardian skill)
+
+If a vault becomes locked because an executed proposal's pre-committed settlement calls revert (`redemptionsLocked()` stays true after the strategy duration elapses), recovery is documented in the **`syndicate-owner` guardian skill** — see `skill/skills/syndicate-owner/SKILL.md` § _"Recovering a stuck Executed proposal"_. That skill contains the full diagnostic playbook and the purpose-built `sherwood proposal unstick` command that clears the lock safely. This is a guardian-only path and is intentionally not surfaced in this top-level skill.
+
 ---
 
 ## Phase 6: Monitor & Communicate
