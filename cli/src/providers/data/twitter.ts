@@ -230,15 +230,17 @@ export class TwitterSentimentProvider {
       // Process each batch
       for (const batch of batches) {
         // Sanitize tweet text to prevent prompt injection:
-        // - Truncate to 280 chars (Twitter max)
-        // - Strip control characters and prompt-injection patterns
-        // - Use system/user message separation
+        // 1. Strip dangerous chars first (bidi overrides, zero-width, control chars)
+        // 2. Flatten newlines
+        // 3. Escape quotes/backslashes
+        // 4. Truncate
         const sanitizeTweet = (text: string): string => {
           return text
-            .slice(0, 280)
-            .replace(/[\x00-\x1f]/g, '') // strip control chars
+            .replace(/[\x00-\x1f\x7f]/g, '') // strip control chars
+            .replace(/[\u200B-\u200D\u202A-\u202E\u2066-\u2069\u00AD\uFEFF]/g, '') // strip bidi overrides + zero-width chars
+            .replace(/\n/g, ' ') // flatten newlines
             .replace(/["\\]/g, (c) => `\\${c}`) // escape quotes/backslashes
-            .replace(/\n/g, ' '); // flatten newlines
+            .slice(0, 280); // truncate last (after stripping, not before)
         };
 
         const tweetTexts = batch.map((tweet, idx) => `${idx + 1}. "${sanitizeTweet(tweet.text)}"`).join('\n');
@@ -287,6 +289,13 @@ export class TwitterSentimentProvider {
           if (!Array.isArray(batchResults) || batchResults.length !== batch.length) {
             console.warn('OpenAI response format mismatch');
             return null;
+          }
+          // Validate each element to prevent NaN propagation from malformed responses
+          const VALID_SENTIMENTS = new Set(['BULLISH', 'BEARISH', 'NEUTRAL']);
+          for (const r of batchResults) {
+            if (!VALID_SENTIMENTS.has(r.sentiment)) r.sentiment = 'NEUTRAL';
+            if (typeof r.confidence !== 'number' || !Number.isFinite(r.confidence)) r.confidence = 50;
+            r.confidence = Math.max(0, Math.min(100, r.confidence));
           }
         } catch (parseErr) {
           console.warn(`Failed to parse OpenAI response: ${parseErr}`);
