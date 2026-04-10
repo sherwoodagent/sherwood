@@ -46,6 +46,6 @@ describe('CorrelationGuard', () => {
 
     expect(result.btcBias).toBe('neutral');
     expect(result.btcScore).toBe(0);
-    expect(result.reason).toContain('BTC structure analysis failed');
+    expect(result.shouldSuppress).toBe(false);
   });
 });

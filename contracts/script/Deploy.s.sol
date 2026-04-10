@@ -107,8 +107,14 @@ contract DeploySherwood is ScriptBase {
         // ── Validate ──
         _validateGovernor(d.deployer, d.governorProxy, d.factoryProxy, cfg.maxStrategyDays);
         _validateFactory(
-            d.deployer, d.governorProxy, d.factoryProxy, d.executorLib, d.vaultImpl, cfg.ensRegistrar,
-            cfg.agentRegistry, cfg.managementFeeBps
+            d.deployer,
+            d.governorProxy,
+            d.factoryProxy,
+            d.executorLib,
+            d.vaultImpl,
+            cfg.ensRegistrar,
+            cfg.agentRegistry,
+            cfg.managementFeeBps
         );
 
         // ── Persist ──
@@ -125,8 +131,7 @@ contract DeploySherwood is ScriptBase {
     {
         bytes memory initData = abi.encodeCall(
             SyndicateGovernor.initialize,
-            (
-                ISyndicateGovernor.InitParams({
+            (ISyndicateGovernor.InitParams({
                     owner: deployer,
                     votingPeriod: 1 hours,
                     executionWindow: 1 days,
@@ -140,12 +145,10 @@ contract DeploySherwood is ScriptBase {
                     parameterChangeDelay: 1 days,
                     protocolFeeBps: cfg.protocolFeeBps,
                     protocolFeeRecipient: deployer
-                })
-            )
+                }))
         );
         return c3.deploy(
-            SALT_GOVERNOR_PROXY,
-            abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(govImpl, initData))
+            SALT_GOVERNOR_PROXY, abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(govImpl, initData))
         );
     }
 
@@ -155,8 +158,7 @@ contract DeploySherwood is ScriptBase {
     {
         bytes memory initData = abi.encodeCall(
             SyndicateFactory.initialize,
-            (
-                SyndicateFactory.InitParams({
+            (SyndicateFactory.InitParams({
                     owner: d.deployer,
                     executorImpl: d.executorLib,
                     vaultImpl: d.vaultImpl,
@@ -164,12 +166,10 @@ contract DeploySherwood is ScriptBase {
                     agentRegistry: cfg.agentRegistry,
                     governor: d.governorProxy,
                     managementFeeBps: cfg.managementFeeBps
-                })
-            )
+                }))
         );
         return c3.deploy(
-            SALT_FACTORY_PROXY,
-            abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(factoryImpl, initData))
+            SALT_FACTORY_PROXY, abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(factoryImpl, initData))
         );
     }
 
