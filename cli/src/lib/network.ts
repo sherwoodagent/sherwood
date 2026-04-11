@@ -69,7 +69,12 @@ export type Network = "base" | "base-sepolia" | "robinhood-testnet" | "hyperevm"
 
 export interface ChainConfig {
   chain: Chain;
-  rpcFallback: string;
+  /**
+   * Ordered list of public RPC URLs tried in sequence when no user RPC is set.
+   * First entry is the primary; the rest are fallbacks used transparently via
+   * viem's `fallback` transport on rate-limit / network errors.
+   */
+  rpcFallbacks: string[];
   /** Legacy env var for backwards compat (base / base-sepolia only) */
   rpcEnvVar?: string;
   explorerHost: string;
@@ -86,7 +91,14 @@ export interface ChainConfig {
 export const CHAIN_REGISTRY: Record<Network, ChainConfig> = {
   base: {
     chain: base,
-    rpcFallback: "https://mainnet.base.org",
+    // Ordered by observed reliability (issue #182). publicnode first because
+    // mainnet.base.org is aggressively rate-limited on fresh installs.
+    rpcFallbacks: [
+      "https://base-rpc.publicnode.com",
+      "https://mainnet.base.org",
+      "https://base.llamarpc.com",
+      "https://base.drpc.org",
+    ],
     rpcEnvVar: "BASE_RPC_URL",
     explorerHost: "basescan.org",
     easGraphqlUrl: "https://base.easscan.org/graphql",
@@ -96,7 +108,11 @@ export const CHAIN_REGISTRY: Record<Network, ChainConfig> = {
   },
   "base-sepolia": {
     chain: baseSepolia,
-    rpcFallback: "https://sepolia.base.org",
+    rpcFallbacks: [
+      "https://base-sepolia-rpc.publicnode.com",
+      "https://sepolia.base.org",
+      "https://base-sepolia.drpc.org",
+    ],
     rpcEnvVar: "BASE_SEPOLIA_RPC_URL",
     explorerHost: "sepolia.basescan.org",
     easGraphqlUrl: "https://base-sepolia.easscan.org/graphql",
@@ -106,7 +122,7 @@ export const CHAIN_REGISTRY: Record<Network, ChainConfig> = {
   },
   "robinhood-testnet": {
     chain: robinhoodTestnet,
-    rpcFallback: "https://rpc.testnet.chain.robinhood.com",
+    rpcFallbacks: ["https://rpc.testnet.chain.robinhood.com"],
     explorerHost: "explorer.testnet.chain.robinhood.com",
     easGraphqlUrl: null,
     easScanHost: null,
@@ -115,7 +131,7 @@ export const CHAIN_REGISTRY: Record<Network, ChainConfig> = {
   },
   hyperevm: {
     chain: hyperevm,
-    rpcFallback: "https://rpc.hyperliquid.xyz/evm",
+    rpcFallbacks: ["https://rpc.hyperliquid.xyz/evm"],
     rpcEnvVar: "HYPEREVM_RPC_URL",
     explorerHost: "hyperevmscan.io",
     easGraphqlUrl: null,
@@ -125,7 +141,7 @@ export const CHAIN_REGISTRY: Record<Network, ChainConfig> = {
   },
   "hyperevm-testnet": {
     chain: hyperevmTestnet,
-    rpcFallback: "https://rpc.hyperliquid-testnet.xyz/evm",
+    rpcFallbacks: ["https://rpc.hyperliquid-testnet.xyz/evm"],
     rpcEnvVar: "HYPEREVM_TESTNET_RPC_URL",
     explorerHost: "explorer.hyperliquid-testnet.xyz",
     easGraphqlUrl: null,
@@ -168,19 +184,33 @@ export function getChain(): Chain {
   return CHAIN_REGISTRY[_network].chain;
 }
 
-export function getRpcUrl(): string {
-  // 1. User config (~/.sherwood/config.json)
-  const fromConfig = getConfigRpcUrl(_network);
-  if (fromConfig) return fromConfig;
-
-  // 2. Legacy env var (backwards compat for base / base-sepolia)
+/**
+ * Ordered list of RPC URLs to try, deduped:
+ *   1. User config (~/.sherwood/config.json) — honored first
+ *   2. Legacy env var (BASE_RPC_URL, etc.)
+ *   3. Public fallback list from CHAIN_REGISTRY
+ *
+ * Fed to viem's `fallback()` transport so rate-limited RPCs transparently
+ * advance to the next entry. See issue #182.
+ */
+export function getRpcUrls(): string[] {
   const cfg = CHAIN_REGISTRY[_network];
+  const urls: string[] = [];
+
+  const fromConfig = getConfigRpcUrl(_network);
+  if (fromConfig) urls.push(fromConfig);
+
   if (cfg.rpcEnvVar && process.env[cfg.rpcEnvVar]) {
-    return process.env[cfg.rpcEnvVar]!;
+    urls.push(process.env[cfg.rpcEnvVar]!);
   }
 
-  // 3. Public fallback
-  return cfg.rpcFallback;
+  urls.push(...cfg.rpcFallbacks);
+
+  return Array.from(new Set(urls));
+}
+
+export function getRpcUrl(): string {
+  return getRpcUrls()[0];
 }
 
 export function getExplorerUrl(txHash: string): string {

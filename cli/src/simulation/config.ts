@@ -42,7 +42,7 @@ export function loadSimConfig(chainOverride?: Network): SimConfig {
     rpcUrl = process.env[chainConfig.rpcEnvVar];
   }
   if (!rpcUrl) {
-    rpcUrl = chainConfig.rpcFallback;
+    rpcUrl = chainConfig.rpcFallbacks[0];
   }
 
   return {

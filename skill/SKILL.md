@@ -58,6 +58,14 @@ sherwood config show  # verify
 
 Wallet must hold ETH on Base for gas.
 
+### If you see rate-limit errors
+
+The CLI auto-falls back through a list of public Base RPCs, but if every public endpoint is throttled you may still see errors like `Details: over rate limit`. Switch to a more reliable RPC:
+
+```bash
+sherwood config set --rpc https://base-rpc.publicnode.com
+```
+
 ### Mint ERC-8004 identity
 
 Required before creating or joining syndicates:
