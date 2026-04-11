@@ -38,10 +38,28 @@ These are also available in `cli/src/lib/addresses.ts` (resolved at runtime base
 
 | Contract | Address |
 |----------|---------|
-| SyndicateFactory | `0xd5C4eE2E4c5B606b9401E69A3B3FeE169037C284` |
-| SyndicateGovernor | `0x358AD8B492BcC710BE0D7c902D8702164c35DC34` |
-| BatchExecutorLib | `0x1E831aB61Dc423bF678a2Ff8d9ce768E1e6D2338` |
+| SyndicateFactory | `0x6d026e2f5Ff0C34A01690EC46Cb601B8fF391985` |
+| SyndicateGovernor | `0xd882056ba6b0aEd8908c541884B327121E2f2C9C` |
+| BatchExecutorLib | `0x1493f5a7E5d82e1e56c34e2Ba300f56F97186017` |
 | WETH | `0x7943e237c7F95DA44E0301572D358911207852Fa` |
+| PortfolioStrategy | `0xAe981882923E0C76A7F10E7cAa3782023c0abd9B` |
+| SynthraSwapAdapter | `0x39a37537E179919cb2dDDb1D6920dD11bAf3aDF0` |
+| SynthraDirectAdapter | `0xdae81cDCfcB14c56fCeB788A147Fcd6CbEdfEeca` |
+| Synthra Router | `0x3Ce954107b1A675826B33bF23060Dd655e3758fE` |
+| Chainlink Verifier Proxy | `0x72790f9eB82db492a7DDb6d2af22A270Dcc3Db64` |
+
+## HyperEVM Mainnet
+
+| Contract | Address |
+|----------|---------|
+| SyndicateFactory | `0x4085EEa1E6d3D20E84D8Ae14964FAb8b899DA40a` |
+| SyndicateGovernor | `0x7B4a2f3480FE101f88b2e3547A1bCf3eaaDE46bc` |
+| BatchExecutorLib | `0xdE317B80E66c5E8872C63B0620E2CbB73b5Bcd49` |
+| SyndicateVaultImpl | `0x09005FEF3EF1879Af207C79416ae9d5059437bd4` |
+| USDC | `0xb88339CB7199b77E23DB6E890353E22632Ba630f` (6 decimals) |
+| HyperliquidPerpStrategy | `0x1E831aB61Dc423bF678a2Ff8d9ce768E1e6D2338` |
+
+HyperEVM has no Moonwell, Uniswap, Venice, Aerodrome, ENS, or ERC-8004 — the factory accepts `address(0)` for `ensRegistrar` and `agentRegistry`.
 
 ## EAS (Ethereum Attestation Service)
 
@@ -60,10 +78,13 @@ ERC-1167 clonable singletons. Use `sherwood strategy list` to see current addres
 
 | Template | Address |
 |----------|---------|
-| MoonwellSupplyStrategy | `0x25E33fAeE061E752fDFe851911ccC4C6D9FBA346` |
+| MoonwellSupplyStrategy | `0x72216571Ac847b29E1a5e3378e6ebCca3C2882da` |
 | AerodromeLPStrategy | `0x1c61c740702690B86b874ab929A6F04A4Ec56C1c` |
 | VeniceInferenceStrategy | `0xd882056ba6b0aEd8908c541884B327121E2f2C9C` |
 | WstETHMoonwellStrategy | `0x6d026e2f5Ff0C34A01690EC46Cb601B8fF391985` |
+| MamoYieldStrategy | `0x5c98808Ce5e51767ba2d969F75312eEFF0b14a6A` |
+| PortfolioStrategy | `0x7865eEA4063c22d0F55FdD412D345495c7b73f64` |
+| UniswapSwapAdapter | `0x121AaC2B96Ec365e457fcCc1C2ED5a6142064069` |
 
 ## Uniswap Trading API
 
