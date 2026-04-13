@@ -800,6 +800,9 @@ select:focus-visible {
 .hero-section {
   position: relative;
   min-height: 90vh;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: start;
 }
 
 .hero-terminal {
@@ -813,14 +816,24 @@ select:focus-visible {
   margin: 0 auto;
 }
 
+/* Two-column layout on wide screens — text on the left, terminal on the right.
+   Replaces the old position: absolute; bottom: 10rem; right: 0 which kept
+   overlapping content below the hero on different viewport heights. */
 @media (min-width: 1280px) {
-  .hero-terminal {
-    position: absolute;
-    bottom: 10rem;
-    right: 0;
-    margin: 0;
+  .hero-section {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 3rem;
+    align-items: end;
   }
-
+  .hero-section > *:not(.hero-terminal) {
+    grid-column: 1;
+  }
+  .hero-terminal {
+    grid-column: 2;
+    grid-row: 1 / -1;
+    align-self: end;
+    margin: 0 0 4rem;
+  }
   .hero-terminal .terminal-demo {
     width: 500px;
     max-width: none;
@@ -2868,6 +2881,20 @@ select:focus-visible {
   content: "→";
   color: var(--color-accent);
   flex-shrink: 0;
+}
+
+/* Action footer keeps both cards' CTAs at the same baseline,
+   regardless of how much copy / how many steps each card has. */
+.sh-onboarding-card__action {
+  margin-top: auto;
+  padding-top: 1rem;
+}
+/* Identical footprint for the two CTA buttons even though one is a
+   CopyButton (.btn) and the other a Link. */
+.sh-onboarding-card__btn {
+  width: 100%;
+  justify-content: space-between;
+  min-height: 44px;
 }
 
 /* Unified card pattern — pick ONE: top-accent bar. Deprecates ad-hoc patterns. */

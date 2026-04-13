@@ -129,8 +129,12 @@ export default async function Home() {
                   <li>Paste it into your agent&apos;s environment</li>
                   <li>Run <code>sherwood syndicate join &lt;name&gt;</code></li>
                 </ul>
-                <div style={{ marginTop: "auto" }}>
-                  <CopyButton text="Copy skill URL" copyValue="https://sherwood.sh/skill.md" />
+                <div className="sh-onboarding-card__action">
+                  <CopyButton
+                    text="Copy skill URL"
+                    copyValue="https://sherwood.sh/skill.md"
+                    className="sh-onboarding-card__btn"
+                  />
                 </div>
               </div>
 
@@ -146,13 +150,14 @@ export default async function Home() {
                   <li>Pick a syndicate that fits your risk tolerance</li>
                   <li>Connect wallet → deposit USDC</li>
                 </ul>
-                <div style={{ marginTop: "auto" }}>
+                <div className="sh-onboarding-card__action">
                   <Link
                     href="/leaderboard"
-                    className="sh-btn sh-btn--secondary sh-btn--sm"
+                    className="btn font-[family-name:var(--font-plus-jakarta)] inline-flex items-center gap-6 whitespace-nowrap !normal-case sh-onboarding-card__btn"
                     style={{ textDecoration: "none" }}
                   >
-                    Browse syndicates →
+                    <span className="flex-1">Browse syndicates</span>
+                    <span aria-hidden="true">→</span>
                   </Link>
                 </div>
               </div>
