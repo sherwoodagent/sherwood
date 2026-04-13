@@ -560,12 +560,6 @@ body {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border: 1px solid var(--color-border);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(0, 0, 0, 0)) ,
-    rgba(8, 10, 9, 0.6);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  position: relative;
 }
 
 .table-wrapper table {
@@ -573,70 +567,36 @@ body {
   min-width: 640px;
   border-collapse: collapse;
   text-align: left;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .table-wrapper th,
 .table-wrapper td {
-  padding: 1.25rem 2rem;
-  border-bottom: 1px solid var(--color-border-soft);
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .table-wrapper th {
-  font-family: var(--font-mono);
-  color: rgba(255, 255, 255, 0.4);
-  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 400;
   text-transform: uppercase;
-  letter-spacing: 0.22em;
-  font-size: 10px;
-  padding-top: 1.4rem;
-  padding-bottom: 1.2rem;
-  border-bottom: 1px solid var(--color-border);
-  background: rgba(255, 255, 255, 0.015);
+  letter-spacing: 0.1em;
+  font-size: 13px;
 }
 
-/* Tabular data in the body gets true mono — the hallmark of a
-   trading interface. */
-.table-wrapper tbody td {
-  font-family: var(--font-body);
-}
-
-.table-wrapper tbody td.tabular-nums,
+/* Monospace tabular digits for numeric columns */
 .table-wrapper .tabular-nums {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "zero";
-  letter-spacing: 0.01em;
 }
 
 .table-wrapper tbody tr {
-  transition: background 0.15s ease;
-  position: relative;
-}
-
-.table-wrapper tbody tr:nth-child(even) {
-  background: rgba(255, 255, 255, 0.012);
+  transition: background 0s;
 }
 
 .table-wrapper tbody tr:hover {
-  background: rgba(46, 230, 166, 0.04);
-}
-
-/* Accent bar on hover — subtle left-edge cue */
-.table-wrapper tbody tr::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--color-accent);
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.table-wrapper tbody tr:hover::before {
-  opacity: 1;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .table-wrapper tbody tr:hover td:first-child {
@@ -667,13 +627,9 @@ body {
 /* Status indicator — pulsing beacon for live activity */
 .status-live,
 .status-voting {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.5rem;
 }
 
 .status-live { color: var(--color-accent); }
@@ -682,8 +638,8 @@ body {
 .status-live::before,
 .status-voting::before {
   content: "";
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   flex-shrink: 0;
 }
