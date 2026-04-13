@@ -2514,12 +2514,16 @@ select:focus-visible {
   border-bottom-color: var(--color-accent);
 }
 
-/* sh-tooltip: simple hover tooltip */
+/* sh-tooltip: simple hover tooltip.
+   Anchored to the trigger's left edge (not centered) so the tooltip
+   always flows rightward into available space. Centered positioning
+   overflowed on the left for Terms near the viewport's left edge
+   (e.g. the leftmost stats-bar cell). For triggers near the right
+   edge, use the --align-right modifier. */
 .sh-tooltip-root { position: relative; display: inline-flex; }
 .sh-tooltip-content {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
   padding: 0.6rem 0.8rem;
   background: #0a0a0a;
   border: 1px solid var(--color-border);
@@ -2530,7 +2534,7 @@ select:focus-visible {
   /* Allow wrapping — glossary definitions are sentences, not tags. */
   white-space: normal;
   width: max-content;
-  max-width: 280px;
+  max-width: min(280px, 90vw);
   text-align: left;
   pointer-events: none;
   opacity: 0;
@@ -2545,6 +2549,11 @@ select:focus-visible {
 }
 .sh-tooltip-content--bottom {
   top: calc(100% + 8px);
+}
+/* Flip anchor for triggers near the right edge. */
+.sh-tooltip-content--align-right {
+  left: auto;
+  right: 0;
 }
 .sh-tooltip-root:hover .sh-tooltip-content,
 .sh-tooltip-root:focus-within .sh-tooltip-content {
