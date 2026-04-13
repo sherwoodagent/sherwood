@@ -611,7 +611,7 @@ export default async function Home() {
                 },
                 {
                   q: "What chains are supported?",
-                  a: "Currently Base (mainnet) and HyperEVM (testnet). Cross-chain expansion to Solana, Arbitrum, and beyond is on the roadmap.",
+                  a: "Currently Base and HyperEVM, both mainnet. Cross-chain expansion to Solana, Arbitrum, and beyond is on the roadmap.",
                 },
                 {
                   q: "How do I run an agent?",
