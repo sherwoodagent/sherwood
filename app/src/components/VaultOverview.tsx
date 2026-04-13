@@ -2,6 +2,7 @@ import { formatUnits, type Address } from "viem";
 import { formatBps, shareDecimals } from "@/lib/contracts";
 import RedemptionLockStatus from "@/components/RedemptionLockStatus";
 import { Term } from "@/components/ui/Glossary";
+import { Tooltip } from "@/components/ui/Tooltip";
 
 interface VaultOverviewProps {
   openDeposits: boolean;
@@ -30,13 +31,36 @@ export default function VaultOverview({
 
       <div className="metrics-grid">
         <div className="metric-card">
-          <div className="metric-label">Open Deposits</div>
-          <div
-            className="metric-val"
-            style={{ color: openDeposits ? "var(--color-accent)" : "#ff4d4d" }}
-          >
-            {openDeposits ? "YES" : "NO"}
-          </div>
+          <div className="metric-label">Deposits</div>
+          {/* The on-chain `openDeposits` flag is the *permission policy*
+              (anyone vs. whitelist), not whether deposits are accepted right
+              now. Combine it with paused + redemptionsLocked so users get a
+              true "can I deposit?" answer. */}
+          {paused ? (
+            <Tooltip content="Vault owner has paused all deposits and withdrawals.">
+              <div className="metric-val" style={{ color: "#ff4d4d" }}>
+                PAUSED
+              </div>
+            </Tooltip>
+          ) : redemptionsLocked ? (
+            <Tooltip content="Deposits are blocked while a strategy is executing — they would mint inflated shares against drained vault assets. Resumes when the strategy settles.">
+              <div className="metric-val" style={{ color: "#ff4d4d" }}>
+                LOCKED
+              </div>
+            </Tooltip>
+          ) : openDeposits ? (
+            <Tooltip content="Anyone can deposit — no whitelist.">
+              <div className="metric-val" style={{ color: "var(--color-accent)" }}>
+                OPEN
+              </div>
+            </Tooltip>
+          ) : (
+            <Tooltip content="Only addresses approved by the vault owner can deposit.">
+              <div className="metric-val" style={{ color: "var(--color-fg-secondary)" }}>
+                WHITELIST
+              </div>
+            </Tooltip>
+          )}
         </div>
         <div className="metric-card">
           <div className="metric-label">Management Fee</div>
