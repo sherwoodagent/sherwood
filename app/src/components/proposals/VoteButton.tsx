@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt, useChainId } from "wagmi";
 import { type Address } from "viem";
-import { SYNDICATE_GOVERNOR_ABI, formatShares } from "@/lib/contracts";
+import { SYNDICATE_GOVERNOR_ABI, formatShares, getAddresses } from "@/lib/contracts";
+import { useToast } from "@/components/ui/Toast";
+import { trackTxSubmitted, trackTxConfirmed, trackTxFailed, classifyError } from "@/lib/analytics";
 
 interface VoteButtonProps {
   governorAddress: Address;
@@ -18,6 +20,8 @@ export default function VoteButton({
   voteEnd,
 }: VoteButtonProps) {
   const router = useRouter();
+  const toast = useToast();
+  const chainId = useChainId();
   const { address, isConnected } = useAccount();
   const [votingEnded, setVotingEnded] = useState(
     () => voteEnd <= BigInt(Math.floor(Date.now() / 1000)),
@@ -56,12 +60,18 @@ export default function VoteButton({
 
   // Re-fetch page data once the vote tx is confirmed
   useEffect(() => {
-    if (isConfirmed) {
+    if (isConfirmed && txHash) {
+      trackTxConfirmed("vote", governorAddress, txHash);
+      toast.success(
+        "Vote confirmed",
+        `Proposal #${proposalId.toString()} — your vote is recorded onchain.`,
+      );
       router.refresh();
     }
-  }, [isConfirmed, router]);
+  }, [isConfirmed, router, txHash, governorAddress, proposalId, toast]);
 
   const busy = isPending || isConfirming;
+  const explorerUrl = getAddresses(chainId)?.blockExplorer;
 
   function castVote(support: number) {
     // Re-check at click time to prevent submitting after deadline
@@ -69,12 +79,25 @@ export default function VoteButton({
       setVotingEnded(true);
       return;
     }
-    writeContract({
-      address: governorAddress,
-      abi: SYNDICATE_GOVERNOR_ABI,
-      functionName: "vote",
-      args: [proposalId, support],
-    });
+    writeContract(
+      {
+        address: governorAddress,
+        abi: SYNDICATE_GOVERNOR_ABI,
+        functionName: "vote",
+        args: [proposalId, support],
+      },
+      {
+        onSuccess: (hash) => trackTxSubmitted("vote", governorAddress, hash),
+        onError: (err) => {
+          const reason = classifyError(err);
+          trackTxFailed("vote", governorAddress, reason);
+          if (reason !== "user_rejected") {
+            const msg = (err as { shortMessage?: string }).shortMessage || err.message;
+            toast.error("Vote failed", msg);
+          }
+        },
+      },
+    );
   }
 
   const btnBase: React.CSSProperties = {
@@ -195,6 +218,24 @@ export default function VoteButton({
           {busy ? "..." : "Vote AGAINST"}
         </button>
       </div>
+      {busy && txHash && explorerUrl && (
+        <div style={{ marginTop: "0.5rem" }}>
+          <a
+            href={`${explorerUrl}/tx/${txHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "10px",
+              letterSpacing: "0.1em",
+              color: "var(--color-accent)",
+              textDecoration: "underline",
+            }}
+          >
+            View pending tx ↗
+          </a>
+        </div>
+      )}
     </div>
   );
 }

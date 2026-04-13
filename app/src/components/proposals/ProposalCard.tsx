@@ -8,6 +8,7 @@ import {
 import { truncateAddress, formatBps, formatShares } from "@/lib/contracts";
 import VoteButton from "./VoteButton";
 import ExecutionCallPreview from "./ExecutionCallPreview";
+import VoteConcentration from "./VoteConcentration";
 import { ProposalStepper } from "@/components/ui/ProposalStepper";
 
 interface ProposalCardProps {
@@ -144,14 +145,23 @@ export default function ProposalCard({
           <ProposalStepper state={proposal.computedState} />
         </div>
 
-        {/* Execution plan — visible only for live syndicates */}
+        {/* Execution plan + vote concentration — live syndicates only */}
         {!disabled && chainId && explorerUrl && (
-          <ExecutionCallPreview
-            governorAddress={governorAddress}
-            proposalId={proposal.id}
-            chainId={chainId}
-            explorerUrl={explorerUrl}
-          />
+          <>
+            <ExecutionCallPreview
+              governorAddress={governorAddress}
+              proposalId={proposal.id}
+              chainId={chainId}
+              explorerUrl={explorerUrl}
+            />
+            <VoteConcentration
+              governorAddress={governorAddress}
+              proposalId={proposal.id}
+              chainId={chainId}
+              assetDecimals={assetDecimals}
+              addressNames={addressNames}
+            />
+          </>
         )}
 
         {isPending && (

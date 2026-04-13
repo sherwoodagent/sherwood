@@ -396,7 +396,18 @@ async function resolveOnChain(
     fetchMetadata(metadataURI),
     fetchXmtpGroupId(chainId, subdomain, addresses.l2Registry),
     fetchSyndicateAttestations(creator, syndicateId, chainId, vault),
-    fetchStrategyActivity(entry.subgraphUrl, syndicateId.toString()),
+    fetchStrategyActivity(entry.subgraphUrl, syndicateId.toString()).then(async (events) => {
+      // Subgraph empty / unavailable — try a bounded log scan of the vault
+      // so the activity feed isn't a black hole when The Graph blips.
+      if (events.length === 0) {
+        try {
+          return await fetchActivityFromLogs(chainId, vault);
+        } catch {
+          return events;
+        }
+      }
+      return events;
+    }),
     fetchEquityCurve(entry.subgraphUrl, syndicateId.toString(), assetDecimals, effectiveTotalAssets),
   ]);
 
@@ -639,6 +650,92 @@ async function fetchStrategyActivity(
   } catch {
     return [];
   }
+}
+
+// ── Event-log fallback for activity feed ──────────────────
+// When the subgraph is unavailable (or the syndicate is too new to be
+// indexed), scan the most recent ~60k blocks of vault Deposit/Withdraw
+// events directly. Costs an extra RPC roundtrip but keeps the feed alive.
+
+const ACTIVITY_LOG_WINDOW = 60_000n; // ~7d on Base (2s blocks)
+const ACTIVITY_LOG_MAX = 20;
+
+async function fetchActivityFromLogs(
+  chainId: number,
+  vault: Address,
+): Promise<ActivityEvent[]> {
+  const client = getPublicClient(chainId);
+  const head = await client.getBlockNumber();
+  const fromBlock = head > ACTIVITY_LOG_WINDOW ? head - ACTIVITY_LOG_WINDOW : 0n;
+
+  const [deposits, withdrawals] = await Promise.all([
+    client.getLogs({
+      address: vault,
+      event: {
+        type: "event",
+        name: "Deposit",
+        inputs: [
+          { name: "sender", type: "address", indexed: true },
+          { name: "owner", type: "address", indexed: true },
+          { name: "assets", type: "uint256", indexed: false },
+          { name: "shares", type: "uint256", indexed: false },
+        ],
+      },
+      fromBlock,
+      toBlock: head,
+    }),
+    client.getLogs({
+      address: vault,
+      event: {
+        type: "event",
+        name: "Withdraw",
+        inputs: [
+          { name: "sender", type: "address", indexed: true },
+          { name: "receiver", type: "address", indexed: true },
+          { name: "owner", type: "address", indexed: true },
+          { name: "assets", type: "uint256", indexed: false },
+          { name: "shares", type: "uint256", indexed: false },
+        ],
+      },
+      fromBlock,
+      toBlock: head,
+    }),
+  ]);
+
+  // Resolve block timestamps in batch (deduped) so we can sort.
+  const blockNumbers = Array.from(
+    new Set([...deposits, ...withdrawals].map((l) => l.blockNumber)),
+  );
+  const blocks = await Promise.all(
+    blockNumbers.map((bn) => client.getBlock({ blockNumber: bn })),
+  );
+  const tsByBlock = new Map<bigint, bigint>();
+  blocks.forEach((b, i) => tsByBlock.set(blockNumbers[i], b.timestamp));
+
+  const events: ActivityEvent[] = [];
+  for (const log of deposits) {
+    events.push({
+      type: "deposit",
+      actor: (log.args.owner as Address) ?? (log.args.sender as Address),
+      amount: (log.args.assets as bigint) ?? 0n,
+      timestamp: tsByBlock.get(log.blockNumber) ?? 0n,
+      txHash: log.transactionHash,
+    });
+  }
+  for (const log of withdrawals) {
+    events.push({
+      type: "withdrawal",
+      actor: (log.args.owner as Address) ?? (log.args.receiver as Address),
+      amount: (log.args.assets as bigint) ?? 0n,
+      timestamp: tsByBlock.get(log.blockNumber) ?? 0n,
+      txHash: log.transactionHash,
+    });
+  }
+
+  events.sort((a, b) =>
+    b.timestamp > a.timestamp ? 1 : b.timestamp < a.timestamp ? -1 : 0,
+  );
+  return events.slice(0, ACTIVITY_LOG_MAX);
 }
 
 // ── Equity curve ──────────────────────────────────────────

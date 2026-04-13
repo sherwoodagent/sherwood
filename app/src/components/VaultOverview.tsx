@@ -1,6 +1,7 @@
 import { formatUnits, type Address } from "viem";
 import { formatBps } from "@/lib/contracts";
 import RedemptionLockStatus from "@/components/RedemptionLockStatus";
+import { Term } from "@/components/ui/Glossary";
 
 interface VaultOverviewProps {
   openDeposits: boolean;
@@ -42,7 +43,9 @@ export default function VaultOverview({
           <div className="metric-val">{formatBps(managementFeeBps)}</div>
         </div>
         <div className="metric-card">
-          <div className="metric-label">Redemptions</div>
+          <div className="metric-label">
+            <Term k="redemptions-locked">Redemptions</Term>
+          </div>
           <div className="metric-val" style={{ fontSize: "0.9rem" }}>
             {vault && chainId ? (
               <RedemptionLockStatus vault={vault} chainId={chainId} initialLocked={redemptionsLocked} />

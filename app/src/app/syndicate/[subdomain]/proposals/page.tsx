@@ -17,7 +17,24 @@ import {
 import { formatBps, getAddresses } from "@/lib/contracts";
 import { formatDuration } from "@/lib/governor-data";
 import { fetchPortfolioData } from "@/lib/portfolio-data";
+import type { ActivityEvent } from "@/lib/syndicate-data";
+import { Term } from "@/components/ui/Glossary";
 import type { Address } from "viem";
+
+/** Reduce activity events into a per-proposal receipt lookup. */
+function buildReceiptsMap(
+  activity: ActivityEvent[],
+): Record<string, { executeTx?: string; settleTx?: string }> {
+  const out: Record<string, { executeTx?: string; settleTx?: string }> = {};
+  for (const a of activity) {
+    if (a.proposalId === undefined) continue;
+    const key = a.proposalId.toString();
+    out[key] = out[key] || {};
+    if (a.type === "settled") out[key].settleTx = a.txHash;
+    else if (a.type === "executed") out[key].executeTx = a.txHash;
+  }
+  return out;
+}
 
 // ── Mock banner ─────────────────────────────────────────────────────────────
 // NOTE: Bold, unambiguous demo-mode signal. Replaces the subtle 9px gray badge
@@ -399,25 +416,33 @@ export default async function ProposalsPage({
           {/* Governor params bar */}
           <div className="stats-bar">
             <div className="stat-item">
-              <div className="stat-label">Voting Period</div>
+              <div className="stat-label">
+                <Term k="voting-period">Voting Period</Term>
+              </div>
               <div className="stat-value" style={{ fontSize: "1.2rem" }}>
                 {formatDuration(governor.params.votingPeriod)}
               </div>
             </div>
             <div className="stat-item">
-              <div className="stat-label">Veto Threshold</div>
+              <div className="stat-label">
+                <Term k="veto-threshold">Veto Threshold</Term>
+              </div>
               <div className="stat-value" style={{ fontSize: "1.2rem" }}>
                 {formatBps(governor.params.vetoThresholdBps)}
               </div>
             </div>
             <div className="stat-item">
-              <div className="stat-label">Max Fee</div>
+              <div className="stat-label">
+                <Term k="max-fee">Max Fee</Term>
+              </div>
               <div className="stat-value" style={{ fontSize: "1.2rem" }}>
                 {formatBps(governor.params.maxPerformanceFeeBps)}
               </div>
             </div>
             <div className="stat-item">
-              <div className="stat-label">Cooldown</div>
+              <div className="stat-label">
+                <Term k="cooldown">Cooldown</Term>
+              </div>
               <div className="stat-value" style={{ fontSize: "1.2rem" }}>
                 {formatDuration(governor.params.cooldownPeriod)}
               </div>
@@ -475,6 +500,8 @@ export default async function ProposalsPage({
               assetDecimals={data.assetDecimals}
               assetSymbol={data.assetSymbol}
               addressNames={addressNames}
+              explorerUrl={!isMock ? getAddresses(data.chainId).blockExplorer : undefined}
+              receipts={!isMock ? buildReceiptsMap(data.activity) : undefined}
             />
             <AgentStats
               proposals={governor.proposals}

@@ -513,6 +513,29 @@ export const SYNDICATE_VAULT_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "bool" }],
   },
+  // Standard ERC-4626 events — used by the activity-feed event-log fallback
+  // when subgraph is unavailable.
+  {
+    type: "event",
+    name: "Deposit",
+    inputs: [
+      { name: "sender", type: "address", indexed: true },
+      { name: "owner", type: "address", indexed: true },
+      { name: "assets", type: "uint256", indexed: false },
+      { name: "shares", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "Withdraw",
+    inputs: [
+      { name: "sender", type: "address", indexed: true },
+      { name: "receiver", type: "address", indexed: true },
+      { name: "owner", type: "address", indexed: true },
+      { name: "assets", type: "uint256", indexed: false },
+      { name: "shares", type: "uint256", indexed: false },
+    ],
+  },
 ] as const;
 
 export const SYNDICATE_GOVERNOR_ABI = [
@@ -670,6 +693,17 @@ export const SYNDICATE_GOVERNOR_ABI = [
           { name: "value", type: "uint256" },
         ],
       },
+    ],
+  },
+  // Events
+  {
+    type: "event",
+    name: "VoteCast",
+    inputs: [
+      { name: "proposalId", type: "uint256", indexed: true },
+      { name: "voter", type: "address", indexed: true },
+      { name: "support", type: "uint8", indexed: false },
+      { name: "weight", type: "uint256", indexed: false },
     ],
   },
 ] as const;
