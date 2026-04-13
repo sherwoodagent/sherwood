@@ -150,7 +150,31 @@ export class AgentLoop {
         }
 
         if (Object.keys(currentPrices).length > 0) {
-          await this.portfolio.updatePrices(currentPrices);
+          const priceState = await this.portfolio.updatePrices(currentPrices);
+
+          // Ratchet stops (breakeven + profit-lock + percent-trail) before
+          // checking exits. This activates trailing-stop logic that was
+          // previously dead code (updateStopLosses was defined but never
+          // called). Stops only move up — never loosened.
+          const tightened = this.riskManager.updateTrailingStops(priceState.positions);
+          const anyChanged = tightened.some(
+            (p, i) => p.stopLoss !== priceState.positions[i]!.stopLoss,
+          );
+          if (anyChanged) {
+            for (let i = 0; i < tightened.length; i++) {
+              const before = priceState.positions[i]!;
+              const after = tightened[i]!;
+              if (after.stopLoss > before.stopLoss) {
+                console.log(
+                  chalk.dim(
+                    `  Stop tightened: ${after.symbol} $${before.stopLoss.toFixed(4)} → $${after.stopLoss.toFixed(4)}`,
+                  ),
+                );
+              }
+            }
+            priceState.positions = tightened;
+            await this.portfolio.save(priceState);
+          }
 
           // Process exits (stop losses, take profits)
           const exits = await this.executor.processExits(currentPrices);

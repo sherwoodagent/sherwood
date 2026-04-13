@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { RiskManager, type Position, type RiskConfig } from "./risk.js";
+import { RiskManager, DEFAULT_RISK_CONFIG, type Position, type RiskConfig } from "./risk.js";
 
 // Helper to create a minimal Position for tests
 function makePosition(overrides: Partial<Position> = {}): Position {
@@ -378,6 +378,91 @@ describe("RiskManager", () => {
       const result = custom.isDrawdownLimitHit();
       expect(result.paused).toBe(true);
       expect(result.level).toBe("daily");
+    });
+  });
+
+  describe("updateTrailingStops", () => {
+    it("moves stop to breakeven after +2% gain", () => {
+      const pos = makePosition({
+        entryPrice: 100,
+        currentPrice: 102.5, // +2.5% triggers breakeven
+        stopLoss: 90,
+      });
+      const [updated] = rm.updateTrailingStops([pos]);
+      // breakeven → 100; percent-trail 5% → 97.375; max = 100
+      expect(updated!.stopLoss).toBe(100);
+    });
+
+    it("locks in +2% gain after +5% move (profit-lock step)", () => {
+      const pos = makePosition({
+        entryPrice: 100,
+        currentPrice: 106,   // +6% triggers [0.05, 0.02]
+        stopLoss: 90,
+      });
+      const [updated] = rm.updateTrailingStops([pos]);
+      // lock → 102; trail 106*0.95=100.7; max = 102
+      expect(updated!.stopLoss).toBe(102);
+    });
+
+    it("locks in +5% gain after +10% move", () => {
+      const pos = makePosition({
+        entryPrice: 100,
+        currentPrice: 111,   // +11% triggers [0.10, 0.05]
+        stopLoss: 90,
+      });
+      const [updated] = rm.updateTrailingStops([pos]);
+      // lock → 105; trail 111*0.95=105.45; max = 105.45
+      expect(updated!.stopLoss).toBeCloseTo(105.45, 2);
+    });
+
+    it("percent-trail beats profit-lock at large gains", () => {
+      const pos = makePosition({
+        entryPrice: 100,
+        currentPrice: 130,   // +30%
+        stopLoss: 90,
+      });
+      const [updated] = rm.updateTrailingStops([pos]);
+      // lock at +20% → 110; trail = 130*0.95 = 123.5; trail wins
+      expect(updated!.stopLoss).toBeCloseTo(123.5, 2);
+    });
+
+    it("never moves stop down", () => {
+      const pos = makePosition({
+        entryPrice: 100,
+        currentPrice: 101,
+        stopLoss: 99,        // already above current trail (101*0.95=95.95)
+      });
+      const [updated] = rm.updateTrailingStops([pos]);
+      expect(updated!.stopLoss).toBe(99);
+      expect(updated).toBe(pos);
+    });
+
+    it("respects disabled mechanisms", () => {
+      const mgrNoMechs = new RiskManager({
+        ...DEFAULT_RISK_CONFIG,
+        trailingStopPct: 0,
+        breakevenTriggerPct: 0,
+        profitLockSteps: [],
+      });
+      const pos = makePosition({
+        entryPrice: 100,
+        currentPrice: 150,
+        stopLoss: 90,
+      });
+      const [updated] = mgrNoMechs.updateTrailingStops([pos]);
+      expect(updated!.stopLoss).toBe(90);
+    });
+
+    it("writes to trailingStop field as well as stopLoss", () => {
+      const pos = makePosition({
+        entryPrice: 100,
+        currentPrice: 110,
+        stopLoss: 90,
+        trailingStop: undefined,
+      });
+      const [updated] = rm.updateTrailingStops([pos]);
+      expect(updated!.trailingStop).toBeDefined();
+      expect(updated!.trailingStop).toBe(updated!.stopLoss);
     });
   });
 });

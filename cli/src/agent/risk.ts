@@ -38,6 +38,18 @@ export interface RiskConfig {
   maxConcurrentTrades: number;
   hardStopPercent: number;
   trailingStopAtr: number;
+  /** Trailing stop as a fraction of current price (e.g. 0.05 = stop at price × 0.95).
+   *  Used by updateTrailingStops() which runs each loop cycle without needing ATR.
+   *  Set to 0 to disable. */
+  trailingStopPct: number;
+  /** Move stop to entry (breakeven) once position gains this percent.
+   *  E.g. 0.02 = after +2% unrealized gain, stop tightens to entry price.
+   *  Set to 0 to disable. */
+  breakevenTriggerPct: number;
+  /** Stepped profit-lock table: each [trigger, lock] pair means "if PnL% crosses
+   *  trigger, ratchet stop to lock in at least lockPct of gain".
+   *  Entries applied in order; last matching entry wins per cycle. */
+  profitLockSteps: Array<{ trigger: number; lock: number }>;
   dailyLossLimit: number;
   weeklyLossLimit: number;
   monthlyLossLimit: number;
@@ -52,6 +64,13 @@ export const DEFAULT_RISK_CONFIG: RiskConfig = {
   maxConcurrentTrades: 8,
   hardStopPercent: 0.12,
   trailingStopAtr: 1.5,
+  trailingStopPct: 0.05,        // 5% trailing by default
+  breakevenTriggerPct: 0.02,    // move to breakeven after +2% gain
+  profitLockSteps: [
+    { trigger: 0.05, lock: 0.02 }, // after +5%, lock in at least +2%
+    { trigger: 0.10, lock: 0.05 }, // after +10%, lock in +5%
+    { trigger: 0.20, lock: 0.10 }, // after +20%, lock in +10%
+  ],
   dailyLossLimit: 0.05,
   weeklyLossLimit: 0.10,
   monthlyLossLimit: 0.15,
@@ -237,6 +256,65 @@ export class RiskManager {
     }
 
     return { paused: false, level: null, message: 'Within limits' };
+  }
+
+  /**
+   * Ratchet stop-losses upward each cycle based on current prices.
+   * Applies three independent mechanisms, whichever gives the highest stop:
+   *
+   *   1. Breakeven: if PnL% crosses +breakevenTriggerPct, move stop to entryPrice.
+   *      Locks in "no loss" once the trade is meaningfully in the money.
+   *
+   *   2. Profit-lock ratchet: stepped table (e.g. after +5% gain, lock in +2%).
+   *      Each triggered step moves stop to entryPrice × (1 + lock).
+   *      Prevents giving back earned profit on mean reversion.
+   *
+   *   3. Percent-trail: stop = max(currentStop, currentPrice × (1 - trailingStopPct)).
+   *      Continuous trail — tracks new highs as price runs.
+   *
+   * All mechanisms respect the "stops never move down" invariant.
+   * Returns an array of updated positions (pure — does not mutate input).
+   *
+   * No ATR needed — works from price alone, so it can run every loop cycle
+   * without re-computing technicals. Use updateStopLosses() when ATR is
+   * already available (keeps tighter trails on volatile assets).
+   */
+  updateTrailingStops(positions: Position[]): Position[] {
+    return positions.map((pos) => {
+      if (pos.currentPrice <= 0 || pos.entryPrice <= 0) return pos;
+
+      const pnlPct = (pos.currentPrice - pos.entryPrice) / pos.entryPrice;
+      let newStop = pos.stopLoss;
+
+      // 1. Breakeven
+      if (
+        this.config.breakevenTriggerPct > 0
+        && pnlPct >= this.config.breakevenTriggerPct
+      ) {
+        newStop = Math.max(newStop, pos.entryPrice);
+      }
+
+      // 2. Profit-lock steps — pick the highest triggered lock
+      if (this.config.profitLockSteps.length > 0) {
+        for (const step of this.config.profitLockSteps) {
+          if (pnlPct >= step.trigger) {
+            const lockedStop = pos.entryPrice * (1 + step.lock);
+            newStop = Math.max(newStop, lockedStop);
+          }
+        }
+      }
+
+      // 3. Percent-trail
+      if (this.config.trailingStopPct > 0) {
+        const trailStop = pos.currentPrice * (1 - this.config.trailingStopPct);
+        newStop = Math.max(newStop, trailStop);
+      }
+
+      if (newStop > pos.stopLoss) {
+        return { ...pos, stopLoss: newStop, trailingStop: newStop };
+      }
+      return pos;
+    });
   }
 
   /** Update trailing stop losses using ATR values */
