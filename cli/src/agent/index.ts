@@ -18,6 +18,7 @@ import {
   scoreEvent,
   computeTradeDecision,
   DEFAULT_WEIGHTS,
+  profileForToken,
 } from "./scoring.js";
 import type { Signal, ScoringWeights, TradeDecision } from "./scoring.js";
 import { runStrategies } from "./strategies/index.js";
@@ -43,6 +44,10 @@ export interface AgentConfig {
   maxPositionPct: number;
   maxRiskPct: number;
   weights?: ScoringWeights;
+  /** Named weight profile (default | majors | altcoin | sentHeavy | techHeavy).
+   *  When set, overrides `weights` and is applied per-token via profileForToken().
+   *  When unset, BTC/ETH/SOL auto-get the "majors" profile, others use default. */
+  weightProfile?: string;
   /** When true, includes paid x402 data (Nansen smart-money, Messari fundamentals) in analysis. */
   useX402?: boolean;
   /** Per-strategy configuration overrides. */
@@ -424,10 +429,13 @@ export class TradingAgent {
     }
 
     // 8. Compute decision with regime adjustments, correlation suppression,
-    //    and regime-conditional action thresholds.
+    //    and regime-conditional action thresholds. Weights resolution order:
+    //    explicit this.config.weights > weightProfile > per-token auto-profile.
+    const resolvedWeights = this.config.weights
+      ?? profileForToken(tokenId, this.config.weightProfile);
     const decision = computeTradeDecision(
       signals,
-      this.config.weights ?? DEFAULT_WEIGHTS,
+      resolvedWeights,
       regimeAnalysis?.strategyAdjustments,
       correlationCheck,
       regimeAnalysis?.regime,

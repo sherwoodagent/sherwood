@@ -33,6 +33,29 @@ export class ExecutionPipeline {
    * regime-conditional BUY/SELL threshold from the decision (defaults to
    * ±0.4 if the decision lacks regime context).
    */
+  /**
+   * Score-weighted position sizing config.
+   *
+   * When enabled, risk percentage scales linearly with score magnitude
+   * across the [floor, ceiling] band. Score at the floor → minRiskPct.
+   * Score at or above the ceiling → maxRiskPct. Default OFF — risk
+   * stays at fixed 2% so live behavior is unchanged until explicitly
+   * enabled and validated.
+   */
+  static scaledSizing: {
+    enabled: boolean;
+    floor: number;     // score at which risk = minRiskPct
+    ceiling: number;   // score at which risk = maxRiskPct
+    minRiskPct: number;
+    maxRiskPct: number;
+  } = {
+    enabled: false,
+    floor: 0.30,
+    ceiling: 0.60,
+    minRiskPct: 0.005, // 0.5% — tiny exposure for marginal signals
+    maxRiskPct: 0.02,  // 2%   — current fixed risk = ceiling
+  };
+
   static generateProposals(
     analyses: TokenAnalysis[],
     portfolioValueUsd: number = 10000
@@ -49,8 +72,17 @@ export class ExecutionPipeline {
 
       // Filter: score must clear the regime-conditional action threshold
       // and confidence must exceed 50%. Falls back to ±0.4 for backward compat.
-      const buyFloor = decision.thresholds?.buy ?? 0.4;
-      const sellFloor = decision.thresholds?.sell ?? -0.4;
+      // When scaledSizing is on, the floor drops to scaledSizing.floor — the
+      // point is to take sub-threshold trades at proportionally smaller size,
+      // not to filter them out before sizing kicks in.
+      const baseBuyFloor = decision.thresholds?.buy ?? 0.4;
+      const baseSellFloor = decision.thresholds?.sell ?? -0.4;
+      const buyFloor = ExecutionPipeline.scaledSizing.enabled
+        ? Math.min(baseBuyFloor, ExecutionPipeline.scaledSizing.floor)
+        : baseBuyFloor;
+      const sellFloor = ExecutionPipeline.scaledSizing.enabled
+        ? Math.max(baseSellFloor, -ExecutionPipeline.scaledSizing.floor)
+        : baseSellFloor;
       const clearsBuy = decision.score >= buyFloor;
       const clearsSell = decision.score <= sellFloor;
       if (!clearsBuy && !clearsSell) {
@@ -83,8 +115,18 @@ export class ExecutionPipeline {
         ? entryPrice + (2.5 * riskAmount)
         : entryPrice - (2.5 * riskAmount);
 
-      // Position sizing (2% portfolio risk)
-      const riskPercentage = 0.02;
+      // Position sizing — fixed 2% by default, score-scaled if enabled.
+      // Score-scaled: bigger conviction → bigger size, smaller conviction → smaller size.
+      // The point: take more sub-0.4 trades but with proportionally smaller exposure.
+      let riskPercentage: number;
+      if (ExecutionPipeline.scaledSizing.enabled) {
+        const cfg = ExecutionPipeline.scaledSizing;
+        const absScore = Math.abs(decision.score);
+        const t = Math.min(1, Math.max(0, (absScore - cfg.floor) / (cfg.ceiling - cfg.floor)));
+        riskPercentage = cfg.minRiskPct + t * (cfg.maxRiskPct - cfg.minRiskPct);
+      } else {
+        riskPercentage = 0.02;
+      }
       const positionSizeUsd = (portfolioValueUsd * riskPercentage) / (Math.abs(entryPrice - stopLoss) / entryPrice);
 
       // Calculate leverage (size / max 10% portfolio allocation, capped at 5x)

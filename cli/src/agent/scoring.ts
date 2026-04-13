@@ -34,6 +34,44 @@ export const DEFAULT_WEIGHTS: ScoringWeights = {
   event: 0.10,
 };
 
+/**
+ * Named weight profiles for `--weight-profile <name>` and per-asset auto-selection.
+ *
+ * - default:    balanced — used when no profile selected
+ * - majors:     BTC/ETH/SOL — drops fundamental (no meaningful TVL on BTC),
+ *               drops event (token unlocks rare on majors). Mass redistributed
+ *               to technical + sentiment + smartMoney + onchain (the 4 that
+ *               actually fire on majors per signal-audit data).
+ * - altcoin:    smaller caps — keeps fundamental + event because TVL deltas
+ *               and unlocks meaningfully drive price action on altcoins.
+ * - sentHeavy:  contrarian setups (extreme F&G), bias toward sentiment signal.
+ * - techHeavy:  trend continuation setups, bias toward technical confirmation.
+ */
+export const WEIGHT_PROFILES: Record<string, ScoringWeights> = {
+  default: DEFAULT_WEIGHTS,
+  majors:    { smartMoney: 0.30, technical: 0.30, sentiment: 0.20, onchain: 0.20, fundamental: 0.00, event: 0.00 },
+  altcoin:   { smartMoney: 0.20, technical: 0.15, sentiment: 0.15, onchain: 0.15, fundamental: 0.20, event: 0.15 },
+  sentHeavy: { smartMoney: 0.10, technical: 0.15, sentiment: 0.40, onchain: 0.15, fundamental: 0.10, event: 0.10 },
+  techHeavy: { smartMoney: 0.10, technical: 0.40, sentiment: 0.15, onchain: 0.15, fundamental: 0.10, event: 0.10 },
+};
+
+/** Tokens that get the "majors" profile when auto-selection is enabled. */
+const MAJORS_TOKEN_IDS = new Set(["bitcoin", "ethereum", "solana"]);
+
+/**
+ * Pick a weight profile for a token. Returns user-specified profile if given,
+ * otherwise auto-selects "majors" for BTC/ETH/SOL and "default" for everything else.
+ */
+export function profileForToken(tokenId: string, userProfile?: string): ScoringWeights {
+  if (userProfile && WEIGHT_PROFILES[userProfile]) {
+    return WEIGHT_PROFILES[userProfile];
+  }
+  if (MAJORS_TOKEN_IDS.has(tokenId.toLowerCase())) {
+    return WEIGHT_PROFILES["majors"]!;
+  }
+  return DEFAULT_WEIGHTS;
+}
+
 export interface TradeDecision {
   action: "STRONG_BUY" | "BUY" | "HOLD" | "SELL" | "STRONG_SELL";
   score: number;

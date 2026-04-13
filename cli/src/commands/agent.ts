@@ -65,7 +65,9 @@ export function registerAgentCommands(program: Command): void {
     .option("--no-x402", "Skip paid x402 data (Nansen smart-money, Messari fundamentals) — on by default")
     .option("--telegram", "Output formatted summary for Telegram")
     .option("--proposals", "Generate trade proposals for high-confidence opportunities")
-    .action(async (tokens: string[], options: { all?: boolean; auto?: boolean; json?: boolean; x402: boolean; telegram?: boolean; proposals?: boolean }) => {
+    .option("--weight-profile <name>", "Weight profile: default | majors | altcoin | sentHeavy | techHeavy (auto: majors for BTC/ETH/SOL)")
+    .option("--scaled-sizing", "Score-weighted position sizing (smaller positions for marginal scores)")
+    .action(async (tokens: string[], options: { all?: boolean; auto?: boolean; json?: boolean; x402: boolean; telegram?: boolean; proposals?: boolean; weightProfile?: string; scaledSizing?: boolean }) => {
       let tokenList: string[];
       let selectionSummary: string | undefined;
 
@@ -91,7 +93,10 @@ export function registerAgentCommands(program: Command): void {
         tokenList = options.all ? DEFAULT_TOKENS : tokens.length > 0 ? tokens : DEFAULT_TOKENS;
       }
 
-      const config = makeConfig({ tokens: tokenList, useX402: options.x402 });
+      if (options.scaledSizing) {
+        ExecutionPipeline.scaledSizing.enabled = true;
+      }
+      const config = makeConfig({ tokens: tokenList, useX402: options.x402, weightProfile: options.weightProfile });
       const tradingAgent = new TradingAgent(config);
       const spinner = ora("Analyzing tokens...").start();
 
@@ -292,7 +297,9 @@ export function registerAgentCommands(program: Command): void {
     .option("--chain <chain>", "Chain for live execution (hyperevm, hyperevm-testnet)", "ethereum")
     .option("--asset-index <n>", "HyperCore perp asset index (default: 3 = ETH)")
     .option("--no-x402", "Skip paid x402 data (Nansen smart-money, Messari fundamentals) — on by default")
-    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; auto?: boolean; log?: string; mode?: string; strategyClone?: string; chain?: string; assetIndex?: string; x402: boolean }) => {
+    .option("--weight-profile <name>", "Weight profile: default | majors | altcoin | sentHeavy | techHeavy (auto: majors for BTC/ETH/SOL)")
+    .option("--scaled-sizing", "Score-weighted position sizing (smaller positions for marginal scores)")
+    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; auto?: boolean; log?: string; mode?: string; strategyClone?: string; chain?: string; assetIndex?: string; x402: boolean; weightProfile?: string; scaledSizing?: boolean }) => {
       let tokenList: string[];
 
       if (options.auto) {
@@ -326,6 +333,9 @@ export function registerAgentCommands(program: Command): void {
       }
 
       const isLive = options.mode === 'hyperliquid-perp';
+      if (options.scaledSizing) {
+        ExecutionPipeline.scaledSizing.enabled = true;
+      }
       if (isLive && !options.strategyClone) {
         console.error(chalk.red('  --strategy-clone is required for hyperliquid-perp mode'));
         process.exitCode = 1;
@@ -339,7 +349,7 @@ export function registerAgentCommands(program: Command): void {
       }
 
       const loopConfig: LoopConfig = {
-        agent: makeConfig({ tokens: tokenList, cycle, dryRun: !isLive, useX402: options.x402 }),
+        agent: makeConfig({ tokens: tokenList, cycle, dryRun: !isLive, useX402: options.x402, weightProfile: options.weightProfile }),
         execution: {
           dryRun: !isLive,
           mode: (options.mode ?? 'dry-run') as 'dry-run' | 'hyperliquid-perp',
@@ -565,9 +575,22 @@ export function registerAgentCommands(program: Command): void {
     .option("--test <days>", "Test window in days for walk-forward", "30")
     .option("--verbose", "Show detailed decision logs for each candle")
     .option("--regime", "Apply regime-conditional thresholds per-candle (matches live behavior)")
-    .action(async (token: string, options: { from: string; to: string; strategies: string; capital: string; cycle: string; walkForward?: boolean; train: string; test: string; verbose?: boolean; regime?: boolean }) => {
+    .option("--trailing-stop <pct>", "Trailing stop as decimal (e.g. 0.05 = 5%) — exits if price drops X% from high-water mark")
+    .option("--scaled-sizing", "Score-weighted position sizing (smaller positions for marginal scores)")
+    .option("--weight-profile <name>", "Named weight profile: default | majors | altcoin | sentHeavy | techHeavy")
+    .action(async (token: string, options: { from: string; to: string; strategies: string; capital: string; cycle: string; walkForward?: boolean; train: string; test: string; verbose?: boolean; regime?: boolean; trailingStop?: string; scaledSizing?: boolean; weightProfile?: string }) => {
       const capital = parseFloat(options.capital);
       const strategies = options.strategies ? options.strategies.split(",").map((s) => s.trim()) : [];
+      const trailingStopPct = options.trailingStop ? parseFloat(options.trailingStop) : undefined;
+      if (trailingStopPct !== undefined && (!Number.isFinite(trailingStopPct) || trailingStopPct <= 0 || trailingStopPct > 0.5)) {
+        console.error(chalk.red("--trailing-stop must be between 0 and 0.5 (e.g. 0.05 = 5%)"));
+        process.exitCode = 1;
+        return;
+      }
+      // Apply scaled sizing globally for this run (config-class state)
+      if (options.scaledSizing) {
+        ExecutionPipeline.scaledSizing.enabled = true;
+      }
 
       if (options.walkForward) {
         // Walk-forward optimization mode
@@ -585,6 +608,7 @@ export function registerAgentCommands(program: Command): void {
           capital,
           strategies,
           useRegime: options.regime,
+          trailingStopPct,
         };
 
         const spinner = ora(`Walk-forward testing ${token} (${trainWindow}d train, ${testWindow}d test)...`).start();
@@ -599,6 +623,7 @@ export function registerAgentCommands(program: Command): void {
             cycle: (options.cycle as BacktestConfig["cycle"]) || "1d",
             verbose: options.verbose,
             useRegime: options.regime,
+            trailingStopPct,
           });
           const result = await backtester.walkForwardTest(walkConfig);
           spinner.stop();
@@ -618,6 +643,7 @@ export function registerAgentCommands(program: Command): void {
           cycle: (options.cycle as BacktestConfig["cycle"]) || "1d",
           verbose: options.verbose,
           useRegime: options.regime,
+          trailingStopPct,
         };
 
         const spinner = ora(`Backtesting ${token} from ${config.startDate} to ${config.endDate}...`).start();

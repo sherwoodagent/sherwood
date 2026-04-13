@@ -25,6 +25,11 @@ export interface BacktestConfig {
   /** When true, classify regime per-candle and apply regime-conditional thresholds.
    *  Default false → flat ±0.3/±0.6 thresholds (matches old backtest behavior). */
   useRegime?: boolean;
+  /** Trailing-stop percent (e.g. 0.05 = 5%). When set and a long position
+   *  exists, exit if price drops trailingStopPct from the high-water mark
+   *  since entry. Independent of SELL signal — stops fire first if hit.
+   *  Default undefined → SELL-signal-only exit. */
+  trailingStopPct?: number;
 }
 
 export interface BacktestTrade {
@@ -59,6 +64,8 @@ export interface WalkForwardConfig {
   strategies: string[];
   /** Forwarded to per-fold Backtester. Default false. */
   useRegime?: boolean;
+  /** Forwarded to per-fold Backtester. Default undefined (no trailing stop). */
+  trailingStopPct?: number;
 }
 
 export interface WalkForwardResult {
@@ -183,7 +190,7 @@ export class Backtester {
 
     // 3. Simulate trading
     let capital = this.config.initialCapital;
-    let position: { entryPrice: number; entryDate: string; signal: string } | null = null;
+    let position: { entryPrice: number; entryDate: string; signal: string; highWaterMark: number } | null = null;
     const trades: BacktestTrade[] = [];
     const equityCurve: Array<{ date: string; value: number }> = [];
     const returns: number[] = [];
@@ -299,23 +306,36 @@ export class Backtester {
           entryPrice: currentPrice,
           entryDate: currentDate,
           signal: decision.action,
+          highWaterMark: currentPrice,
         };
-      } else if (position && (decision.action === 'SELL' || decision.action === 'STRONG_SELL')) {
-        // Exit long
-        const pnlPercent = (currentPrice - position.entryPrice) / position.entryPrice;
-        capital *= (1 + pnlPercent);
-        returns.push(pnlPercent);
+      } else if (position) {
+        // Update high-water mark for trailing stop
+        if (currentPrice > position.highWaterMark) {
+          position.highWaterMark = currentPrice;
+        }
 
-        trades.push({
-          entryDate: position.entryDate,
-          exitDate: currentDate,
-          entryPrice: position.entryPrice,
-          exitPrice: currentPrice,
-          pnlPercent,
-          signal: `${position.signal} → ${decision.action}`,
-        });
+        // Check trailing stop FIRST — exits faster than waiting for SELL signal
+        const trailingStopHit = this.config.trailingStopPct !== undefined
+          && currentPrice <= position.highWaterMark * (1 - this.config.trailingStopPct);
+        const sellSignal = decision.action === 'SELL' || decision.action === 'STRONG_SELL';
 
-        position = null;
+        if (trailingStopHit || sellSignal) {
+          const pnlPercent = (currentPrice - position.entryPrice) / position.entryPrice;
+          capital *= (1 + pnlPercent);
+          returns.push(pnlPercent);
+
+          const exitReason = trailingStopHit ? `TRAILING_STOP (-${(this.config.trailingStopPct! * 100).toFixed(1)}%)` : decision.action;
+          trades.push({
+            entryDate: position.entryDate,
+            exitDate: currentDate,
+            entryPrice: position.entryPrice,
+            exitPrice: currentPrice,
+            pnlPercent,
+            signal: `${position.signal} → ${exitReason}`,
+          });
+
+          position = null;
+        }
       }
     }
 
@@ -421,6 +441,7 @@ export class Backtester {
           cycle: '1d',
           verbose: false, // Don't spam verbose output during walk-forward
           useRegime: config.useRegime,
+          trailingStopPct: config.trailingStopPct,
         });
         const trainResult = await trainBacktester.run();
 
@@ -434,6 +455,7 @@ export class Backtester {
           cycle: '1d',
           verbose: false, // Don't spam verbose output during walk-forward
           useRegime: config.useRegime,
+          trailingStopPct: config.trailingStopPct,
         });
         const testResult = await testBacktester.run();
 
