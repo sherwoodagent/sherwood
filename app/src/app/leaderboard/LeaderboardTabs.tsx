@@ -21,6 +21,33 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   NO_AGENTS: { bg: "rgba(255,77,77,0.15)", text: "#ff4d4d" },
 };
 
+// Rank medal — gold/silver/bronze for top 3, plain mono digits thereafter.
+function RankCell({ index }: { index: number }) {
+  const medalClass =
+    index === 0
+      ? "rank-medal rank-medal--gold"
+      : index === 1
+        ? "rank-medal rank-medal--silver"
+        : index === 2
+          ? "rank-medal rank-medal--bronze"
+          : null;
+  if (medalClass) {
+    return <span className={medalClass}>{String(index + 1).padStart(2, "0")}</span>;
+  }
+  return <span className="rank-plain">{String(index + 1).padStart(2, "0")}</span>;
+}
+
+// Directional P&L cell — arrow + monospace tabular number.
+// Strips a leading +/- if present so the CSS ▲/▼ can own direction cue.
+function PnlDelta({ value, raw }: { value: string; raw: number }) {
+  const dir = raw > 0 ? "up" : raw < 0 ? "down" : "flat";
+  const label =
+    raw === 0
+      ? value
+      : value.replace(/^[+-]/, ""); // drop leading sign; arrow carries direction
+  return <span className={`pnl-delta pnl-delta--${dir}`}>{label}</span>;
+}
+
 export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
   const [tab, setTab] = useState<"syndicates" | "agents">("syndicates");
 
@@ -45,26 +72,24 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
   return (
     <div className="font-[family-name:var(--font-plus-jakarta)]">
       {/* Tab switcher */}
-      <div className="flex gap-0 mb-0 border-b border-[var(--color-border)]">
+      <div className="flex gap-1 mb-0 border-b border-[var(--color-border)]" role="tablist">
         <button
+          role="tab"
+          aria-selected={tab === "syndicates"}
           onClick={() => setTab("syndicates")}
-          className={`px-6 py-3 text-xs uppercase tracking-[0.1em] font-semibold transition-colors border-b-2 -mb-px ${
-            tab === "syndicates"
-              ? "border-[var(--color-accent)] text-[var(--color-accent)]"
-              : "border-transparent text-[rgba(255,255,255,0.4)] hover:text-white"
-          }`}
+          className="lb-tab"
         >
-          Syndicates ({syndicates.length})
+          Syndicates
+          <span className="lb-tab__count">{String(syndicates.length).padStart(2, "0")}</span>
         </button>
         <button
+          role="tab"
+          aria-selected={tab === "agents"}
           onClick={() => setTab("agents")}
-          className={`px-6 py-3 text-xs uppercase tracking-[0.1em] font-semibold transition-colors border-b-2 -mb-px ${
-            tab === "agents"
-              ? "border-[var(--color-accent)] text-[var(--color-accent)]"
-              : "border-transparent text-[rgba(255,255,255,0.4)] hover:text-white"
-          }`}
+          className="lb-tab"
         >
-          Agents ({agents.length})
+          Agents
+          <span className="lb-tab__count">{String(agents.length).padStart(2, "0")}</span>
         </button>
       </div>
 
@@ -94,14 +119,9 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                   const badge = CHAIN_BADGES[s.chainId];
                   const status = STATUS_COLORS[s.status] || STATUS_COLORS.IDLE;
                   return (
-                    <tr key={`${s.chainId}-${s.id}`}>
-                      <td
-                        style={{
-                          color: "var(--color-accent)",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {String(i + 1).padStart(2, "0")}
+                    <tr key={`${s.chainId}-${s.id}`} className={i === 0 ? "lb-row-top1" : undefined}>
+                      <td>
+                        <RankCell index={i} />
                       </td>
                       <td>
                         <Link
@@ -209,14 +229,9 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                 {agents.map((a, i) => {
                   const badge = CHAIN_BADGES[a.chainId];
                   return (
-                    <tr key={`${a.agentAddress}-${a.syndicateSubdomain}`}>
-                      <td
-                        style={{
-                          color: "var(--color-accent)",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {String(i + 1).padStart(2, "0")}
+                    <tr key={`${a.agentAddress}-${a.syndicateSubdomain}`} className={i === 0 ? "lb-row-top1" : undefined}>
+                      <td>
+                        <RankCell index={i} />
                       </td>
                       <td>
                         <span className="text-white font-medium">
@@ -253,18 +268,8 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                         </span>
                       </td>
                       <td>{a.proposalCount}</td>
-                      <td
-                        style={{
-                          color:
-                            a.totalPnlRaw > 0
-                              ? "var(--color-accent)"
-                              : a.totalPnlRaw < 0
-                                ? "#ff4d4d"
-                                : "rgba(255,255,255,0.5)",
-                          fontWeight: a.totalPnlRaw !== 0 ? 600 : 400,
-                        }}
-                      >
-                        {a.totalPnl}
+                      <td>
+                        <PnlDelta value={a.totalPnl} raw={a.totalPnlRaw} />
                       </td>
                       <td>
                         {badge && (

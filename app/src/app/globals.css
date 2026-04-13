@@ -201,6 +201,158 @@ body {
   line-height: 1.65;
 }
 
+/* Rank medal — the first three positions in a leaderboard get
+   a framed badge treatment. Gold uses parchment to echo Robin
+   Hood's gilded mythology rather than literal metal yellow. */
+.rank-medal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: 1px solid currentColor;
+  background: rgba(0, 0, 0, 0.3);
+  transition: box-shadow 0.3s ease;
+}
+
+.rank-medal--gold {
+  color: var(--color-parchment);
+  box-shadow: 0 0 22px rgba(232, 220, 192, 0.28),
+              inset 0 0 0 1px rgba(232, 220, 192, 0.15);
+}
+.rank-medal--gold::after {
+  content: "";
+  position: relative;
+  width: 3px;
+  height: 3px;
+  background: var(--color-parchment);
+  margin-left: 4px;
+  box-shadow: 0 0 6px var(--color-parchment);
+}
+.rank-medal--silver { color: rgba(210, 215, 222, 0.9); }
+.rank-medal--bronze { color: rgba(205, 127, 70, 0.9); }
+
+.rank-plain {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: rgba(46, 230, 166, 0.55);
+  letter-spacing: 0.05em;
+}
+
+/* P&L column — direction arrow + monospace */
+.pnl-delta {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.pnl-delta--up { color: var(--color-accent); }
+.pnl-delta--down { color: #ff4d4d; }
+.pnl-delta--flat { color: rgba(255, 255, 255, 0.4); }
+.pnl-delta--up::before { content: "▲"; font-size: 8px; transform: translateY(-1px); }
+.pnl-delta--down::before { content: "▼"; font-size: 8px; transform: translateY(-1px); }
+
+/* Leaderboard meta rail — sits above the hero heading */
+.lb-meta {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.lb-meta__pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+  color: var(--color-accent);
+}
+.lb-meta__pulse::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: pulseBeacon 2.1s ease-out infinite;
+}
+
+.lb-meta__sep {
+  width: 3px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  transform: rotate(45deg);
+}
+
+/* Leaderboard tab switcher upgrades */
+.lb-tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.85rem 1.25rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+  border-bottom: 1px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  position: relative;
+}
+
+.lb-tab:hover { color: #fff; }
+
+.lb-tab[aria-selected="true"] {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+.lb-tab[aria-selected="true"]::before,
+.lb-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  width: 6px;
+  height: 6px;
+  border-bottom: 1px solid var(--color-accent);
+}
+.lb-tab[aria-selected="true"]::before { left: 0; border-left: 1px solid var(--color-accent); }
+.lb-tab[aria-selected="true"]::after  { right: 0; border-right: 1px solid var(--color-accent); }
+
+.lb-tab__count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: currentColor;
+  opacity: 0.6;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+}
+
+/* Top-row accent for #1 ranked syndicate */
+.lb-row-top1 {
+  background: linear-gradient(90deg,
+    rgba(232, 220, 192, 0.045),
+    rgba(232, 220, 192, 0.01) 40%,
+    transparent 75%);
+}
+
 /* Horizontal progress rail used by roadmap phases */
 .progress-rail {
   position: relative;

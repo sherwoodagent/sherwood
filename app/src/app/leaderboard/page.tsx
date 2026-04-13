@@ -40,7 +40,13 @@ export default async function LeaderboardPage() {
 
           {/* Section header */}
           <div className="leaderboard-header">
-            <span className="section-num">{"// Active Syndicates"}</span>
+            <div className="lb-meta">
+              <span className="lb-meta__pulse">{"// Live Sync"}</span>
+              <span className="lb-meta__sep" aria-hidden />
+              <span>§ LB.001 · Ranked by TVL</span>
+              <span className="lb-meta__sep" aria-hidden />
+              <span>Base · Hyperwood</span>
+            </div>
             <h1 className="text-[3.5rem] font-medium tracking-tight text-white mb-4 font-[family-name:var(--font-inter)]">
               Leaderboard
             </h1>
