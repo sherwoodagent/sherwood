@@ -29,7 +29,9 @@ contract CreateWstETHProposal is Script {
     address constant AERO_FACTORY = 0x420DD381b31aEf6683db6B902084cB0FFECe40Da;
 
     // Strategy params
-    uint256 constant SUPPLY_AMOUNT = 0.0194 ether; // full vault balance
+    // Fixed-amount script. Set SUPPLY_AMOUNT = 0 to use the vault's full WETH
+    // balance at execute time (dynamic-all mode supported by the strategy).
+    uint256 constant SUPPLY_AMOUNT = 0.0194 ether;
     // Per-unit slippage rates (1e18-scaled): min out per 1e18 in. ~7% tolerance.
     uint256 constant MIN_WSTETH_OUT_PER_WETH = 0.93e18;
     uint256 constant MIN_WETH_OUT_PER_WSTETH = 0.93e18;

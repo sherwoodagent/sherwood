@@ -521,11 +521,15 @@ export function computeTradeDecision(
 
   // Determine action using regime-conditional thresholds
   let action: TradeDecision["action"];
+  // Symmetric >= / <= on both sides — exactly hitting a threshold counts as
+  // crossing it. Score == buy → BUY. Score == sell → SELL. Score ==
+  // strongSell → STRONG_SELL. This replaces the old mixed > / >= scheme
+  // flagged in code review as asymmetric.
   if (score >= thresholds.strongBuy) action = "STRONG_BUY";
   else if (score >= thresholds.buy) action = "BUY";
-  else if (score > thresholds.sell) action = "HOLD";
-  else if (score > thresholds.strongSell) action = "SELL";
-  else action = "STRONG_SELL";
+  else if (score <= thresholds.strongSell) action = "STRONG_SELL";
+  else if (score <= thresholds.sell) action = "SELL";
+  else action = "HOLD";
 
   const reasoning = signals.map((s) => `[${s.source}] ${s.details}`).join("\n");
 

@@ -25,41 +25,58 @@ export interface TradeProposal {
   timestamp: number;
 }
 
-export class ExecutionPipeline {
+/**
+ * Score-weighted position sizing config.
+ *
+ * When enabled, risk percentage scales linearly with score magnitude
+ * across the [floor, ceiling] band. Score at the floor → minRiskPct.
+ * Score at or above the ceiling → maxRiskPct.
+ */
+export interface ScaledSizingConfig {
+  enabled: boolean;
+  floor: number;
+  ceiling: number;
+  minRiskPct: number;
+  maxRiskPct: number;
+}
 
+export const DEFAULT_SCALED_SIZING: ScaledSizingConfig = {
+  enabled: false,
+  floor: 0.30,
+  ceiling: 0.60,
+  minRiskPct: 0.005,
+  maxRiskPct: 0.02,
+};
+
+export interface ProposalOptions {
+  portfolioValueUsd?: number;
+  scaledSizing?: ScaledSizingConfig;
+}
+
+export class ExecutionPipeline {
   /**
    * Generate trade proposals from analysis results.
    * Only creates proposals for high-confidence opportunities — uses the
    * regime-conditional BUY/SELL threshold from the decision (defaults to
    * ±0.4 if the decision lacks regime context).
-   */
-  /**
-   * Score-weighted position sizing config.
    *
-   * When enabled, risk percentage scales linearly with score magnitude
-   * across the [floor, ceiling] band. Score at the floor → minRiskPct.
-   * Score at or above the ceiling → maxRiskPct. Default OFF — risk
-   * stays at fixed 2% so live behavior is unchanged until explicitly
-   * enabled and validated.
+   * Optional ProposalOptions.scaledSizing enables score-weighted sizing.
+   * Previously this was a mutable static field — fixed per code review
+   * to eliminate cross-invocation leakage in long-lived processes.
    */
-  static scaledSizing: {
-    enabled: boolean;
-    floor: number;     // score at which risk = minRiskPct
-    ceiling: number;   // score at which risk = maxRiskPct
-    minRiskPct: number;
-    maxRiskPct: number;
-  } = {
-    enabled: false,
-    floor: 0.30,
-    ceiling: 0.60,
-    minRiskPct: 0.005, // 0.5% — tiny exposure for marginal signals
-    maxRiskPct: 0.02,  // 2%   — current fixed risk = ceiling
-  };
-
   static generateProposals(
     analyses: TokenAnalysis[],
-    portfolioValueUsd: number = 10000
+    portfolioValueOrOpts: number | ProposalOptions = 10000,
+    optsArg?: ProposalOptions,
   ): TradeProposal[] {
+    // Backward-compatible call shape: either generateProposals(analyses, 10000)
+    // or generateProposals(analyses, { portfolioValueUsd, scaledSizing }).
+    const opts: ProposalOptions =
+      typeof portfolioValueOrOpts === 'number'
+        ? { portfolioValueUsd: portfolioValueOrOpts, ...(optsArg ?? {}) }
+        : (portfolioValueOrOpts ?? {});
+    const portfolioValueUsd = opts.portfolioValueUsd ?? 10000;
+    const scaledSizing = opts.scaledSizing ?? DEFAULT_SCALED_SIZING;
     const proposals: TradeProposal[] = [];
 
     for (const analysis of analyses) {
@@ -77,11 +94,11 @@ export class ExecutionPipeline {
       // not to filter them out before sizing kicks in.
       const baseBuyFloor = decision.thresholds?.buy ?? 0.4;
       const baseSellFloor = decision.thresholds?.sell ?? -0.4;
-      const buyFloor = ExecutionPipeline.scaledSizing.enabled
-        ? Math.min(baseBuyFloor, ExecutionPipeline.scaledSizing.floor)
+      const buyFloor = scaledSizing.enabled
+        ? Math.min(baseBuyFloor, scaledSizing.floor)
         : baseBuyFloor;
-      const sellFloor = ExecutionPipeline.scaledSizing.enabled
-        ? Math.max(baseSellFloor, -ExecutionPipeline.scaledSizing.floor)
+      const sellFloor = scaledSizing.enabled
+        ? Math.max(baseSellFloor, -scaledSizing.floor)
         : baseSellFloor;
       const clearsBuy = decision.score >= buyFloor;
       const clearsSell = decision.score <= sellFloor;
@@ -119,8 +136,8 @@ export class ExecutionPipeline {
       // Score-scaled: bigger conviction → bigger size, smaller conviction → smaller size.
       // The point: take more sub-0.4 trades but with proportionally smaller exposure.
       let riskPercentage: number;
-      if (ExecutionPipeline.scaledSizing.enabled) {
-        const cfg = ExecutionPipeline.scaledSizing;
+      if (scaledSizing.enabled) {
+        const cfg = scaledSizing;
         const absScore = Math.abs(decision.score);
         const t = Math.min(1, Math.max(0, (absScore - cfg.floor) / (cfg.ceiling - cfg.floor)));
         riskPercentage = cfg.minRiskPct + t * (cfg.maxRiskPct - cfg.minRiskPct);

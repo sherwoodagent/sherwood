@@ -162,7 +162,12 @@ contract WstETHMoonwellStrategy is BaseStrategy {
                 );
         }
 
-        // 3. Push all WETH back to vault (router already enforced min-out slippage)
+        // 3. Push all WETH back to vault. The router already enforced per-swap
+        //    slippage, but guard against a zero-balance edge case where the
+        //    Moonwell redeem or Aero swap silently returned nothing — we must
+        //    not silently "settle" a proposal with no funds returned.
+        uint256 wethBalance = IERC20(weth).balanceOf(address(this));
+        if (wethBalance == 0) revert InvalidAmount();
         _pushAllToVault(weth);
 
         // Push any residual dust

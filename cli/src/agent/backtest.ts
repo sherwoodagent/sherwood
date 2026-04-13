@@ -34,6 +34,14 @@ export interface BacktestConfig {
   /** When true, smooth fast/noisy signals with rolling window (in-memory
    *  per-simulation, no disk IO). Default false. */
   smoothFastSignals?: boolean;
+  /** Override scoring weights (for calibration sweeps). */
+  customWeights?: import('./scoring.js').ScoringWeights;
+  /** Override BUY threshold (applied symmetrically to STRONG_BUY as buy+0.3).
+   *  Used by calibrator to sweep threshold values. When set, takes precedence
+   *  over regime-based thresholds. */
+  buyThreshold?: number;
+  /** Override SELL threshold (applied symmetrically to STRONG_SELL as sell-0.3). */
+  sellThreshold?: number;
 }
 
 export interface BacktestTrade {
@@ -112,6 +120,16 @@ export class Backtester {
 
   /** Run backtest using historical data from CoinGecko. */
   async run(): Promise<BacktestResult> {
+    const data = await this.fetchData();
+    return this.simulate(data.candles, data.fearAndGreedData);
+  }
+
+  /**
+   * Fetch historical OHLC + Fear & Greed data for the configured token/date range.
+   * Extracted so callers (e.g. the calibrator) can fetch once and replay many
+   * configurations against the same dataset without re-hitting CoinGecko.
+   */
+  async fetchData(): Promise<{ candles: Candle[]; fearAndGreedData: Record<string, number> }> {
     // 1. Fetch historical OHLC data
     const startMs = new Date(this.config.startDate).getTime();
     const endMs = new Date(this.config.endDate).getTime();
@@ -189,6 +207,18 @@ export class Backtester {
       }
     }
 
+    return { candles: allCandles, fearAndGreedData };
+  }
+
+  /**
+   * Run the simulation loop on pre-fetched data. Pure of network IO.
+   * The calibrator uses this directly after fetchData() to replay many
+   * config permutations without re-fetching per permutation.
+   */
+  async simulate(
+    allCandles: Candle[],
+    fearAndGreedData: Record<string, number>,
+  ): Promise<BacktestResult> {
     // 2. Determine step size based on cycle
     const stepSize = this.config.cycle === '1h' ? 1 : this.config.cycle === '4h' ? 4 : 24;
     // CoinGecko OHLC for 90+ days gives daily candles, so step = 1 candle for '1d'
@@ -298,11 +328,28 @@ export class Backtester {
 
         decision = computeTradeDecision(
           filtered.length > 0 ? filtered : signals,
-          undefined,
+          this.config.customWeights,
           undefined,
           undefined,
           regime,
         );
+
+        // Calibrator uses scalar threshold overrides — re-derive action from
+        // score if buyThreshold/sellThreshold are set. STRONG_* thresholds
+        // extrapolate ±0.3 from the base (matches the regime threshold spread).
+        if (this.config.buyThreshold !== undefined || this.config.sellThreshold !== undefined) {
+          const buy = this.config.buyThreshold ?? decision.thresholds?.buy ?? 0.3;
+          const sell = this.config.sellThreshold ?? decision.thresholds?.sell ?? -0.3;
+          const strongBuy = buy + 0.3;
+          const strongSell = sell - 0.3;
+          let action: typeof decision.action;
+          if (decision.score >= strongBuy) action = 'STRONG_BUY';
+          else if (decision.score >= buy) action = 'BUY';
+          else if (decision.score <= strongSell) action = 'STRONG_SELL';
+          else if (decision.score <= sell) action = 'SELL';
+          else action = 'HOLD';
+          decision = { ...decision, action, thresholds: { strongBuy, buy, sell, strongSell } };
+        }
 
         // Verbose logging
         if (this.config.verbose) {

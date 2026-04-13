@@ -32,7 +32,7 @@ import { Reporter } from "../agent/reporter.js";
 import { Backtester } from "../agent/backtest.js";
 import type { BacktestConfig, WalkForwardConfig } from "../agent/backtest.js";
 import { AlertFormatter } from "../agent/alert-formatter.js";
-import { ExecutionPipeline } from "../agent/execution-pipeline.js";
+import { ExecutionPipeline, DEFAULT_SCALED_SIZING } from "../agent/execution-pipeline.js";
 import { auditSignalHistory, suggestRenormalizedWeights, diffAudits } from "../agent/signal-audit.js";
 import type { AuditResult } from "../agent/signal-audit.js";
 import { DEFAULT_WEIGHTS } from "../agent/scoring.js";
@@ -94,9 +94,9 @@ export function registerAgentCommands(program: Command): void {
         tokenList = options.all ? DEFAULT_TOKENS : tokens.length > 0 ? tokens : DEFAULT_TOKENS;
       }
 
-      if (options.scaledSizing) {
-        ExecutionPipeline.scaledSizing.enabled = true;
-      }
+      const scaledSizing = options.scaledSizing
+        ? { ...DEFAULT_SCALED_SIZING, enabled: true }
+        : undefined;
       const config = makeConfig({ tokens: tokenList, useX402: options.x402, weightProfile: options.weightProfile, smoothFastSignals: options.smooth });
       const tradingAgent = new TradingAgent(config);
       const spinner = ora("Analyzing tokens...").start();
@@ -116,7 +116,7 @@ export function registerAgentCommands(program: Command): void {
 
         if (options.proposals) {
           // Output trade proposals
-          const proposals = ExecutionPipeline.generateProposals(results);
+          const proposals = ExecutionPipeline.generateProposals(results, { scaledSizing });
           const formatted = ExecutionPipeline.formatProposals(proposals);
           console.log(formatted);
           return;
@@ -335,9 +335,9 @@ export function registerAgentCommands(program: Command): void {
       }
 
       const isLive = options.mode === 'hyperliquid-perp';
-      if (options.scaledSizing) {
-        ExecutionPipeline.scaledSizing.enabled = true;
-      }
+      // NOTE: options.scaledSizing is currently a no-op here because the loop
+      // does not call ExecutionPipeline.generateProposals. If that changes,
+      // pass { scaledSizing } through LoopConfig and into the proposal call.
       if (isLive && !options.strategyClone) {
         console.error(chalk.red('  --strategy-clone is required for hyperliquid-perp mode'));
         process.exitCode = 1;
@@ -590,10 +590,9 @@ export function registerAgentCommands(program: Command): void {
         process.exitCode = 1;
         return;
       }
-      // Apply scaled sizing globally for this run (config-class state)
-      if (options.scaledSizing) {
-        ExecutionPipeline.scaledSizing.enabled = true;
-      }
+      // NOTE: options.scaledSizing is currently a no-op in backtest because
+      // the backtester doesn't generate TradeProposals — it simulates its own
+      // BUY/SELL directly from decision.action. Flag is parsed but unused.
 
       if (options.walkForward) {
         // Walk-forward optimization mode

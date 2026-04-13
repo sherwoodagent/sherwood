@@ -538,6 +538,19 @@ async function buildInitDataForTemplate(
     const decimals = token.toUpperCase() === "USDC" ? 6 : 18;
     // Omit --amount to use the vault's full asset balance at execute time (dynamic-all mode).
     const depositAmount = opts.amount ? parseUnits(opts.amount as string, decimals) : 0n;
+    // --min-return is a settlement floor: `sweepToVault` reverts on the first
+    // call if `balance < minReturnAmount`. With --amount set we default to 1:1
+    // (return at least the deposit). With dynamic-all we have no anchor, so
+    // require --min-return explicitly — a zero floor would trivially pass the
+    // settlement guard and defeat the whole check.
+    if (depositAmount === 0n && !opts.minReturn) {
+      console.error(chalk.red(
+        "--min-return is required when --amount is omitted (dynamic-all mode).\n" +
+        "  The settlement floor can't be derived without a reference deposit — " +
+        "set it explicitly to the minimum USDC you'll accept back from HyperCore.",
+      ));
+      process.exit(1);
+    }
     const minReturn = opts.minReturn
       ? parseUnits(opts.minReturn as string, decimals)
       : opts.amount
