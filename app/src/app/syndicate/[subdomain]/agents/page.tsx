@@ -98,7 +98,7 @@ export default async function AgentsPage({
               style={{
                 textAlign: "center",
                 padding: "3rem 0",
-                color: "rgba(255,255,255,0.3)",
+                color: "rgba(255,255,255,0.55)",
                 fontFamily: "var(--font-plus-jakarta), sans-serif",
                 fontSize: "12px",
               }}
@@ -178,7 +178,7 @@ export default async function AgentsPage({
                       className="font-[family-name:var(--font-plus-jakarta)] flex items-center gap-2"
                       style={{
                         fontSize: "11px",
-                        color: "rgba(255,255,255,0.35)",
+                        color: "rgba(255,255,255,0.6)",
                         marginTop: agent.identity?.description ? 0 : "0.5rem",
                       }}
                     >

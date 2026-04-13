@@ -127,7 +127,7 @@ export default function ProposalHistory({
           style={{
             textAlign: "center",
             padding: "2rem 0",
-            color: "rgba(255,255,255,0.3)",
+            color: "rgba(255,255,255,0.55)",
             fontFamily: "var(--font-plus-jakarta), sans-serif",
             fontSize: "12px",
           }}
@@ -169,7 +169,7 @@ export default function ProposalHistory({
                   </td>
                   <td
                     style={{
-                      color: pnlDisplay?.color ?? "rgba(255,255,255,0.3)",
+                      color: pnlDisplay?.color ?? "rgba(255,255,255,0.55)",
                       fontWeight: pnlDisplay ? 600 : 400,
                     }}
                   >

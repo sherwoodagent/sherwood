@@ -1,12 +1,12 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
+import dynamic from "next/dynamic";
 import AmbientBackground from "@/components/AmbientBackground";
 import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import SyndicateClient from "@/components/SyndicateClient";
 import DepositButton from "@/components/DepositButton";
 import WithdrawButton from "@/components/WithdrawButton";
-import EquityCurveChart from "@/components/EquityCurveChart";
 import RiskMetricsPanel from "@/components/RiskMetricsPanel";
 import VaultOverview from "@/components/VaultOverview";
 import AgentRoster from "@/components/AgentRoster";
@@ -18,8 +18,29 @@ import StrategyActivity from "@/components/StrategyActivity";
 import ReferralBanner from "@/components/ReferralBanner";
 import { RecentlyViewedTracker } from "@/components/RecentlyViewed";
 import { TargetChainProvider } from "@/components/TargetChainContext";
+import RedemptionUnlockWatcher from "@/components/RedemptionUnlockWatcher";
 import { resolveSyndicateBySubdomain } from "@/lib/syndicate-data";
 import { loadActiveStrategy } from "@/lib/active-strategy";
+
+// Equity chart pulls chart.js (~50kB gzip). Lives below the fold on the
+// vault page; dynamic-importing it shifts that weight out of the route's
+// initial JS bundle.
+// EquityCurveChart already has "use client" — dropping ssr: false (which
+// isn't allowed in server-component dynamic imports) lets Next render
+// the loading placeholder server-side and hydrate the chart on the client.
+const EquityCurveChart = dynamic(() => import("@/components/EquityCurveChart"), {
+  loading: () => (
+    <div
+      style={{
+        height: 320,
+        background: "rgba(255,255,255,0.02)",
+        animation: "sh-skel-shimmer 1.5s ease-in-out infinite",
+      }}
+      aria-busy="true"
+      aria-label="Loading equity chart"
+    />
+  ),
+});
 
 export async function generateMetadata({
   params,
@@ -125,6 +146,15 @@ export default async function SyndicateDetailPage({
           <RecentlyViewedTracker
             subdomain={subdomain}
             name={name}
+            chainId={data.chainId}
+          />
+
+          {/* Toasts the connected wallet when redemptions unlock on this
+              vault — only fires when the user holds shares + the vault
+              transitions locked → open. */}
+          <RedemptionUnlockWatcher
+            vault={data.vault}
+            vaultName={name}
             chainId={data.chainId}
           />
 

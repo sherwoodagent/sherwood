@@ -393,7 +393,7 @@ export default async function ProposalsPage({
                 style={{ marginBottom: "1rem" }}
               >
                 <span>Voting Queue</span>
-                <span style={{ color: "rgba(255,255,255,0.35)", fontSize: "10px", letterSpacing: "0.15em" }}>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: "10px", letterSpacing: "0.15em" }}>
                   {votingQueue.length} PENDING
                 </span>
               </div>

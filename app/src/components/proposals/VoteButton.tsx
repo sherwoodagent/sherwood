@@ -165,7 +165,7 @@ export default function VoteButton({
       <div
         style={{
           fontSize: "11px",
-          color: "rgba(255,255,255,0.3)",
+          color: "rgba(255,255,255,0.55)",
           fontFamily: "var(--font-plus-jakarta), sans-serif",
           padding: "0.5rem 0",
         }}
@@ -195,7 +195,7 @@ export default function VoteButton({
       <div
         style={{
           fontSize: "11px",
-          color: "rgba(255,255,255,0.3)",
+          color: "rgba(255,255,255,0.55)",
           fontFamily: "var(--font-plus-jakarta), sans-serif",
           padding: "0.5rem 0",
         }}

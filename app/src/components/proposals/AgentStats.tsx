@@ -85,7 +85,7 @@ export default function AgentStats({
           style={{
             textAlign: "center",
             padding: "2rem 0",
-            color: "rgba(255,255,255,0.3)",
+            color: "rgba(255,255,255,0.55)",
             fontFamily: "var(--font-plus-jakarta), sans-serif",
             fontSize: "12px",
           }}
@@ -116,7 +116,7 @@ export default function AgentStats({
                 ? "var(--color-accent)"
                 : pnlNegative
                   ? "#ff4d4d"
-                  : "rgba(255,255,255,0.3)";
+                  : "rgba(255,255,255,0.55)";
 
               return (
                 <tr key={stat.address}>

@@ -268,7 +268,7 @@ select:focus-visible {
   margin-left: auto;
   font-family: var(--font-mono);
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.6);
   transition: transform 0.25s ease, color 0.25s ease;
 }
 
@@ -464,7 +464,7 @@ select:focus-visible {
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.16em;
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.6);
   border-right: 1px dashed var(--color-border-soft);
   padding-right: 1.25rem;
   padding-top: 0.15rem;
@@ -585,7 +585,7 @@ select:focus-visible {
   font-size: 10px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.55);
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px dashed var(--color-border-soft);
@@ -1545,7 +1545,7 @@ select:focus-visible {
   font-size: 14px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.6);
   text-decoration: none;
   padding: 0.75rem 1.5rem;
   border-bottom: 2px solid transparent;
@@ -1758,7 +1758,7 @@ select:focus-visible {
 .log-table th {
   text-align: left;
   padding: 0 0.75rem 1rem 0;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.55);
   text-transform: uppercase;
   font-weight: 400;
 }
@@ -1942,7 +1942,7 @@ select:focus-visible {
 
 .ticker-item .ticker-weight {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.55);
   font-family: var(--font-plus-jakarta), sans-serif;
 }
 
@@ -2453,7 +2453,7 @@ select:focus-visible {
 .sh-input:hover { border-color: rgba(255, 255, 255, 0.25); }
 .sh-input:focus { border-color: var(--color-accent); background: rgba(46, 230, 166, 0.03); outline: none; }
 .sh-input--error { border-color: #ff4d4d; }
-.sh-input::placeholder { color: rgba(255, 255, 255, 0.3); }
+.sh-input::placeholder { color: rgba(255, 255, 255, 0.55); }
 
 .sh-field { display: flex; flex-direction: column; gap: 0.4rem; }
 .sh-field__label {

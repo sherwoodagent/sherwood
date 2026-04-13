@@ -16,7 +16,7 @@ export default function AgentRoster({ agents }: AgentRosterProps) {
       {agents.length === 0 ? (
         <div
           className="font-[family-name:var(--font-plus-jakarta)] text-xs"
-          style={{ color: "rgba(255,255,255,0.3)", padding: "2rem 0" }}
+          style={{ color: "rgba(255,255,255,0.55)", padding: "2rem 0" }}
         >
           No agents registered
         </div>
@@ -57,7 +57,7 @@ export default function AgentRoster({ agents }: AgentRosterProps) {
                       className="font-[family-name:var(--font-plus-jakarta)]"
                       style={{
                         fontSize: "9px",
-                        color: "rgba(255,255,255,0.3)",
+                        color: "rgba(255,255,255,0.55)",
                         marginTop: "2px",
                         fontStyle: "italic",
                       }}

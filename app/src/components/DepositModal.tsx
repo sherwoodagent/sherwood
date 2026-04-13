@@ -303,7 +303,7 @@ export default function DepositModal({
             <details
               style={{
                 fontSize: "10px",
-                color: "rgba(255,255,255,0.3)",
+                color: "rgba(255,255,255,0.55)",
                 maxHeight: "100px",
                 overflow: "auto",
                 wordBreak: "break-all",
