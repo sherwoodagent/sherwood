@@ -37,7 +37,10 @@ interface VoterRow {
   share: number; // 0..1
 }
 
-const BLOCK_WINDOW = 60_000n; // ~7d on Base (2s blocks)
+// Block count is chain-agnostic; the calendar window varies (Base ≈ 7d,
+// HyperEVM is shorter). Bounded for predictable RPC cost; older votes
+// aren't shown.
+const BLOCK_WINDOW = 60_000n;
 
 export default function VoteConcentration({
   governorAddress,

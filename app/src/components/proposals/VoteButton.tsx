@@ -65,6 +65,13 @@ export default function VoteButton({
   const { writeContract, data: txHash, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
 
+  // Local submitting flag — flips true synchronously inside castVote (before
+  // wagmi's isPending catches up) so both FOR/AGAINST buttons lock out as
+  // soon as the user clicks. Without this there's a window between
+  // onOptimistic firing and isPending becoming true where a second click
+  // could overwrite the optimistic bar with the opposite direction.
+  const [submitting, setSubmitting] = useState(false);
+
   // Re-fetch page data once the vote tx is confirmed
   useEffect(() => {
     if (isConfirmed && txHash) {
@@ -74,12 +81,13 @@ export default function VoteButton({
         `Proposal #${proposalId.toString()} — your vote is recorded onchain.`,
       );
       router.refresh();
+      setSubmitting(false);
       // Drop the optimistic overlay — refresh will pull canonical numbers.
       onResolved?.();
     }
   }, [isConfirmed, router, txHash, governorAddress, proposalId, toast, onResolved]);
 
-  const busy = isPending || isConfirming;
+  const busy = submitting || isPending || isConfirming;
   const explorerUrl = getAddresses(chainId)?.blockExplorer;
 
   function castVote(support: 0 | 1) {
@@ -88,6 +96,9 @@ export default function VoteButton({
       setVotingEnded(true);
       return;
     }
+    // Belt-and-suspenders: ignore if already mid-flight.
+    if (submitting || isPending || isConfirming) return;
+    setSubmitting(true);
     // Apply optimistic overlay BEFORE writeContract so the UI updates the
     // moment the user clicks (before the wallet popup even appears).
     if (voteWeight && voteWeight > 0n) {
@@ -105,6 +116,7 @@ export default function VoteButton({
         onError: (err) => {
           const reason = classifyError(err);
           trackTxFailed("vote", governorAddress, reason);
+          setSubmitting(false);
           // Roll back the optimistic overlay on submission failure (rejected
           // signatures, RPC errors, etc.) so the bar reverts immediately.
           onResolved?.();

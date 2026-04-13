@@ -689,7 +689,10 @@ async function fetchStrategyActivity(
 // indexed), scan the most recent ~60k blocks of vault Deposit/Withdraw
 // events directly. Costs an extra RPC roundtrip but keeps the feed alive.
 
-const ACTIVITY_LOG_WINDOW = 60_000n; // ~7d on Base (2s blocks)
+// Calendar window varies by chain (Base ≈ 7d at 2s blocks, HyperEVM ≈
+// ~1d at ~1s blocks, etc). The count stays bounded so RPC latency is
+// predictable; older history comes from the subgraph when available.
+const ACTIVITY_LOG_WINDOW = 60_000n;
 const ACTIVITY_LOG_MAX = 20;
 
 async function fetchActivityFromLogs(

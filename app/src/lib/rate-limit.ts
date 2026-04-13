@@ -30,11 +30,26 @@ function clientIp(req: Request): string {
   );
 }
 
+/** Sweep expired buckets every 5 minutes to prevent unbounded memory growth
+ *  under IP rotation or sustained traffic. Without this the Map accumulates
+ *  one entry per unique IP for the lifetime of the process. */
+const SWEEP_INTERVAL_MS = 5 * 60_000;
+
 export function makeRateLimit({ windowMs, max }: Options) {
   const buckets = new Map<string, Bucket>();
+  let lastSweep = Date.now();
+
   return function checkRateLimit(req: Request): boolean {
-    const ip = clientIp(req);
     const now = Date.now();
+
+    if (now - lastSweep > SWEEP_INTERVAL_MS) {
+      for (const [key, entry] of buckets) {
+        if (entry.resetAt < now) buckets.delete(key);
+      }
+      lastSweep = now;
+    }
+
+    const ip = clientIp(req);
     const entry = buckets.get(ip);
     if (!entry || entry.resetAt < now) {
       buckets.set(ip, { count: 1, resetAt: now + windowMs });

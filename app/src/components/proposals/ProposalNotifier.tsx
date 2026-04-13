@@ -12,7 +12,7 @@
  * spam the user with stale notifications when they reopen the app.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useAccount, usePublicClient } from "wagmi";
 import { type Address } from "viem";
 import {
@@ -51,9 +51,25 @@ export default function ProposalNotifier({
   // Track which proposals we've already confirmed the user voted on.
   const userVoted = useRef<Map<string, boolean>>(new Map());
 
+  // Stable key summarising the proposal set. Parent re-renders (e.g. the
+  // router.refresh() VoteButton fires on confirm) create a new proposals
+  // array every time; depending on that array identity would tear down the
+  // interval + reset lastSeen/userVoted on every vote, causing spurious
+  // toasts and bursty RPC polling.
+  const proposalsKey = useMemo(
+    () => proposals.map((p) => p.id.toString()).join(","),
+    [proposals],
+  );
+  const proposalsRef = useRef(proposals);
+  // Keep the ref in sync via an effect — mutating refs during render is a
+  // React 19 rule violation and breaks concurrent rendering guarantees.
+  useEffect(() => {
+    proposalsRef.current = proposals;
+  }, [proposals]);
+
   useEffect(() => {
     if (!client || !address) return;
-    if (!proposals.length) return;
+    if (!proposalsRef.current.length) return;
 
     let cancelled = false;
 
@@ -62,7 +78,7 @@ export default function ProposalNotifier({
 
       // Step 1: Resolve which proposals this user voted on (one-time per
       // proposal). Skip terminal proposals — there's nothing left to notify.
-      const live = proposals.filter(
+      const live = proposalsRef.current.filter(
         (p) => !TERMINAL_STATES.has(p.computedState),
       );
       const toCheck = live.filter(
@@ -158,7 +174,10 @@ export default function ProposalNotifier({
       cancelled = true;
       clearInterval(id);
     };
-  }, [client, address, governorAddress, proposals, toast]);
+    // `proposalsKey` is a stable summary of the proposal set. Depending on
+    // the raw `proposals` array would reset the interval + user-vote cache
+    // every time the parent re-renders (router.refresh() after a vote).
+  }, [client, address, governorAddress, proposalsKey, toast]);
 
   return null;
 }

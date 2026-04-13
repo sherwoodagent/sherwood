@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useSyncExternalStore, useState } from "react";
+import { useEffect, useSyncExternalStore, useState } from "react";
 import CopyButton from "./CopyButton";
 
 interface ReferralBannerProps {
@@ -59,19 +59,18 @@ export default function ReferralBanner({ subdomain }: ReferralBannerProps) {
   // Local override so dismissing closes the banner immediately
   const [dismissedNow, setDismissedNow] = useState(false);
 
-  // Persist URL ref to localStorage when it appears (event-driven side effect,
-  // not a render-time setState — runs once per real refParam change).
-  if (
-    typeof window !== "undefined" &&
-    refParam &&
-    refParam !== cachedRef
-  ) {
+  // Persist URL ref to localStorage when it appears. Must live in an effect —
+  // writing during render is a React rule violation (render functions must be
+  // pure) and the StorageEvent dispatched by setItem would re-trigger the
+  // useSyncExternalStore subscription mid-render under concurrent mode.
+  useEffect(() => {
+    if (!refParam || refParam === cachedRef) return;
     try {
       localStorage.setItem(`${STORAGE_PREFIX}${subdomain}`, refParam);
     } catch {
-      // ignore
+      // ignore quota / privacy errors
     }
-  }
+  }, [refParam, cachedRef, subdomain]);
 
   const effectiveRef = refParam ?? cachedRef;
   const isDismissed = dismissedFlag === "1" || dismissedNow;
