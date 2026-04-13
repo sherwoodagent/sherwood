@@ -1510,7 +1510,8 @@ select:focus-visible {
   background: transparent;
   color: var(--color-accent);
   border: 1px solid var(--color-accent);
-  padding: 0.8rem 1.5rem;
+  padding: 0.55rem 1rem;
+  white-space: nowrap;
   font-size: 14px;
   font-weight: 700;
   text-transform: uppercase;
@@ -1617,6 +1618,16 @@ select:focus-visible {
 
 .table-container tbody tr:hover {
   background: rgba(46, 230, 166, 0.03);
+}
+
+/* On narrow viewports, tighten td/th padding so action buttons have room
+   and the table doesn't starve its rightmost column. */
+@media (max-width: 900px) {
+  .table-container th,
+  .table-container td {
+    padding: 0.9rem 0.75rem;
+    font-size: 13px;
+  }
 }
 
 /* ── Agent Detail Header ───────────────────────────────── */
