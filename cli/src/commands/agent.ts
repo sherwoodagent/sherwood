@@ -45,6 +45,7 @@ function makeConfig(overrides?: Partial<AgentConfig>): AgentConfig {
     dryRun: true,
     maxPositionPct: 5,
     maxRiskPct: 20,
+    useX402: true, // Paid signals (Nansen + Messari) on by default — opt out with --no-x402
     ...overrides,
   };
 }
@@ -60,10 +61,10 @@ export function registerAgentCommands(program: Command): void {
     .option("--all", "Analyze full watchlist")
     .option("--auto", "Use dynamic token selection from Hyperliquid market data")
     .option("--json", "Output as JSON")
-    .option("--x402", "Include paid x402 data (Nansen smart-money, Messari fundamentals)")
+    .option("--no-x402", "Skip paid x402 data (Nansen smart-money, Messari fundamentals) — on by default")
     .option("--telegram", "Output formatted summary for Telegram")
     .option("--proposals", "Generate trade proposals for high-confidence opportunities")
-    .action(async (tokens: string[], options: { all?: boolean; auto?: boolean; json?: boolean; x402?: boolean; telegram?: boolean; proposals?: boolean }) => {
+    .action(async (tokens: string[], options: { all?: boolean; auto?: boolean; json?: boolean; x402: boolean; telegram?: boolean; proposals?: boolean }) => {
       let tokenList: string[];
       let selectionSummary: string | undefined;
 
@@ -89,7 +90,7 @@ export function registerAgentCommands(program: Command): void {
         tokenList = options.all ? DEFAULT_TOKENS : tokens.length > 0 ? tokens : DEFAULT_TOKENS;
       }
 
-      const config = makeConfig({ tokens: tokenList, useX402: options.x402 ?? false });
+      const config = makeConfig({ tokens: tokenList, useX402: options.x402 });
       const tradingAgent = new TradingAgent(config);
       const spinner = ora("Analyzing tokens...").start();
 
@@ -289,8 +290,8 @@ export function registerAgentCommands(program: Command): void {
     .option("--strategy-clone <address>", "Strategy clone address on HyperEVM (required for hyperliquid-perp)")
     .option("--chain <chain>", "Chain for live execution (hyperevm, hyperevm-testnet)", "ethereum")
     .option("--asset-index <n>", "HyperCore perp asset index (default: 3 = ETH)")
-    .option("--x402", "Include paid x402 data (Nansen smart-money, Messari fundamentals)")
-    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; auto?: boolean; log?: string; mode?: string; strategyClone?: string; chain?: string; assetIndex?: string; x402?: boolean }) => {
+    .option("--no-x402", "Skip paid x402 data (Nansen smart-money, Messari fundamentals) — on by default")
+    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; auto?: boolean; log?: string; mode?: string; strategyClone?: string; chain?: string; assetIndex?: string; x402: boolean }) => {
       let tokenList: string[];
 
       if (options.auto) {
@@ -337,7 +338,7 @@ export function registerAgentCommands(program: Command): void {
       }
 
       const loopConfig: LoopConfig = {
-        agent: makeConfig({ tokens: tokenList, cycle, dryRun: !isLive, useX402: options.x402 ?? false }),
+        agent: makeConfig({ tokens: tokenList, cycle, dryRun: !isLive, useX402: options.x402 }),
         execution: {
           dryRun: !isLive,
           mode: (options.mode ?? 'dry-run') as 'dry-run' | 'hyperliquid-perp',
