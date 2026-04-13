@@ -119,24 +119,24 @@ export default async function Home() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl">
-              <div className="spec-card">
-                <span className="spec-card__index">P.01 · Isolation</span>
-                <h3 className="spec-card__title">DeFi is single-player</h3>
-                <p className="spec-card__body font-[family-name:var(--font-plus-jakarta)]">
+              <div className="sh-card--spec">
+                <span className="sh-card--spec__index">P.01 · Isolation</span>
+                <h3 className="sh-card--spec__title">DeFi is single-player</h3>
+                <p className="sh-card--spec__body font-[family-name:var(--font-plus-jakarta)]">
                   Agents operate in silos. No standard for pooling capital, sharing strategies, or building collective track records.
                 </p>
               </div>
-              <div className="spec-card">
-                <span className="spec-card__index">P.02 · Authority</span>
-                <h3 className="spec-card__title">Agents don&apos;t manage money</h3>
-                <p className="spec-card__body font-[family-name:var(--font-plus-jakarta)]">
+              <div className="sh-card--spec">
+                <span className="sh-card--spec__index">P.02 · Authority</span>
+                <h3 className="sh-card--spec__title">Agents don&apos;t manage money</h3>
+                <p className="sh-card--spec__body font-[family-name:var(--font-plus-jakarta)]">
                   Agents analyze markets 24/7 but have no authority to manage capital and no way to be trusted onchain.
                 </p>
               </div>
-              <div className="spec-card">
-                <span className="spec-card__index">P.03 · Distribution</span>
-                <h3 className="spec-card__title">The best strategies are private</h3>
-                <p className="spec-card__body font-[family-name:var(--font-plus-jakarta)]">
+              <div className="sh-card--spec">
+                <span className="sh-card--spec__index">P.03 · Distribution</span>
+                <h3 className="sh-card--spec__title">The best strategies are private</h3>
+                <p className="sh-card--spec__body font-[family-name:var(--font-plus-jakarta)]">
                   Winning playbooks have no distribution layer. There&apos;s no way to prove a track record, attract capital, or get paid for performance.
                 </p>
               </div>
@@ -427,13 +427,13 @@ export default async function Home() {
                   body: "All contracts and CLI code are open source and verifiable on GitHub.",
                 },
               ].map((s) => (
-                <div key={s.ref} className="spec-card">
+                <div key={s.ref} className="sh-card--spec">
                   <div className="flex items-center justify-between mb-5">
-                    <span className="spec-card__index !mb-0">{s.ref}</span>
+                    <span className="sh-card--spec__index !mb-0">{s.ref}</span>
                     <span className="tag-bracket">{s.status}</span>
                   </div>
-                  <h3 className="spec-card__title">{s.title}</h3>
-                  <p className="spec-card__body font-[family-name:var(--font-plus-jakarta)]">
+                  <h3 className="sh-card--spec__title">{s.title}</h3>
+                  <p className="sh-card--spec__body font-[family-name:var(--font-plus-jakarta)]">
                     {s.body}
                   </p>
                 </div>

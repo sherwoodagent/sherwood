@@ -29,7 +29,7 @@ export default function VaultOverview({
       <div className="panel-title">Vault Configuration</div>
 
       <div className="metrics-grid">
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Open Deposits</div>
           <div
             className="metric-val"
@@ -38,11 +38,11 @@ export default function VaultOverview({
             {openDeposits ? "YES" : "NO"}
           </div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Management Fee</div>
           <div className="metric-val">{formatBps(managementFeeBps)}</div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">
             <Term k="redemptions-locked">Redemptions</Term>
           </div>
@@ -56,7 +56,7 @@ export default function VaultOverview({
             )}
           </div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Status</div>
           <div
             className="metric-val"

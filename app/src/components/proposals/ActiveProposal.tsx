@@ -151,19 +151,19 @@ export default function ActiveProposal({
       </div>
 
       <div className="metrics-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Agent</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {addressNames?.[proposal.proposer.toLowerCase()] || truncateAddress(proposal.proposer)}
           </div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Capital Deployed</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {formatAsset(proposal.deployedCapital, assetDecimals)} {assetSymbol}
           </div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Settles In</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {timeLeft > 0n ? (
@@ -173,7 +173,7 @@ export default function ActiveProposal({
             )}
           </div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Performance Fee</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {formatBps(proposal.performanceFeeBps)}

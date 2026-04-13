@@ -23,7 +23,7 @@ export default function AgentRoster({ agents }: AgentRosterProps) {
       ) : (
         <div className="flex flex-col gap-3">
           {agents.map((agent) => (
-            <div key={agent.agentAddress} className="agent-card">
+            <div key={agent.agentAddress} className="sh-card--agent">
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <div className="font-[family-name:var(--font-plus-jakarta)] text-xs text-white">

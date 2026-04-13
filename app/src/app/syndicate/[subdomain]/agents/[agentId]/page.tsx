@@ -187,21 +187,21 @@ export default async function AgentDetailPage({
 
           {/* Track record */}
           <div className="metrics-grid" style={{ marginTop: "1.5rem" }}>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Proposals</div>
               <div className="metric-val">{agentProposals.length}</div>
             </div>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Settled</div>
               <div className="metric-val">{settled.length}</div>
             </div>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Win rate</div>
               <div className="metric-val">
                 {settled.length === 0 ? "—" : `${winRate.toFixed(0)}%`}
               </div>
             </div>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Net P&amp;L</div>
               <div
                 className="metric-val"

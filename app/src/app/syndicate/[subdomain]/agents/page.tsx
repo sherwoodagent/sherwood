@@ -115,7 +115,7 @@ export default async function AgentsPage({
                 );
 
                 return (
-                  <div key={agent.agentAddress} className="agent-card" style={{ padding: "1.25rem" }}>
+                  <div key={agent.agentAddress} className="sh-card--agent" style={{ padding: "1.25rem" }}>
                     {/* Header: name + status */}
                     <div className="flex justify-between items-start mb-3">
                       <div>
