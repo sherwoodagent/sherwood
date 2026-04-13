@@ -99,7 +99,7 @@ export default function SiteFooter() {
           {Object.entries(FOOTER_LINKS).map(([heading, links], colIdx) => (
             <div key={heading}>
               <h4 className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[var(--color-accent)] mb-5 font-medium flex items-baseline gap-2">
-                <span className="opacity-55">§ {String(colIdx + 1).padStart(2, "0")}</span>
+                <span className="opacity-55">{String(colIdx + 1).padStart(2, "0")}</span>
                 <span>{heading}</span>
               </h4>
               <ul className="space-y-3">

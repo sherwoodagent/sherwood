@@ -43,7 +43,7 @@ export default async function LeaderboardPage() {
             <div className="lb-meta">
               <span className="lb-meta__pulse">{"// Live Sync"}</span>
               <span className="lb-meta__sep" aria-hidden />
-              <span>§ LB.001 · Ranked by TVL</span>
+              <span>LB.001 · Ranked by TVL</span>
               <span className="lb-meta__sep" aria-hidden />
               <span>Base · Hyperwood</span>
             </div>
