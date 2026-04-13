@@ -527,7 +527,9 @@ contract SyndicateGovernorTest is Test {
         uint256 proposalId = _createApprovedProposal(1500, 7 days);
         vm.prank(owner);
         governor.emergencyCancel(proposalId);
-        assertEq(governor.getActiveProposal(address(vault)), 0, "activeProposal should be cleared after emergencyCancel");
+        assertEq(
+            governor.getActiveProposal(address(vault)), 0, "activeProposal should be cleared after emergencyCancel"
+        );
         assertFalse(vault.redemptionsLocked(), "vault should not be locked after emergencyCancel");
     }
 
