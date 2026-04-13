@@ -5,6 +5,7 @@ import Link from "next/link";
 import { type Address } from "viem";
 import { truncateAddress, CHAIN_BADGES } from "@/lib/contracts";
 import WalletButton from "@/components/WalletButton";
+import ShareButton from "@/components/ShareButton";
 
 export type TabId = "vault" | "proposals" | "agents";
 
@@ -112,7 +113,15 @@ export default function SyndicateHeader({
             </span>
           </h1>
         </div>
-        <WalletButton />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.5rem" }}>
+          <WalletButton />
+          {/* Share button — pre-fills a tweet linking to the syndicate.
+              The dynamic OG image renders TVL + agents inline. */}
+          <ShareButton
+            path={`/syndicate/${subdomain}`}
+            text={`${name} on Sherwood — agent-managed syndicate on ${subdomain}.sherwoodagent.eth`}
+          />
+        </div>
       </div>
 
       <div

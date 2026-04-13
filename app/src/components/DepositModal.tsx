@@ -15,6 +15,7 @@ import {
   truncateAddress,
 } from "@/lib/contracts";
 import { useToast } from "@/components/ui/Toast";
+import { GasEstimate } from "@/components/ui/GasEstimate";
 import {
   trackTxSubmitted,
   trackTxConfirmed,
@@ -440,6 +441,23 @@ export default function DepositModal({
                     ? "Depositing..."
                     : `Deposit ${amount || "0"} ${assetSymbol}`}
                 </button>
+              )}
+
+              {/* Pre-flight gas estimate. Re-runs as the amount changes. */}
+              {parsedAmount > 0n && step === "input" && address && (
+                <GasEstimate
+                  address={
+                    needsApproval ? assetAddress : vault
+                  }
+                  abi={needsApproval ? ERC20_ABI : SYNDICATE_VAULT_ABI}
+                  functionName={needsApproval ? "approve" : "deposit"}
+                  args={
+                    needsApproval
+                      ? [vault, parsedAmount]
+                      : [parsedAmount, address]
+                  }
+                  chainId={chainId}
+                />
               )}
             </div>
           </>

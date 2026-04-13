@@ -19,6 +19,7 @@ import { formatDuration } from "@/lib/governor-data";
 import type { ActivityEvent } from "@/lib/syndicate-data";
 import { Term } from "@/components/ui/Glossary";
 import { TargetChainProvider } from "@/components/TargetChainContext";
+import TimelockPanel from "@/components/governance/TimelockPanel";
 import type { Address } from "viem";
 
 /** Reduce activity events into a per-proposal receipt lookup. */
@@ -384,6 +385,14 @@ export default async function ProposalsPage({
           {/* NOTE: Active Strategy now lives on the Vault tab — that's where
               depositors first land asking "what is my capital doing?".
               Proposals page stays focused on voting + history. */}
+
+          {/* Pending parameter changes (timelock). Hides itself when none. */}
+          {!isMock && (
+            <TimelockPanel
+              governorAddress={governor.governorAddress}
+              chainId={data.chainId}
+            />
+          )}
 
           {/* Voting Queue */}
           {votingQueue.length > 0 && (

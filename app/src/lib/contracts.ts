@@ -695,6 +695,24 @@ export const SYNDICATE_GOVERNOR_ABI = [
       },
     ],
   },
+  // Parameter-change reads (timelock surface)
+  {
+    name: "getPendingParameterChange",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "paramKey", type: "bytes32" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "newValue", type: "uint256" },
+          { name: "executableAt", type: "uint256" },
+          { name: "queuedAt", type: "uint256" },
+        ],
+      },
+    ],
+  },
   // Events
   {
     type: "event",
@@ -704,6 +722,30 @@ export const SYNDICATE_GOVERNOR_ABI = [
       { name: "voter", type: "address", indexed: true },
       { name: "support", type: "uint8", indexed: false },
       { name: "weight", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ParameterChangeQueued",
+    inputs: [
+      { name: "paramKey", type: "bytes32", indexed: true },
+      { name: "newValue", type: "uint256", indexed: false },
+      { name: "executableAt", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ParameterChangeFinalized",
+    inputs: [
+      { name: "paramKey", type: "bytes32", indexed: true },
+      { name: "newValue", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ParameterChangeCancelled",
+    inputs: [
+      { name: "paramKey", type: "bytes32", indexed: true },
     ],
   },
 ] as const;

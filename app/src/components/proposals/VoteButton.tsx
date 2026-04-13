@@ -6,6 +6,7 @@ import { useAccount, useReadContract, useWriteContract, useWaitForTransactionRec
 import { type Address } from "viem";
 import { SYNDICATE_GOVERNOR_ABI, formatShares, getAddresses } from "@/lib/contracts";
 import { useToast } from "@/components/ui/Toast";
+import { GasEstimate } from "@/components/ui/GasEstimate";
 import { trackTxSubmitted, trackTxConfirmed, trackTxFailed, classifyError } from "@/lib/analytics";
 
 interface VoteButtonProps {
@@ -247,6 +248,18 @@ export default function VoteButton({
           {busy ? "..." : "Vote AGAINST"}
         </button>
       </div>
+      {/* Pre-flight gas estimate. We estimate the FOR path arbitrarily —
+          gas usage for vote(proposalId, 0) vs vote(proposalId, 1) is
+          essentially identical (same storage writes). */}
+      {!busy && voteWeight && voteWeight > 0n && (
+        <GasEstimate
+          address={governorAddress}
+          abi={SYNDICATE_GOVERNOR_ABI}
+          functionName="vote"
+          args={[proposalId, 0]}
+          chainId={chainId}
+        />
+      )}
       {busy && txHash && explorerUrl && (
         <div style={{ marginTop: "0.5rem" }}>
           <a

@@ -11,6 +11,7 @@ import { resolveSyndicateBySubdomain } from "@/lib/syndicate-data";
 import { fetchGovernorData, ProposalState } from "@/lib/governor-data";
 import { truncateAddress, formatAsset, getAddresses } from "@/lib/contracts";
 import { TargetChainProvider } from "@/components/TargetChainContext";
+import ShareButton from "@/components/ShareButton";
 
 interface PageParams {
   subdomain: string;
@@ -26,7 +27,26 @@ export async function generateMetadata({
   const data = await resolveSyndicateBySubdomain(subdomain);
   const agent = data?.agents.find((a) => a.agentId.toString() === agentId);
   const name = agent?.identity?.name || `Agent #${agentId}`;
-  return { title: `Sherwood // ${name}` };
+  const description = agent?.identity?.description
+    ? agent.identity.description.slice(0, 160)
+    : `Agent on ${subdomain}.sherwoodagent.eth — ERC-8004 identity #${agentId}.`;
+  const canonical = `/syndicate/${subdomain}/agents/${agentId}`;
+  return {
+    title: `Sherwood // ${name}`,
+    description,
+    alternates: { canonical },
+    openGraph: {
+      title: `${name} · Sherwood`,
+      description,
+      type: "profile",
+      // opengraph-image.tsx in this dir auto-generates the rich card.
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${name} · Sherwood`,
+      description,
+    },
+  };
 }
 
 export default async function AgentDetailPage({
@@ -179,9 +199,24 @@ export default async function AgentDetailPage({
                   </p>
                 )}
               </div>
-              <Badge variant={agent.active ? "success" : "danger"}>
-                {agent.active ? "Active" : "Inactive"}
-              </Badge>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  gap: "0.75rem",
+                }}
+              >
+                <Badge variant={agent.active ? "success" : "danger"}>
+                  {agent.active ? "Active" : "Inactive"}
+                </Badge>
+                {/* Share button — pre-fills a tweet linking to this agent's
+                    detail page; OG card auto-renders a rich preview. */}
+                <ShareButton
+                  path={`/syndicate/${subdomain}/agents/${agent.agentId.toString()}`}
+                  text={`${displayName} on Sherwood — ERC-8004 #${agent.agentId.toString()} · ${syndicateName}`}
+                />
+              </div>
             </div>
           </div>
 
