@@ -30,8 +30,9 @@ contract CreateWstETHProposal is Script {
 
     // Strategy params
     uint256 constant SUPPLY_AMOUNT = 0.0194 ether; // full vault balance
-    uint256 constant MIN_WSTETH_OUT = 0.018 ether; // ~7% slippage tolerance on execute swap
-    uint256 constant MIN_WETH_OUT = 0.018 ether; // ~7% slippage tolerance on settle swap
+    // Per-unit slippage rates (1e18-scaled): min out per 1e18 in. ~7% tolerance.
+    uint256 constant MIN_WSTETH_OUT_PER_WETH = 0.93e18;
+    uint256 constant MIN_WETH_OUT_PER_WSTETH = 0.93e18;
     uint256 constant DEADLINE_OFFSET = 300; // 5 min deadline
 
     function run() external {
@@ -52,8 +53,8 @@ contract CreateWstETHProposal is Script {
             aeroRouter: AERO_ROUTER,
             aeroFactory: AERO_FACTORY,
             supplyAmount: SUPPLY_AMOUNT,
-            minWstethOut: MIN_WSTETH_OUT,
-            minWethOut: MIN_WETH_OUT,
+            minWstethOutPerWeth: MIN_WSTETH_OUT_PER_WETH,
+            minWethOutPerWsteth: MIN_WETH_OUT_PER_WSTETH,
             deadlineOffset: DEADLINE_OFFSET
         });
 

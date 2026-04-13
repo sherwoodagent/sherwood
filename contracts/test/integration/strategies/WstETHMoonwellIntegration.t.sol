@@ -109,8 +109,8 @@ contract WstETHMoonwellIntegrationTest is BaseIntegrationTest {
             aeroRouter: AERO_ROUTER,
             aeroFactory: AERO_FACTORY,
             supplyAmount: supplyAmount,
-            minWstethOut: supplyAmount * 80 / 100, // 80% slippage tolerance
-            minWethOut: supplyAmount * 80 / 100, // 80% slippage tolerance
+            minWstethOutPerWeth: 0.8e18, // 20% slippage tolerance (per-unit 1e18 rate)
+            minWethOutPerWsteth: 0.8e18, // 20% slippage tolerance
             deadlineOffset: 300
         });
     }

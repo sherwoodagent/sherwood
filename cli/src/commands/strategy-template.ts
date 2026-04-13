@@ -430,8 +430,12 @@ async function buildInitDataForTemplate(
   if (templateKey === "wsteth-moonwell") {
     const supplyAmount = opts.amount ? parseUnits(opts.amount as string, 18) : 0n; // WETH = 18 decimals; 0 => use full vault balance at execute time
     const slippageBps = BigInt((opts.slippage as string) || "500"); // default 5% slippage
-    const minWstethOut = supplyAmount === 0n ? 1n : supplyAmount - (supplyAmount * slippageBps) / 10000n;
-    const minWethOut = supplyAmount === 0n ? 1n : supplyAmount - (supplyAmount * slippageBps) / 10000n;
+    // Per-unit rates (1e18-scaled) — Aerodrome wstETH/WETH stable pool trades
+    // near 1:1, so default the expected rate to 1e18. Slippage cuts from that.
+    // Rates scale with amountIn at execute time → dynamic-all mode is safe.
+    const ONE = 10n ** 18n;
+    const minWstethOutPerWeth = (ONE * (10000n - slippageBps)) / 10000n;
+    const minWethOutPerWsteth = (ONE * (10000n - slippageBps)) / 10000n;
 
     const params: wstethBuilder.WstETHMoonwellInitParams = {
       weth: TOKENS().WETH,
@@ -440,8 +444,8 @@ async function buildInitDataForTemplate(
       aeroRouter: AERODROME().ROUTER,
       aeroFactory: AERODROME().FACTORY,
       supplyAmount,
-      minWstethOut,
-      minWethOut,
+      minWstethOutPerWeth,
+      minWethOutPerWsteth,
       deadlineOffset: 300n,
     };
 

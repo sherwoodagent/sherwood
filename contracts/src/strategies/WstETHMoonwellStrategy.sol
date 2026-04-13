@@ -34,13 +34,17 @@ interface IAeroRouter {
  *   Settle:  redeem mwstETH → swap wstETH to WETH (Aerodrome stable pool) → push to vault
  *
  *   Batch calls from governor:
- *     Execute: [WETH.approve(strategy, supplyAmount|max), strategy.execute()]
+ *     Execute: [WETH.approve(strategy, amount), strategy.execute(), WETH.approve(strategy, 0)]
  *     Settle:  [strategy.settle()]
  *
- *   Tunable params (updatable by proposer between execution and settlement):
- *     - minWethOut: minimum WETH to accept on final settle swap (slippage)
- *     - minWstethOut: minimum wstETH to accept on execute swap (slippage)
- *     - deadlineOffset: seconds added to block.timestamp for swap deadlines
+ *   Slippage is expressed as *per-unit rates* (scaled by 1e18) so it works
+ *   for both fixed and dynamic-all mode:
+ *     - minWstethOutPerWeth:  min wstETH received per 1e18 WETH swapped (execute)
+ *     - minWethOutPerWsteth:  min WETH received per 1e18 wstETH swapped (settle)
+ *     minOut at swap time = (amountIn * rate) / 1e18
+ *
+ *   Tunable params (updatable by proposer):
+ *     - minWstethOutPerWeth, minWethOutPerWsteth, deadlineOffset
  *     - supplyAmount: fixed WETH amount, or 0 to use the vault's full WETH balance at execute time
  */
 contract WstETHMoonwellStrategy is BaseStrategy {
@@ -61,8 +65,8 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         address aeroRouter;
         address aeroFactory;
         uint256 supplyAmount;
-        uint256 minWstethOut; // slippage: min wstETH from WETH→wstETH swap (execute)
-        uint256 minWethOut; // slippage: min WETH from wstETH→WETH swap (settle)
+        uint256 minWstethOutPerWeth; // rate (1e18): min wstETH per 1e18 WETH (execute swap)
+        uint256 minWethOutPerWsteth; // rate (1e18): min WETH per 1e18 wstETH (settle swap)
         uint256 deadlineOffset; // seconds added to block.timestamp for swap deadlines
     }
 
@@ -74,8 +78,8 @@ contract WstETHMoonwellStrategy is BaseStrategy {
     address public aeroFactory;
 
     uint256 public supplyAmount;
-    uint256 public minWstethOut;
-    uint256 public minWethOut;
+    uint256 public minWstethOutPerWeth;
+    uint256 public minWethOutPerWsteth;
     uint256 public deadlineOffset;
 
     /// @inheritdoc IStrategy
@@ -89,7 +93,7 @@ contract WstETHMoonwellStrategy is BaseStrategy {
 
         if (p.weth == address(0) || p.wsteth == address(0) || p.mwsteth == address(0)) revert ZeroAddress();
         if (p.aeroRouter == address(0) || p.aeroFactory == address(0)) revert ZeroAddress();
-        if (p.minWstethOut == 0 || p.minWethOut == 0) revert InvalidAmount();
+        if (p.minWstethOutPerWeth == 0 || p.minWethOutPerWsteth == 0) revert InvalidAmount();
 
         weth = p.weth;
         wsteth = p.wsteth;
@@ -97,8 +101,8 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         aeroRouter = p.aeroRouter;
         aeroFactory = p.aeroFactory;
         supplyAmount = p.supplyAmount;
-        minWstethOut = p.minWstethOut;
-        minWethOut = p.minWethOut;
+        minWstethOutPerWeth = p.minWstethOutPerWeth;
+        minWethOutPerWsteth = p.minWethOutPerWsteth;
         deadlineOffset = p.deadlineOffset == 0 ? 300 : p.deadlineOffset;
     }
 
@@ -111,13 +115,15 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         _pullFromVault(weth, amountIn);
 
         // 2. Swap WETH → wstETH via Aerodrome stable pool
+        //    minOut scales with actual amountIn — safe for dynamic-all mode.
+        uint256 minWstethOut = (amountIn * minWstethOutPerWeth) / 1e18;
+        if (minWstethOut == 0) revert InvalidAmount();
+
         IERC20(weth).forceApprove(aeroRouter, amountIn);
         IAeroRouter.Route[] memory routes = new IAeroRouter.Route[](1);
         routes[0] = IAeroRouter.Route({from: weth, to: wsteth, stable: true, factory: aeroFactory});
         uint256[] memory amounts = IAeroRouter(aeroRouter)
-            .swapExactTokensForTokens(
-                amountIn, minWstethOut, routes, address(this), block.timestamp + deadlineOffset
-            );
+            .swapExactTokensForTokens(amountIn, minWstethOut, routes, address(this), block.timestamp + deadlineOffset);
         uint256 wstethReceived = amounts[amounts.length - 1];
         if (wstethReceived == 0) revert SwapFailed();
 
@@ -141,8 +147,12 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         }
 
         // 2. Swap wstETH → WETH via Aerodrome stable pool
+        //    minOut scales with actual wstETH balance — handles yield-accrued amounts safely.
         uint256 wstethBalance = IERC20(wsteth).balanceOf(address(this));
         if (wstethBalance > 0) {
+            uint256 minWethOut = (wstethBalance * minWethOutPerWsteth) / 1e18;
+            if (minWethOut == 0) revert InvalidAmount();
+
             IERC20(wsteth).forceApprove(aeroRouter, wstethBalance);
             IAeroRouter.Route[] memory routes = new IAeroRouter.Route[](1);
             routes[0] = IAeroRouter.Route({from: wsteth, to: weth, stable: true, factory: aeroFactory});
@@ -152,9 +162,7 @@ contract WstETHMoonwellStrategy is BaseStrategy {
                 );
         }
 
-        // 3. Push all WETH back to vault
-        uint256 wethBalance = IERC20(weth).balanceOf(address(this));
-        if (wethBalance < minWethOut) revert InvalidAmount();
+        // 3. Push all WETH back to vault (router already enforced min-out slippage)
         _pushAllToVault(weth);
 
         // Push any residual dust
@@ -165,7 +173,7 @@ contract WstETHMoonwellStrategy is BaseStrategy {
      * @notice Update slippage params — allowed in Pending OR Executed state.
      * @dev Overrides BaseStrategy to relax the state check. Proposer can fix
      *      slippage before execution (Pending) or between execute/settle (Executed).
-     *      Decode: (uint256 newMinWethOut, uint256 newMinWstethOut, uint256 newDeadlineOffset)
+     *      Decode: (uint256 newMinWethOutPerWsteth, uint256 newMinWstethOutPerWeth, uint256 newDeadlineOffset)
      *      Pass 0 to keep current value.
      */
     function updateParams(bytes calldata data) external override onlyProposer {
@@ -174,10 +182,10 @@ contract WstETHMoonwellStrategy is BaseStrategy {
     }
 
     function _updateParams(bytes calldata data) internal override {
-        (uint256 newMinWethOut, uint256 newMinWstethOut, uint256 newDeadlineOffset) =
+        (uint256 newMinWethOutPerWsteth, uint256 newMinWstethOutPerWeth, uint256 newDeadlineOffset) =
             abi.decode(data, (uint256, uint256, uint256));
-        if (newMinWethOut > 0) minWethOut = newMinWethOut;
-        if (newMinWstethOut > 0) minWstethOut = newMinWstethOut;
+        if (newMinWethOutPerWsteth > 0) minWethOutPerWsteth = newMinWethOutPerWsteth;
+        if (newMinWstethOutPerWeth > 0) minWstethOutPerWeth = newMinWstethOutPerWeth;
         if (newDeadlineOffset > 0) deadlineOffset = newDeadlineOffset;
     }
 }

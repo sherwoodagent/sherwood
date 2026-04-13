@@ -77,6 +77,14 @@ export function getCachedGroupId(subdomain: string): string | undefined {
   return config.groupCache[subdomain];
 }
 
+export function invalidateCachedGroupId(subdomain: string): void {
+  const config = loadConfig();
+  if (config.groupCache[subdomain]) {
+    delete config.groupCache[subdomain];
+    saveConfig(config);
+  }
+}
+
 export function setVeniceApiKey(apiKey: string): void {
   const config = loadConfig();
   config.veniceApiKey = apiKey;
