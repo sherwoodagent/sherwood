@@ -25,9 +25,9 @@ export default async function Home() {
           {/* Hero */}
           <article className="hero-section">
             <div className="stagger">
-              {/* Live-on rail */}
+              {/* System status rail */}
               <div className="hero-rule mt-10">
-                <span>Live on Base · Hyperwood</span>
+                <span>// System Online, Deployed Base + Hyperwood</span>
               </div>
 
               {/* Hackathon Badge */}
