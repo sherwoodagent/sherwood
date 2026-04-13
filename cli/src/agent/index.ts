@@ -26,6 +26,7 @@ import { DexScreenerProvider } from "../providers/data/dexscreener.js";
 import { FundingRateProvider } from "../providers/data/funding-rate.js";
 import { TokenUnlocksProvider } from "../providers/data/token-unlocks.js";
 import { TwitterSentimentProvider } from "../providers/data/twitter.js";
+import { logSignal } from "./signal-logger.js";
 import { HyperliquidProvider } from "../providers/data/hyperliquid.js";
 import type { StrategyContext, StrategyConfig } from "./strategies/index.js";
 import { MarketRegimeDetector } from "./regime.js";
@@ -436,13 +437,22 @@ export class TradingAgent {
       regimeAnalysis?.regime,
     );
 
-    return {
+    const result: TokenAnalysis = {
       token: tokenId,
       decision,
       data: { technicalSignals, fearAndGreed: fearAndGreedValue, tvl },
       regime: regimeAnalysis,
       correlation: correlationCheck,
     };
+
+    // Persist analysis to ~/.sherwood/agent/signal-history.jsonl so the
+    // signal-audit tool can measure fire rates over time. Fire-and-forget —
+    // never blocks scoring, never crashes on disk failure.
+    const currentPrice = hyperliquidData?.markPrice
+      ?? (candles && candles.length > 0 ? candles[candles.length - 1]!.close : 0);
+    logSignal(result, currentPrice, resolvedWeights);
+
+    return result;
   }
 
   /** Update the token watchlist without recreating the agent (preserves caches). */
