@@ -258,6 +258,94 @@ describe("computeTradeDecision", () => {
     expect(decision.score).toBe(0);
   });
 
+  // ── Regime-conditional thresholds ──
+
+  it("trending-up regime fires BUY at lower score than default", () => {
+    // Score ~0.27 would HOLD under default (0.3 threshold) but BUY in trending-up (0.25 threshold)
+    const signals: Signal[] = [
+      makeSignal("technical", 0.3),
+      makeSignal("sentiment", 0.3),
+      makeSignal("onchain", 0.3),
+      makeSignal("fundamental", 0.3),
+      makeSignal("event", 0.0),
+      makeSignal("smartMoney", 0.3),
+    ];
+    const defaultDecision = computeTradeDecision(signals);
+    const trendingUpDecision = computeTradeDecision(
+      signals,
+      undefined,
+      undefined,
+      undefined,
+      "trending-up",
+    );
+    expect(defaultDecision.score).toBeCloseTo(trendingUpDecision.score, 5);
+    // In trending-up, a weak positive score should fire BUY
+    expect(trendingUpDecision.action).toBe("BUY");
+    expect(trendingUpDecision.thresholds?.buy).toBe(0.25);
+  });
+
+  it("ranging regime demands higher conviction than default", () => {
+    // Score ~0.35 would BUY under default (0.3) but HOLD in ranging (0.40 threshold)
+    const signals: Signal[] = [
+      makeSignal("technical", 0.4),
+      makeSignal("sentiment", 0.35),
+      makeSignal("onchain", 0.35),
+      makeSignal("fundamental", 0.35),
+      makeSignal("event", 0.35),
+      makeSignal("smartMoney", 0.35),
+    ];
+    const rangingDecision = computeTradeDecision(
+      signals,
+      undefined,
+      undefined,
+      undefined,
+      "ranging",
+    );
+    expect(rangingDecision.score).toBeGreaterThan(0.3);
+    expect(rangingDecision.score).toBeLessThan(0.4);
+    expect(rangingDecision.action).toBe("HOLD");
+    expect(rangingDecision.thresholds?.buy).toBe(0.4);
+  });
+
+  it("trending-up is asymmetric — harder to SELL than default", () => {
+    // Score -0.35 would SELL under default (-0.3) but HOLD in trending-up (-0.40 sell threshold)
+    const signals: Signal[] = [
+      makeSignal("technical", -0.4),
+      makeSignal("sentiment", -0.35),
+      makeSignal("onchain", -0.35),
+      makeSignal("fundamental", -0.35),
+      makeSignal("event", -0.35),
+      makeSignal("smartMoney", -0.35),
+    ];
+    const trendingUpDecision = computeTradeDecision(
+      signals,
+      undefined,
+      undefined,
+      undefined,
+      "trending-up",
+    );
+    expect(trendingUpDecision.score).toBeLessThan(-0.3);
+    expect(trendingUpDecision.score).toBeGreaterThan(-0.4);
+    expect(trendingUpDecision.action).toBe("HOLD");
+  });
+
+  it("records thresholds used on the decision for replay", () => {
+    const signals: Signal[] = [makeSignal("technical", 0.5)];
+    const decision = computeTradeDecision(
+      signals,
+      undefined,
+      undefined,
+      undefined,
+      "high-volatility",
+    );
+    expect(decision.thresholds).toEqual({
+      strongBuy: 0.7,
+      buy: 0.45,
+      sell: -0.45,
+      strongSell: -0.7,
+    });
+  });
+
   it("uses _weightOverride when provided on a signal", () => {
     // Give technical a massive override weight so it dominates
     const tech: Signal = {

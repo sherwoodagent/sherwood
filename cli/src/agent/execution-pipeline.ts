@@ -29,7 +29,9 @@ export class ExecutionPipeline {
 
   /**
    * Generate trade proposals from analysis results.
-   * Only creates proposals for high-confidence opportunities (score > 0.4, confidence > 50%).
+   * Only creates proposals for high-confidence opportunities — uses the
+   * regime-conditional BUY/SELL threshold from the decision (defaults to
+   * ±0.4 if the decision lacks regime context).
    */
   static generateProposals(
     analyses: TokenAnalysis[],
@@ -40,13 +42,21 @@ export class ExecutionPipeline {
     for (const analysis of analyses) {
       const { decision, token, data } = analysis;
 
-      // Filter criteria: score > 0.4 and confidence > 50%
-      if (Math.abs(decision.score) <= 0.4 || decision.confidence <= 0.5) {
+      // Skip HOLD signals
+      if (decision.action === "HOLD") {
         continue;
       }
 
-      // Skip HOLD signals
-      if (decision.action === "HOLD") {
+      // Filter: score must clear the regime-conditional action threshold
+      // and confidence must exceed 50%. Falls back to ±0.4 for backward compat.
+      const buyFloor = decision.thresholds?.buy ?? 0.4;
+      const sellFloor = decision.thresholds?.sell ?? -0.4;
+      const clearsBuy = decision.score >= buyFloor;
+      const clearsSell = decision.score <= sellFloor;
+      if (!clearsBuy && !clearsSell) {
+        continue;
+      }
+      if (decision.confidence <= 0.5) {
         continue;
       }
 

@@ -423,12 +423,14 @@ export class TradingAgent {
       console.error(chalk.dim(`  Correlation check failed: ${(err as Error).message}`));
     }
 
-    // 8. Compute decision with regime adjustments and correlation suppression
+    // 8. Compute decision with regime adjustments, correlation suppression,
+    //    and regime-conditional action thresholds.
     const decision = computeTradeDecision(
       signals,
       this.config.weights ?? DEFAULT_WEIGHTS,
       regimeAnalysis?.strategyAdjustments,
-      correlationCheck
+      correlationCheck,
+      regimeAnalysis?.regime,
     );
 
     return {

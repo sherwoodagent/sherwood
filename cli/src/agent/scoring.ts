@@ -5,6 +5,7 @@
 import type { TechnicalSignals } from "./technical.js";
 import { clamp } from "./utils.js";
 import type { CorrelationCheck } from "./correlation.js";
+import type { MarketRegime } from "./regime.js";
 
 export interface Signal {
   name: string;
@@ -40,6 +41,45 @@ export interface TradeDecision {
   reasoning: string;
   confidence: number;
   timestamp: number;
+  /** Thresholds actually used to decide action — for audit + backtest replay. */
+  thresholds?: ActionThresholds;
+}
+
+/** BUY/SELL action thresholds. All values are score cutoffs in [-1, 1]. */
+export interface ActionThresholds {
+  strongBuy: number;  // score >= strongBuy → STRONG_BUY
+  buy: number;        // score >= buy → BUY
+  sell: number;       // score <= sell → SELL (negative)
+  strongSell: number; // score <= strongSell → STRONG_SELL (more negative)
+}
+
+/** Default thresholds — symmetric, used when no regime info is provided. */
+export const DEFAULT_THRESHOLDS: ActionThresholds = {
+  strongBuy: 0.6,
+  buy: 0.3,
+  sell: -0.3,
+  strongSell: -0.6,
+};
+
+/**
+ * Regime-conditional thresholds.
+ *
+ * Trending regimes: asymmetric — easier to enter WITH the trend, harder to fade it.
+ * Ranging: symmetric but tighter — whipsaws are expensive, demand more conviction.
+ * High-volatility: tighter — wide moves without direction mean more false signals.
+ * Low-volatility: looser — cleaner signal environment, less noise to filter.
+ */
+export const REGIME_THRESHOLDS: Record<MarketRegime, ActionThresholds> = {
+  "trending-up": { strongBuy: 0.55, buy: 0.25, sell: -0.40, strongSell: -0.70 },
+  "trending-down": { strongBuy: 0.70, buy: 0.40, sell: -0.25, strongSell: -0.55 },
+  "ranging":        { strongBuy: 0.65, buy: 0.40, sell: -0.40, strongSell: -0.65 },
+  "high-volatility":{ strongBuy: 0.70, buy: 0.45, sell: -0.45, strongSell: -0.70 },
+  "low-volatility": { strongBuy: 0.60, buy: 0.30, sell: -0.30, strongSell: -0.60 },
+};
+
+export function thresholdsForRegime(regime?: MarketRegime): ActionThresholds {
+  if (!regime) return DEFAULT_THRESHOLDS;
+  return REGIME_THRESHOLDS[regime] ?? DEFAULT_THRESHOLDS;
 }
 
 // ── Score Technical Signals ──
@@ -366,8 +406,10 @@ export function computeTradeDecision(
   weights?: ScoringWeights,
   regimeAdjustments?: Record<string, number>,
   correlationCheck?: CorrelationCheck,
+  regime?: MarketRegime,
 ): TradeDecision {
   const w = weights ?? DEFAULT_WEIGHTS;
+  const thresholds = thresholdsForRegime(regime);
 
   // Map signal names to weight keys
   const weightMap: Record<string, number> = {
@@ -439,12 +481,12 @@ export function computeTradeDecision(
     score = Math.max(-1, Math.min(1, score));
   }
 
-  // Determine action
+  // Determine action using regime-conditional thresholds
   let action: TradeDecision["action"];
-  if (score > 0.6) action = "STRONG_BUY";
-  else if (score > 0.3) action = "BUY";
-  else if (score > -0.3) action = "HOLD";
-  else if (score > -0.6) action = "SELL";
+  if (score >= thresholds.strongBuy) action = "STRONG_BUY";
+  else if (score >= thresholds.buy) action = "BUY";
+  else if (score > thresholds.sell) action = "HOLD";
+  else if (score > thresholds.strongSell) action = "SELL";
   else action = "STRONG_SELL";
 
   const reasoning = signals.map((s) => `[${s.source}] ${s.details}`).join("\n");
@@ -456,5 +498,6 @@ export function computeTradeDecision(
     reasoning,
     confidence,
     timestamp: Date.now(),
+    thresholds,
   };
 }

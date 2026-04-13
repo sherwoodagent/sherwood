@@ -1,0 +1,55 @@
+- Backtesting bitcoin from 2026-01-14 to 2026-04-13...
+
+  ┌──────────────────────────────────────────────┐
+  │          Backtest Results                    │
+  └──────────────────────────────────────────────┘
+
+  Token:          bitcoin
+  Period:         2026-01-14 → 2026-04-13
+  Initial:        $10,000
+  Strategies:     all
+  Cycle:          1d
+
+  ══════════════════════════════════════════════════
+  Total Return:   $-458.68 (-4.59%)
+  Final Capital:  $9541.32
+  Sharpe Ratio:   -1.02
+  Max Drawdown:   11.44%
+  Win Rate:       0.0%
+  Total Trades:   1
+
+  ⚠️  Volume Data Quality:
+     Volume data sourced from market_chart endpoint and aggregated daily.
+     Intraday volume patterns may not be fully captured.
+
+  Monthly Returns:
+  Month        Return %   Performance
+  ───────────────────────────────────
+  2026-02      0.0%               ░░░░░░░░░░
+  2026-03      -8.3%              ███░░░░░░░
+  2026-04      +4.1%              █░░░░░░░░░
+
+  Trades:
+  Entry        Exit         Entry$     Exit$      PnL%       Signal
+  ─────────────────────────────────────────────────────────────────
+  2026-03-17   2026-04-12   $74313.12  $70904.51    -4.59%  BUY → CLOSE
+
+  Equity Curve:
+    $10000 │█████████████████████████████████                          
+     $9918 │                                                           
+     $9837 │                                                        ▓▓ 
+     $9755 │                                                           
+     $9673 │                                                       ▓   
+     $9592 │                                 ▓      ▓            ▓▓    
+     $9510 │                                   ▓  ▓                   ▓
+     $9428 │                                  ▓ ▓  ▓                   
+     $9346 │                                                           
+     $9265 │                                         ▓          ▓      
+     $9183 │                                     ▓        ▓▓   ▓       
+     $9101 │                                                  ▓        
+     $9020 │                                             ▓  ▓▓         
+     $8938 │                                           ▓               
+     $8856 │                                          ▓ ▓              
+           └───────────────────────────────────────────────────────────
+           2026-02-13                                       2026-04-12
+
