@@ -128,7 +128,9 @@ export default function TimelockPanel({ governorAddress, chainId }: Props) {
           setPending(out);
           setLoading(false);
         }
-      } catch {
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[TimelockPanel] could not read parameter changes", err);
         if (!cancelled) {
           setErrored(true);
           setLoading(false);
@@ -141,10 +143,14 @@ export default function TimelockPanel({ governorAddress, chainId }: Props) {
     };
   }, [client, governorAddress, chainId]);
 
-  // Hide the panel entirely when there's nothing to show — this is an
-  // exception surface, not a constant fixture.
-  const hasContent = pending.length > 0 || loading || errored;
-  if (!hasContent) return null;
+  // Render the panel ONLY when there's a real pending change. The panel
+  // is an exception surface — if everything's settled (or the governor on
+  // this chain doesn't emit timelock events), we render nothing rather
+  // than blare an empty/error placeholder. The errored case is logged in
+  // the console for debugging but not surfaced as UI noise.
+  if (loading) return null;
+  if (errored) return null;
+  if (pending.length === 0) return null;
 
   return (
     <div className="panel" style={{ marginTop: "1.5rem" }}>
@@ -153,28 +159,14 @@ export default function TimelockPanel({ governorAddress, chainId }: Props) {
           <Term k="optimistic-governance">Pending Parameter Changes</Term>
         </span>
         <span style={{ color: "var(--color-fg-secondary)", fontSize: "10px" }}>
-          {loading ? "scanning…" : errored ? "unavailable" : `${pending.length}`}
+          {pending.length}
         </span>
       </div>
-      {!loading && errored && (
-        <div className="sh-empty__desc" style={{ padding: "0.5rem 0" }}>
-          Could not read pending parameter changes. The governor may not yet
-          implement timelock event emission on this chain.
-        </div>
-      )}
-      {!loading && !errored && pending.length === 0 && (
-        <div className="sh-empty__desc" style={{ padding: "0.5rem 0" }}>
-          No parameter changes queued. All current governor settings have
-          finalized.
-        </div>
-      )}
-      {!loading && pending.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          {pending.map((p) => (
-            <ChangeRow key={p.paramKey} change={p} />
-          ))}
-        </div>
-      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        {pending.map((p) => (
+          <ChangeRow key={p.paramKey} change={p} />
+        ))}
+      </div>
     </div>
   );
 }
