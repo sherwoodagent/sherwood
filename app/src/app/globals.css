@@ -24,6 +24,40 @@
   color: #000;
 }
 
+/* ── Custom scrollbars ──────────────────────────────────
+   Default browser scrollbars (light gray) clash with the dark OS aesthetic.
+   These replace them with thin, accent-tinted bars across all scrollable
+   containers. The terminal-body keeps its no-scrollbar override below. */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(46, 230, 166, 0.25) transparent;
+}
+
+/* WebKit / Blink */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(46, 230, 166, 0.18);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(46, 230, 166, 0.4);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 body {
   font-size: 16px;
   line-height: 1.4;

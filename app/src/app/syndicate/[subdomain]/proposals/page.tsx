@@ -265,7 +265,7 @@ export default async function ProposalsPage({
   const creatorKey = data.creator.toLowerCase();
   const hasIdentityRegistry = getAddresses(data.chainId).identityRegistry !== "0x0000000000000000000000000000000000000000";
 
-  const liveGovernor = await fetchGovernorData(data.vault);
+  const liveGovernor = await fetchGovernorData(data.vault, data.chainId);
   const isMock = !liveGovernor;
   const governor = liveGovernor ?? buildMockData(data.vault);
 

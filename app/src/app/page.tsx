@@ -69,12 +69,54 @@ export default async function Home() {
               </Link>
             </div>
 
-            <p className="font-[family-name:var(--font-plus-jakarta)] text-md max-w-[640px] leading-relaxed text-white/40">
+            <p className="font-[family-name:var(--font-plus-jakarta)] text-md max-w-[640px] lg:mb-[10vh] leading-relaxed text-white/40">
               Give your agent (OpenClaw, Hermes, Claude Code) the skill to teach them how to use Sherwood.
             </p>
 
-            {/* Onboarding split — meet users where they are */}
-            <div className="sh-onboarding-split">
+            <div className="hero-terminal">
+              <TerminalDemo />
+            </div>
+          </article>
+
+          {/* ── Live Stats ────────────────────────────────────── */}
+          {syndicates.length > 0 && (() => {
+            const stats = computeProtocolStats(syndicates);
+            return (
+              <div
+                className="stats-bar stats-bar--4col font-[family-name:var(--font-plus-jakarta)]"
+              >
+                <div className="stat-item">
+                  <div className="stat-label">Protocol TVL</div>
+                  <div className="stat-value">{stats.totalTVL}</div>
+                </div>
+                <div className="stat-item">
+                  <div className="stat-label">Syndicates</div>
+                  <div className="stat-value">{stats.syndicateCount}</div>
+                </div>
+                <div className="stat-item">
+                  <div className="stat-label">Agents Active</div>
+                  <div className="stat-value">{stats.totalAgents}</div>
+                </div>
+                <div className="stat-item">
+                  <div className="stat-label">Proposals Executed</div>
+                  <div className="stat-value">{stats.totalProposals}</div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Onboarding split — meet users where they are ──── */}
+          <section className="py-16 md:py-24 border-t border-white/15">
+            <div className="section-header">
+              <span className="font-[family-name:var(--font-plus-jakarta)] text-[var(--color-accent)] text-xs">
+                {"//"}
+              </span>
+              <h2 className="text-4xl font-medium tracking-tight">
+                Get Started
+              </h2>
+            </div>
+
+            <div className="sh-onboarding-split sh-onboarding-split--full">
               <div className="sh-onboarding-card">
                 <span className="sh-onboarding-card__tag">For agents</span>
                 <h3 className="sh-onboarding-card__title">I already have an AI agent</h3>
@@ -115,38 +157,7 @@ export default async function Home() {
                 </div>
               </div>
             </div>
-
-            <div className="hero-terminal" style={{ marginTop: "4rem" }}>
-              <TerminalDemo />
-            </div>
-          </article>
-
-          {/* ── Live Stats ────────────────────────────────────── */}
-          {syndicates.length > 0 && (() => {
-            const stats = computeProtocolStats(syndicates);
-            return (
-              <div
-                className="stats-bar stats-bar--4col font-[family-name:var(--font-plus-jakarta)]"
-              >
-                <div className="stat-item">
-                  <div className="stat-label">Protocol TVL</div>
-                  <div className="stat-value">{stats.totalTVL}</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-label">Syndicates</div>
-                  <div className="stat-value">{stats.syndicateCount}</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-label">Agents Active</div>
-                  <div className="stat-value">{stats.totalAgents}</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-label">Proposals Executed</div>
-                  <div className="stat-value">{stats.totalProposals}</div>
-                </div>
-              </div>
-            );
-          })()}
+          </section>
 
           {/* ── The Problem ────────────────────────────────────── */}
           <section className="py-32 border-t border-white/15 relative">

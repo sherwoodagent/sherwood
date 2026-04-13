@@ -48,7 +48,7 @@ export default async function AgentDetailPage({
     chainAddrs.identityRegistry !== "0x0000000000000000000000000000000000000000";
 
   // Fetch governor data to compute per-agent track record (if deployed).
-  const governor = await fetchGovernorData(data.vault);
+  const governor = await fetchGovernorData(data.vault, data.chainId);
   const agentLower = agent.agentAddress.toLowerCase();
   const agentProposals = governor
     ? governor.proposals.filter((p) => p.proposer.toLowerCase() === agentLower)
