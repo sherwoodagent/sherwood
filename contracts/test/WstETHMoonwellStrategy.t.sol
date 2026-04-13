@@ -221,12 +221,15 @@ contract WstETHMoonwellStrategyTest is Test {
         WstETHMoonwellStrategy(clone).initialize(vault, proposer, abi.encode(params));
     }
 
-    function test_initialize_zeroSupplyAmount_reverts() public {
+    function test_initialize_zeroSupplyAmount_allowsDynamicAll() public {
+        address clone = Clones.clone(address(template));
+        WstETHMoonwellStrategy s = WstETHMoonwellStrategy(clone);
         WstETHMoonwellStrategy.InitParams memory params = _defaultParams();
         params.supplyAmount = 0;
-        address clone = Clones.clone(address(template));
-        vm.expectRevert(WstETHMoonwellStrategy.InvalidAmount.selector);
-        WstETHMoonwellStrategy(clone).initialize(vault, proposer, abi.encode(params));
+
+        s.initialize(vault, proposer, abi.encode(params));
+
+        assertEq(s.supplyAmount(), 0);
     }
 
     function test_initialize_zeroSlippage_reverts() public {
@@ -263,6 +266,34 @@ contract WstETHMoonwellStrategyTest is Test {
         // No dust left on strategy
         assertEq(wethToken.balanceOf(address(strategy)), 0);
         assertEq(wstethToken.balanceOf(address(strategy)), 0);
+    }
+
+    function test_execute_dynamicAll_usesFullVaultBalance() public {
+        WstETHMoonwellStrategy s = _deployStrategyWithSupplyAmount(0);
+        uint256 vaultBalance = wethToken.balanceOf(vault);
+
+        vm.prank(vault);
+        wethToken.approve(address(s), type(uint256).max);
+
+        vm.prank(vault);
+        s.execute();
+
+        uint256 expectedWsteth = (vaultBalance * WETH_WSTETH_RATE) / 1e18;
+        assertEq(wethToken.balanceOf(vault), 0);
+        assertEq(MockMwstETH(s.mwsteth()).balanceOf(address(s)), expectedWsteth);
+        assertEq(uint256(s.state()), uint256(BaseStrategy.State.Executed));
+    }
+
+    function test_execute_dynamicAll_zeroVaultBalance_reverts() public {
+        WstETHMoonwellStrategy s = _deployStrategyWithSupplyAmount(0);
+        deal(address(wethToken), vault, 0);
+
+        vm.prank(vault);
+        wethToken.approve(address(s), type(uint256).max);
+
+        vm.prank(vault);
+        vm.expectRevert(WstETHMoonwellStrategy.InvalidAmount.selector);
+        s.execute();
     }
 
     function test_execute_onlyVault() public {
@@ -501,6 +532,15 @@ contract WstETHMoonwellStrategyTest is Test {
         wethToken.approve(address(strategy), SUPPLY_AMOUNT);
         vm.prank(vault);
         strategy.execute();
+    }
+
+    function _deployStrategyWithSupplyAmount(uint256 amount) internal returns (WstETHMoonwellStrategy s) {
+        address clone = Clones.clone(address(template));
+        s = WstETHMoonwellStrategy(clone);
+
+        WstETHMoonwellStrategy.InitParams memory params = _defaultParams();
+        params.supplyAmount = amount;
+        s.initialize(vault, proposer, abi.encode(params));
     }
 
     function _defaultParams() internal view returns (WstETHMoonwellStrategy.InitParams memory) {

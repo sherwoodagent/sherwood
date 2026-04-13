@@ -218,14 +218,25 @@ export class TwitterSentimentProvider {
                    tweet.public_metrics.reply_count,
       }));
 
+      // Keep LLM pass bounded so full scanner doesn't timeout under 10-token auto mode.
+      // Use top-engagement tweets first because they carry the most signal.
+      const llmTweets = [...tweetsWithEngagement]
+        .sort((a, b) => b.engagement - a.engagement)
+        .slice(0, 40);
+      if (llmTweets.length === 0) {
+        return null;
+      }
+
       // Batch tweets into groups of 20
       const batchSize = 20;
       const batches: TweetWithEngagement[][] = [];
-      for (let i = 0; i < tweetsWithEngagement.length; i += batchSize) {
-        batches.push(tweetsWithEngagement.slice(i, i + batchSize));
+      for (let i = 0; i < llmTweets.length; i += batchSize) {
+        batches.push(llmTweets.slice(i, i + batchSize));
       }
 
       const allResults: (OpenAISentimentResponse & { engagement: number })[] = [];
+      let consecutiveBatchFailures = 0;
+      const MAX_CONSECUTIVE_BATCH_FAILURES = 2;
 
       // Process each batch
       for (const batch of batches) {
@@ -245,10 +256,14 @@ export class TwitterSentimentProvider {
 
         const tweetTexts = batch.map((tweet, idx) => `${idx + 1}. "${sanitizeTweet(tweet.text)}"`).join('\n');
 
-        const systemPrompt = `You are a crypto market sentiment analyzer. For each tweet, classify sentiment as BULLISH, BEARISH, or NEUTRAL with confidence 0-100. Consider sarcasm, irony, CT slang. Respond ONLY as a JSON array: [{"sentiment": "BULLISH", "confidence": 85}, ...]`;
+        const systemPrompt = `You are a crypto market sentiment analyzer. For each tweet, classify sentiment as BULLISH, BEARISH, or NEUTRAL with confidence 0-100. Consider sarcasm, irony, and CT slang.
+Return ONLY valid JSON with this exact shape:
+{"results":[{"sentiment":"BULLISH|BEARISH|NEUTRAL","confidence":0-100}]}`;
 
         const userPrompt = `Analyze these ${batch.length} tweets:\n${tweetTexts}`;
 
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10_000);
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -261,20 +276,27 @@ export class TwitterSentimentProvider {
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt },
             ],
+            response_format: { type: 'json_object' },
             temperature: 0,
           }),
+          signal: controller.signal,
         });
+        clearTimeout(timeout);
 
         if (!response.ok) {
           console.warn(`OpenAI API error: ${response.status} ${response.statusText}`);
-          return null;
+          consecutiveBatchFailures++;
+          if (consecutiveBatchFailures >= MAX_CONSECUTIVE_BATCH_FAILURES) return null;
+          continue;
         }
 
         const data = await response.json();
         const content = data.choices?.[0]?.message?.content;
         if (!content) {
           console.warn('OpenAI API returned no content');
-          return null;
+          consecutiveBatchFailures++;
+          if (consecutiveBatchFailures >= MAX_CONSECUTIVE_BATCH_FAILURES) return null;
+          continue;
         }
 
         // Parse JSON response — strip markdown code blocks if present
@@ -285,11 +307,54 @@ export class TwitterSentimentProvider {
           if (jsonStr.startsWith('```')) {
             jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
           }
-          batchResults = JSON.parse(jsonStr);
-          if (!Array.isArray(batchResults) || batchResults.length !== batch.length) {
-            console.warn('OpenAI response format mismatch');
-            return null;
+          const parsed = JSON.parse(jsonStr) as unknown;
+          let parsedResults: unknown[] | null = null;
+
+          if (Array.isArray(parsed)) {
+            parsedResults = parsed;
+          } else if (parsed && typeof parsed === 'object') {
+            const obj = parsed as Record<string, unknown>;
+            if (Array.isArray(obj.results)) {
+              parsedResults = obj.results;
+            } else if (Array.isArray(obj.tweets)) {
+              parsedResults = obj.tweets;
+            } else if (Array.isArray(obj.sentiments)) {
+              parsedResults = obj.sentiments;
+            }
           }
+
+          if (!parsedResults) {
+            const arrMatch = jsonStr.match(/\[[\s\S]*\]/);
+            if (arrMatch) {
+              const recovered = JSON.parse(arrMatch[0]) as unknown;
+              if (Array.isArray(recovered)) {
+                parsedResults = recovered;
+              }
+            }
+          }
+
+          if (!parsedResults) {
+            throw new Error('No parseable sentiment array');
+          }
+
+          batchResults = parsedResults.map((item) => {
+            const row = (item && typeof item === 'object') ? item as Record<string, unknown> : {};
+            const sentimentRaw = String(row.sentiment ?? row.label ?? row.classification ?? 'NEUTRAL').toUpperCase();
+            const confidenceRaw = Number(row.confidence ?? row.score ?? 50);
+            return {
+              sentiment: sentimentRaw as OpenAISentimentResponse['sentiment'],
+              confidence: confidenceRaw,
+            };
+          });
+
+          if (batchResults.length > batch.length) {
+            batchResults = batchResults.slice(0, batch.length);
+          } else if (batchResults.length < batch.length) {
+            while (batchResults.length < batch.length) {
+              batchResults.push({ sentiment: 'NEUTRAL', confidence: 50 });
+            }
+          }
+
           // Validate each element to prevent NaN propagation from malformed responses
           const VALID_SENTIMENTS = new Set(['BULLISH', 'BEARISH', 'NEUTRAL']);
           for (const r of batchResults) {
@@ -297,9 +362,13 @@ export class TwitterSentimentProvider {
             if (typeof r.confidence !== 'number' || !Number.isFinite(r.confidence)) r.confidence = 50;
             r.confidence = Math.max(0, Math.min(100, r.confidence));
           }
+          consecutiveBatchFailures = 0;
         } catch (parseErr) {
           console.warn(`Failed to parse OpenAI response: ${parseErr}`);
-          return null;
+          consecutiveBatchFailures++;
+          if (consecutiveBatchFailures >= MAX_CONSECUTIVE_BATCH_FAILURES) return null;
+          // Continue using neutral placeholders for this batch instead of failing whole token scan.
+          batchResults = batch.map(() => ({ sentiment: 'NEUTRAL', confidence: 50 }));
         }
 
         // Combine with engagement data

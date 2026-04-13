@@ -34,13 +34,14 @@ interface IAeroRouter {
  *   Settle:  redeem mwstETH → swap wstETH to WETH (Aerodrome stable pool) → push to vault
  *
  *   Batch calls from governor:
- *     Execute: [WETH.approve(strategy, supplyAmount), strategy.execute()]
+ *     Execute: [WETH.approve(strategy, supplyAmount|max), strategy.execute()]
  *     Settle:  [strategy.settle()]
  *
  *   Tunable params (updatable by proposer between execution and settlement):
  *     - minWethOut: minimum WETH to accept on final settle swap (slippage)
  *     - minWstethOut: minimum wstETH to accept on execute swap (slippage)
  *     - deadlineOffset: seconds added to block.timestamp for swap deadlines
+ *     - supplyAmount: fixed WETH amount, or 0 to use the vault's full WETH balance at execute time
  */
 contract WstETHMoonwellStrategy is BaseStrategy {
     using SafeERC20 for IERC20;
@@ -88,7 +89,6 @@ contract WstETHMoonwellStrategy is BaseStrategy {
 
         if (p.weth == address(0) || p.wsteth == address(0) || p.mwsteth == address(0)) revert ZeroAddress();
         if (p.aeroRouter == address(0) || p.aeroFactory == address(0)) revert ZeroAddress();
-        if (p.supplyAmount == 0) revert InvalidAmount();
         if (p.minWstethOut == 0 || p.minWethOut == 0) revert InvalidAmount();
 
         weth = p.weth;
@@ -104,16 +104,19 @@ contract WstETHMoonwellStrategy is BaseStrategy {
 
     /// @notice Pull WETH → swap to wstETH → supply to Moonwell
     function _execute() internal override {
+        uint256 amountIn = supplyAmount == 0 ? IERC20(weth).balanceOf(vault()) : supplyAmount;
+        if (amountIn == 0) revert InvalidAmount();
+
         // 1. Pull WETH from vault
-        _pullFromVault(weth, supplyAmount);
+        _pullFromVault(weth, amountIn);
 
         // 2. Swap WETH → wstETH via Aerodrome stable pool
-        IERC20(weth).forceApprove(aeroRouter, supplyAmount);
+        IERC20(weth).forceApprove(aeroRouter, amountIn);
         IAeroRouter.Route[] memory routes = new IAeroRouter.Route[](1);
         routes[0] = IAeroRouter.Route({from: weth, to: wsteth, stable: true, factory: aeroFactory});
         uint256[] memory amounts = IAeroRouter(aeroRouter)
             .swapExactTokensForTokens(
-                supplyAmount, minWstethOut, routes, address(this), block.timestamp + deadlineOffset
+                amountIn, minWstethOut, routes, address(this), block.timestamp + deadlineOffset
             );
         uint256 wstethReceived = amounts[amounts.length - 1];
         if (wstethReceived == 0) revert SwapFailed();

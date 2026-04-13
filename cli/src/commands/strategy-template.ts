@@ -428,14 +428,10 @@ async function buildInitDataForTemplate(
   }
 
   if (templateKey === "wsteth-moonwell") {
-    if (!opts.amount) {
-      console.error(chalk.red("--amount is required for wsteth-moonwell template"));
-      process.exit(1);
-    }
-    const supplyAmount = parseUnits(opts.amount as string, 18); // WETH = 18 decimals
+    const supplyAmount = opts.amount ? parseUnits(opts.amount as string, 18) : 0n; // WETH = 18 decimals; 0 => use full vault balance at execute time
     const slippageBps = BigInt((opts.slippage as string) || "500"); // default 5% slippage
-    const minWstethOut = supplyAmount - (supplyAmount * slippageBps) / 10000n;
-    const minWethOut = supplyAmount - (supplyAmount * slippageBps) / 10000n;
+    const minWstethOut = supplyAmount === 0n ? 1n : supplyAmount - (supplyAmount * slippageBps) / 10000n;
+    const minWethOut = supplyAmount === 0n ? 1n : supplyAmount - (supplyAmount * slippageBps) / 10000n;
 
     const params: wstethBuilder.WstETHMoonwellInitParams = {
       weth: TOKENS().WETH,

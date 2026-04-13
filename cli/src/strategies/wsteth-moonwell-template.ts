@@ -5,10 +5,11 @@
  *   address weth, address wsteth, address mwsteth,
  *   address aeroRouter, address aeroFactory,
  *   uint256 supplyAmount, uint256 minWstethOut, uint256 minWethOut, uint256 deadlineOffset
+ *   supplyAmount = 0 means use the vault's full WETH balance at execute time
  */
 
 import type { Address, Hex } from "viem";
-import { encodeAbiParameters, encodeFunctionData } from "viem";
+import { encodeAbiParameters, encodeFunctionData, maxUint256 } from "viem";
 import { ERC20_ABI, BASE_STRATEGY_ABI } from "../lib/abis.js";
 import type { BatchCall } from "../lib/batch.js";
 
@@ -50,13 +51,15 @@ export function buildExecuteCalls(
   weth: Address,
   supplyAmount: bigint,
 ): BatchCall[] {
+  const approveAmount = supplyAmount === 0n ? maxUint256 : supplyAmount;
+
   return [
     {
       target: weth,
       data: encodeFunctionData({
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [clone, supplyAmount],
+        args: [clone, approveAmount],
       }),
       value: 0n,
     },

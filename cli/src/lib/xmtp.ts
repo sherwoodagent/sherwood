@@ -189,27 +189,26 @@ export async function getGroup(
   // Sync to get latest conversations (including MLS welcome messages)
   await client.conversations.syncAll([ConsentState.Allowed]);
 
-  // Try local cache
+  // Try local cache — trust it without validation
+  // (the group may have been created on another device and not yet synced to this client's DB)
   let groupId: string | undefined = getCachedGroupId(subdomain);
-
-  // Validate cached ID actually exists in the local DB
   if (groupId) {
-    const conv = await client.conversations.getConversationById(groupId);
-    if (!conv) {
-      cacheGroupId(subdomain, ""); // invalidate stale entry
-      groupId = undefined;
-    }
+    return groupId;
   }
 
-  // Fall back to on-chain ENS text record
+  // Fall back to on-chain ENS text record (may not exist on all chains)
   if (!groupId) {
-    const ensId = await getTextRecord(subdomain, "xmtpGroupId");
-    if (ensId) {
-      const conv = await client.conversations.getConversationById(ensId);
-      if (conv) {
-        groupId = ensId;
-        cacheGroupId(subdomain, groupId);
+    try {
+      const ensId = await getTextRecord(subdomain, "xmtpGroupId");
+      if (ensId) {
+        const conv = await client.conversations.getConversationById(ensId);
+        if (conv) {
+          groupId = ensId;
+          cacheGroupId(subdomain, groupId);
+        }
       }
+    } catch {
+      // ENS not available on this chain (e.g. HyperEVM) — skip
     }
   }
 
