@@ -27,6 +27,9 @@ import { FundingRateProvider } from "../providers/data/funding-rate.js";
 import { TokenUnlocksProvider } from "../providers/data/token-unlocks.js";
 import { TwitterSentimentProvider } from "../providers/data/twitter.js";
 import { logSignal } from "./signal-logger.js";
+import { SignalSmoother, FileSmootherStorage, DEFAULT_SMOOTHER_CONFIG } from "./signal-smoother.js";
+import { join as joinPath } from "node:path";
+import { homedir as getHomedir } from "node:os";
 import { HyperliquidProvider } from "../providers/data/hyperliquid.js";
 import type { StrategyContext, StrategyConfig } from "./strategies/index.js";
 import { MarketRegimeDetector } from "./regime.js";
@@ -51,6 +54,10 @@ export interface AgentConfig {
   weightProfile?: string;
   /** When true, includes paid x402 data (Nansen smart-money, Messari fundamentals) in analysis. */
   useX402?: boolean;
+  /** When true, smooth fast/noisy signals (HL flow, smartMoney, dexFlow, fundingRate)
+   *  with a rolling 3-reading average before scoring. Reduces single-scan flicker.
+   *  Default false. */
+  smoothFastSignals?: boolean;
   /** Per-strategy configuration overrides. */
   strategyConfigs?: Record<string, StrategyConfig>;
 }
@@ -80,6 +87,7 @@ export class TradingAgent {
   private regimeDetector: MarketRegimeDetector;
   private correlationGuard: CorrelationGuard;
   private alertSystem: AlertSystem;
+  private smoother: SignalSmoother | null = null;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -377,7 +385,24 @@ export class TradingAgent {
         tokenSymbol, // from phase 3
       };
 
-      const strategySignals = await runStrategies(stratCtx, this.config.strategyConfigs);
+      let strategySignals = await runStrategies(stratCtx, this.config.strategyConfigs);
+
+      // Smooth fast/noisy signals (HL flow, smartMoney, dexFlow, fundingRate)
+      // with a rolling 3-reading average. Slow signals pass through unchanged.
+      // Disabled by default — enable via --smooth flag or config.smoothFastSignals.
+      if (this.config.smoothFastSignals) {
+        if (!this.smoother) {
+          this.smoother = new SignalSmoother(
+            new FileSmootherStorage(joinPath(getHomedir(), '.sherwood', 'agent', 'signal-cache.json')),
+            DEFAULT_SMOOTHER_CONFIG,
+          );
+        }
+        try {
+          strategySignals = await this.smoother.smooth(tokenId, strategySignals);
+        } catch (err) {
+          console.error(chalk.dim(`  Signal smoothing failed (using raw): ${(err as Error).message}`));
+        }
+      }
 
       // Merge strategy signals: only add those with meaningful confidence (>0.05)
       for (const sig of strategySignals) {

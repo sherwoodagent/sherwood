@@ -45,3 +45,4 @@ __pycache__/
 baseline-backtest-*
 *.backtest.json
 *.backtest.txt
+signal-cache.json

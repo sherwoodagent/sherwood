@@ -13,6 +13,7 @@ import { computeTradeDecision } from './scoring.js';
 import type { TradeDecision } from './scoring.js';
 import { MarketRegimeDetector } from './regime.js';
 import type { MarketRegime } from './regime.js';
+import { SignalSmoother, MemorySmootherStorage, DEFAULT_SMOOTHER_CONFIG } from './signal-smoother.js';
 
 export interface BacktestConfig {
   tokenId: string;
@@ -30,6 +31,9 @@ export interface BacktestConfig {
    *  since entry. Independent of SELL signal — stops fire first if hit.
    *  Default undefined → SELL-signal-only exit. */
   trailingStopPct?: number;
+  /** When true, smooth fast/noisy signals with rolling window (in-memory
+   *  per-simulation, no disk IO). Default false. */
+  smoothFastSignals?: boolean;
 }
 
 export interface BacktestTrade {
@@ -66,6 +70,8 @@ export interface WalkForwardConfig {
   useRegime?: boolean;
   /** Forwarded to per-fold Backtester. Default undefined (no trailing stop). */
   trailingStopPct?: number;
+  /** Forwarded to per-fold Backtester. Default false. */
+  smoothFastSignals?: boolean;
 }
 
 export interface WalkForwardResult {
@@ -191,6 +197,12 @@ export class Backtester {
     // 3. Simulate trading
     let capital = this.config.initialCapital;
     let position: { entryPrice: number; entryDate: string; signal: string; highWaterMark: number } | null = null;
+    // Per-simulation in-memory smoother (no disk IO). Maintains rolling
+    // buffers across candles so smoothing reflects the same window logic
+    // as live runs.
+    const smoother = this.config.smoothFastSignals
+      ? new SignalSmoother(new MemorySmootherStorage(), DEFAULT_SMOOTHER_CONFIG)
+      : null;
     const trades: BacktestTrade[] = [];
     const equityCurve: Array<{ date: string; value: number }> = [];
     const returns: number[] = [];
@@ -252,7 +264,13 @@ export class Backtester {
         };
 
         // Run strategies — filter to candle-based only for backtest
-        const signals = await runStrategies(ctx);
+        let signals = await runStrategies(ctx);
+
+        // Optional smoothing — uses per-simulation in-memory buffer so each
+        // candle adds to a rolling window matching live behavior.
+        if (smoother) {
+          signals = await smoother.smooth(this.config.tokenId, signals, currentCandle.timestamp);
+        }
 
         // Filter strategies: if user specified strategies, honor their choice
         // Otherwise, filter to candle-based strategies only
@@ -442,6 +460,7 @@ export class Backtester {
           verbose: false, // Don't spam verbose output during walk-forward
           useRegime: config.useRegime,
           trailingStopPct: config.trailingStopPct,
+          smoothFastSignals: config.smoothFastSignals,
         });
         const trainResult = await trainBacktester.run();
 
@@ -456,6 +475,7 @@ export class Backtester {
           verbose: false, // Don't spam verbose output during walk-forward
           useRegime: config.useRegime,
           trailingStopPct: config.trailingStopPct,
+          smoothFastSignals: config.smoothFastSignals,
         });
         const testResult = await testBacktester.run();
 

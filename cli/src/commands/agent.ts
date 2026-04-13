@@ -67,7 +67,8 @@ export function registerAgentCommands(program: Command): void {
     .option("--proposals", "Generate trade proposals for high-confidence opportunities")
     .option("--weight-profile <name>", "Weight profile: default | majors | altcoin | sentHeavy | techHeavy (auto: majors for BTC/ETH/SOL)")
     .option("--scaled-sizing", "Score-weighted position sizing (smaller positions for marginal scores)")
-    .action(async (tokens: string[], options: { all?: boolean; auto?: boolean; json?: boolean; x402: boolean; telegram?: boolean; proposals?: boolean; weightProfile?: string; scaledSizing?: boolean }) => {
+    .option("--smooth", "Smooth fast signals with rolling 3-reading window")
+    .action(async (tokens: string[], options: { all?: boolean; auto?: boolean; json?: boolean; x402: boolean; telegram?: boolean; proposals?: boolean; weightProfile?: string; scaledSizing?: boolean; smooth?: boolean }) => {
       let tokenList: string[];
       let selectionSummary: string | undefined;
 
@@ -96,7 +97,7 @@ export function registerAgentCommands(program: Command): void {
       if (options.scaledSizing) {
         ExecutionPipeline.scaledSizing.enabled = true;
       }
-      const config = makeConfig({ tokens: tokenList, useX402: options.x402, weightProfile: options.weightProfile });
+      const config = makeConfig({ tokens: tokenList, useX402: options.x402, weightProfile: options.weightProfile, smoothFastSignals: options.smooth });
       const tradingAgent = new TradingAgent(config);
       const spinner = ora("Analyzing tokens...").start();
 
@@ -299,7 +300,8 @@ export function registerAgentCommands(program: Command): void {
     .option("--no-x402", "Skip paid x402 data (Nansen smart-money, Messari fundamentals) — on by default")
     .option("--weight-profile <name>", "Weight profile: default | majors | altcoin | sentHeavy | techHeavy (auto: majors for BTC/ETH/SOL)")
     .option("--scaled-sizing", "Score-weighted position sizing (smaller positions for marginal scores)")
-    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; auto?: boolean; log?: string; mode?: string; strategyClone?: string; chain?: string; assetIndex?: string; x402: boolean; weightProfile?: string; scaledSizing?: boolean }) => {
+    .option("--smooth", "Smooth fast signals with rolling 3-reading window")
+    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; auto?: boolean; log?: string; mode?: string; strategyClone?: string; chain?: string; assetIndex?: string; x402: boolean; weightProfile?: string; scaledSizing?: boolean; smooth?: boolean }) => {
       let tokenList: string[];
 
       if (options.auto) {
@@ -349,7 +351,7 @@ export function registerAgentCommands(program: Command): void {
       }
 
       const loopConfig: LoopConfig = {
-        agent: makeConfig({ tokens: tokenList, cycle, dryRun: !isLive, useX402: options.x402, weightProfile: options.weightProfile }),
+        agent: makeConfig({ tokens: tokenList, cycle, dryRun: !isLive, useX402: options.x402, weightProfile: options.weightProfile, smoothFastSignals: options.smooth }),
         execution: {
           dryRun: !isLive,
           mode: (options.mode ?? 'dry-run') as 'dry-run' | 'hyperliquid-perp',
@@ -578,7 +580,8 @@ export function registerAgentCommands(program: Command): void {
     .option("--trailing-stop <pct>", "Trailing stop as decimal (e.g. 0.05 = 5%) — exits if price drops X% from high-water mark")
     .option("--scaled-sizing", "Score-weighted position sizing (smaller positions for marginal scores)")
     .option("--weight-profile <name>", "Named weight profile: default | majors | altcoin | sentHeavy | techHeavy")
-    .action(async (token: string, options: { from: string; to: string; strategies: string; capital: string; cycle: string; walkForward?: boolean; train: string; test: string; verbose?: boolean; regime?: boolean; trailingStop?: string; scaledSizing?: boolean; weightProfile?: string }) => {
+    .option("--smooth", "Smooth fast signals (HL flow, smartMoney, dexFlow, fundingRate) with rolling 3-reading window")
+    .action(async (token: string, options: { from: string; to: string; strategies: string; capital: string; cycle: string; walkForward?: boolean; train: string; test: string; verbose?: boolean; regime?: boolean; trailingStop?: string; scaledSizing?: boolean; weightProfile?: string; smooth?: boolean }) => {
       const capital = parseFloat(options.capital);
       const strategies = options.strategies ? options.strategies.split(",").map((s) => s.trim()) : [];
       const trailingStopPct = options.trailingStop ? parseFloat(options.trailingStop) : undefined;
@@ -609,6 +612,7 @@ export function registerAgentCommands(program: Command): void {
           strategies,
           useRegime: options.regime,
           trailingStopPct,
+          smoothFastSignals: options.smooth,
         };
 
         const spinner = ora(`Walk-forward testing ${token} (${trainWindow}d train, ${testWindow}d test)...`).start();
@@ -624,6 +628,7 @@ export function registerAgentCommands(program: Command): void {
             verbose: options.verbose,
             useRegime: options.regime,
             trailingStopPct,
+            smoothFastSignals: options.smooth,
           });
           const result = await backtester.walkForwardTest(walkConfig);
           spinner.stop();
@@ -644,6 +649,7 @@ export function registerAgentCommands(program: Command): void {
           verbose: options.verbose,
           useRegime: options.regime,
           trailingStopPct,
+          smoothFastSignals: options.smooth,
         };
 
         const spinner = ora(`Backtesting ${token} from ${config.startDate} to ${config.endDate}...`).start();
