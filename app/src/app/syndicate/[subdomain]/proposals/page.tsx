@@ -19,22 +19,18 @@ import { formatDuration } from "@/lib/governor-data";
 import { fetchPortfolioData } from "@/lib/portfolio-data";
 import type { Address } from "viem";
 
-// ── Mock badge ──────────────────────────────────────────────────────────────
+// ── Mock banner ─────────────────────────────────────────────────────────────
+// NOTE: Bold, unambiguous demo-mode signal. Replaces the subtle 9px gray badge
+// that users could miss. Voting is disabled below when isMock is true.
 
-function MockBadge() {
+function MockBanner() {
   return (
-    <div
-      style={{
-        position: "absolute",
-        top: "0.75rem",
-        right: "0.75rem",
-        zIndex: 1,
-        color: "rgba(255,255,255,0.2)",
-        fontSize: "9px",
-        fontFamily: "var(--font-plus-jakarta), sans-serif",
-      }}
-    >
-      MOCK DATA
+    <div className="mock-banner" role="alert">
+      <span className="mock-banner__tag">[DEMO]</span>
+      <span className="mock-banner__title">Illustrative data — governance is not live for this syndicate</span>
+      <span className="mock-banner__sub">
+        Voting, execution, and history below are simulated. No onchain state will change.
+      </span>
     </div>
   );
 }
@@ -378,12 +374,6 @@ export default async function ProposalsPage({
       p.computedState === ProposalState.Approved,
   );
 
-  const mockTag = isMock ? (
-    <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "9px", fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
-      MOCK DATA
-    </span>
-  ) : null;
-
   return (
     <>
       <TorusKnotBackground
@@ -444,19 +434,18 @@ export default async function ProposalsPage({
             </div>
           </div>
 
+          {isMock && <MockBanner />}
+
           {/* Active Strategy */}
-          <div style={{ position: "relative" }}>
-            {isMock && <MockBadge />}
-            <ActiveProposal
-              proposal={activeProposal}
-              cooldownEnd={governor.cooldownEnd}
-              addressNames={addressNames}
-              assetDecimals={data.assetDecimals}
-              assetSymbol={data.assetSymbol}
-              portfolioAllocations={portfolioAllocations}
-              enrichedPortfolio={enrichedPortfolio}
-            />
-          </div>
+          <ActiveProposal
+            proposal={activeProposal}
+            cooldownEnd={governor.cooldownEnd}
+            addressNames={addressNames}
+            assetDecimals={data.assetDecimals}
+            assetSymbol={data.assetSymbol}
+            portfolioAllocations={portfolioAllocations}
+            enrichedPortfolio={enrichedPortfolio}
+          />
 
           {/* Voting Queue */}
           {votingQueue.length > 0 && (
@@ -466,12 +455,9 @@ export default async function ProposalsPage({
                 style={{ marginBottom: "1rem" }}
               >
                 <span>Voting Queue</span>
-                <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
-                  {mockTag}
-                  <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "9px" }}>
-                    {votingQueue.length} PENDING
-                  </span>
-                </div>
+                <span style={{ color: "rgba(255,255,255,0.35)", fontSize: "10px", letterSpacing: "0.15em" }}>
+                  {votingQueue.length} PENDING
+                </span>
               </div>
               {votingQueue.map((p) => (
                 <ProposalCard
@@ -481,6 +467,7 @@ export default async function ProposalsPage({
                   params={governor.params}
                   assetDecimals={data.assetDecimals}
                   addressNames={addressNames}
+                  disabled={isMock}
                 />
               ))}
             </div>
@@ -488,24 +475,18 @@ export default async function ProposalsPage({
 
           {/* History + Agent Stats grid */}
           <div className="grid-dashboard" style={{ marginTop: "1.5rem" }}>
-            <div style={{ position: "relative" }}>
-              {isMock && <MockBadge />}
-              <ProposalHistory
-                proposals={governor.proposals}
-                assetDecimals={data.assetDecimals}
-                assetSymbol={data.assetSymbol}
-                addressNames={addressNames}
-              />
-            </div>
-            <div style={{ position: "relative" }}>
-              {isMock && <MockBadge />}
-              <AgentStats
-                proposals={governor.proposals}
-                assetDecimals={data.assetDecimals}
-                assetSymbol={data.assetSymbol}
-                addressNames={addressNames}
-              />
-            </div>
+            <ProposalHistory
+              proposals={governor.proposals}
+              assetDecimals={data.assetDecimals}
+              assetSymbol={data.assetSymbol}
+              addressNames={addressNames}
+            />
+            <AgentStats
+              proposals={governor.proposals}
+              assetDecimals={data.assetDecimals}
+              assetSymbol={data.assetSymbol}
+              addressNames={addressNames}
+            />
           </div>
         </main>
       </div>

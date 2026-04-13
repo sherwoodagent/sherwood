@@ -5,7 +5,7 @@
  * Uses subgraph where available, falls back to onchain factory.getActiveSyndicates().
  */
 
-import { type Address } from "viem";
+import { formatUnits, type Address } from "viem";
 import {
   CHAINS,
   type ChainEntry,
@@ -386,7 +386,7 @@ async function fetchViaSubgraph(
         name: metadata?.name || `Syndicate #${s.id}`,
         strategy,
         tvl: `${tvlFormatted} ${info.symbol}`,
-        tvlRaw: Number(totalAssets) / 10 ** info.decimals,
+        tvlRaw: parseFloat(formatUnits(totalAssets, info.decimals)),
         assetSymbol: info.symbol,
         agentCount,
         proposalCount: (s.proposals || []).length,
@@ -402,7 +402,7 @@ async function fetchViaSubgraph(
             agentName: identityMap[a.agentId],
             proposalCount: stats.count,
             totalPnl: stats.count > 0 ? pnlDisplay : "—",
-            totalPnlRaw: Number(stats.pnl) / 10 ** info.decimals,
+            totalPnlRaw: parseFloat(formatUnits(stats.pnl < 0n ? -stats.pnl : stats.pnl, info.decimals)) * (stats.pnl < 0n ? -1 : 1),
           };
         }),
         status,
@@ -613,7 +613,7 @@ async function fetchViaOnChain(
         name: metadata?.name || `Syndicate #${s.id.toString()}`,
         strategy,
         tvl: `${tvlFormatted} ${info.symbol}`,
-        tvlRaw: Number(totalAssets) / 10 ** info.decimals,
+        tvlRaw: parseFloat(formatUnits(totalAssets, info.decimals)),
         assetSymbol: info.symbol,
         agentCount,
         proposalCount: 0, // not available without extra calls in onchain fallback

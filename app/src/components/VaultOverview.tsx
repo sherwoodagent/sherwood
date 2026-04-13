@@ -1,3 +1,4 @@
+import { formatUnits } from "viem";
 import { formatBps } from "@/lib/contracts";
 
 interface VaultOverviewProps {
@@ -59,7 +60,9 @@ export default function VaultOverview({
         <div className="param-row">
           <span className="param-key">Total Shares</span>
           <span className="param-val">
-            {(Number(totalSupply) / 10 ** (assetDecimals * 2)).toLocaleString()}
+            {parseFloat(formatUnits(totalSupply, assetDecimals * 2)).toLocaleString("en-US", {
+              maximumFractionDigits: 2,
+            })}
           </span>
         </div>
       </div>

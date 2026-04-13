@@ -13,6 +13,7 @@ import {
   getAddresses,
   truncateAddress,
 } from "@/lib/contracts";
+import { useToast } from "@/components/ui/Toast";
 
 interface WithdrawModalProps {
   vault: Address;
@@ -39,6 +40,7 @@ export default function WithdrawModal({
 }: WithdrawModalProps) {
   const { address } = useAccount();
   const addresses = getAddresses();
+  const toast = useToast();
 
   const [amount, setAmount] = useState("");
   const [isMax, setIsMax] = useState(false);
@@ -85,8 +87,12 @@ export default function WithdrawModal({
   useEffect(() => {
     if (isWithdrawConfirmed && step === "withdrawing") {
       setStep("success");
+      toast.success(
+        "Withdrawal confirmed",
+        `Your ${assetSymbol} is back in your wallet.`,
+      );
     }
-  }, [isWithdrawConfirmed, step]);
+  }, [isWithdrawConfirmed, step, toast, assetSymbol]);
 
   function handleWithdraw() {
     if (!address) return;
@@ -330,6 +336,26 @@ export default function WithdrawModal({
                   : `Withdraw ${isMax ? "All" : truncateDisplay(amount) || "0"} ${assetSymbol}`}
               </button>
             </div>
+
+            {/* Pending tx link */}
+            {step === "withdrawing" && withdrawHash && (
+              <div style={{ marginTop: "0.75rem", textAlign: "center" }}>
+                <a
+                  href={`${addresses.blockExplorer}/tx/${withdrawHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "11px",
+                    letterSpacing: "0.1em",
+                    color: "var(--color-accent)",
+                    textDecoration: "underline",
+                  }}
+                >
+                  View pending transaction ↗
+                </a>
+              </div>
+            )}
           </>
         )}
       </div>

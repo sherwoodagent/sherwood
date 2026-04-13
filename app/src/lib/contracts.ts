@@ -8,6 +8,7 @@
 import {
   createPublicClient,
   defineChain,
+  formatUnits,
   http,
   type Address,
   type Chain,
@@ -377,6 +378,27 @@ export const SYNDICATE_VAULT_ABI = [
     stateMutability: "view",
     inputs: [{ name: "shares", type: "uint256" }],
     outputs: [{ name: "assets", type: "uint256" }],
+  },
+  {
+    name: "previewDeposit",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "assets", type: "uint256" }],
+    outputs: [{ name: "shares", type: "uint256" }],
+  },
+  {
+    name: "previewRedeem",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "shares", type: "uint256" }],
+    outputs: [{ name: "assets", type: "uint256" }],
+  },
+  {
+    name: "maxRedeem",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "maxShares", type: "uint256" }],
   },
   {
     name: "redeem",
@@ -822,13 +844,14 @@ export function formatUSDC(raw: bigint): string {
   return formatAsset(raw, 6, "USD");
 }
 
-/** Format a raw uint256 token amount with the given decimals. */
+/** Format a raw uint256 token amount with the given decimals.
+ *  Uses viem's formatUnits for precision-safe bigint → string (avoids Number overflow >2^53). */
 export function formatAsset(
   raw: bigint,
   decimals: number,
   currency?: string,
 ): string {
-  const num = Number(raw) / 10 ** decimals;
+  const num = parseFloat(formatUnits(raw, decimals));
   if (currency === "USD") {
     return num.toLocaleString("en-US", {
       style: "currency",
@@ -846,6 +869,21 @@ export function formatAsset(
   });
 }
 
+/** Format a large number with K/M/B suffixes for compact display. */
+export function formatCompact(raw: bigint, decimals: number, currency?: string): string {
+  const num = parseFloat(formatUnits(raw, decimals));
+  const abs = Math.abs(num);
+  const sign = num < 0 ? "-" : "";
+  const prefix = currency === "USD" ? "$" : "";
+  const suffix = currency && currency !== "USD" ? ` ${currency}` : "";
+  let body: string;
+  if (abs >= 1_000_000_000) body = `${(abs / 1_000_000_000).toFixed(2)}B`;
+  else if (abs >= 1_000_000) body = `${(abs / 1_000_000).toFixed(2)}M`;
+  else if (abs >= 10_000) body = `${(abs / 1_000).toFixed(1)}K`;
+  else body = abs.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return `${sign}${prefix}${body}${suffix}`;
+}
+
 /** Format basis points to percentage string. */
 export function formatBps(bps: bigint): string {
   return `${(Number(bps) / 100).toFixed(1)}%`;
@@ -854,7 +892,7 @@ export function formatBps(bps: bigint): string {
 /** Format vault shares to a readable number.
  *  Shares have assetDecimals * 2 decimals due to _decimalsOffset() (12 for USDC). */
 export function formatShares(raw: bigint, decimals: number = 12): string {
-  const num = Number(raw) / 10 ** decimals;
+  const num = parseFloat(formatUnits(raw, decimals));
   return num.toLocaleString("en-US", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,

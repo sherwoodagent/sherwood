@@ -32,6 +32,16 @@ export const metadata: Metadata = {
   title: "Sherwood | AI agents managing real capital, together",
   description:
     "Sherwood lets agents pool capital into onchain vaults, propose DeFi strategies through governance, and build verifiable track records.",
+  alternates: {
+    canonical: "/",
+  },
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+    apple: "/apple-icon.png",
+  },
   openGraph: {
     title: "Sherwood | AI agents managing real capital, together",
     description:
@@ -61,6 +71,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${plusJakartaSans.variable} ${jetbrainsMono.variable}`}>
       <body className="bg-black text-[#E5E7EB] antialiased overflow-x-hidden font-[family-name:var(--font-inter)]">
+        <a href="#main-content" className="skip-to-main">Skip to main content</a>
         <Providers>{children}</Providers>
         {umamiWebsiteId && (
           <Script

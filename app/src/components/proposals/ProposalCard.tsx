@@ -14,6 +14,8 @@ interface ProposalCardProps {
   params: GovernorParams;
   assetDecimals: number;
   addressNames?: Record<string, string>;
+  /** When true, voting UI is replaced with a demo-mode notice. */
+  disabled?: boolean;
 }
 
 export default function ProposalCard({
@@ -22,6 +24,7 @@ export default function ProposalCard({
   params,
   assetDecimals,
   addressNames,
+  disabled = false,
 }: ProposalCardProps) {
   const title =
     proposal.metadata?.title || `Proposal #${proposal.id.toString()}`;
@@ -131,11 +134,17 @@ export default function ProposalCard({
 
         {isPending && (
           <div style={{ marginTop: "1rem" }}>
-            <VoteButton
-              governorAddress={governorAddress}
-              proposalId={proposal.id}
-              voteEnd={proposal.voteEnd}
-            />
+            {disabled ? (
+              <div className="prop-card__demo-notice" role="note">
+                Demo mode — voting disabled. Connect a live syndicate to participate.
+              </div>
+            ) : (
+              <VoteButton
+                governorAddress={governorAddress}
+                proposalId={proposal.id}
+                voteEnd={proposal.voteEnd}
+              />
+            )}
           </div>
         )}
       </div>

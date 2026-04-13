@@ -6,7 +6,7 @@
  */
 
 import { cache } from "react";
-import { type Address, namehash } from "viem";
+import { formatUnits, type Address, namehash } from "viem";
 import {
   CHAINS,
   type ChainEntry,
@@ -649,7 +649,7 @@ async function fetchEquityCurve(
   assetDecimals: number,
   currentTotalAssets: bigint,
 ): Promise<number[]> {
-  const currentTVL = Number(currentTotalAssets) / 10 ** assetDecimals;
+  const currentTVL = parseFloat(formatUnits(currentTotalAssets, assetDecimals));
 
   if (!subgraphUrl) return [currentTVL];
 
@@ -741,7 +741,7 @@ async function fetchEquityCurve(
           break;
         }
       }
-      curve.push(Number(dayTVL) / 10 ** assetDecimals);
+      curve.push(parseFloat(formatUnits(dayTVL, assetDecimals)));
     }
 
     // Replace last point with actual onchain TVL for accuracy

@@ -55,15 +55,16 @@ export default function SiteHeader() {
           Syndicates →
         </Link>
 
-        {/* Mobile hamburger */}
+        {/* Mobile hamburger — 44×44 touch target */}
         <button
           onClick={() => setMenuOpen((prev) => !prev)}
-          className="md:hidden ml-3 p-2 text-white/80 hover:text-white transition-colors cursor-pointer"
+          className="md:hidden ml-2 flex items-center justify-center w-11 h-11 text-white/80 hover:text-white transition-colors cursor-pointer"
           aria-label="Toggle menu"
+          aria-expanded={menuOpen}
         >
           <svg
-            width="20"
-            height="20"
+            width="22"
+            height="22"
             viewBox="0 0 20 20"
             fill="none"
             stroke="currentColor"
