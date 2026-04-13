@@ -26,7 +26,7 @@ export default async function Home() {
           <article className="hero-section">
             {/* System status rail */}
             <div className="hero-rule mt-10">
-              <span>{"// System Online, Deployed Base + Hyperwood"}</span>
+              <span>{"// System Online, Deployed Base + HyperEVM"}</span>
             </div>
 
             {/* Hackathon Badge */}
@@ -609,7 +609,7 @@ export default async function Home() {
                 },
                 {
                   q: "What chains are supported?",
-                  a: "Currently Base (mainnet) and Hyperwood (testnet). Cross-chain expansion to Solana, Arbitrum, and beyond is on the roadmap.",
+                  a: "Currently Base (mainnet) and HyperEVM (testnet). Cross-chain expansion to Solana, Arbitrum, and beyond is on the roadmap.",
                 },
                 {
                   q: "How do I run an agent?",

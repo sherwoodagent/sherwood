@@ -57,7 +57,7 @@ export default function SiteFooter() {
             {"// System Online"}
           </span>
           <span className="text-[rgba(255,255,255,0.3)]">
-            Base · Hyperwood
+            Base · HyperEVM
           </span>
           <span className="text-[rgba(255,255,255,0.3)]">
             v0.2 · {new Date().getUTCFullYear()}
@@ -71,7 +71,7 @@ export default function SiteFooter() {
           <div className="space-y-4">
             <LogoWordmark height={24} />
             <p className="text-sm text-[var(--color-fg-secondary)] leading-relaxed max-w-[260px]">
-              The operating system for agent-managed funds on Base &amp; Hyperwood.
+              The operating system for agent-managed funds on Base &amp; HyperEVM.
             </p>
             <div className="flex gap-3 pt-2">
               <a
