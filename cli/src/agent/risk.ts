@@ -236,28 +236,23 @@ export class RiskManager {
     let quantity = riskUsd / riskPerUnit;
     let sizeUsd = quantity * entryPrice;
 
-    // Minimum position floor: Hyperliquid requires ~$10+ notional per order.
-    // For small vaults (<$1000) the standard 2% risk produces sub-minimum
-    // sizes. Scale up to at least $15 notional (with 50% safety buffer over
-    // HL's ~$10 minimum) if the vault can afford it. Never exceed
-    // maxSinglePosition cap — that's handled below.
-    const MIN_POSITION_USD = 15;
-    if (sizeUsd < MIN_POSITION_USD && portfolioValue >= MIN_POSITION_USD * 2) {
-      const scale = MIN_POSITION_USD / sizeUsd;
-      sizeUsd = MIN_POSITION_USD;
-      quantity = sizeUsd / entryPrice;
-      riskUsd *= scale;
-    }
-
-    // Cap at max single position size
+    // Cap at max single position size FIRST — floor must not exceed cap.
     const maxSizeUsd = portfolioValue * this.config.maxSinglePosition;
     if (sizeUsd > maxSizeUsd) {
-      const cappedQuantity = maxSizeUsd / entryPrice;
-      return {
-        quantity: cappedQuantity,
-        sizeUsd: maxSizeUsd,
-        riskUsd: cappedQuantity * riskPerUnit,
-      };
+      sizeUsd = maxSizeUsd;
+      quantity = maxSizeUsd / entryPrice;
+      riskUsd = quantity * riskPerUnit;
+    }
+
+    // Minimum position floor: Hyperliquid requires ~$10+ notional per order.
+    // Applied AFTER the cap so floor never exceeds maxSinglePosition.
+    // Only scales up if vault can afford 2× the floor (safety buffer).
+    const MIN_POSITION_USD = 15;
+    const effectiveFloor = Math.min(MIN_POSITION_USD, maxSizeUsd);
+    if (sizeUsd < effectiveFloor && portfolioValue >= MIN_POSITION_USD * 2) {
+      sizeUsd = effectiveFloor;
+      quantity = sizeUsd / entryPrice;
+      riskUsd = quantity * riskPerUnit;
     }
 
     return { quantity, sizeUsd, riskUsd };

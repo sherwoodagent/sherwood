@@ -572,7 +572,15 @@ export function computeTradeDecision(
   // capped at 0.27. With convergence bonus: 0.27 × 1.15 = 0.31 → fires BUY.
   if (Math.abs(score) > 0.01) {
     const scoreSign = Math.sign(score);
-    // Compute net direction per active category
+    // Compute net direction per active category.
+    // NOTE: uses raw signal.value (not dampened). This means a dampened
+    // technical signal at -0.30 still votes "bearish" in convergence even
+    // though its weighted contribution is halved. This is intentional:
+    // dampening reduces a lagging signal's INFLUENCE on the score, but
+    // its DIRECTIONAL OPINION still counts for convergence. If we used
+    // dampened values, a 50% weight cut would make a -0.30 signal appear
+    // as -0.15, potentially flipping the category to "neutral" and
+    // artificially inflating the convergence count.
     const categoryNetDirection = new Map<string, number>();
     for (const signal of signals) {
       const category = SIGNAL_CATEGORY_MAP[signal.name];

@@ -57,7 +57,7 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     // Multi-asset actions (assetIndex in calldata — one clone trades any perp):
     uint8 constant ACTION_OPEN_LONG_MULTI = 6; // (action, assetIndex, limitPx, sz, stopLossPx, stopLossSz)
     uint8 constant ACTION_OPEN_SHORT_MULTI = 7; // same encoding
-    uint8 constant ACTION_CLOSE_MULTI = 8; // (action, assetIndex, limitPx, sz)
+    uint8 constant ACTION_CLOSE_MULTI = 8; // (action, assetIndex, isBuy, limitPx, sz)
 
     // ── CLOID constant for stop-loss tracking ──
     // Single fixed CLOID — only one GTC stop-loss is ever live at a time.
@@ -80,6 +80,11 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     uint32 public maxTradesPerDay; // Rate limit on trading actions per day
     uint32 public tradesToday; // Counter for today's trades
     uint256 public lastTradeReset; // Timestamp of last daily counter reset
+    // Multi-asset tracking: all asset indices that have been traded via
+    // ACTION_OPEN_*_MULTI. _settle() iterates this to close positions on
+    // ALL assets, not just perpAssetIndex. Bounded by maxTradesPerDay.
+    uint32[] public tradedAssets;
+    mapping(uint32 => bool) public assetTraded; // dedup guard
 
     /// @inheritdoc IStrategy
     function name() external pure returns (string memory) {
@@ -272,20 +277,26 @@ contract HyperliquidPerpStrategy is BaseStrategy {
             L1Write.sendLimitOrder(ai, !isBuy, stopLossPx, stopLossSz, true, TimeInForce.Gtc, STOP_LOSS_CLOID);
             hasActiveStopLoss = true;
 
-            // Update tracked asset so _settle() closes the right position
+            // Track this asset for multi-asset settlement
+            if (!assetTraded[ai]) {
+                assetTraded[ai] = true;
+                tradedAssets.push(ai);
+            }
             perpAssetIndex = ai;
 
             emit PositionOpened(ai, isBuy, limitPx, sz, leverage);
             emit StopLossUpdated(stopLossPx);
         } else if (action == ACTION_CLOSE_MULTI) {
-            // Multi-asset close: assetIndex in calldata.
-            // Decode: (action, assetIndex, limitPx, sz)
-            (, uint32 ai, uint64 limitPx, uint64 sz) = abi.decode(data, (uint8, uint32, uint64, uint64));
+            // Multi-asset close: assetIndex + direction in calldata.
+            // isBuy=true closes a short (buy back), isBuy=false closes a long (sell).
+            // Decode: (action, assetIndex, isBuy, limitPx, sz)
+            (, uint32 ai, bool isBuy, uint64 limitPx, uint64 sz) =
+                abi.decode(data, (uint8, uint32, bool, uint64, uint64));
 
             _cancelCurrentStopLoss();
 
-            // Reduce-only close on the specified asset
-            L1Write.sendLimitOrder(ai, false, limitPx, sz, true, TimeInForce.Ioc, NO_CLOID);
+            // Reduce-only close on the specified asset and direction
+            L1Write.sendLimitOrder(ai, isBuy, limitPx, sz, true, TimeInForce.Ioc, NO_CLOID);
 
             emit PositionClosed(ai, limitPx, sz);
         } else {
@@ -297,18 +308,28 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     /// @dev After this call, USDC has NOT yet arrived on the EVM side.
     ///      Call sweepToVault() in a separate tx once USDC arrives.
     function _settle() internal override {
-        // Always attempt cancel + force-close (no-op on HyperCore if no position)
         _cancelCurrentStopLoss();
 
-        // Force-close LONG positions: IOC sell at minimum price (1).
-        // Reduce-only — no-op if no long position exists on HyperCore.
-        L1Write.sendLimitOrder(perpAssetIndex, false, 1, type(uint64).max, true, TimeInForce.Ioc, NO_CLOID);
-
-        // Force-close SHORT positions: IOC buy at maximum price.
-        // Reduce-only — no-op if no short position exists on HyperCore.
-        L1Write.sendLimitOrder(
-            perpAssetIndex, true, type(uint64).max, type(uint64).max, true, TimeInForce.Ioc, NO_CLOID
-        );
+        // Close positions on ALL traded assets (not just perpAssetIndex).
+        // Each asset gets both a long-close and short-close attempt — the
+        // reduce-only flag makes the wrong direction a no-op on HyperCore.
+        // If no multi-asset trades were made, falls back to perpAssetIndex
+        // (backwards compat with legacy single-asset actions).
+        if (tradedAssets.length > 0) {
+            for (uint256 i = 0; i < tradedAssets.length; i++) {
+                uint32 ai = tradedAssets[i];
+                // Force-close LONG: sell at min price
+                L1Write.sendLimitOrder(ai, false, 1, type(uint64).max, true, TimeInForce.Ioc, NO_CLOID);
+                // Force-close SHORT: buy at max price
+                L1Write.sendLimitOrder(ai, true, type(uint64).max, type(uint64).max, true, TimeInForce.Ioc, NO_CLOID);
+            }
+        } else {
+            // Legacy path: only perpAssetIndex from storage
+            L1Write.sendLimitOrder(perpAssetIndex, false, 1, type(uint64).max, true, TimeInForce.Ioc, NO_CLOID);
+            L1Write.sendLimitOrder(
+                perpAssetIndex, true, type(uint64).max, type(uint64).max, true, TimeInForce.Ioc, NO_CLOID
+            );
+        }
 
         // Transfer all USD from perp margin back to spot (async)
         L1Write.sendUsdClassTransfer(type(uint64).max, false);
