@@ -532,6 +532,21 @@ export function computeTradeDecision(
       adjustedConfidence *= adjustment;
     }
 
+    // Dampen lagging technical indicators during momentum moves.
+    // RSI/MACD/EMA read bearish alignment during the first hours of a pump
+    // because they lag by construction (14-period RSI, 26-period MACD, 50/200 EMA).
+    // This cancels real-time bullish signals — ETH scored 0.00 during a +7.8% rally
+    // because scoreTechnical() was reading stale bearish MACD/EMA.
+    //
+    // When the regime is a momentum override (trending-up/down), cut the weight
+    // of lagging technical signals by 50%. The momentum signal (which is NOT lagged)
+    // and breakoutOnChain (which uses recent price action) keep their full weight.
+    const LAGGING_TECHNICAL_SIGNALS = new Set(['technical', 'meanReversion']);
+    if (regime && (regime === 'trending-up' || regime === 'trending-down')
+        && LAGGING_TECHNICAL_SIGNALS.has(signal.name)) {
+      signalWeight *= 0.5;
+    }
+
     weightedSum += adjustedValue * signalWeight;
     weightedConfidence += adjustedConfidence * signalWeight;
     totalWeight += signalWeight;

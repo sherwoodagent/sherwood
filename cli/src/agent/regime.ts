@@ -386,13 +386,28 @@ export class MarketRegimeDetector {
    * Returns a RegimeAnalysis if momentum override fires, or null to fall
    * through to the standard EMA/ADX classification.
    *
-   * Requirements for trending-up: price >3% above 24-candle low AND in
-   * the upper half of the range (prevents false positives on bounces
-   * within a larger downtrend). Symmetric for trending-down.
+   * Threshold is volatility-adjusted: 1.5× the 14-candle ATR as a
+   * percentage of current price, floored at 2% and capped at 8%.
+   * - BTC (daily ATR ~2%): threshold ≈ 3% — same as before
+   * - SOL (daily ATR ~5%): threshold ≈ 7.5% — avoids false triggers on normal alt vol
+   * - FARTCOIN (daily ATR ~10%): threshold = 8% cap — only fires on genuinely unusual moves
+   *
+   * Requirements for trending-up: price above threshold AND in the upper
+   * half of the range (prevents false positives on bounces within a larger
+   * downtrend). Symmetric for trending-down.
    */
   private checkMomentumOverride(candles: Candle[], currentPrice: number): RegimeAnalysis | null {
     const MOMENTUM_LOOKBACK = 24;
-    const MOMENTUM_THRESHOLD = 0.03; // 3%
+    const MIN_THRESHOLD = 0.02; // floor: 2%
+    const MAX_THRESHOLD = 0.08; // cap: 8%
+    const ATR_MULTIPLIER = 1.5;
+
+    // Compute 14-period ATR as a percentage of current price for vol-adjustment
+    const atrValues = calculateATR(candles, 14);
+    const currentAtr = this.getLastValidValue(atrValues);
+    const atrPct = currentPrice > 0 && !isNaN(currentAtr) ? currentAtr / currentPrice : 0.02;
+    const threshold = Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, atrPct * ATR_MULTIPLIER));
+
     const recentCandles = candles.slice(-MOMENTUM_LOOKBACK);
     const recentLow = Math.min(...recentCandles.map((c) => c.low));
     const recentHigh = Math.max(...recentCandles.map((c) => c.high));
@@ -403,23 +418,23 @@ export class MarketRegimeDetector {
     const inUpperHalf = currentPrice >= recentMid;
     const inLowerHalf = currentPrice <= recentMid;
 
-    if (pctAboveLow >= MOMENTUM_THRESHOLD && inUpperHalf) {
+    if (pctAboveLow >= threshold && inUpperHalf) {
       return {
         regime: "trending-up",
         confidence: Math.min(0.85, 0.5 + pctAboveLow * 5),
         btcTrend: "up",
         volatilityLevel: "normal",
-        details: `Momentum override: price +${(pctAboveLow * 100).toFixed(1)}% above ${MOMENTUM_LOOKBACK}-candle low (upper half)`,
+        details: `Momentum override: price +${(pctAboveLow * 100).toFixed(1)}% above ${MOMENTUM_LOOKBACK}-candle low (threshold ${(threshold * 100).toFixed(1)}%, ATR-adjusted)`,
         strategyAdjustments: this.getStrategyAdjustments("trending-up"),
       };
     }
-    if (pctBelowHigh >= MOMENTUM_THRESHOLD && inLowerHalf) {
+    if (pctBelowHigh >= threshold && inLowerHalf) {
       return {
         regime: "trending-down",
         confidence: Math.min(0.85, 0.5 + pctBelowHigh * 5),
         btcTrend: "down",
         volatilityLevel: "normal",
-        details: `Momentum override: price -${(pctBelowHigh * 100).toFixed(1)}% below ${MOMENTUM_LOOKBACK}-candle high (lower half)`,
+        details: `Momentum override: price -${(pctBelowHigh * 100).toFixed(1)}% below ${MOMENTUM_LOOKBACK}-candle high (threshold ${(threshold * 100).toFixed(1)}%, ATR-adjusted)`,
         strategyAdjustments: this.getStrategyAdjustments("trending-down"),
       };
     }

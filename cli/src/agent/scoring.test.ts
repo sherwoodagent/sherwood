@@ -278,8 +278,10 @@ describe("computeTradeDecision", () => {
       undefined,
       "trending-up",
     );
-    expect(defaultDecision.score).toBeCloseTo(trendingUpDecision.score, 5);
-    // In trending-up, a weak positive score should fire BUY
+    // Scores may differ: trending-up dampens lagging technical signals by 50%,
+    // so the aggregate shifts toward the non-technical (bullish) signals.
+    // Both should be positive; trending-up fires BUY at its lower 0.25 threshold.
+    expect(trendingUpDecision.score).toBeGreaterThan(0.25);
     expect(trendingUpDecision.action).toBe("BUY");
     expect(trendingUpDecision.thresholds?.buy).toBe(0.25);
   });
