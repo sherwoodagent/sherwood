@@ -1,16 +1,20 @@
 /**
- * Nansen research provider — x402 micropayments for on-chain analytics.
+ * Nansen research provider — supports both API key auth (Pro subscription,
+ * ~5× cheaper) and x402 micropayments (pay-per-request, no subscription).
+ *
+ * Auth priority:
+ *   1. NANSEN_API_KEY env var → standard fetch with apiKey header (Pro plan)
+ *   2. x402 fetch wrapper → automatic USDC micropayments on Base
  *
  * Docs: https://docs.nansen.ai
- * Payment: x402 (USDC on Base) — no API key required
- * Pricing: Basic $0.01/call (Token Screener, Wallet Balances, PnL, Transactions)
- *          Smart Money $0.05/call (SM Net Flow, SM Holdings, SM DEX Trades)
- *          Premium $0.05/call (Counterparties, Holders, PnL Leaderboard)
+ * Pro pricing: 5 credits/call for Smart Money endpoints (~$0.005/call)
+ * x402 pricing: ~$0.06/call for Smart Money endpoints
  *
  * Supports all query types:
  *   token       → token screener (on-chain metrics, holder quality)
  *   market      → token screener sorted by market cap / volume
  *   smart-money → smart money net flow from labeled wallets
+ *   hl-perp-trades → Hyperliquid smart-money perp trades
  *   wallet      → wallet profiler (PnL, tx patterns, counterparties)
  */
 
@@ -20,6 +24,26 @@ import type { ResearchProvider, ResearchQuery, ResearchResult } from "./index.js
 import { getX402Fetch } from "../../lib/x402.js";
 
 const BASE_URL = "https://api.nansen.ai";
+
+/**
+ * Returns a fetch function configured for Nansen auth.
+ * If NANSEN_API_KEY is set, wraps standard fetch with the apiKey header.
+ * Otherwise falls back to x402 micropayment fetch.
+ */
+async function getNansenFetch(): Promise<typeof fetch> {
+  const apiKey = process.env.NANSEN_API_KEY;
+  if (apiKey) {
+    // Pro plan: standard fetch with API key header
+    const baseFetch = globalThis.fetch;
+    return ((url: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      headers.set("apiKey", apiKey);
+      return baseFetch(url, { ...init, headers });
+    }) as typeof fetch;
+  }
+  // Fallback: x402 micropayments
+  return getX402Fetch();
+}
 
 /** Known x402 cost per Nansen query type. */
 export const NANSEN_COST_ESTIMATE: Record<string, string> = {
@@ -66,7 +90,7 @@ export class NansenProvider implements ResearchProvider {
    * Cost: ~$0.01 (basic tier)
    */
   private async tokenScreener(target: string): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
 
     // Determine if target is an address or symbol
     const isAddr = target.startsWith("0x") && target.length === 42;
@@ -112,7 +136,7 @@ export class NansenProvider implements ResearchProvider {
    * Cost: ~$0.01 (basic tier)
    */
   private async marketScreener(asset: string): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
 
     const isAddr = asset.startsWith("0x") && asset.length === 42;
     const filters: Record<string, unknown> = isAddr
@@ -168,7 +192,7 @@ export class NansenProvider implements ResearchProvider {
   private async smartMoneyNetflow(
     target: string,
   ): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
 
     // Map CoinGecko token IDs to symbols for the filter
     const symbolMap: Record<string, string> = {
@@ -232,7 +256,7 @@ export class NansenProvider implements ResearchProvider {
   async queryHyperliquidSmartMoney(
     tokenSymbol: string,
   ): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
 
     const body = {
       filters: {
@@ -277,7 +301,7 @@ export class NansenProvider implements ResearchProvider {
    * The correct x402 endpoint is /api/v1/profiler/address/pnl-summary.
    */
   private async walletProfile(address: string): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
 
     // pnl-summary uses `chain` (singular) + a date range, not `chains` array
     const now = new Date();
@@ -326,7 +350,7 @@ export class NansenProvider implements ResearchProvider {
       return target;
     }
 
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
     const body = {
       chains: ["base"],
       timeframe: "24h",
