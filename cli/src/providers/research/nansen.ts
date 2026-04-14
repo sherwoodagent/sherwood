@@ -26,23 +26,36 @@ import { getX402Fetch } from "../../lib/x402.js";
 const BASE_URL = "https://api.nansen.ai";
 
 /**
- * Returns a fetch function configured for Nansen auth.
- * If NANSEN_API_KEY is set, wraps standard fetch with the apiKey header.
- * Otherwise falls back to x402 micropayment fetch.
+ * Returns a fetch function configured for Nansen auth. Cached after first
+ * creation — same pattern as getX402Fetch() to avoid allocating a new
+ * closure on every call.
+ *
+ * If NANSEN_API_KEY is set → standard fetch with apiKey header (Pro plan).
+ * Otherwise → x402 micropayment fetch.
  */
+let _nansenFetch: typeof fetch | null = null;
+let _nansenFetchKey: string | undefined;
+
 async function getNansenFetch(): Promise<typeof fetch> {
   const apiKey = process.env.NANSEN_API_KEY;
+
+  // Cache hit — return if key hasn't changed
+  if (_nansenFetch && _nansenFetchKey === apiKey) return _nansenFetch;
+
   if (apiKey) {
-    // Pro plan: standard fetch with API key header
     const baseFetch = globalThis.fetch;
-    return ((url: string | URL | Request, init?: RequestInit) => {
+    _nansenFetch = ((url: string | URL | Request, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       headers.set("apiKey", apiKey);
       return baseFetch(url, { ...init, headers });
     }) as typeof fetch;
+    _nansenFetchKey = apiKey;
+  } else {
+    _nansenFetch = await getX402Fetch();
+    _nansenFetchKey = undefined;
   }
-  // Fallback: x402 micropayments
-  return getX402Fetch();
+
+  return _nansenFetch;
 }
 
 /** Known x402 cost per Nansen query type. */

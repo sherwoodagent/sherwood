@@ -194,6 +194,12 @@ contract HyperliquidPerpStrategy is BaseStrategy {
 
             emit PositionClosed(perpAssetIndex, limitPx, sz);
         } else if (action == ACTION_UPDATE_STOP_LOSS) {
+            // NOTE: action=3 is for LONG positions only (reduce-only sell).
+            // For shorts, use ACTION_UPDATE_STOP_LOSS_SHORT (action=5).
+            // If the wrong action is sent, HyperCore's reduce-only flag will
+            // reject the order (a reduce-only sell with no long position is a no-op).
+            // Position direction is NOT tracked on-chain — the proposer/agent
+            // is responsible for sending the correct action type.
             (, uint64 triggerPx, uint64 sz) = abi.decode(data, (uint8, uint64, uint64));
 
             _cancelCurrentStopLoss();

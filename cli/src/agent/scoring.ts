@@ -452,7 +452,9 @@ const SIGNAL_CATEGORY_MAP: Record<string, keyof ScoringWeights> = {
   smartMoney: "smartMoney",
 
   // Strategy signal mappings to categories
-  momentum: "technical",            // price momentum — same category as other technical signals
+  // momentum intentionally has no key in getStrategyAdjustments() — it keeps
+  // full weight during momentum overrides (not dampened like lagging indicators).
+  momentum: "technical",
   breakoutOnChain: "technical",
   meanReversion: "technical",
   multiTimeframe: "technical",
