@@ -325,35 +325,64 @@ export class RiskManager {
     return positions.map((pos) => {
       if (pos.currentPrice <= 0 || pos.entryPrice <= 0) return pos;
 
-      const pnlPct = (pos.currentPrice - pos.entryPrice) / pos.entryPrice;
+      const isShort = pos.side === 'short';
+      // Direction-aware PnL
+      const pnlPct = isShort
+        ? (pos.entryPrice - pos.currentPrice) / (pos.entryPrice || 1)
+        : (pos.currentPrice - pos.entryPrice) / (pos.entryPrice || 1);
       let newStop = pos.stopLoss;
 
-      // 1. Breakeven
-      if (
-        this.config.breakevenTriggerPct > 0
-        && pnlPct >= this.config.breakevenTriggerPct
-      ) {
-        newStop = Math.max(newStop, pos.entryPrice);
-      }
+      if (isShort) {
+        // For SHORTS: stops move DOWN (tighter = lower price).
+        // "Never loosen" = never move stop UP (higher) for shorts.
 
-      // 2. Profit-lock steps — pick the highest triggered lock
-      if (this.config.profitLockSteps.length > 0) {
+        // 1. Breakeven: move stop down to entry (from above)
+        if (this.config.breakevenTriggerPct > 0 && pnlPct >= this.config.breakevenTriggerPct) {
+          newStop = Math.min(newStop, pos.entryPrice);
+        }
+
+        // 2. Profit-lock: lock in gains by moving stop further down
+        for (const step of this.config.profitLockSteps) {
+          if (pnlPct >= step.trigger) {
+            const lockedStop = pos.entryPrice * (1 - step.lock);
+            newStop = Math.min(newStop, lockedStop);
+          }
+        }
+
+        // 3. Percent-trail: track new lows
+        if (this.config.trailingStopPct > 0) {
+          const trailStop = pos.currentPrice * (1 + this.config.trailingStopPct);
+          newStop = Math.min(newStop, trailStop);
+        }
+
+        if (newStop < pos.stopLoss) {
+          return { ...pos, stopLoss: newStop, trailingStop: newStop };
+        }
+      } else {
+        // For LONGS: stops move UP (tighter = higher price).
+
+        // 1. Breakeven
+        if (this.config.breakevenTriggerPct > 0 && pnlPct >= this.config.breakevenTriggerPct) {
+          newStop = Math.max(newStop, pos.entryPrice);
+        }
+
+        // 2. Profit-lock steps
         for (const step of this.config.profitLockSteps) {
           if (pnlPct >= step.trigger) {
             const lockedStop = pos.entryPrice * (1 + step.lock);
             newStop = Math.max(newStop, lockedStop);
           }
         }
-      }
 
-      // 3. Percent-trail
-      if (this.config.trailingStopPct > 0) {
-        const trailStop = pos.currentPrice * (1 - this.config.trailingStopPct);
-        newStop = Math.max(newStop, trailStop);
-      }
+        // 3. Percent-trail
+        if (this.config.trailingStopPct > 0) {
+          const trailStop = pos.currentPrice * (1 - this.config.trailingStopPct);
+          newStop = Math.max(newStop, trailStop);
+        }
 
-      if (newStop > pos.stopLoss) {
-        return { ...pos, stopLoss: newStop, trailingStop: newStop };
+        if (newStop > pos.stopLoss) {
+          return { ...pos, stopLoss: newStop, trailingStop: newStop };
+        }
       }
       return pos;
     });
@@ -395,41 +424,50 @@ export class RiskManager {
       const price = currentPrices[pos.tokenId];
       if (price === undefined) continue;
 
-      // Update current price for evaluation
       const updatedPos = { ...pos, currentPrice: price };
-      const pnlPercent = (price - pos.entryPrice) / pos.entryPrice;
+      const isShort = pos.side === 'short';
 
-      // Hard stop loss check
+      // PnL calculation — direction-aware
+      const pnlPercent = isShort
+        ? (pos.entryPrice - price) / (pos.entryPrice || 1)
+        : (price - pos.entryPrice) / (pos.entryPrice || 1);
+
+      // Hard stop loss check (direction-aware via pnlPercent)
       if (pnlPercent <= -this.config.hardStopPercent) {
         toClose.push(updatedPos);
         reasons[pos.tokenId] = `Hard stop hit: ${(pnlPercent * 100).toFixed(1)}% loss (limit: -${(this.config.hardStopPercent * 100).toFixed(0)}%)`;
         continue;
       }
 
-      // Stop loss check
-      if (price <= pos.stopLoss) {
+      // Stop loss check — for shorts, stop is ABOVE entry (price >= stopLoss)
+      // for longs, stop is BELOW entry (price <= stopLoss)
+      const stopHit = isShort ? price >= pos.stopLoss : price <= pos.stopLoss;
+      if (stopHit) {
         toClose.push(updatedPos);
         reasons[pos.tokenId] = `Stop loss hit at $${pos.stopLoss.toFixed(4)} (price: $${price.toFixed(4)})`;
         continue;
       }
 
-      // Trailing stop check
-      if (pos.trailingStop !== undefined && price <= pos.trailingStop) {
-        toClose.push(updatedPos);
-        reasons[pos.tokenId] = `Trailing stop hit at $${pos.trailingStop.toFixed(4)} (price: $${price.toFixed(4)})`;
-        continue;
+      // Trailing stop check — same direction logic as stop loss
+      if (pos.trailingStop !== undefined) {
+        const trailHit = isShort ? price >= pos.trailingStop : price <= pos.trailingStop;
+        if (trailHit) {
+          toClose.push(updatedPos);
+          reasons[pos.tokenId] = `Trailing stop hit at $${pos.trailingStop.toFixed(4)} (price: $${price.toFixed(4)})`;
+          continue;
+        }
       }
 
-      // Take profit check
-      if (price >= pos.takeProfit) {
+      // Take profit check — for shorts, TP is BELOW entry (price <= takeProfit)
+      // for longs, TP is ABOVE entry (price >= takeProfit)
+      const tpHit = isShort ? price <= pos.takeProfit : price >= pos.takeProfit;
+      if (tpHit) {
         toClose.push(updatedPos);
         reasons[pos.tokenId] = `Take profit hit at $${pos.takeProfit.toFixed(4)} (price: $${price.toFixed(4)})`;
         continue;
       }
 
-      // Time-based exit: short-term strategy — close after 48h if PnL
-      // is flat (<1%). If the trade hasn't moved in 2 days, it's dead money.
-      // Frees capital for better opportunities.
+      // Time-based exit: close after 48h if PnL is flat (<1%)
       const holdingHours = (Date.now() - pos.entryTimestamp) / (1000 * 60 * 60);
       if (holdingHours > 48 && pnlPercent < 0.01 && pnlPercent > -0.01) {
         toClose.push(updatedPos);

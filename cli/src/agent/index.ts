@@ -231,7 +231,11 @@ export class TradingAgent {
       fearAndGreedValue = fgData[0]!.value;
       const values = fgData.map((d) => d.value);
       sentimentZScore = this.sentiment.computeSentimentZScore(values);
-      signals.push(scoreSentiment(fearAndGreedValue, sentimentZScore));
+      // F&G is used as a regime-gate (extreme fear = allow BUY, extreme greed = allow SELL)
+      // NOT as a scoring signal. It fires at +0.76 on 100% of observations when F&G < 25,
+      // making it a constant bias rather than a directional signal. The sentimentContrarian
+      // strategy (which modulates based on actual F&G value) remains active.
+      // signals.push(scoreSentiment(fearAndGreedValue, sentimentZScore)); // REMOVED: constant bias
     } else if (fearGreedResult.status === 'rejected') {
       console.error(chalk.dim(`  Sentiment data failed: ${fearGreedResult.reason}`));
     }
@@ -387,13 +391,11 @@ export class TradingAgent {
 
       // Push event signal (no Messari — use free path)
       signals.push(scoreEvent({}));
-    } else {
-      // Free path only
-      if (!signals.some(s => s.name === "fundamental")) {
-        signals.push(scoreFundamental({}));
-      }
-      signals.push(scoreEvent({}));
     }
+    // Free path: don't push empty fundamental/event signals that always return
+    // value=0. They participate in per-category weight normalization and dilute
+    // signals that actually fire. Only push when there's real data (TVL from
+    // phase 1, or Nansen/Messari from x402).
 
     // Phase 3: Parallel strategy data fetching (symbol, funding rate, unlocks)
     let marketData: any = undefined;
