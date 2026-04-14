@@ -275,4 +275,12 @@ contract HyperliquidPerpStrategy is BaseStrategy {
             hasActiveStopLoss = false;
         }
     }
+
+    // ── positionValue ──
+    // Inherits BaseStrategy's (0, false) default. A HyperEVM-native impl
+    // would wrap `L1Read.accountMarginSummary(...)` and return
+    // `accountValue` (clamped at zero, converted from 8-decimal USD to
+    // the asset's 6-decimal USDC). Deferred until there's fork-test
+    // infrastructure on HyperEVM; the existing `getMarginSummary()`
+    // view is already available for any caller that wants it directly.
 }

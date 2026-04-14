@@ -110,6 +110,14 @@ abstract contract BaseStrategy is IStrategy {
         return _state;
     }
 
+    /// @inheritdoc IStrategy
+    /// @dev State gating is centralized here so concrete strategies only
+    ///      need to override `_positionValue` for the Executed case.
+    function positionValue() external view virtual returns (uint256, bool) {
+        if (_state != State.Executed) return (0, false);
+        return _positionValue();
+    }
+
     // ── Internal helpers ──
 
     /// @notice Pull tokens from the vault into this strategy
@@ -141,4 +149,13 @@ abstract contract BaseStrategy is IStrategy {
 
     /// @notice Update tunable parameters (decode from data)
     function _updateParams(bytes calldata data) internal virtual;
+
+    /// @notice Executed-state position valuation. Default stub returns
+    ///         (0, false) so strategies without a queryable current
+    ///         value (Mamo, Venice, HyperLiquid on non-HyperEVM) can
+    ///         inherit without overriding. Strategies that can compute
+    ///         an onchain value override this with their implementation.
+    function _positionValue() internal view virtual returns (uint256, bool) {
+        return (0, false);
+    }
 }

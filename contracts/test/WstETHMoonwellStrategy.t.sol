@@ -511,6 +511,22 @@ contract WstETHMoonwellStrategyTest is Test {
         assertGt(vaultBal, 100e18 - SUPPLY_AMOUNT); // got something back
     }
 
+    // ==================== POSITION VALUE ====================
+    // Inherits BaseStrategy's (0, false) default — see contract comment
+    // for rationale (Base bridged wstETH has no rate view).
+
+    function test_positionValue_alwaysStubbed() public {
+        (uint256 value, bool valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+
+        _executeStrategy();
+
+        (value, valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+    }
+
     // ==================== CLONING ====================
 
     function test_clonesHaveIsolatedStorage() public {

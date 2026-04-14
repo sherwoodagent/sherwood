@@ -203,4 +203,10 @@ contract VeniceInferenceStrategy is BaseStrategy {
         if (newMinVVV > 0) minVVV = newMinVVV;
         if (newDeadlineOffset > 0) deadlineOffset = newDeadlineOffset;
     }
+
+    // ── positionValue ──
+    // Inherits BaseStrategy's (0, false) default. Loan model — the vault's
+    // asset was transferred to the agent at execute, and sVVV (held by the
+    // agent, non-transferrable) is not an asset this strategy owns. There
+    // is no mid-strategy position on this contract to value.
 }

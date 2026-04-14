@@ -1350,6 +1350,19 @@ export const BASE_STRATEGY_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "uint8" }],
   },
+  {
+    // Canonical mid-strategy position value view added in #218.
+    // Returns (value, valid) — `valid=false` means the frontend should
+    // hide the live P&L chip rather than render a misleading $0.
+    name: "positionValue",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "value", type: "uint256" },
+      { name: "valid", type: "bool" },
+    ],
+  },
 ] as const;
 
 // ── HyperliquidPerpStrategy (extends BaseStrategy with sweepToVault) ──

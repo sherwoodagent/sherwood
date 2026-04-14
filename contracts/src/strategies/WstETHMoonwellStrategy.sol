@@ -193,4 +193,15 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         if (newMinWstethOutPerWeth > 0) minWstethOutPerWeth = newMinWstethOutPerWeth;
         if (newDeadlineOffset > 0) deadlineOffset = newDeadlineOffset;
     }
+
+    // ── positionValue ──
+    // Inherits BaseStrategy's (0, false) default. On Base mainnet the
+    // bridged Lido wstETH (ERC20Bridged via OssifiableProxy) does NOT
+    // expose stEthPerToken / tokensPerStEth / any rate view — an earlier
+    // impl here that called stEthPerToken reverted on the forked
+    // mainnet integration test. The correct fix is to read Chainlink's
+    // WSTETH/ETH feed (Base: 0x43a5C292A453A3bF3606fa856197f09D7B74251a),
+    // which requires threading a new oracle address through InitParams
+    // and all construction callers (CLI + scripts). Deferred to a
+    // focused follow-up; keeping this stub honest in the meantime.
 }

@@ -176,6 +176,68 @@ contract MoonwellSupplyIntegrationTest is BaseIntegrationTest {
         );
     }
 
+    /// @notice positionValue() matches the canonical cToken math against real Moonwell,
+    ///         and grows over time as interest accrues.
+    function test_moonwell_positionValue_matchesMoonwellMath() public {
+        // Before any execution the value is (0, false).
+        bytes memory initData = abi.encode(USDC, MOONWELL_MUSDC, SUPPLY_AMOUNT, MIN_REDEEM);
+        address strategy = _cloneAndInit(moonwellTemplate, initData);
+        (uint256 v0, bool valid0) = MoonwellSupplyStrategy(payable(strategy)).positionValue();
+        assertEq(v0, 0, "pre-execute value");
+        assertFalse(valid0, "pre-execute valid flag");
+
+        // Execute via full governor lifecycle so state matches prod.
+        BatchExecutorLib.Call[] memory execCalls = _buildExecCalls(strategy);
+        BatchExecutorLib.Call[] memory settleCalls = _buildSettleCalls(strategy);
+        uint256 proposalId = _proposeVoteExecute(execCalls, settleCalls, PERF_FEE_BPS, STRATEGY_DURATION);
+
+        // Immediately after execute: positionValue should match
+        //   cToken.balanceOf(strategy) * cToken.exchangeRateStored() / 1e18
+        // against the *real* mUSDC contract, within 1 wei of rounding.
+        uint256 cBal = ICToken(MOONWELL_MUSDC).balanceOf(strategy);
+        uint256 rate = ICToken(MOONWELL_MUSDC).exchangeRateStored();
+        uint256 expected = (cBal * rate) / 1e18;
+
+        (uint256 v1, bool valid1) = MoonwellSupplyStrategy(payable(strategy)).positionValue();
+        assertTrue(valid1, "post-execute valid flag");
+        assertEq(v1, expected, "positionValue == canonical cToken math");
+
+        // Value should be close to the supplied amount (fresh supply, no accrual yet).
+        assertApproxEqAbs(v1, SUPPLY_AMOUNT, 2, "fresh position value ~= supplyAmount");
+
+        // Warp 30 days of real Moonwell interest accrual. Re-read — cToken.balanceOf is
+        // unchanged (we didn't mint more) but exchangeRateStored does NOT accrue without
+        // a poke. So we poke by calling a non-view function on the cToken that triggers
+        // accrueInterest: a zero-value mint from a random address.
+        vm.warp(block.timestamp + 30 days);
+        vm.roll(block.number + (30 days) / 2); // ~2s blocks on Base
+        _pokeMoonwellAccrual(MOONWELL_MUSDC);
+
+        uint256 rateAfter = ICToken(MOONWELL_MUSDC).exchangeRateStored();
+        (uint256 v2,) = MoonwellSupplyStrategy(payable(strategy)).positionValue();
+        assertGt(rateAfter, rate, "exchange rate should grow with accrual");
+        assertGt(v2, v1, "positionValue should grow with accrual");
+
+        // Settle and confirm post-settle returns (0, false).
+        vm.prank(agent);
+        governor.settleProposal(proposalId);
+        (uint256 v3, bool valid3) = MoonwellSupplyStrategy(payable(strategy)).positionValue();
+        assertEq(v3, 0, "post-settle value");
+        assertFalse(valid3, "post-settle valid flag");
+    }
+
+    /// @dev Trigger Moonwell's `accrueInterest` so `exchangeRateStored` reflects
+    ///      elapsed time. Mint-with-zero would revert; we instead do a 1-wei mint
+    ///      from a funded poker address.
+    function _pokeMoonwellAccrual(address mToken) internal {
+        address poker = makeAddr("poker");
+        deal(USDC, poker, 1);
+        vm.startPrank(poker);
+        IERC20(USDC).approve(mToken, 1);
+        ICToken(mToken).mint(1);
+        vm.stopPrank();
+    }
+
     /// @notice The proposer (agent) can settle immediately without waiting for duration.
     function test_moonwell_settleByProposer_early() public {
         (, uint256 proposalId) = _deployAndExecute();
