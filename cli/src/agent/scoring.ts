@@ -110,7 +110,7 @@ export const DEFAULT_THRESHOLDS: ActionThresholds = {
 export const REGIME_THRESHOLDS: Record<MarketRegime, ActionThresholds> = {
   "trending-up": { strongBuy: 0.55, buy: 0.25, sell: -0.40, strongSell: -0.70 },
   "trending-down": { strongBuy: 0.70, buy: 0.40, sell: -0.25, strongSell: -0.55 },
-  "ranging":        { strongBuy: 0.65, buy: 0.40, sell: -0.40, strongSell: -0.65 },
+  "ranging":        { strongBuy: 0.55, buy: 0.30, sell: -0.30, strongSell: -0.55 },
   "high-volatility":{ strongBuy: 0.70, buy: 0.45, sell: -0.45, strongSell: -0.70 },
   "low-volatility": { strongBuy: 0.60, buy: 0.30, sell: -0.30, strongSell: -0.60 },
 };
@@ -439,37 +439,60 @@ export function scoreEvent(data: {
 
 // ── Combine All Signals Into Trade Decision ──
 
+/** Signal name → weight category mapping. */
+const SIGNAL_CATEGORY_MAP: Record<string, keyof ScoringWeights> = {
+  technical: "technical",
+  sentiment: "sentiment",
+  onchain: "onchain",
+  fundamental: "fundamental",
+  event: "event",
+  smartMoney: "smartMoney",
+
+  // Strategy signal mappings to categories
+  breakoutOnChain: "technical",
+  meanReversion: "technical",
+  multiTimeframe: "technical",
+  dexFlow: "onchain",
+  fundingRate: "onchain",          // FIX 2: was "fundamental" — wasted on majors (0.00 weight)
+  tvlMomentum: "fundamental",
+  sentimentContrarian: "sentiment",
+  twitterSentiment: "sentiment",
+  tokenUnlock: "event",
+  hyperliquidFlow: "onchain",
+};
+
+/** Categories that rely on x402 paid data (Nansen, Messari). */
+const X402_CATEGORIES: Set<keyof ScoringWeights> = new Set(["smartMoney", "event"]);
+
 export function computeTradeDecision(
   signals: Signal[],
   weights?: ScoringWeights,
   regimeAdjustments?: Record<string, number>,
   correlationCheck?: CorrelationCheck,
   regime?: MarketRegime,
+  x402Available?: boolean,
 ): TradeDecision {
   const w = weights ?? DEFAULT_WEIGHTS;
   const thresholds = thresholdsForRegime(regime);
 
-  // Map signal names to weight keys
-  const weightMap: Record<string, number> = {
-    technical: w.technical,
-    sentiment: w.sentiment,
-    onchain: w.onchain,
-    fundamental: w.fundamental,
-    event: w.event,
-    smartMoney: w.smartMoney,
+  // FIX 1: When x402 is unavailable, exclude x402-dependent categories entirely.
+  // Their weight is redistributed proportionally to remaining active categories.
+  const excludedCategories = new Set<keyof ScoringWeights>();
+  if (x402Available === false) {
+    for (const cat of X402_CATEGORIES) {
+      if (w[cat] > 0) excludedCategories.add(cat);
+    }
+  }
 
-    // Strategy signal mappings to categories
-    breakoutOnChain: w.technical,
-    meanReversion: w.technical,
-    multiTimeframe: w.technical,
-    dexFlow: w.onchain,
-    fundingRate: w.fundamental,
-    tvlMomentum: w.fundamental,
-    sentimentContrarian: w.sentiment,
-    twitterSentiment: w.sentiment,
-    tokenUnlock: w.event,
-    hyperliquidFlow: w.onchain,
-  };
+  // FIX 3: Normalize per-category weights.
+  // Count how many signals fire per category, then split category weight among them.
+  const categoryCounts: Record<string, number> = {};
+  for (const signal of signals) {
+    if (signal._weightOverride !== undefined) continue; // manual overrides skip normalization
+    const category = SIGNAL_CATEGORY_MAP[signal.name];
+    if (!category || excludedCategories.has(category)) continue;
+    categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+  }
 
   // Weighted sum
   let totalWeight = 0;
@@ -477,7 +500,22 @@ export function computeTradeDecision(
   let weightedConfidence = 0;
 
   for (const signal of signals) {
-    const signalWeight = signal._weightOverride ?? weightMap[signal.name] ?? 0.1;
+    // Determine signal weight
+    let signalWeight: number;
+
+    if (signal._weightOverride !== undefined) {
+      signalWeight = signal._weightOverride;
+    } else {
+      const category = SIGNAL_CATEGORY_MAP[signal.name];
+
+      // FIX 1: skip signals in excluded x402 categories
+      if (category && excludedCategories.has(category)) continue;
+
+      const categoryWeight = category ? w[category] : 0.1;
+      const count = category ? (categoryCounts[category] ?? 1) : 1;
+      // FIX 3: split category weight among all signals in that category
+      signalWeight = categoryWeight / count;
+    }
 
     // Apply regime adjustment if available
     let adjustedValue = signal.value;

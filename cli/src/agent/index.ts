@@ -38,6 +38,7 @@ import { CorrelationGuard } from "./correlation.js";
 import type { CorrelationCheck } from "./correlation.js";
 import { AlertSystem } from "./alerts.js";
 import type { Alert } from "./alerts.js";
+import { isX402WalletFunded } from "../lib/x402.js";
 
 export type { Signal, ScoringWeights, TradeDecision, Alert, TechnicalSignals };
 
@@ -233,8 +234,18 @@ export class TradingAgent {
     let nansenData: any = undefined;
     let messariData: any = undefined;
 
-    // Phase 2: Parallel research data fetching (Nansen + Messari) if x402 enabled
+    // Check x402 wallet USDC balance once per scan cycle.
+    // If wallet is unfunded, skip x402 calls entirely to avoid diluting scores.
+    let x402Available = false;
     if (this.config.useX402) {
+      x402Available = await isX402WalletFunded();
+      if (!x402Available) {
+        console.error(chalk.yellow(`  x402 wallet has insufficient USDC — skipping paid signals (smartMoney, event) for this cycle`));
+      }
+    }
+
+    // Phase 2: Parallel research data fetching (Nansen + Messari) if x402 enabled AND funded
+    if (this.config.useX402 && x402Available) {
       const [nansenResult, messariResult] = await Promise.allSettled([
         // 4. Smart-money & on-chain data (via Nansen x402)
         getResearchProvider("nansen").query({ type: "smart-money", target: tokenId }),
@@ -460,6 +471,7 @@ export class TradingAgent {
       regimeAnalysis?.strategyAdjustments,
       correlationCheck,
       regimeAnalysis?.regime,
+      x402Available,
     );
 
     const result: TokenAnalysis = {

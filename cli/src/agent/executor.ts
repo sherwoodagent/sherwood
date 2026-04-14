@@ -59,8 +59,8 @@ export class TradeExecutor {
     error?: string;
     dryRun: boolean;
   }> {
-    // Handle SELL/STRONG_SELL by closing existing long positions
-    if (decision.action === 'SELL' || decision.action === 'STRONG_SELL') {
+    // Handle SELL/STRONG_SELL: in dry-run mode close existing positions; in perp mode open shorts
+    if ((decision.action === 'SELL' || decision.action === 'STRONG_SELL') && this.config.mode !== 'hyperliquid-perp') {
       const sellState = await this.portfolio.load();
       const existing = sellState.positions.find((p) => p.tokenId === tokenId);
       if (!existing) {
@@ -91,8 +91,8 @@ export class TradeExecutor {
       }
     }
 
-    // Only execute buys on BUY or STRONG_BUY; HOLD does nothing
-    if (decision.action !== 'BUY' && decision.action !== 'STRONG_BUY') {
+    // Only execute buys/sells; HOLD does nothing
+    if (decision.action !== 'BUY' && decision.action !== 'STRONG_BUY' && decision.action !== 'SELL' && decision.action !== 'STRONG_SELL') {
       return {
         success: false,
         error: `Action ${decision.action} does not trigger execution`,
@@ -105,9 +105,14 @@ export class TradeExecutor {
     this.riskManager.updatePortfolio(state);
 
     // Calculate stop loss and take profit from current price
+    const isShort = decision.action === 'SELL' || decision.action === 'STRONG_SELL';
     const stopLossDistance = currentPrice * 0.08; // 8% default stop
-    const stopLossPrice = currentPrice - stopLossDistance;
-    const takeProfitPrice = currentPrice * (1 + 0.08 * 2.5); // 2.5:1 reward/risk
+    const stopLossPrice = isShort
+      ? currentPrice + stopLossDistance      // stop above for shorts
+      : currentPrice - stopLossDistance;     // stop below for longs
+    const takeProfitPrice = isShort
+      ? currentPrice * (1 - 0.08 * 2.5)    // profit below for shorts
+      : currentPrice * (1 + 0.08 * 2.5);   // profit above for longs
 
     // Size the position using risk management
     const sizing = this.riskManager.calculatePositionSize(
@@ -136,7 +141,7 @@ export class TradeExecutor {
 
     const order: OrderParams = {
       tokenId,
-      side: 'buy',
+      side: isShort ? 'sell' : 'buy',
       amountUsd: sizing.sizeUsd,
       maxSlippage: 0.015,
       stopLoss: stopLossPrice,
@@ -257,8 +262,11 @@ export class TradeExecutor {
       transport: http(),
     });
 
-    // limitPx: slightly above market for buy IOC (1% slippage buffer)
-    const limitPx = priceToUint64(currentPrice * 1.01);
+    // limitPx: slightly above/below market for IOC (1% slippage buffer)
+    const isShort = order.side === 'sell';
+    const limitPx = isShort
+      ? priceToUint64(currentPrice * 0.99)   // below market for sell IOC
+      : priceToUint64(currentPrice * 1.01);  // above market for buy IOC
     // sz: token quantity — fetch asset-specific szDecimals from Hyperliquid meta API
     const quantity = order.amountUsd / currentPrice;
     const assetIndex = this.config.assetIndex ?? 3; // default ETH
@@ -267,10 +275,11 @@ export class TradeExecutor {
     const stopLossPx = priceToUint64(order.stopLoss);
     const stopLossSz = sz;
 
-    // Encode ACTION_OPEN_LONG (action=1)
+    // Encode action: ACTION_OPEN_LONG=1 or ACTION_OPEN_SHORT=4
+    const action = isShort ? 4 : 1;
     const actionData = encodeAbiParameters(
       [{ type: 'uint8' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint64' }],
-      [1, limitPx, sz, stopLossPx, stopLossSz],
+      [action, limitPx, sz, stopLossPx, stopLossSz],
     );
 
     const txData = encodeFunctionData({

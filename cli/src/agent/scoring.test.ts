@@ -285,7 +285,7 @@ describe("computeTradeDecision", () => {
   });
 
   it("ranging regime demands higher conviction than default", () => {
-    // Score ~0.35 would BUY under default (0.3) but HOLD in ranging (0.40 threshold)
+    // Score ~0.35 would BUY under default (0.3) and also BUY in ranging (0.30 threshold)
     const signals: Signal[] = [
       makeSignal("technical", 0.4),
       makeSignal("sentiment", 0.35),
@@ -303,8 +303,8 @@ describe("computeTradeDecision", () => {
     );
     expect(rangingDecision.score).toBeGreaterThan(0.3);
     expect(rangingDecision.score).toBeLessThan(0.4);
-    expect(rangingDecision.action).toBe("HOLD");
-    expect(rangingDecision.thresholds?.buy).toBe(0.4);
+    expect(rangingDecision.action).toBe("BUY");
+    expect(rangingDecision.thresholds?.buy).toBe(0.3);
   });
 
   it("trending-up is asymmetric — harder to SELL than default", () => {

@@ -51,6 +51,7 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     uint8 constant ACTION_OPEN_LONG = 1;
     uint8 constant ACTION_CLOSE_POSITION = 2;
     uint8 constant ACTION_UPDATE_STOP_LOSS = 3;
+    uint8 constant ACTION_OPEN_SHORT = 4;
 
     // ── CLOID constant for stop-loss tracking ──
     // Single fixed CLOID — only one GTC stop-loss is ever live at a time.
@@ -201,6 +202,33 @@ contract HyperliquidPerpStrategy is BaseStrategy {
             hasActiveStopLoss = true;
 
             emit StopLossUpdated(triggerPx);
+        } else if (action == ACTION_OPEN_SHORT) {
+            (, uint64 limitPx, uint64 sz, uint64 stopLossPx, uint64 stopLossSz) =
+                abi.decode(data, (uint8, uint64, uint64, uint64, uint64));
+
+            if (!leverageSentToCore) {
+                L1Write.sendUpdateLeverage(perpAssetIndex, true, leverage);
+                leverageSentToCore = true;
+                emit LeverageUpdated(perpAssetIndex, leverage);
+            }
+
+            // On-chain position size check
+            uint256 approxUsd = uint256(sz) * uint256(limitPx) / 1e6;
+            if (approxUsd > maxPositionSize) revert PositionTooLarge(approxUsd, maxPositionSize);
+
+            _cancelCurrentStopLoss();
+
+            // Place IOC sell order (market-like short entry) - isBuy=false, reduceOnly=false
+            L1Write.sendLimitOrder(perpAssetIndex, false, limitPx, sz, false, TimeInForce.Ioc, NO_CLOID);
+
+            // Place GTC stop loss (reduce-only buy to close short) with fixed CLOID
+            L1Write.sendLimitOrder(
+                perpAssetIndex, true, stopLossPx, stopLossSz, true, TimeInForce.Gtc, STOP_LOSS_CLOID
+            );
+            hasActiveStopLoss = true;
+
+            emit PositionOpened(perpAssetIndex, false, limitPx, sz, leverage);
+            emit StopLossUpdated(stopLossPx);
         } else {
             revert InvalidAction();
         }
