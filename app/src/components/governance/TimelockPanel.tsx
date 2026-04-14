@@ -19,7 +19,7 @@ import { Countdown } from "@/components/ui/Countdown";
 import { Term } from "@/components/ui/Glossary";
 
 const QUEUED_EVENT = parseAbiItem(
-  "event ParameterChangeQueued(bytes32 indexed paramKey, uint256 newValue, uint256 executableAt)",
+  "event ParameterChangeQueued(bytes32 indexed paramKey, uint256 newValue, uint256 effectiveAt)",
 );
 
 const BLOCK_WINDOW = 60_000n;
@@ -28,8 +28,8 @@ interface PendingChange {
   paramKey: `0x${string}`;
   label: string;
   newValue: bigint;
-  executableAt: bigint;
-  queuedAt: bigint;
+  /** Timestamp after which the change can be finalized. */
+  effectiveAt: bigint;
 }
 
 interface Props {
@@ -37,15 +37,51 @@ interface Props {
   chainId: number;
 }
 
-/** keccak256 of common parameter names. Computed offline (cast keccak256
- *  "votingPeriod" etc) and inlined so we don't need a hashing dep at
- *  runtime. If a key isn't in this map, we fall back to the truncated
- *  paramKey hex for display.
- *
- *  TODO: populate by capturing real ParameterChangeQueued log paramKeys
- *  from the deployed governor + reverse-mapping to the contract constants
- *  in GovernorParameters.sol. Tracked in a follow-up issue. */
-const PARAM_LABELS: Record<string, string> = {};
+/** keccak256 of parameter names from GovernorParameters.sol, computed via
+ *  `cast keccak "votingPeriod"` etc. Maps paramKey → human label. */
+const PARAM_LABELS: Record<string, string> = {
+  "0x76f733d2535ffde0b80d69adaccb5c2fb7ee34b4cd295def21acc7430f9cd824": "Voting Period",
+  "0xa4b5f6bf28c085260904fae0b08985850e712a3a7a8c2878d270d9553a57b21f": "Execution Window",
+  "0xa4f81ccb2354204c9f162b42b0cd6586b02247e3ac18e6f88a746ca444e65557": "Veto Threshold",
+  "0x99d950da57e425332e0f1cec408ed3b99b2af0b63a2065a8fb14ea8b71c75789": "Max Performance Fee",
+  "0xcce1092625a03fac0d6e8157338acd93b25b81ceea4c4e6d9ad09c18cd5f8fad": "Min Strategy Duration",
+  "0x305f0386aba27545cda71d8e4dc09dc19364bf2899ad2a7993763819e6212558": "Max Strategy Duration",
+  "0x293cb597f24591d5414f6e271e5de3fa4bbd9c27f749b4efbb561e3643e8e23b": "Cooldown Period",
+  "0x233e14d086be76b44a8127f5a05ce665a37d62bec45665208b0d2e5fd2c8724c": "Collaboration Window",
+  "0x413fb89725373d2e7f4001d903c8b479ed4fb543bdf153f24cee2969efd118e0": "Max Co-Proposers",
+  "0x01b466362d07312faeacb71469058a46b31266e91b12cf581791bf051d79b0e2": "Protocol Fee",
+};
+
+/** Keys that represent basis-point values (displayed as X.Y%). */
+const BPS_PARAMS = new Set([
+  "0xa4f81ccb2354204c9f162b42b0cd6586b02247e3ac18e6f88a746ca444e65557", // vetoThresholdBps
+  "0x99d950da57e425332e0f1cec408ed3b99b2af0b63a2065a8fb14ea8b71c75789", // maxPerformanceFeeBps
+  "0x01b466362d07312faeacb71469058a46b31266e91b12cf581791bf051d79b0e2", // protocolFeeBps
+]);
+
+/** Keys that represent durations in seconds. */
+const DURATION_PARAMS = new Set([
+  "0x76f733d2535ffde0b80d69adaccb5c2fb7ee34b4cd295def21acc7430f9cd824", // votingPeriod
+  "0xa4b5f6bf28c085260904fae0b08985850e712a3a7a8c2878d270d9553a57b21f", // executionWindow
+  "0xcce1092625a03fac0d6e8157338acd93b25b81ceea4c4e6d9ad09c18cd5f8fad", // minStrategyDuration
+  "0x305f0386aba27545cda71d8e4dc09dc19364bf2899ad2a7993763819e6212558", // maxStrategyDuration
+  "0x293cb597f24591d5414f6e271e5de3fa4bbd9c27f749b4efbb561e3643e8e23b", // cooldownPeriod
+  "0x233e14d086be76b44a8127f5a05ce665a37d62bec45665208b0d2e5fd2c8724c", // collaborationWindow
+]);
+
+/** Format a raw newValue into a human-friendly display. */
+function formatParamValue(paramKey: string, raw: bigint): string {
+  if (BPS_PARAMS.has(paramKey)) {
+    return `${(Number(raw) / 100).toFixed(1)}%`;
+  }
+  if (DURATION_PARAMS.has(paramKey)) {
+    const secs = Number(raw);
+    if (secs >= 86400) return `${(secs / 86400).toFixed(1)}d`;
+    if (secs >= 3600) return `${(secs / 3600).toFixed(1)}h`;
+    return `${(secs / 60).toFixed(0)}m`;
+  }
+  return raw.toString();
+}
 
 function labelFor(paramKey: `0x${string}`): string {
   return PARAM_LABELS[paramKey] ?? `${paramKey.slice(0, 10)}…`;
@@ -98,11 +134,13 @@ export default function TimelockPanel({ governorAddress, chainId }: Props) {
         }
 
         // Verify each against the canonical onchain state.
+        // The function is `getPendingChange` (not getPendingParameterChange)
+        // and returns { newValue, effectiveAt, exists }.
         const checks = await client.multicall({
           contracts: candidates.map((c) => ({
             address: governorAddress,
             abi: SYNDICATE_GOVERNOR_ABI,
-            functionName: "getPendingParameterChange" as const,
+            functionName: "getPendingChange" as const,
             args: [c.args.paramKey as `0x${string}`] as const,
           })),
         });
@@ -111,16 +149,15 @@ export default function TimelockPanel({ governorAddress, chainId }: Props) {
         for (let i = 0; i < candidates.length; i++) {
           const r = checks[i];
           if (r.status !== "success" || !r.result) continue;
-          const data = r.result as { newValue: bigint; executableAt: bigint; queuedAt: bigint };
-          // executableAt = 0 means no pending change (finalized or cancelled).
-          if (!data.executableAt || data.executableAt === 0n) continue;
+          const data = r.result as { newValue: bigint; effectiveAt: bigint; exists: boolean };
+          // exists == false means no pending change (finalized or cancelled).
+          if (!data.exists || !data.effectiveAt || data.effectiveAt === 0n) continue;
           const paramKey = candidates[i].args.paramKey as `0x${string}`;
           out.push({
             paramKey,
             label: labelFor(paramKey),
             newValue: data.newValue,
-            executableAt: data.executableAt,
-            queuedAt: data.queuedAt,
+            effectiveAt: data.effectiveAt,
           });
         }
 
@@ -181,7 +218,7 @@ function ChangeRow({ change }: { change: PendingChange }) {
     return () => clearInterval(id);
   }, []);
 
-  const ready = change.executableAt <= BigInt(now);
+  const ready = change.effectiveAt <= BigInt(now);
   return (
     <div
       style={{
@@ -206,14 +243,14 @@ function ChangeRow({ change }: { change: PendingChange }) {
           }}
         >
           {change.label}
-          <span style={{ color: "var(--color-fg-secondary)", marginLeft: "0.5rem" }}>
-            → {change.newValue.toString()}
+          <span style={{ color: "var(--color-accent)", marginLeft: "0.5rem" }}>
+            → {formatParamValue(change.paramKey, change.newValue)}
           </span>
         </div>
         {ready ? (
           <span className="sh-badge sh-badge--success">Ready to finalize</span>
         ) : (
-          <Countdown to={change.executableAt} label="Finalize in" />
+          <Countdown to={change.effectiveAt} label="Finalize in" />
         )}
       </div>
       <div className="sh-stepper">

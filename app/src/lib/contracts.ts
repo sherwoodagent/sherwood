@@ -695,9 +695,11 @@ export const SYNDICATE_GOVERNOR_ABI = [
       },
     ],
   },
-  // Parameter-change reads (timelock surface)
+  // Parameter-change reads (timelock surface).
+  // Function name + return tuple match GovernorParameters.sol exactly:
+  // returns PendingChange { newValue, effectiveAt, exists }.
   {
-    name: "getPendingParameterChange",
+    name: "getPendingChange",
     type: "function",
     stateMutability: "view",
     inputs: [{ name: "paramKey", type: "bytes32" }],
@@ -707,8 +709,8 @@ export const SYNDICATE_GOVERNOR_ABI = [
         type: "tuple",
         components: [
           { name: "newValue", type: "uint256" },
-          { name: "executableAt", type: "uint256" },
-          { name: "queuedAt", type: "uint256" },
+          { name: "effectiveAt", type: "uint256" },
+          { name: "exists", type: "bool" },
         ],
       },
     ],
@@ -730,7 +732,7 @@ export const SYNDICATE_GOVERNOR_ABI = [
     inputs: [
       { name: "paramKey", type: "bytes32", indexed: true },
       { name: "newValue", type: "uint256", indexed: false },
-      { name: "executableAt", type: "uint256", indexed: false },
+      { name: "effectiveAt", type: "uint256", indexed: false },
     ],
   },
   {
@@ -738,6 +740,7 @@ export const SYNDICATE_GOVERNOR_ABI = [
     name: "ParameterChangeFinalized",
     inputs: [
       { name: "paramKey", type: "bytes32", indexed: true },
+      { name: "oldValue", type: "uint256", indexed: false },
       { name: "newValue", type: "uint256", indexed: false },
     ],
   },

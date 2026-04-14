@@ -114,8 +114,7 @@ export function GasEstimate({
       cancelled = true;
     };
     // Re-estimate on argument changes via the bigint-safe argsKey above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, account, address, functionName, argsKey, value, chainId]);
+  }, [client, account, address, abi, functionName, argsKey, value, chainId]);
 
   if (!account) return null;
 
