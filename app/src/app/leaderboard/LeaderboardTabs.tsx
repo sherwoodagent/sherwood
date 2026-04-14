@@ -141,7 +141,6 @@ function SortHeader({
     <button
       type="button"
       onClick={onClick}
-      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
       className="sh-sort-header"
       style={{
         background: "none",
@@ -701,7 +700,16 @@ export default function LeaderboardTabs({
                 <tr>
                   <th scope="col" style={{ width: "32px" }} aria-label="Watchlist"></th>
                   <th scope="col" style={{ width: "40px" }}>Rank</th>
-                  <th scope="col">
+                  <th
+                    scope="col"
+                    aria-sort={
+                      sortKey === "name"
+                        ? sortDir === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : "none"
+                    }
+                  >
                     <SortHeader
                       label="Syndicate"
                       active={sortKey === "name"}
@@ -710,7 +718,16 @@ export default function LeaderboardTabs({
                     />
                   </th>
                   <th scope="col">Strategy</th>
-                  <th scope="col">
+                  <th
+                    scope="col"
+                    aria-sort={
+                      sortKey === "tvl"
+                        ? sortDir === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : "none"
+                    }
+                  >
                     <SortHeader
                       label="TVL"
                       active={sortKey === "tvl"}
@@ -726,7 +743,16 @@ export default function LeaderboardTabs({
                     Trend (7D)
                   </th>
                   <th scope="col" style={{ width: "40px" }} title="Net deposit flow over lifetime">Flow</th>
-                  <th scope="col">
+                  <th
+                    scope="col"
+                    aria-sort={
+                      sortKey === "agents"
+                        ? sortDir === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : "none"
+                    }
+                  >
                     <SortHeader
                       label="Agents"
                       active={sortKey === "agents"}
