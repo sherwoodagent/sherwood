@@ -722,6 +722,11 @@ async function fetchViaOnChain(
         assetSymbol: info.symbol,
         agentCount,
         proposalCount: 0, // not available without extra calls in onchain fallback
+        // equityCurve intentionally omitted: it's reconstructed from
+        // subgraph event history in fetchViaSubgraph, and this code path
+        // runs only when that subgraph is unreachable. Rows coming from
+        // this fallback render "—" in the Trend (7D) column, which is
+        // the correct graceful degradation.
         agents: agentsByVault[s.vault.toLowerCase()] ?? [],
         status,
         chainId,
