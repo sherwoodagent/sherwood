@@ -101,10 +101,17 @@ export interface WalkForwardResult {
 }
 
 // Strategies that can work with candles-only data in backtest mode
-const CANDLE_BASED_STRATEGIES = [
-  'breakoutOnChain',
-  'meanReversion',
-  'multiTimeframe',
+// Strategies that work with candle data + F&G available in the backtester.
+// Previously limited to 3 candle-only strategies — expanded to include all
+// that fire with the data the backtester provides (candles + fearAndGreed).
+const BACKTEST_STRATEGIES = [
+  'breakoutOnChain',     // 95% fire rate — candle-based
+  'multiTimeframe',      // 78% fire rate — candle-based
+  'sentimentContrarian', // 100% fire rate — uses fearAndGreed from context
+  'momentum',            // computed from candles directly in the backtest loop
+  'fundingRate',         // fires when ctx.fundingRateData is set (won't fire in backtest — ok)
+  'dexFlow',             // fires when ctx.dexData is set (won't fire in backtest — ok)
+  'hyperliquidFlow',     // fires when ctx.hyperliquidData is set (won't fire — ok)
 ];
 
 export class Backtester {
@@ -226,7 +233,7 @@ export class Backtester {
 
     // 3. Simulate trading
     let capital = this.config.initialCapital;
-    let position: { entryPrice: number; entryDate: string; signal: string; highWaterMark: number } | null = null;
+    let position: { entryPrice: number; entryDate: string; signal: string; highWaterMark: number; entryTimestamp: number } | null = null;
     // Per-simulation in-memory smoother (no disk IO). Maintains rolling
     // buffers across candles so smoothing reflects the same window logic
     // as live runs.
@@ -244,7 +251,7 @@ export class Backtester {
       if (this.config.strategies.length > 0) {
         console.log(chalk.dim(`  Using user-specified strategies: ${this.config.strategies.join(', ')}`));
       } else {
-        const availableStrategies = [...CANDLE_BASED_STRATEGIES];
+        const availableStrategies = [...BACKTEST_STRATEGIES];
         if (Object.keys(fearAndGreedData).length > 0) {
           availableStrategies.push('sentimentContrarian');
         }
@@ -293,8 +300,37 @@ export class Backtester {
           fearAndGreed,
         };
 
-        // Run strategies — filter to candle-based only for backtest
+        // Run strategies
         let signals = await runStrategies(ctx);
+
+        // Add momentum signal (same logic as live in index.ts — computed from candles)
+        if (windowCandles.length >= 24) {
+          const recent = windowCandles.slice(-24);
+          const recentLow = Math.min(...recent.map((c) => c.low));
+          const recentHigh = Math.max(...recent.map((c) => c.high));
+          const pctFromLow = recentLow > 0 ? (currentPrice - recentLow) / recentLow : 0;
+          const pctFromHigh = recentHigh > 0 ? (recentHigh - currentPrice) / recentHigh : 0;
+
+          let momentumValue = 0;
+          if (pctFromHigh < 0.01) {
+            momentumValue = Math.min(0.6, pctFromLow * 5);
+          } else if (pctFromLow < 0.01) {
+            momentumValue = -Math.min(0.6, pctFromHigh * 5);
+          } else {
+            const rangePosition = (currentPrice - recentLow) / (recentHigh - recentLow);
+            momentumValue = (rangePosition - 0.5) * 0.4;
+          }
+
+          if (Math.abs(momentumValue) > 0.02) {
+            signals.push({
+              name: 'momentum',
+              value: momentumValue,
+              confidence: Math.min(0.7, 0.3 + Math.abs(momentumValue)),
+              source: 'Price Momentum',
+              details: `Backtest momentum`,
+            });
+          }
+        }
 
         // Optional smoothing — uses per-simulation in-memory buffer so each
         // candle adds to a rolling window matching live behavior.
@@ -312,8 +348,7 @@ export class Backtester {
           ));
         } else {
           // No user selection — filter to candle-based strategies only
-          filtered = signals.filter((s) => CANDLE_BASED_STRATEGIES.includes(s.name) ||
-                                          (fearAndGreed && s.name === 'sentimentContrarian'));
+          filtered = signals.filter((s) => BACKTEST_STRATEGIES.includes(s.name));
         }
 
         // Classify regime from the current rolling window (no look-ahead)
@@ -374,32 +409,59 @@ export class Backtester {
         continue; // skip candle if analysis fails
       }
 
-      // Execute paper trades
+      // ── Execute paper trades with FULL exit logic ──
+      // Matches the live system: stop-loss, take-profit, time stop, trailing,
+      // AND signal-based exits. Previously only checked SELL signals, so
+      // positions rode forever without stops.
+      const STOP_LOSS_PCT = 0.03;    // 3% stop — matches executor.ts
+      const TAKE_PROFIT_PCT = 0.06;  // 6% TP (2:1 R:R)
+      const TIME_STOP_HOURS = 48;    // 48h dead-money exit
+      const TRAIL_PCT = this.config.trailingStopPct ?? 0.025; // 2.5% trail
+
       if (!position && (decision.action === 'BUY' || decision.action === 'STRONG_BUY')) {
-        // Enter long
         position = {
           entryPrice: currentPrice,
           entryDate: currentDate,
           signal: decision.action,
           highWaterMark: currentPrice,
+          entryTimestamp: currentCandle.timestamp,
         };
       } else if (position) {
-        // Update high-water mark for trailing stop
+        // Update high-water mark
         if (currentPrice > position.highWaterMark) {
           position.highWaterMark = currentPrice;
         }
 
-        // Check trailing stop FIRST — exits faster than waiting for SELL signal
-        const trailingStopHit = this.config.trailingStopPct !== undefined
-          && currentPrice <= position.highWaterMark * (1 - this.config.trailingStopPct);
-        const sellSignal = decision.action === 'SELL' || decision.action === 'STRONG_SELL';
+        const pnlPercent = (currentPrice - position.entryPrice) / position.entryPrice;
+        const holdingHours = (currentCandle.timestamp - position.entryTimestamp) / (1000 * 60 * 60);
 
-        if (trailingStopHit || sellSignal) {
-          const pnlPercent = (currentPrice - position.entryPrice) / position.entryPrice;
+        // Check ALL exit conditions (priority order)
+        let exitReason: string | null = null;
+
+        // 1. Stop loss (3%)
+        if (pnlPercent <= -STOP_LOSS_PCT) {
+          exitReason = `STOP_LOSS (${(pnlPercent * 100).toFixed(1)}%)`;
+        }
+        // 2. Take profit (6%)
+        else if (pnlPercent >= TAKE_PROFIT_PCT) {
+          exitReason = `TAKE_PROFIT (+${(pnlPercent * 100).toFixed(1)}%)`;
+        }
+        // 3. Trailing stop
+        else if (TRAIL_PCT > 0 && currentPrice <= position.highWaterMark * (1 - TRAIL_PCT)) {
+          exitReason = `TRAILING_STOP (HWM $${position.highWaterMark.toFixed(2)}, -${(TRAIL_PCT * 100).toFixed(1)}%)`;
+        }
+        // 4. Time stop (48h with <1% PnL)
+        else if (holdingHours > TIME_STOP_HOURS && Math.abs(pnlPercent) < 0.01) {
+          exitReason = `TIME_STOP (${(holdingHours / 24).toFixed(1)}d, ${(pnlPercent * 100).toFixed(1)}%)`;
+        }
+        // 5. Signal-based SELL
+        else if (decision.action === 'SELL' || decision.action === 'STRONG_SELL') {
+          exitReason = decision.action;
+        }
+
+        if (exitReason) {
           capital *= (1 + pnlPercent);
           returns.push(pnlPercent);
-
-          const exitReason = trailingStopHit ? `TRAILING_STOP (-${(this.config.trailingStopPct! * 100).toFixed(1)}%)` : decision.action;
           trades.push({
             entryDate: position.entryDate,
             exitDate: currentDate,
@@ -408,7 +470,6 @@ export class Backtester {
             pnlPercent,
             signal: `${position.signal} → ${exitReason}`,
           });
-
           position = null;
         }
       }
