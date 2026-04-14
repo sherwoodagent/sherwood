@@ -547,7 +547,7 @@ export default function LeaderboardTabs({
         csvCell(s.subdomain),
         csvCell(s.strategy || ""),
         csvCell(s.tvl),
-        s.tvlUSDDisplay || "",
+        csvCell(s.tvlUSDDisplay || ""),
         String(s.agentCount),
         csvCell(s.status),
         String(s.chainId),
