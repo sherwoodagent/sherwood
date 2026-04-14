@@ -207,7 +207,14 @@ function compareSyndicates(
       cmp = a.name.localeCompare(b.name);
       break;
   }
-  return dir === "asc" ? cmp : -cmp;
+  if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
+  // Tiebreakers are pinned (TVL desc, then id asc) regardless of primary
+  // direction — they just make the sort deterministic so the row order
+  // doesn't flicker across re-renders / auto-refresh ticks when the
+  // primary key ties. Flipping them with `dir` would reintroduce flicker.
+  const tvlTie = b.tvlNum - a.tvlNum;
+  if (tvlTie !== 0) return tvlTie;
+  return a.id.localeCompare(b.id);
 }
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }> = {
