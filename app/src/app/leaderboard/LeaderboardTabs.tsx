@@ -14,6 +14,11 @@ import { RecentlyViewedStrip } from "@/components/RecentlyViewed";
 
 const PAGE_SIZE = 25;
 const WATCHLIST_KEY = "sherwood_watchlist";
+/** Auto-refresh interval for the leaderboard table when the tab is
+    visible. Server route is cached at 30s so this doesn't amplify load. */
+const REFRESH_INTERVAL_MS = 30_000;
+/** How long the rank-change flash persists on a row. */
+const RANK_FLASH_MS = 3_000;
 
 // ── Watchlist (localStorage-backed) ──────────────────────
 function readWatchlist(): Set<string> {
@@ -113,6 +118,83 @@ type TabId = "syndicates" | "agents";
 type ChainFilter = "all" | "8453" | "84532" | "999";
 type StatusFilter = "all" | "ACTIVE_STRATEGY" | "VOTING" | "IDLE" | "NO_AGENTS";
 
+// ── Sorting ────────────────────────────────────────────────
+type SortKey = "tvl" | "agents" | "age" | "name";
+type SortDir = "asc" | "desc";
+
+const DEFAULT_SORT: { key: SortKey; dir: SortDir } = { key: "tvl", dir: "desc" };
+
+/** Clickable sort-toggle rendered inside a <th>. */
+function SortHeader({
+  label,
+  active,
+  dir,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  dir: SortDir;
+  onClick: () => void;
+}) {
+  const arrow = !active ? "" : dir === "asc" ? " ▲" : " ▼";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
+      className="sh-sort-header"
+      style={{
+        background: "none",
+        border: 0,
+        padding: 0,
+        font: "inherit",
+        color: active ? "var(--color-accent)" : "inherit",
+        cursor: "pointer",
+        letterSpacing: "inherit",
+        textTransform: "inherit",
+      }}
+    >
+      {label}
+      <span aria-hidden style={{ fontSize: "9px", opacity: active ? 1 : 0.3 }}>
+        {arrow || " ⇅"}
+      </span>
+    </button>
+  );
+}
+
+function parseSortParam(raw: string | null): { key: SortKey; dir: SortDir } {
+  if (!raw) return DEFAULT_SORT;
+  const [k, d] = raw.split(":");
+  const key =
+    k === "tvl" || k === "agents" || k === "age" || k === "name" ? k : DEFAULT_SORT.key;
+  const dir = d === "asc" ? "asc" : "desc";
+  return { key, dir };
+}
+
+function compareSyndicates(
+  a: RankedSyndicate,
+  b: RankedSyndicate,
+  key: SortKey,
+  dir: SortDir,
+): number {
+  let cmp = 0;
+  switch (key) {
+    case "tvl":
+      cmp = a.tvlNum - b.tvlNum;
+      break;
+    case "agents":
+      cmp = a.agentCount - b.agentCount;
+      break;
+    case "age":
+      cmp = (a.ageDays ?? 0) - (b.ageDays ?? 0);
+      break;
+    case "name":
+      cmp = a.name.localeCompare(b.name);
+      break;
+  }
+  return dir === "asc" ? cmp : -cmp;
+}
+
 const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   ACTIVE_STRATEGY: { bg: "rgba(46,230,166,0.15)", text: "#2EE6A6", label: "Active" },
   VOTING: { bg: "rgba(234,179,8,0.15)", text: "#eab308", label: "Voting" },
@@ -121,7 +203,15 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }>
 };
 
 // Rank medal — gold/silver/bronze for top 3, plain mono digits thereafter.
-function RankCell({ index }: { index: number }) {
+// A `delta` arg surfaces the brief up/down flash when auto-refresh detects
+// that a syndicate moved in rank since the previous tick.
+function RankCell({
+  index,
+  delta,
+}: {
+  index: number;
+  delta?: "up" | "down";
+}) {
   const medalClass =
     index === 0
       ? "rank-medal rank-medal--gold"
@@ -130,10 +220,18 @@ function RankCell({ index }: { index: number }) {
         : index === 2
           ? "rank-medal rank-medal--bronze"
           : null;
-  if (medalClass) {
-    return <span className={medalClass}>{String(index + 1).padStart(2, "0")}</span>;
-  }
-  return <span className="rank-plain">{String(index + 1).padStart(2, "0")}</span>;
+  const deltaClass = delta ? `sh-rank-delta sh-rank-delta--${delta}` : "";
+  const inner = medalClass ? (
+    <span className={medalClass}>{String(index + 1).padStart(2, "0")}</span>
+  ) : (
+    <span className="rank-plain">{String(index + 1).padStart(2, "0")}</span>
+  );
+  if (!delta) return inner;
+  return (
+    <span className={deltaClass} title={delta === "up" ? "Moved up" : "Moved down"}>
+      {inner}
+    </span>
+  );
 }
 
 // Directional P&L cell
@@ -198,12 +296,20 @@ function NewBadge({ ageDays }: { ageDays?: number }) {
   );
 }
 
-export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
+export default function LeaderboardTabs({
+  syndicates: initialSyndicates,
+}: LeaderboardTabsProps) {
   // Deep-link support: ?syndicate=<subdomain> jumps to the row, scrolls into
   // view, briefly flashes accent. Designed for shared links (watchlist /
   // social) so they land on the right entry without manual filtering.
   const searchParams = useSearchParams();
   const deepLinkSubdomain = searchParams.get("syndicate");
+  const initialSort = parseSortParam(searchParams.get("sort"));
+
+  // Live-syncing data: starts from the SSR prop, then auto-refreshes from
+  // the /api/leaderboard route every REFRESH_INTERVAL_MS when the tab is
+  // visible. Everything downstream reads from this state, not the prop.
+  const [syndicates, setSyndicates] = useState(initialSyndicates);
 
   // Compute the deep-link target's page once at mount via lazy initializer
   // so we don't need a setState-in-effect on first render.
@@ -211,7 +317,8 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
     if (!deepLinkSubdomain) return 0;
     const idx = syndicates.findIndex((s) => s.subdomain === deepLinkSubdomain);
     return idx >= 0 ? Math.floor(idx / PAGE_SIZE) : 0;
-  }, [deepLinkSubdomain, syndicates]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkSubdomain]);
 
   const [tab, setTab] = useState<TabId>("syndicates");
   const [query, setQuery] = useState("");
@@ -220,7 +327,82 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
   const [page, setPage] = useState<number>(() => deepLinkPage);
   const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
   const [flashedKey, setFlashedKey] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>(initialSort.key);
+  const [sortDir, setSortDir] = useState<SortDir>(initialSort.dir);
+  const [rankDeltas, setRankDeltas] = useState<Record<string, "up" | "down">>(
+    {},
+  );
   const watchlist = useWatchlist();
+
+  // ── Auto-refresh ─────────────────────────────────────────
+  // Poll the cached /api/leaderboard route when the tab is visible.
+  // Diff ranks against the previous tick to flash the sh-rank-delta chip
+  // on rows that moved.
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+
+    async function tick() {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
+      }
+      try {
+        const res = await fetch("/api/leaderboard", { cache: "no-store" });
+        if (!res.ok) return;
+        const next = (await res.json()) as RankedSyndicate[];
+        if (cancelled) return;
+
+        // Rank-change detection by syndicate key (chainId-id).
+        const prevIdx = new Map<string, number>();
+        syndicates.forEach((s, i) => prevIdx.set(`${s.chainId}-${s.id}`, i));
+        const deltas: Record<string, "up" | "down"> = {};
+        next.forEach((s, i) => {
+          const key = `${s.chainId}-${s.id}`;
+          const prev = prevIdx.get(key);
+          if (prev !== undefined && prev !== i) {
+            deltas[key] = i < prev ? "up" : "down";
+          }
+        });
+
+        setSyndicates(next);
+        if (Object.keys(deltas).length > 0) {
+          setRankDeltas(deltas);
+          setTimeout(() => {
+            if (!cancelled) setRankDeltas({});
+          }, RANK_FLASH_MS);
+        }
+      } catch {
+        // Network hiccups are silent — the prior data is still visible.
+      }
+    }
+
+    timer = setInterval(tick, REFRESH_INTERVAL_MS);
+
+    // Immediate refresh when the tab becomes visible again.
+    const onVis = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [syndicates]);
+
+  // ── URL sort sync ────────────────────────────────────────
+  // Keep ?sort= in sync with sort state so links are shareable.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (sortKey === DEFAULT_SORT.key && sortDir === DEFAULT_SORT.dir) {
+      url.searchParams.delete("sort");
+    } else {
+      url.searchParams.set("sort", `${sortKey}:${sortDir}`);
+    }
+    window.history.replaceState(null, "", url.toString());
+  }, [sortKey, sortDir]);
 
   // Reset page when filters change
   const resetPage = useCallback(() => setPage(0), []);
@@ -269,7 +451,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
   );
 
   const filteredSyndicates = useMemo(() => {
-    return syndicates.filter((s) => {
+    const filtered = syndicates.filter((s) => {
       if (showWatchlistOnly && !watchlist.has(`${s.chainId}:${s.id}`)) return false;
       if (chain !== "all" && String(s.chainId) !== chain) return false;
       if (status !== "all" && s.status !== status) return false;
@@ -285,7 +467,63 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
       }
       return true;
     });
-  }, [syndicates, chain, status, query, showWatchlistOnly, watchlist]);
+    return filtered.sort((a, b) => compareSyndicates(a, b, sortKey, sortDir));
+  }, [syndicates, chain, status, query, showWatchlistOnly, watchlist, sortKey, sortDir]);
+
+  // Toggle handler for sortable column headers.
+  const toggleSort = useCallback(
+    (key: SortKey) => {
+      if (sortKey === key) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSortKey(key);
+        // Sensible default direction per column.
+        setSortDir(key === "name" ? "asc" : "desc");
+      }
+    },
+    [sortKey],
+  );
+
+  // CSV export — serializes the currently filtered + sorted view.
+  const exportCsv = useCallback(() => {
+    const header = [
+      "rank",
+      "name",
+      "subdomain",
+      "strategy",
+      "tvl",
+      "tvlUSD",
+      "agents",
+      "status",
+      "chainId",
+      "ageDays",
+    ];
+    const lines = [header.join(",")];
+    filteredSyndicates.forEach((s, i) => {
+      const row = [
+        String(i + 1),
+        JSON.stringify(s.name),
+        s.subdomain,
+        JSON.stringify(s.strategy || ""),
+        JSON.stringify(s.tvl),
+        s.tvlUSDDisplay || "",
+        String(s.agentCount),
+        s.status,
+        String(s.chainId),
+        s.ageDays != null ? String(s.ageDays) : "",
+      ];
+      lines.push(row.join(","));
+    });
+    const csv = lines.join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.download = `sherwood-leaderboard-${stamp}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [filteredSyndicates]);
 
   // Page slice for syndicates table
   const totalPages = Math.max(1, Math.ceil(filteredSyndicates.length / PAGE_SIZE));
@@ -391,6 +629,18 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
           </button>
         )}
 
+        {tab === "syndicates" && filteredSyndicates.length > 0 && (
+          <button
+            type="button"
+            onClick={exportCsv}
+            className="sh-btn sh-btn--secondary sh-btn--sm"
+            aria-label="Export current view as CSV"
+            title="Export the current filtered view as CSV"
+          >
+            ⬇ CSV
+          </button>
+        )}
+
         <span
           style={{
             marginLeft: "auto",
@@ -451,9 +701,23 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                 <tr>
                   <th scope="col" style={{ width: "32px" }} aria-label="Watchlist"></th>
                   <th scope="col" style={{ width: "40px" }}>Rank</th>
-                  <th scope="col">Syndicate</th>
+                  <th scope="col">
+                    <SortHeader
+                      label="Syndicate"
+                      active={sortKey === "name"}
+                      dir={sortDir}
+                      onClick={() => toggleSort("name")}
+                    />
+                  </th>
                   <th scope="col">Strategy</th>
-                  <th scope="col">TVL</th>
+                  <th scope="col">
+                    <SortHeader
+                      label="TVL"
+                      active={sortKey === "tvl"}
+                      dir={sortDir}
+                      onClick={() => toggleSort("tvl")}
+                    />
+                  </th>
                   <th
                     scope="col"
                     style={{ width: "90px" }}
@@ -462,7 +726,14 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                     Trend (7D)
                   </th>
                   <th scope="col" style={{ width: "40px" }} title="Net deposit flow over lifetime">Flow</th>
-                  <th scope="col">Agents</th>
+                  <th scope="col">
+                    <SortHeader
+                      label="Agents"
+                      active={sortKey === "agents"}
+                      dir={sortDir}
+                      onClick={() => toggleSort("agents")}
+                    />
+                  </th>
                   <th scope="col">Status</th>
                   <th scope="col">Chain</th>
                   <th scope="col" style={{ textAlign: "right" }}>Action</th>
@@ -493,7 +764,7 @@ export default function LeaderboardTabs({ syndicates }: LeaderboardTabsProps) {
                           label={s.name}
                         />
                       </td>
-                      <td><RankCell index={rankIdx} /></td>
+                      <td><RankCell index={rankIdx} delta={rankDeltas[rowKey]} /></td>
                       <td>
                         <Link
                           href={`/syndicate/${s.subdomain}`}
