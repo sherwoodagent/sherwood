@@ -161,6 +161,22 @@ function SortHeader({
   );
 }
 
+/**
+ * Escape a user-controlled string for CSV export.
+ *
+ * Defends against spreadsheet formula injection (CVE-2014-3524 family):
+ * a cell starting with `=`, `+`, `-`, `@`, tab, or CR is interpreted as
+ * a formula by Excel and Google Sheets. Wrapping in double-quotes
+ * alone isn't enough — the formula still fires. We prefix a leading
+ * single apostrophe in those cases, then quote and escape embedded
+ * quotes per RFC 4180.
+ */
+function csvCell(raw: string): string {
+  const needsPrefix = /^[=+\-@\t\r]/.test(raw);
+  const value = needsPrefix ? `'${raw}` : raw;
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
 function parseSortParam(raw: string | null): { key: SortKey; dir: SortDir } {
   if (!raw) return DEFAULT_SORT;
   const [k, d] = raw.split(":");
@@ -514,13 +530,13 @@ export default function LeaderboardTabs({
     filteredSyndicates.forEach((s, i) => {
       const row = [
         String(i + 1),
-        JSON.stringify(s.name),
-        s.subdomain,
-        JSON.stringify(s.strategy || ""),
-        JSON.stringify(s.tvl),
+        csvCell(s.name),
+        csvCell(s.subdomain),
+        csvCell(s.strategy || ""),
+        csvCell(s.tvl),
         s.tvlUSDDisplay || "",
         String(s.agentCount),
-        s.status,
+        csvCell(s.status),
         String(s.chainId),
         s.ageDays != null ? String(s.ageDays) : "",
       ];
