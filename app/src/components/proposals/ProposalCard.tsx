@@ -11,6 +11,7 @@ import {
 import { truncateAddress, formatBps, formatShares } from "@/lib/contracts";
 import VoteButton from "./VoteButton";
 import ExecutionCallPreview from "./ExecutionCallPreview";
+import SwapRiskWarning from "./SwapRiskWarning";
 import VoteConcentration from "./VoteConcentration";
 import { ProposalStepper } from "@/components/ui/ProposalStepper";
 
@@ -181,6 +182,11 @@ export default function ProposalCard({
               proposalId={proposal.id}
               chainId={chainId}
               explorerUrl={explorerUrl}
+            />
+            <SwapRiskWarning
+              governorAddress={governorAddress}
+              proposalId={proposal.id}
+              chainId={chainId}
             />
             <VoteConcentration
               governorAddress={governorAddress}

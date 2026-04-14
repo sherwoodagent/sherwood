@@ -35,6 +35,8 @@ export interface PortfolioData {
   assetSymbol: string;
   assetAddress: Address;
   assetDecimals: number;
+  /** Max slippage tolerance set on the strategy, in basis points. */
+  maxSlippageBps: number;
 }
 
 // ── Main fetch ─────────────────────────────────────────────
@@ -87,7 +89,7 @@ export async function fetchPortfolioData(
     if (!strategyAddress) return null;
 
     // Step 3: Read strategy data
-    const [allocationsRaw, totalAmountRaw, swapExtraDataRaw, assetRaw] = await client.multicall({
+    const [allocationsRaw, totalAmountRaw, swapExtraDataRaw, assetRaw, slippageRaw] = await client.multicall({
       contracts: [
         {
           address: strategyAddress,
@@ -108,6 +110,11 @@ export async function fetchPortfolioData(
           address: strategyAddress,
           abi: PORTFOLIO_STRATEGY_ABI,
           functionName: "asset",
+        },
+        {
+          address: strategyAddress,
+          abi: PORTFOLIO_STRATEGY_ABI,
+          functionName: "maxSlippageBps",
         },
       ],
     });
@@ -199,6 +206,11 @@ export async function fetchPortfolioData(
       };
     });
 
+    const maxSlippageBps =
+      slippageRaw.status === "success"
+        ? Number(slippageRaw.result as bigint)
+        : 0;
+
     return {
       strategyAddress,
       allocations,
@@ -206,6 +218,7 @@ export async function fetchPortfolioData(
       assetSymbol,
       assetAddress,
       assetDecimals,
+      maxSlippageBps,
     };
   } catch {
     // Graceful failure — governor may not support getExecuteCalls or RPC may be down
