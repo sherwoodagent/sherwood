@@ -439,6 +439,9 @@ export function scoreEvent(data: {
 
 // ── Combine All Signals Into Trade Decision ──
 
+/** Lagging technical indicators whose weight is dampened during momentum moves. */
+const LAGGING_TECHNICAL_SIGNALS = new Set(['technical', 'meanReversion']);
+
 /** Signal name → weight category mapping. */
 const SIGNAL_CATEGORY_MAP: Record<string, keyof ScoringWeights> = {
   technical: "technical",
@@ -541,7 +544,7 @@ export function computeTradeDecision(
     // When the regime is a momentum override (trending-up/down), cut the weight
     // of lagging technical signals by 50%. The momentum signal (which is NOT lagged)
     // and breakoutOnChain (which uses recent price action) keep their full weight.
-    const LAGGING_TECHNICAL_SIGNALS = new Set(['technical', 'meanReversion']);
+    // LAGGING_TECHNICAL_SIGNALS hoisted to module level for GC efficiency
     if (regime && (regime === 'trending-up' || regime === 'trending-down')
         && LAGGING_TECHNICAL_SIGNALS.has(signal.name)) {
       signalWeight *= 0.5;
@@ -609,9 +612,14 @@ export function computeTradeDecision(
       score *= correlationCheck.suppressionFactor;
     }
 
-    // Clamp the final score
     score = Math.max(-1, Math.min(1, score));
   }
+
+  // Unconditional clamp — convergence bonus and correlation boost can both
+  // push score beyond [-1, 1]. Clamp was previously only inside the
+  // correlationCheck block; scores flowed unclamped when no correlation
+  // data was available.
+  score = Math.max(-1, Math.min(1, score));
 
   // Determine action using regime-conditional thresholds
   let action: TradeDecision["action"];

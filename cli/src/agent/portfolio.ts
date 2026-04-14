@@ -182,8 +182,8 @@ export class PortfolioTracker {
       ? (pos.entryPrice - exitPrice) * pos.quantity
       : (exitPrice - pos.entryPrice) * pos.quantity;
     const pnlPercent = isShort
-      ? (pos.entryPrice - exitPrice) / pos.entryPrice
-      : (exitPrice - pos.entryPrice) / pos.entryPrice;
+      ? (pos.entryPrice - exitPrice) / (pos.entryPrice || 1)
+      : (exitPrice - pos.entryPrice) / (pos.entryPrice || 1);
     const duration = Math.floor((Date.now() - pos.entryTimestamp) / 1000);
 
     // Record the trade
@@ -234,8 +234,8 @@ export class PortfolioTracker {
           ? (pos.entryPrice - price) * pos.quantity
           : (price - pos.entryPrice) * pos.quantity;
         pos.pnlPercent = isShort
-          ? (pos.entryPrice - price) / pos.entryPrice
-          : (price - pos.entryPrice) / pos.entryPrice;
+          ? (pos.entryPrice - price) / (pos.entryPrice || 1)
+          : (price - pos.entryPrice) / (pos.entryPrice || 1);
       }
     }
 

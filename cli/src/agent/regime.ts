@@ -408,6 +408,18 @@ export class MarketRegimeDetector {
     const atrPct = currentPrice > 0 && !isNaN(currentAtr) ? currentAtr / currentPrice : 0.02;
     const threshold = Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, atrPct * ATR_MULTIPLIER));
 
+    // Compute volatility level BEFORE the override so it propagates
+    // into the returned RegimeAnalysis. Previously hardcoded "normal"
+    // which masked extreme volatility during fast moves.
+    const bb = calculateBollingerBands(candles, 20, 2.0);
+    const currentBbWidth = this.getLastValidValue(bb.width);
+    let volLevel: RegimeAnalysis["volatilityLevel"] = "normal";
+    if (!isNaN(currentBbWidth)) {
+      if (currentBbWidth < 0.04) volLevel = "low";
+      else if (currentBbWidth > 0.20) volLevel = "extreme";
+      else if (currentBbWidth > 0.10) volLevel = "high";
+    }
+
     const recentCandles = candles.slice(-MOMENTUM_LOOKBACK);
     const recentLow = Math.min(...recentCandles.map((c) => c.low));
     const recentHigh = Math.max(...recentCandles.map((c) => c.high));
@@ -423,7 +435,7 @@ export class MarketRegimeDetector {
         regime: "trending-up",
         confidence: Math.min(0.85, 0.5 + pctAboveLow * 5),
         btcTrend: "up",
-        volatilityLevel: "normal",
+        volatilityLevel: volLevel,
         details: `Momentum override: price +${(pctAboveLow * 100).toFixed(1)}% above ${MOMENTUM_LOOKBACK}-candle low (threshold ${(threshold * 100).toFixed(1)}%, ATR-adjusted)`,
         strategyAdjustments: this.getStrategyAdjustments("trending-up"),
       };
@@ -433,7 +445,7 @@ export class MarketRegimeDetector {
         regime: "trending-down",
         confidence: Math.min(0.85, 0.5 + pctBelowHigh * 5),
         btcTrend: "down",
-        volatilityLevel: "normal",
+        volatilityLevel: volLevel,
         details: `Momentum override: price -${(pctBelowHigh * 100).toFixed(1)}% below ${MOMENTUM_LOOKBACK}-candle high (threshold ${(threshold * 100).toFixed(1)}%, ATR-adjusted)`,
         strategyAdjustments: this.getStrategyAdjustments("trending-down"),
       };

@@ -50,8 +50,9 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     uint8 constant ACTION_UPDATE_MIN_RETURN = 0;
     uint8 constant ACTION_OPEN_LONG = 1;
     uint8 constant ACTION_CLOSE_POSITION = 2;
-    uint8 constant ACTION_UPDATE_STOP_LOSS = 3;
+    uint8 constant ACTION_UPDATE_STOP_LOSS = 3;       // reduce-only sell (for longs)
     uint8 constant ACTION_OPEN_SHORT = 4;
+    uint8 constant ACTION_UPDATE_STOP_LOSS_SHORT = 5;  // reduce-only buy (for shorts)
 
     // ── CLOID constant for stop-loss tracking ──
     // Single fixed CLOID — only one GTC stop-loss is ever live at a time.
@@ -229,6 +230,17 @@ contract HyperliquidPerpStrategy is BaseStrategy {
 
             emit PositionOpened(perpAssetIndex, false, limitPx, sz, leverage);
             emit StopLossUpdated(stopLossPx);
+        } else if (action == ACTION_UPDATE_STOP_LOSS_SHORT) {
+            (, uint64 triggerPx, uint64 sz) = abi.decode(data, (uint8, uint64, uint64));
+
+            _cancelCurrentStopLoss();
+
+            // Place new GTC stop loss for SHORT position (reduce-only BUY) with fixed CLOID.
+            // isBuy=true closes the short; triggerPx is above current price.
+            L1Write.sendLimitOrder(perpAssetIndex, true, triggerPx, sz, true, TimeInForce.Gtc, STOP_LOSS_CLOID);
+            hasActiveStopLoss = true;
+
+            emit StopLossUpdated(triggerPx);
         } else {
             revert InvalidAction();
         }
