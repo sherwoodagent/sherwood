@@ -174,6 +174,48 @@ export class TradingAgent {
       candles = ohlcResult.value;
       technicalSignals = getLatestSignals(candles);
       signals.push(scoreTechnical(technicalSignals));
+
+      // Price momentum signal — captures "the market is moving" before
+      // lagging indicators (RSI, MACD, EMA) catch up. Uses the same candle
+      // data we already have. Scored as a technical-category signal so it
+      // adds to (not replaces) the existing technical analysis.
+      if (candles.length >= 24) {
+        const recent = candles.slice(-24);
+        const currentClose = recent[recent.length - 1]!.close;
+        const recentLow = Math.min(...recent.map((c) => c.low));
+        const recentHigh = Math.max(...recent.map((c) => c.high));
+        const pctFromLow = recentLow > 0 ? (currentClose - recentLow) / recentLow : 0;
+        const pctFromHigh = recentHigh > 0 ? (recentHigh - currentClose) / recentHigh : 0;
+
+        let momentumValue = 0;
+        let momentumDetails = '';
+        // Bullish momentum: price near 24-candle highs
+        if (pctFromHigh < 0.01) {
+          momentumValue = Math.min(0.6, pctFromLow * 5); // scales: 3% move → 0.15, 5% → 0.25, 10% → 0.50
+          momentumDetails = `Price +${(pctFromLow * 100).toFixed(1)}% from 24-candle low, near highs`;
+        }
+        // Bearish momentum: price near 24-candle lows
+        else if (pctFromLow < 0.01) {
+          momentumValue = -Math.min(0.6, pctFromHigh * 5);
+          momentumDetails = `Price -${(pctFromHigh * 100).toFixed(1)}% from 24-candle high, near lows`;
+        }
+        // Mid-range: proportional to position within range
+        else {
+          const rangePosition = (currentClose - recentLow) / (recentHigh - recentLow); // 0=low, 1=high
+          momentumValue = (rangePosition - 0.5) * 0.4; // -0.2 to +0.2
+          momentumDetails = `Mid-range (${(rangePosition * 100).toFixed(0)}th percentile of 24-candle range)`;
+        }
+
+        if (Math.abs(momentumValue) > 0.02) {
+          signals.push({
+            name: 'momentum',
+            value: momentumValue,
+            confidence: Math.min(0.7, 0.3 + Math.abs(momentumValue)),
+            source: 'Price Momentum',
+            details: momentumDetails,
+          });
+        }
+      }
     } else if (ohlcResult.status === 'rejected') {
       console.error(chalk.dim(`  Technical analysis failed for ${tokenId}: ${ohlcResult.reason}`));
     }

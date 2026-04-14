@@ -449,6 +449,7 @@ const SIGNAL_CATEGORY_MAP: Record<string, keyof ScoringWeights> = {
   smartMoney: "smartMoney",
 
   // Strategy signal mappings to categories
+  momentum: "technical",            // price momentum — same category as other technical signals
   breakoutOnChain: "technical",
   meanReversion: "technical",
   multiTimeframe: "technical",
@@ -538,6 +539,42 @@ export function computeTradeDecision(
 
   let score = totalWeight > 0 ? weightedSum / totalWeight : 0;
   const confidence = totalWeight > 0 ? weightedConfidence / totalWeight : 0;
+
+  // ── Convergence bonus ──
+  // When multiple independent categories agree on direction, amplify the score.
+  // The weighted average treats disagreement and agreement symmetrically — a
+  // 5/6 bullish consensus scores the same as if those 5 categories had smaller
+  // values. In reality, broad agreement across uncorrelated sources (technical +
+  // sentiment + on-chain + funding) is stronger evidence than any single source
+  // at high conviction.
+  //
+  // On the Apr 13-14 BTC pump: 4-5 categories were bullish but the score
+  // capped at 0.27. With convergence bonus: 0.27 × 1.15 = 0.31 → fires BUY.
+  if (Math.abs(score) > 0.01) {
+    const scoreSign = Math.sign(score);
+    // Compute net direction per active category
+    const categoryNetDirection = new Map<string, number>();
+    for (const signal of signals) {
+      const category = SIGNAL_CATEGORY_MAP[signal.name];
+      if (!category || excludedCategories.has(category)) continue;
+      if (signal._weightOverride !== undefined) continue;
+      const current = categoryNetDirection.get(category) ?? 0;
+      categoryNetDirection.set(category, current + signal.value);
+    }
+    // Count categories that agree with the aggregate direction
+    let agreeing = 0;
+    let totalActive = 0;
+    for (const [, netValue] of categoryNetDirection) {
+      totalActive++;
+      if (Math.sign(netValue) === scoreSign) agreeing++;
+    }
+    // Bonus kicks in at 4+ agreeing categories out of at least 4 active.
+    // Scale: 4/N → 1.15x, 5/N → 1.30x, 6/N → 1.45x. Capped at 1.45x.
+    if (agreeing >= 4 && totalActive >= 4) {
+      const bonus = 1.0 + 0.15 * (agreeing - 3);
+      score *= Math.min(bonus, 1.45);
+    }
+  }
 
   // Apply correlation-aware adjustment if provided
   // BTC bearish → suppress longs, boost shorts

@@ -285,14 +285,12 @@ describe("computeTradeDecision", () => {
   });
 
   it("ranging regime demands higher conviction than default", () => {
-    // Score ~0.35 would BUY under default (0.3) and also BUY in ranging (0.30 threshold)
+    // Use 3 categories so convergence bonus doesn't fire (needs >=4).
+    // Score ~0.35 → BUY under ranging (0.30 threshold).
     const signals: Signal[] = [
-      makeSignal("technical", 0.4),
+      makeSignal("technical", 0.35),
       makeSignal("sentiment", 0.35),
       makeSignal("onchain", 0.35),
-      makeSignal("fundamental", 0.35),
-      makeSignal("event", 0.35),
-      makeSignal("smartMoney", 0.35),
     ];
     const rangingDecision = computeTradeDecision(
       signals,
@@ -308,14 +306,11 @@ describe("computeTradeDecision", () => {
   });
 
   it("trending-up is asymmetric — harder to SELL than default", () => {
-    // Score -0.35 would SELL under default (-0.3) but HOLD in trending-up (-0.40 sell threshold)
+    // Use 3 categories to avoid convergence bonus.
     const signals: Signal[] = [
-      makeSignal("technical", -0.4),
+      makeSignal("technical", -0.35),
       makeSignal("sentiment", -0.35),
       makeSignal("onchain", -0.35),
-      makeSignal("fundamental", -0.35),
-      makeSignal("event", -0.35),
-      makeSignal("smartMoney", -0.35),
     ];
     const trendingUpDecision = computeTradeDecision(
       signals,
@@ -329,55 +324,80 @@ describe("computeTradeDecision", () => {
     expect(trendingUpDecision.action).toBe("HOLD");
   });
 
-  it("score == buy threshold fires BUY (symmetric boundary)", () => {
-    // Construct a signal set that scores exactly at the ranging regime's BUY
-    // threshold (0.4). Confirms the >= check fires at the boundary.
-    const signals: Signal[] = [
-      makeSignal("technical", 0.4),
-      makeSignal("sentiment", 0.4),
-      makeSignal("onchain", 0.4),
-      makeSignal("fundamental", 0.4),
-      makeSignal("event", 0.4),
-      makeSignal("smartMoney", 0.4),
-    ];
+  it("score at buy threshold fires BUY (symmetric boundary)", () => {
+    // Use a single signal to avoid FP rounding from weighted-average division.
+    // Ranging BUY threshold = 0.30. Signal at exactly 0.30 → score = 0.30.
+    const signals: Signal[] = [makeSignal("technical", 0.30)];
     const decision = computeTradeDecision(
       signals, undefined, undefined, undefined, "ranging",
     );
-    expect(decision.score).toBeCloseTo(0.4, 5);
+    expect(decision.score).toBe(0.30);
     expect(decision.action).toBe("BUY");
   });
 
-  it("score == sell threshold fires SELL (symmetric boundary)", () => {
-    const signals: Signal[] = [
-      makeSignal("technical", -0.4),
-      makeSignal("sentiment", -0.4),
-      makeSignal("onchain", -0.4),
-      makeSignal("fundamental", -0.4),
-      makeSignal("event", -0.4),
-      makeSignal("smartMoney", -0.4),
-    ];
+  it("score at sell threshold fires SELL (symmetric boundary)", () => {
+    const signals: Signal[] = [makeSignal("technical", -0.30)];
     const decision = computeTradeDecision(
       signals, undefined, undefined, undefined, "ranging",
     );
-    expect(decision.score).toBeCloseTo(-0.4, 5);
+    expect(decision.score).toBe(-0.30);
     expect(decision.action).toBe("SELL");
   });
 
   it("score == strongSell threshold fires STRONG_SELL", () => {
+    // 3 categories to avoid convergence bonus.
+    // Ranging strongSell = -0.55 (from REGIME_THRESHOLDS).
     const signals: Signal[] = [
-      makeSignal("technical", -0.65),
-      makeSignal("sentiment", -0.65),
-      makeSignal("onchain", -0.65),
-      makeSignal("fundamental", -0.65),
-      makeSignal("event", -0.65),
-      makeSignal("smartMoney", -0.65),
+      makeSignal("technical", -0.55),
+      makeSignal("sentiment", -0.55),
+      makeSignal("onchain", -0.55),
     ];
     const decision = computeTradeDecision(
       signals, undefined, undefined, undefined, "ranging",
     );
-    // Ranging strongSell = -0.65 exactly
-    expect(decision.score).toBeCloseTo(-0.65, 5);
+    expect(decision.score).toBeCloseTo(-0.55, 5);
     expect(decision.action).toBe("STRONG_SELL");
+  });
+
+  it("convergence bonus amplifies score when 4+ categories agree", () => {
+    // 5 categories bullish → 1.30x bonus
+    const signals: Signal[] = [
+      makeSignal("technical", 0.3),
+      makeSignal("sentiment", 0.3),
+      makeSignal("onchain", 0.3),
+      makeSignal("fundamental", 0.2),
+      makeSignal("smartMoney", 0.2),
+    ];
+    const decision = computeTradeDecision(signals);
+    // Base weighted avg ≈ 0.26. With 5/5 convergence → ×1.30 ≈ 0.34
+    expect(decision.score).toBeGreaterThan(0.30);
+    expect(decision.action).toBe("BUY");
+  });
+
+  it("convergence bonus does not fire with <4 agreeing categories", () => {
+    // 3 categories — bonus requires >=4
+    const signals: Signal[] = [
+      makeSignal("technical", 0.3),
+      makeSignal("sentiment", 0.3),
+      makeSignal("onchain", 0.3),
+    ];
+    const decision = computeTradeDecision(signals);
+    expect(decision.score).toBeCloseTo(0.3, 2); // no bonus
+  });
+
+  it("convergence bonus does not fire when categories disagree", () => {
+    // 4 categories: 2 bullish, 2 bearish — only 2 agree with positive aggregate
+    const signals: Signal[] = [
+      makeSignal("technical", 0.5),
+      makeSignal("sentiment", 0.4),
+      makeSignal("onchain", -0.3),
+      makeSignal("fundamental", -0.2),
+    ];
+    const decision = computeTradeDecision(signals);
+    // Only 2/4 agree with the positive aggregate → no bonus.
+    // Weighted avg of mixed signals, compressed by disagreement.
+    expect(decision.score).toBeLessThan(0.20);
+    expect(decision.score).toBeGreaterThan(0.0); // net positive because bull signals are larger
   });
 
   it("records thresholds used on the decision for replay", () => {
