@@ -319,36 +319,11 @@ export class TradingAgent {
 
       const nansenProvider = getResearchProvider("nansen") as import("../providers/research/nansen.js").NansenProvider;
 
-      const [netflowResult, hlPerpResult] = await Promise.allSettled([
-        // 4. Smart-money netflows (multi-chain)
-        nansenProvider.query({ type: "smart-money", target: tokenId }),
-        // 5. HL smart-money perp trades (same venue we trade)
+      // Nansen netflow dropped — returns 422 for token_symbol filter.
+      // HL perp-trades is the higher-value signal (same venue we trade).
+      const [hlPerpResult] = await Promise.allSettled([
         nansenProvider.queryHyperliquidSmartMoney(hlSymbol),
       ]);
-
-      // Process netflow results
-      if (netflowResult.status === 'fulfilled') {
-        const smResult = netflowResult.value;
-        nansenData = smResult.data;
-        const flows = smResult.data.flows as Array<Record<string, unknown>> | undefined;
-        if (flows && flows.length > 0) {
-          // Aggregate net_flow_24h_usd across all chains for this token
-          const netflow24h = flows.reduce((sum, f) => sum + (Number(f.net_flow_24h_usd ?? 0)), 0);
-          const traderCount = flows.reduce((sum, f) => sum + (Number(f.trader_count ?? 0)), 0);
-          signals.push(scoreOnChain({
-            exchangeNetFlow: netflow24h,
-            whaleAccumulating: netflow24h < 0,
-            activeAddressesGrowth: traderCount > 10 ? 0.2 : traderCount > 5 ? 0.1 : 0,
-          }));
-          console.error(chalk.dim(`  x402 Nansen netflow: ${flows.length} chain(s), net $${(netflow24h / 1e6).toFixed(1)}M 24h, cost ${smResult.costUsdc} USDC`));
-        } else {
-          signals.push(scoreOnChain({}));
-          console.error(chalk.dim(`  x402 Nansen netflow: no flows for ${tokenId}, cost ${smResult.costUsdc} USDC`));
-        }
-      } else {
-        console.error(chalk.dim(`  x402 Nansen netflow unavailable: ${netflowResult.reason}`));
-        signals.push(scoreOnChain({}));
-      }
 
       // Process HL perp trades — derive a smartMoney signal from recent trade direction
       if (hlPerpResult.status === 'fulfilled') {
