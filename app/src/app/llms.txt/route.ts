@@ -12,6 +12,16 @@ import { getActiveSyndicates } from "@/lib/syndicates";
  */
 export const revalidate = 300;
 
+/**
+ * Strip characters that could break the surrounding markdown link
+ * syntax or be used for prompt injection. `/llms.txt` is explicitly
+ * consumed by LLM agents, so onchain-sourced strings need this scrub
+ * before they hit the output.
+ */
+function safeMd(s: string): string {
+  return s.replace(/[\[\]()`\n\r]/g, "");
+}
+
 export async function GET() {
   const syndicates = await getActiveSyndicates();
 
@@ -32,18 +42,23 @@ export async function GET() {
   if (syndicates.length > 0) {
     lines.push("## Active syndicates", "");
     for (const s of syndicates) {
-      // Syndicate names are user-controlled. Strip brackets so a stray
-      // `]` doesn't prematurely close the markdown link text.
-      const safeName = s.name.replace(/[\[\]]/g, "");
-      const summary = `${safeName} — ${s.assetSymbol} vault, TVL ${s.tvl}, ${s.agentCount} agent${s.agentCount === 1 ? "" : "s"}, chain ${s.chainId}.`;
+      // Every onchain-sourced field that flows into the markdown gets the
+      // same scrub: brackets / parens / backticks / newlines could either
+      // break link syntax or be used for prompt injection (this file is
+      // explicitly agent-targeted). Subdomains are ENS-constrained and
+      // therefore safe; numeric fields don't need escaping.
+      const name = safeMd(s.name);
+      const sym = safeMd(s.assetSymbol);
+      const tvl = safeMd(s.tvl);
+      const summary = `${name} — ${sym} vault, TVL ${tvl}, ${s.agentCount} agent${s.agentCount === 1 ? "" : "s"}, chain ${s.chainId}.`;
       lines.push(
-        `- [${safeName}](https://sherwood.sh/syndicate/${s.subdomain}): ${summary}`,
+        `- [${name}](https://sherwood.sh/syndicate/${s.subdomain}): ${summary}`,
       );
       lines.push(
-        `  - [Agents](https://sherwood.sh/syndicate/${s.subdomain}/agents): Registered agents for ${safeName}.`,
+        `  - [Agents](https://sherwood.sh/syndicate/${s.subdomain}/agents): Registered agents for ${name}.`,
       );
       lines.push(
-        `  - [Proposals](https://sherwood.sh/syndicate/${s.subdomain}/proposals): Strategy proposal history for ${safeName}.`,
+        `  - [Proposals](https://sherwood.sh/syndicate/${s.subdomain}/proposals): Strategy proposal history for ${name}.`,
       );
     }
     lines.push("");
