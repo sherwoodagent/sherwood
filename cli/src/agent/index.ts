@@ -366,11 +366,14 @@ export class TradingAgent {
           // longRatio 0.3- = smart money heavily short = bearish
           const smBias = (longRatio - 0.5) * 2; // -1 to +1
 
-          // Push as a smartMoney signal with high confidence (same-venue data)
+          // Push as a smartMoney signal. Scale to ±0.5 max (not ±0.8) —
+          // a single Nansen snapshot shouldn't dominate the entire score.
+          // At weight 0.30 (majors profile), ±0.5 contributes ±0.15 to
+          // aggregate — meaningful but not a veto over 5 other categories.
           signals.push({
             name: 'smartMoney',
-            value: smBias * 0.8, // scale to ±0.8 max
-            confidence: Math.min(0.85, 0.4 + (trades.length / 20) * 0.4),
+            value: smBias * 0.5,
+            confidence: Math.min(0.7, 0.3 + (trades.length / 30) * 0.4),
             source: 'Nansen HL Smart Money',
             details: `${trades.length} trades: $${(longValueUsd / 1e6).toFixed(1)}M long / $${(shortValueUsd / 1e6).toFixed(1)}M short (${(longRatio * 100).toFixed(0)}% long)`,
           });

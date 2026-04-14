@@ -23,7 +23,12 @@ export { DexFlowStrategy, MeanReversionStrategy, TwitterSentimentStrategy, Hyper
 export { MultiTimeframeStrategy };
 
 export const DEFAULT_STRATEGIES: Strategy[] = [
-  new SmartMoneyStrategy(),
+  // SmartMoneyStrategy disabled — smartMoney signal is now generated directly
+  // in index.ts from Nansen HL perp-trades data (same-venue, higher quality).
+  // The old strategy depended on ctx.nansenData with Base-only flows that
+  // never returned useful data for majors. Keeping it here produced a
+  // duplicate zero-value smartMoney signal that diluted the real one via
+  // per-category weight normalization.
   new TokenUnlockStrategy(),
   new SentimentContrarianStrategy(),
   new BreakoutOnChainStrategy(),
