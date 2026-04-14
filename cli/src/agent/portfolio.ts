@@ -84,6 +84,86 @@ export class PortfolioTracker {
     this.state = { ...DEFAULT_PORTFOLIO };
   }
 
+  /**
+   * Initialize portfolio from on-chain vault balance instead of the
+   * hardcoded $10k default. Reads totalAssets() from the vault that
+   * the strategy clone is deployed to.
+   *
+   * Call once on startup (before the first cycle) when no persisted
+   * portfolio.json exists. If a portfolio already exists on disk,
+   * this is a no-op — we trust the persisted state.
+   *
+   * @param strategyClone - HyperliquidPerpStrategy clone address
+   * @param chain - 'hyperevm' | 'hyperevm-testnet'
+   */
+  async initFromOnChain(strategyClone: string, chain: string): Promise<void> {
+    // Only initialize if no persisted state exists
+    try {
+      await readFile(this.statePath, 'utf-8');
+      return; // file exists — trust persisted state
+    } catch {
+      // No file — initialize from on-chain
+    }
+
+    try {
+      const { createPublicClient, http } = await import('viem');
+      const { hyperevm, hyperevmTestnet } = await import('../lib/network.js');
+      const { BASE_STRATEGY_ABI, SYNDICATE_VAULT_ABI } = await import('../lib/abis.js');
+
+      const selectedChain = chain === 'hyperevm-testnet' ? hyperevmTestnet : hyperevm;
+      const client = createPublicClient({
+        chain: selectedChain,
+        transport: http(),
+      });
+
+      // Read vault address from the strategy clone
+      const vaultAddr = await client.readContract({
+        address: strategyClone as `0x${string}`,
+        abi: BASE_STRATEGY_ABI,
+        functionName: 'vault',
+      }) as `0x${string}`;
+
+      if (!vaultAddr || vaultAddr === '0x0000000000000000000000000000000000000000') {
+        console.error('[portfolio] Strategy clone has no vault — using default portfolio');
+        return;
+      }
+
+      // Read total assets from the vault (USDC, 6 decimals)
+      const totalAssets = await client.readContract({
+        address: vaultAddr,
+        abi: SYNDICATE_VAULT_ABI,
+        functionName: 'totalAssets',
+      }) as bigint;
+
+      const vaultValueUsd = Number(totalAssets) / 1e6; // USDC 6 decimals
+
+      if (vaultValueUsd > 0) {
+        this.state = {
+          ...DEFAULT_PORTFOLIO,
+          totalValue: vaultValueUsd,
+          cash: vaultValueUsd,
+        };
+        await this.save(this.state);
+        console.error(`[portfolio] Initialized from on-chain vault: $${vaultValueUsd.toFixed(2)} USDC`);
+      } else {
+        console.error('[portfolio] Vault has 0 assets — using default portfolio');
+      }
+    } catch (err) {
+      console.error(`[portfolio] Failed to read on-chain balance: ${(err as Error).message} — using default`);
+    }
+  }
+
+  /**
+   * Force-refresh portfolio value from on-chain vault balance.
+   * Unlike initFromOnChain(), this runs even if portfolio.json exists.
+   * Call via `sherwood agent config --sync-vault` or on explicit user request.
+   */
+  async syncFromOnChain(strategyClone: string, chain: string): Promise<void> {
+    // Temporarily remove the file so initFromOnChain doesn't short-circuit
+    try { await import('node:fs/promises').then(fs => fs.unlink(this.statePath)); } catch { /* ok */ }
+    await this.initFromOnChain(strategyClone, chain);
+  }
+
   /** Load portfolio state from disk with validation */
   async load(): Promise<PortfolioState> {
     try {

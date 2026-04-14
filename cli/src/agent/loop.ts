@@ -68,6 +68,16 @@ export class AgentLoop {
     const stateDir = join(homedir(), '.sherwood', 'agent');
     await mkdir(stateDir, { recursive: true });
 
+    // Initialize portfolio from on-chain vault balance if no persisted state.
+    // This replaces the $10k default with the actual vault USDC balance so
+    // position sizing and risk management reflect real capital.
+    if (this.config.execution.strategyClone && this.config.execution.chain) {
+      await this.portfolio.initFromOnChain(
+        this.config.execution.strategyClone,
+        this.config.execution.chain,
+      );
+    }
+
     // Startup banner
     const cfg = this.config.agent;
     console.log('');
