@@ -177,6 +177,17 @@ function csvCell(raw: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
+/** Human-readable summary of the current syndicates-tab sort. Rendered
+ *  in the filter bar so users can see at a glance what the table is
+ *  ordered by — the sort is now column-driven, so a hardcoded label
+ *  would be wrong whenever the user isn't on the default (TVL desc). */
+function sortSummaryLabel(key: SortKey, dir: SortDir): string {
+  const keyLabel =
+    key === "tvl" ? "TVL" : key === "agents" ? "agents" : key === "age" ? "age" : "name";
+  const dirLabel = dir === "asc" ? "↑" : "↓";
+  return `Sorted by ${keyLabel} ${dirLabel}`;
+}
+
 function parseSortParam(raw: string | null): { key: SortKey; dir: SortDir } {
   if (!raw) return DEFAULT_SORT;
   const [k, d] = raw.split(":");
@@ -526,6 +537,22 @@ export default function LeaderboardTabs({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syndicates]);
 
+  // User-driven re-orders (sort, filter, watchlist toggles) aren't rank
+  // movements — they're just the user asking to see the list differently.
+  // Sync the ref to the freshly-rendered order WITHOUT emitting deltas.
+  // Without this, the next auto-refresh tick would diff the new data
+  // against the pre-sort snapshot and flash every row that merely
+  // changed position due to the user's sort change.
+  useEffect(() => {
+    renderedOrderRef.current = filteredSyndicates.map(
+      (s) => `${s.chainId}-${s.id}`,
+    );
+    // Deliberately omit filteredSyndicates: when it changes because
+    // `syndicates` updated, the delta effect above already handles the
+    // ref + flash. This effect handles the non-data reorders only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortKey, sortDir, chain, status, query, showWatchlistOnly, watchlist]);
+
   // Toggle handler for sortable column headers.
   const toggleSort = useCallback(
     (key: SortKey) => {
@@ -727,7 +754,7 @@ export default function LeaderboardTabs({
           {tab === "syndicates"
             ? `${filteredSyndicates.length} / ${syndicates.length}`
             : `${filteredAgents.length} / ${agents.length}`}{" "}
-          · Ranked by all-time TVL
+          · {tab === "agents" ? "Ranked by P&L" : sortSummaryLabel(sortKey, sortDir)}
         </span>
       </div>
 
