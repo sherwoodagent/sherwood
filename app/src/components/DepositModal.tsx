@@ -196,11 +196,13 @@ export default function DepositModal({
       // Pull fresh onchain data so the syndicate page picks up the new
       // TVL, totalSupply, and the user's share balance without a manual
       // page reload. router.refresh() re-runs server components (TVL,
-      // stats bar, vault overview); invalidating the wagmi query cache
-      // refetches any useReadContract-backed views (share balance on
-      // the header, active-strategy panel, etc.).
+      // stats bar, vault overview); invalidating the wagmi readContract
+      // queries refetches any useReadContract-backed views (share
+      // balance on the header, active-strategy panel, etc.) without
+      // clobbering unrelated caches app-wide.
       router.refresh();
-      queryClient.invalidateQueries();
+      queryClient.invalidateQueries({ queryKey: ["readContract"] });
+      queryClient.invalidateQueries({ queryKey: ["balance"] });
     }
   }, [isDepositConfirmed, step, toast, amount, assetSymbol, expectedShares, assetDecimals, depositHash, vault, router, queryClient]);
 
