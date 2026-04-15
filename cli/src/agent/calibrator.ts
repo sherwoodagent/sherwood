@@ -11,8 +11,25 @@ import type { ScoringWeights } from "./scoring.js";
 import type { Candle } from "./technical.js";
 
 // ── Weight Profiles ──
+//
+// IMPORTANT: this set deliberately includes BOTH the live production
+// profiles (default-live, majors-live, altcoin-live — pulled from
+// scoring.ts WEIGHT_PROFILES) AND exploratory profiles for tuning.
+// Without the live profiles in the sweep, the calibrator can never tell
+// you "the current production weights are the best" — you'd only see
+// rankings of variants. The live entries are SUFFIXED `-live` so they're
+// obvious in the ranked output.
+//
+// To keep this in sync after a scoring.ts weight change: update the
+// `*-live` rows below to match the new production weights.
 
 export const WEIGHT_PROFILES: Record<string, ScoringWeights> = {
+  // ── Live production profiles (from scoring.ts; keep in sync) ──
+  "default-live": { smartMoney: 0.15, technical: 0.10, sentiment: 0.40, onchain: 0.20, fundamental: 0.10, event: 0.05 },
+  "majors-live":  { smartMoney: 0.15, technical: 0.10, sentiment: 0.40, onchain: 0.35, fundamental: 0.00, event: 0.00 },
+  "altcoin-live": { smartMoney: 0.15, technical: 0.15, sentiment: 0.30, onchain: 0.20, fundamental: 0.10, event: 0.10 },
+
+  // ── Exploratory profiles (historical baselines + variants) ──
   default:    { smartMoney: 0.25, technical: 0.20, sentiment: 0.20, onchain: 0.15, fundamental: 0.10, event: 0.10 },
   techHeavy:  { smartMoney: 0.10, technical: 0.40, sentiment: 0.15, onchain: 0.15, fundamental: 0.10, event: 0.10 },
   sentHeavy:  { smartMoney: 0.10, technical: 0.15, sentiment: 0.40, onchain: 0.15, fundamental: 0.10, event: 0.10 },
@@ -23,8 +40,10 @@ export const WEIGHT_PROFILES: Record<string, ScoringWeights> = {
   flowBased:  { smartMoney: 0.20, technical: 0.15, sentiment: 0.10, onchain: 0.35, fundamental: 0.10, event: 0.10 },
 };
 
-export const BUY_THRESHOLDS = [0.2, 0.3, 0.4, 0.5];
-export const SELL_THRESHOLDS = [-0.2, -0.3, -0.4, -0.5];
+// Added 0.25 / -0.25 so the calibrator can validate the lowered ranging-regime
+// BUY threshold against historical data. Grid is now 8 profiles × 5 × 5 = 200.
+export const BUY_THRESHOLDS = [0.2, 0.25, 0.3, 0.4, 0.5];
+export const SELL_THRESHOLDS = [-0.2, -0.25, -0.3, -0.4, -0.5];
 
 export const DEFAULT_CALIBRATION_TOKENS = [
   "bitcoin", "ethereum", "solana", "aave", "uniswap", "chainlink", "arbitrum",
@@ -144,7 +163,28 @@ export async function runCalibration(opts: CalibratorOptions): Promise<Calibrati
       continue;
     }
 
-    // Now replay all 128 configs using cached data (no API calls!)
+    // Pre-compute strategy signals + regime ONCE per candle (this is the
+    // network-bound work — most strategies hit their own APIs). Each subsequent
+    // simulate() call replays only the scoring math against these cached
+    // signals, turning a multi-hour calibration into seconds.
+    log(`  Precomputing signals for ${candles.length} candles...`);
+    let precomputed: Awaited<ReturnType<Backtester['precomputeSignals']>>;
+    try {
+      precomputed = await baseBt.precomputeSignals(candles, fearAndGreedData);
+      const valid = precomputed.filter((p) => p !== null).length;
+      log(`  Precomputed ${valid} candle signal sets`);
+    } catch (err) {
+      log(`  SKIP ${tokenId}: precompute failed: ${(err as Error).message}`);
+      for (const cfg of configs) {
+        const key = configKey(cfg);
+        resultMap.get(key)!.tokenResults.push({
+          tokenId, totalReturn: 0, sharpeRatio: 0, maxDrawdown: 0, winRate: 0, numTrades: 0,
+        });
+      }
+      continue;
+    }
+
+    // Now replay all configs using cached signals (zero API calls!)
     log(`  Running ${configs.length} configs on ${tokenId}...`);
     for (let ci = 0; ci < configs.length; ci++) {
       const cfg = configs[ci]!;
@@ -164,8 +204,8 @@ export async function runCalibration(opts: CalibratorOptions): Promise<Calibrati
           sellThreshold: cfg.sellThreshold,
         });
 
-        // Use simulate() directly — no API calls
-        const result = await bt.simulate(candles, fearAndGreedData);
+        // Use simulate() with precomputed signals — pure of network IO
+        const result = await bt.simulate(candles, fearAndGreedData, precomputed);
 
         resultMap.get(key)!.tokenResults.push({
           tokenId,
@@ -181,7 +221,7 @@ export async function runCalibration(opts: CalibratorOptions): Promise<Calibrati
         });
       }
 
-      if ((ci + 1) % 32 === 0) {
+      if ((ci + 1) % 50 === 0) {
         log(`  ${tokenId}: ${ci + 1}/${configs.length} configs done`);
       }
     }
@@ -208,8 +248,13 @@ export async function runCalibration(opts: CalibratorOptions): Promise<Calibrati
     results.push(entry);
   }
 
-  // Sort by avgSharpe desc, avgReturn desc
+  // Sort: 0-trade configs sink to the bottom (vacuously "safe" — sharpe=0
+  // ties at the top otherwise, masking real winners). Among configs that
+  // actually trade, sort by avgSharpe desc, then avgReturn desc.
   results.sort((a, b) => {
+    const aZero = a.totalTrades === 0;
+    const bZero = b.totalTrades === 0;
+    if (aZero !== bZero) return aZero ? 1 : -1;
     if (Math.abs(b.avgSharpe - a.avgSharpe) > 0.001) return b.avgSharpe - a.avgSharpe;
     return b.avgReturn - a.avgReturn;
   });

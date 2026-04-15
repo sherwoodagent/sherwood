@@ -1,16 +1,20 @@
 /**
- * Nansen research provider — x402 micropayments for on-chain analytics.
+ * Nansen research provider — supports both API key auth (Pro subscription,
+ * ~5× cheaper) and x402 micropayments (pay-per-request, no subscription).
+ *
+ * Auth priority:
+ *   1. NANSEN_API_KEY env var → standard fetch with apiKey header (Pro plan)
+ *   2. x402 fetch wrapper → automatic USDC micropayments on Base
  *
  * Docs: https://docs.nansen.ai
- * Payment: x402 (USDC on Base) — no API key required
- * Pricing: Basic $0.01/call (Token Screener, Wallet Balances, PnL, Transactions)
- *          Smart Money $0.05/call (SM Net Flow, SM Holdings, SM DEX Trades)
- *          Premium $0.05/call (Counterparties, Holders, PnL Leaderboard)
+ * Pro pricing: 5 credits/call for Smart Money endpoints (~$0.005/call)
+ * x402 pricing: ~$0.06/call for Smart Money endpoints
  *
  * Supports all query types:
  *   token       → token screener (on-chain metrics, holder quality)
  *   market      → token screener sorted by market cap / volume
  *   smart-money → smart money net flow from labeled wallets
+ *   hl-perp-trades → Hyperliquid smart-money perp trades
  *   wallet      → wallet profiler (PnL, tx patterns, counterparties)
  */
 
@@ -21,11 +25,45 @@ import { getX402Fetch } from "../../lib/x402.js";
 
 const BASE_URL = "https://api.nansen.ai";
 
+/**
+ * Returns a fetch function configured for Nansen auth. Cached after first
+ * creation — same pattern as getX402Fetch() to avoid allocating a new
+ * closure on every call.
+ *
+ * If NANSEN_API_KEY is set → standard fetch with apiKey header (Pro plan).
+ * Otherwise → x402 micropayment fetch.
+ */
+let _nansenFetch: typeof fetch | null = null;
+let _nansenFetchKey: string | undefined;
+
+async function getNansenFetch(): Promise<typeof fetch> {
+  const apiKey = process.env.NANSEN_API_KEY;
+
+  // Cache hit — return if key hasn't changed
+  if (_nansenFetch && _nansenFetchKey === apiKey) return _nansenFetch;
+
+  if (apiKey) {
+    const baseFetch = globalThis.fetch;
+    _nansenFetch = ((url: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      headers.set("apiKey", apiKey);
+      return baseFetch(url, { ...init, headers });
+    }) as typeof fetch;
+    _nansenFetchKey = apiKey;
+  } else {
+    _nansenFetch = await getX402Fetch();
+    _nansenFetchKey = undefined;
+  }
+
+  return _nansenFetch;
+}
+
 /** Known x402 cost per Nansen query type. */
 export const NANSEN_COST_ESTIMATE: Record<string, string> = {
   token: "~$0.01",
   market: "~$0.01",
   "smart-money": "~$0.06",
+  "hl-perp-trades": "~$0.06",
   wallet: "~$0.01",
 };
 
@@ -65,7 +103,7 @@ export class NansenProvider implements ResearchProvider {
    * Cost: ~$0.01 (basic tier)
    */
   private async tokenScreener(target: string): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
 
     // Determine if target is an address or symbol
     const isAddr = target.startsWith("0x") && target.length === 42;
@@ -111,7 +149,7 @@ export class NansenProvider implements ResearchProvider {
    * Cost: ~$0.01 (basic tier)
    */
   private async marketScreener(asset: string): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
 
     const isAddr = asset.startsWith("0x") && asset.length === 42;
     const filters: Record<string, unknown> = isAddr
@@ -154,27 +192,44 @@ export class NansenProvider implements ResearchProvider {
   /**
    * Smart Money Net Flow — capital flow analysis from labeled wallets.
    * Endpoint: POST /api/v1/smart-money/netflow
-   * Cost: ~$0.05 (premium tier)
+   * Cost: ~$0.06 (premium tier)
    *
-   * The netflow endpoint only accepts `token_address` filters (not `token_symbol`).
-   * If the target is a symbol, we resolve it to an address via the token screener first.
+   * Queries across all major chains (ethereum, solana, base, arbitrum, etc.)
+   * using the token's symbol for filtering. Previously hardcoded to ["base"]
+   * which returned empty flows for BTC/ETH/SOL — those tokens don't
+   * meaningfully trade on Base.
+   *
+   * Response includes net_flow_1h/24h/7d/30d in USD per token+chain,
+   * plus trader_count (active smart money wallets in 30d window).
    */
   private async smartMoneyNetflow(
     target: string,
   ): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
 
-    // Resolve symbol → address if needed (token screener is $0.01)
-    const tokenAddress = await this.resolveTokenAddress(target);
+    // Map CoinGecko token IDs to symbols for the filter
+    const symbolMap: Record<string, string> = {
+      bitcoin: "BTC", ethereum: "ETH", solana: "SOL",
+      arbitrum: "ARB", aave: "AAVE", uniswap: "UNI",
+      chainlink: "LINK", dogecoin: "DOGE", ripple: "XRP",
+      polkadot: "DOT", avalanche: "AVAX", near: "NEAR",
+      sui: "SUI", aptos: "APT", hyperliquid: "HYPE",
+      worldcoin: "WLD", "worldcoin-wld": "WLD",
+      bittensor: "TAO", zcash: "ZEC", fartcoin: "FARTCOIN",
+      pepe: "PEPE", pendle: "PENDLE", jupiter: "JUP",
+    };
+    const symbol = symbolMap[target.toLowerCase()] ?? target.toUpperCase();
 
     const body: Record<string, unknown> = {
-      chains: ["base"],
-      pagination: { page: 1, records_per_page: 10 },
+      // Query all supported smart-money chains — the API returns per-chain
+      // rows so we get flows across ethereum, solana, base, L2s, etc.
+      chains: ["ethereum", "solana", "base", "arbitrum", "optimism", "polygon", "avalanche", "bnb"],
+      filters: {
+        token_symbol: [symbol],
+      },
+      order_by: [{ field: "net_flow_24h_usd", direction: "DESC" }],
+      pagination: { page: 1, per_page: 10 },
     };
-
-    if (tokenAddress) {
-      body.filters = { token_address: [tokenAddress] };
-    }
 
     const res = await fetchWithPay(`${BASE_URL}/api/v1/smart-money/netflow`, {
       method: "POST",
@@ -202,6 +257,55 @@ export class NansenProvider implements ResearchProvider {
   }
 
   /**
+   * Hyperliquid Smart Money Perp Trades — what smart wallets are trading
+   * on Hyperliquid perps right now.
+   * Endpoint: POST /api/v1/smart-money/perp-trades
+   * Cost: ~$0.06 (premium tier, estimated)
+   *
+   * Returns granular trade data: direction (Long/Short), size, price, action
+   * (Buy - Add Long, Sell - Open Short, etc.), trader labels (Fund, Smart Trader).
+   * Directly relevant — same venue + instrument we trade.
+   */
+  async queryHyperliquidSmartMoney(
+    tokenSymbol: string,
+  ): Promise<ResearchResult> {
+    const fetchWithPay = await getNansenFetch();
+
+    const body = {
+      filters: {
+        include_smart_money_labels: ["Fund", "Smart Trader", "Smart HL Perps Trader"],
+        token_symbol: tokenSymbol,
+        value_usd: { min: 50000 }, // only meaningful-size trades
+      },
+      only_new_positions: false,
+      pagination: { page: 1, per_page: 20 },
+      order_by: [{ field: "block_timestamp", direction: "DESC" }],
+    };
+
+    const res = await fetchWithPay(`${BASE_URL}/api/v1/smart-money/perp-trades`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Nansen HL perp-trades query failed: ${res.status} ${res.statusText}`);
+    }
+
+    const json = (await res.json()) as { data?: unknown[] };
+    const costUsdc = this.extractCost(res, "smart-money");
+
+    return {
+      provider: "nansen",
+      queryType: "hl-perp-trades",
+      target: tokenSymbol,
+      data: { trades: json.data ?? [], count: (json.data ?? []).length },
+      costUsdc,
+      timestamp: Math.floor(Date.now() / 1000),
+    };
+  }
+
+  /**
    * Wallet Profile — PnL summary, realized/unrealized gains, token breakdown.
    * Endpoint: POST /api/v1/profiler/address/pnl-summary
    * Cost: ~$0.01 (basic tier)
@@ -210,7 +314,7 @@ export class NansenProvider implements ResearchProvider {
    * The correct x402 endpoint is /api/v1/profiler/address/pnl-summary.
    */
   private async walletProfile(address: string): Promise<ResearchResult> {
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
 
     // pnl-summary uses `chain` (singular) + a date range, not `chains` array
     const now = new Date();
@@ -259,7 +363,7 @@ export class NansenProvider implements ResearchProvider {
       return target;
     }
 
-    const fetchWithPay = await getX402Fetch();
+    const fetchWithPay = await getNansenFetch();
     const body = {
       chains: ["base"],
       timeframe: "24h",

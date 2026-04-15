@@ -101,10 +101,17 @@ export interface WalkForwardResult {
 }
 
 // Strategies that can work with candles-only data in backtest mode
-const CANDLE_BASED_STRATEGIES = [
-  'breakoutOnChain',
-  'meanReversion',
-  'multiTimeframe',
+// Strategies that work with candle data + F&G available in the backtester.
+// Previously limited to 3 candle-only strategies — expanded to include all
+// that fire with the data the backtester provides (candles + fearAndGreed).
+const BACKTEST_STRATEGIES = [
+  'breakoutOnChain',     // 95% fire rate — candle-based
+  'multiTimeframe',      // 78% fire rate — candle-based
+  'sentimentContrarian', // 100% fire rate — uses fearAndGreed from context
+  'momentum',            // computed from candles directly in the backtest loop
+  'fundingRate',         // fires when ctx.fundingRateData is set (won't fire in backtest — ok)
+  'dexFlow',             // fires when ctx.dexData is set (won't fire in backtest — ok)
+  'hyperliquidFlow',     // fires when ctx.hyperliquidData is set (won't fire — ok)
 ];
 
 export class Backtester {
@@ -211,71 +218,35 @@ export class Backtester {
   }
 
   /**
-   * Run the simulation loop on pre-fetched data. Pure of network IO.
-   * The calibrator uses this directly after fetchData() to replay many
-   * config permutations without re-fetching per permutation.
+   * Pre-compute per-candle strategy signals and regime classification.
+   * Called once per token by the calibrator; result is fed back into
+   * `simulate(..., precomputed)` to skip the network-bound strategy stack.
+   *
+   * Filters signals to BACKTEST_STRATEGIES (the calibrator does not vary
+   * `config.strategies`). Regime is always computed and returned —
+   * `simulate()` will only consume it when `config.useRegime` is set.
    */
-  async simulate(
+  async precomputeSignals(
     allCandles: Candle[],
     fearAndGreedData: Record<string, number>,
-  ): Promise<BacktestResult> {
-    // 2. Determine step size based on cycle
+  ): Promise<Array<{ signals: import('./scoring.js').Signal[]; regime: MarketRegime } | null>> {
     const stepSize = this.config.cycle === '1h' ? 1 : this.config.cycle === '4h' ? 4 : 24;
-    // CoinGecko OHLC for 90+ days gives daily candles, so step = 1 candle for '1d'
-    const step = Math.max(1, Math.floor(stepSize / 24)); // approximate
+    const step = Math.max(1, Math.floor(stepSize / 24));
+    const windowSize = 30;
 
-    // 3. Simulate trading
-    let capital = this.config.initialCapital;
-    let position: { entryPrice: number; entryDate: string; signal: string; highWaterMark: number } | null = null;
-    // Per-simulation in-memory smoother (no disk IO). Maintains rolling
-    // buffers across candles so smoothing reflects the same window logic
-    // as live runs.
-    const smoother = this.config.smoothFastSignals
-      ? new SignalSmoother(new MemorySmootherStorage(), DEFAULT_SMOOTHER_CONFIG)
-      : null;
-    const trades: BacktestTrade[] = [];
-    const equityCurve: Array<{ date: string; value: number }> = [];
-    const returns: number[] = [];
-
-    const windowSize = 30; // min candles needed for indicators
-
-    // Show strategy filtering info
-    if (this.config.verbose) {
-      if (this.config.strategies.length > 0) {
-        console.log(chalk.dim(`  Using user-specified strategies: ${this.config.strategies.join(', ')}`));
-      } else {
-        const availableStrategies = [...CANDLE_BASED_STRATEGIES];
-        if (Object.keys(fearAndGreedData).length > 0) {
-          availableStrategies.push('sentimentContrarian');
-        }
-        console.log(chalk.dim(`  Using candle-based strategies: ${availableStrategies.join(', ')}`));
-        console.log(chalk.dim(`  Filtered out external data strategies to prevent zero-signal noise`));
-      }
-      console.log();
-    }
+    const out: Array<{ signals: import('./scoring.js').Signal[]; regime: MarketRegime } | null> =
+      new Array(allCandles.length).fill(null);
 
     for (let i = windowSize; i < allCandles.length; i += step) {
-      // Use historical data only (excluding current candle to avoid look-ahead bias)
       const windowCandles = allCandles.slice(Math.max(0, i - 200), i);
+      if (windowCandles.length < windowSize) continue;
       const currentCandle = allCandles[i]!;
       const currentDate = new Date(currentCandle.timestamp).toISOString().split('T')[0]!;
       const currentPrice = currentCandle.close;
 
-      // Skip if insufficient data for indicators
-      if (windowCandles.length < windowSize) continue;
-
-      // Track equity
-      const equity = position
-        ? capital * (currentPrice / position.entryPrice)
-        : capital;
-      equityCurve.push({ date: currentDate, value: equity });
-
-      // Compute indicators using only historical data
-      let decision: TradeDecision;
       try {
         const technicals = getLatestSignals(windowCandles);
 
-        // Add Fear & Greed data for the current date if available
         let fearAndGreed: { value: number; classification: string } | undefined;
         const fgValue = fearAndGreedData[currentDate];
         if (fgValue !== undefined) {
@@ -293,41 +264,222 @@ export class Backtester {
           fearAndGreed,
         };
 
-        // Run strategies — filter to candle-based only for backtest
-        let signals = await runStrategies(ctx);
+        const rawSignals = await runStrategies(ctx);
 
-        // Optional smoothing — uses per-simulation in-memory buffer so each
-        // candle adds to a rolling window matching live behavior.
-        if (smoother) {
-          signals = await smoother.smooth(this.config.tokenId, signals, currentCandle.timestamp);
+        // Same momentum injection as simulate()
+        if (windowCandles.length >= 24) {
+          const recent = windowCandles.slice(-24);
+          const recentLow = Math.min(...recent.map((c) => c.low));
+          const recentHigh = Math.max(...recent.map((c) => c.high));
+          const pctFromLow = recentLow > 0 ? (currentPrice - recentLow) / recentLow : 0;
+          const pctFromHigh = recentHigh > 0 ? (recentHigh - currentPrice) / recentHigh : 0;
+
+          let momentumValue = 0;
+          if (pctFromHigh < 0.01) momentumValue = Math.min(0.6, pctFromLow * 5);
+          else if (pctFromLow < 0.01) momentumValue = -Math.min(0.6, pctFromHigh * 5);
+          else if (recentHigh > recentLow) {
+            const rangePosition = (currentPrice - recentLow) / (recentHigh - recentLow);
+            momentumValue = (rangePosition - 0.5) * 0.4;
+          }
+
+          if (Math.abs(momentumValue) > 0.02) {
+            rawSignals.push({
+              name: 'momentum',
+              value: momentumValue,
+              confidence: Math.min(0.7, 0.3 + Math.abs(momentumValue)),
+              source: 'Price Momentum',
+              details: `Backtest momentum`,
+            });
+          }
         }
 
-        // Filter strategies: if user specified strategies, honor their choice
-        // Otherwise, filter to candle-based strategies only
-        let filtered = signals;
-        if (this.config.strategies.length > 0) {
-          // User specified strategies — use their selection
-          filtered = signals.filter((s) => this.config.strategies.some(
-            (name) => s.name.toLowerCase().includes(name.toLowerCase()),
-          ));
-        } else {
-          // No user selection — filter to candle-based strategies only
-          filtered = signals.filter((s) => CANDLE_BASED_STRATEGIES.includes(s.name) ||
-                                          (fearAndGreed && s.name === 'sentimentContrarian'));
-        }
+        // Calibrator path: filter to BACKTEST_STRATEGIES (config.strategies is [])
+        const filtered = rawSignals.filter((s) => BACKTEST_STRATEGIES.includes(s.name));
+        const regime = MarketRegimeDetector.classifyFromCandles(windowCandles).regime;
 
-        // Classify regime from the current rolling window (no look-ahead)
-        // when --regime is enabled. The backtester operates on a single
-        // token's candles; for a true cross-asset regime read you'd swap
-        // BTC candles in here, but per-candle BTC/ETH/SOL trends are
-        // highly correlated so the asset's own candles are a fair proxy.
+        out[i] = { signals: filtered.length > 0 ? filtered : rawSignals, regime };
+      } catch {
+        out[i] = null; // skip — same as simulate()
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * Run the simulation loop on pre-fetched data. Pure of network IO.
+   * The calibrator uses this directly after fetchData() to replay many
+   * config permutations without re-fetching per permutation.
+   *
+   * When `precomputed` is supplied, the inner per-candle strategy stack
+   * (network-bound) is skipped and the cached signals/regime are used
+   * instead. Smoothing is also skipped on the precomputed path — the
+   * caller is responsible for applying it before precomputing if needed.
+   */
+  async simulate(
+    allCandles: Candle[],
+    fearAndGreedData: Record<string, number>,
+    precomputed?: Array<{ signals: import('./scoring.js').Signal[]; regime: MarketRegime } | null>,
+  ): Promise<BacktestResult> {
+    // 2. Determine step size based on cycle
+    const stepSize = this.config.cycle === '1h' ? 1 : this.config.cycle === '4h' ? 4 : 24;
+    // CoinGecko OHLC for 90+ days gives daily candles, so step = 1 candle for '1d'
+    const step = Math.max(1, Math.floor(stepSize / 24)); // approximate
+
+    // 3. Simulate trading
+    let capital = this.config.initialCapital;
+    // `extremePrice` tracks the high-water mark for longs and the low-water
+    // mark for shorts — i.e. the most favorable price seen since entry, used
+    // for trailing-stop calculations.
+    let position: {
+      side: 'long' | 'short';
+      entryPrice: number;
+      entryDate: string;
+      signal: string;
+      extremePrice: number;
+      entryTimestamp: number;
+    } | null = null;
+    // Per-simulation in-memory smoother (no disk IO). Maintains rolling
+    // buffers across candles so smoothing reflects the same window logic
+    // as live runs.
+    const smoother = this.config.smoothFastSignals
+      ? new SignalSmoother(new MemorySmootherStorage(), DEFAULT_SMOOTHER_CONFIG)
+      : null;
+    const trades: BacktestTrade[] = [];
+    const equityCurve: Array<{ date: string; value: number }> = [];
+    const returns: number[] = [];
+
+    const windowSize = 30; // min candles needed for indicators
+
+    // Show strategy filtering info
+    if (this.config.verbose) {
+      if (this.config.strategies.length > 0) {
+        console.log(chalk.dim(`  Using user-specified strategies: ${this.config.strategies.join(', ')}`));
+      } else {
+        console.log(chalk.dim(`  Using backtest strategies: ${BACKTEST_STRATEGIES.join(', ')} + momentum`));
+        if (Object.keys(fearAndGreedData).length > 0) {
+          console.log(chalk.dim(`  Fear & Greed data available — sentimentContrarian active`));
+        }
+      }
+      console.log();
+    }
+
+    for (let i = windowSize; i < allCandles.length; i += step) {
+      // Use historical data only (excluding current candle to avoid look-ahead bias)
+      const windowCandles = allCandles.slice(Math.max(0, i - 200), i);
+      const currentCandle = allCandles[i]!;
+      const currentDate = new Date(currentCandle.timestamp).toISOString().split('T')[0]!;
+      const currentPrice = currentCandle.close;
+
+      // Skip if insufficient data for indicators
+      if (windowCandles.length < windowSize) continue;
+
+      // Track equity (direction-aware: shorts profit when price falls)
+      const equity = position
+        ? capital * (1 + (position.side === 'short'
+            ? (position.entryPrice - currentPrice) / position.entryPrice
+            : (currentPrice - position.entryPrice) / position.entryPrice))
+        : capital;
+      equityCurve.push({ date: currentDate, value: equity });
+
+      // Compute indicators using only historical data
+      let decision: TradeDecision;
+      try {
+        let filtered: import('./scoring.js').Signal[];
         let regime: MarketRegime | undefined;
-        if (this.config.useRegime) {
-          regime = MarketRegimeDetector.classifyFromCandles(windowCandles).regime;
+
+        if (precomputed) {
+          // Fast path — use cached signals + regime from a prior precomputeSignals() pass.
+          // Skips the network-bound runStrategies call. Used by the calibrator to replay
+          // hundreds of weight/threshold combinations against the same token in seconds.
+          const entry = precomputed[i];
+          if (!entry) continue;
+          filtered = entry.signals;
+          regime = this.config.useRegime ? entry.regime : undefined;
+        } else {
+          const technicals = getLatestSignals(windowCandles);
+
+          // Add Fear & Greed data for the current date if available
+          let fearAndGreed: { value: number; classification: string } | undefined;
+          const fgValue = fearAndGreedData[currentDate];
+          if (fgValue !== undefined) {
+            const classification = fgValue < 25 ? 'Extreme Fear' :
+                                   fgValue < 40 ? 'Fear' :
+                                   fgValue < 60 ? 'Neutral' :
+                                   fgValue < 75 ? 'Greed' : 'Extreme Greed';
+            fearAndGreed = { value: fgValue, classification };
+          }
+
+          const ctx: StrategyContext = {
+            tokenId: this.config.tokenId,
+            candles: windowCandles,
+            technicals,
+            fearAndGreed,
+          };
+
+          // Run strategies
+          let signals = await runStrategies(ctx);
+
+          // Add momentum signal (same logic as live in index.ts — computed from candles)
+          if (windowCandles.length >= 24) {
+            const recent = windowCandles.slice(-24);
+            const recentLow = Math.min(...recent.map((c) => c.low));
+            const recentHigh = Math.max(...recent.map((c) => c.high));
+            const pctFromLow = recentLow > 0 ? (currentPrice - recentLow) / recentLow : 0;
+            const pctFromHigh = recentHigh > 0 ? (recentHigh - currentPrice) / recentHigh : 0;
+
+            let momentumValue = 0;
+            if (pctFromHigh < 0.01) {
+              momentumValue = Math.min(0.6, pctFromLow * 5);
+            } else if (pctFromLow < 0.01) {
+              momentumValue = -Math.min(0.6, pctFromHigh * 5);
+            } else if (recentHigh > recentLow) {
+              const rangePosition = (currentPrice - recentLow) / (recentHigh - recentLow);
+              momentumValue = (rangePosition - 0.5) * 0.4;
+            }
+
+            if (Math.abs(momentumValue) > 0.02) {
+              signals.push({
+                name: 'momentum',
+                value: momentumValue,
+                confidence: Math.min(0.7, 0.3 + Math.abs(momentumValue)),
+                source: 'Price Momentum',
+                details: `Backtest momentum`,
+              });
+            }
+          }
+
+          // Optional smoothing — uses per-simulation in-memory buffer so each
+          // candle adds to a rolling window matching live behavior.
+          if (smoother) {
+            signals = await smoother.smooth(this.config.tokenId, signals, currentCandle.timestamp);
+          }
+
+          // Filter strategies: if user specified strategies, honor their choice
+          // Otherwise, filter to candle-based strategies only
+          if (this.config.strategies.length > 0) {
+            // User specified strategies — use their selection
+            filtered = signals.filter((s) => this.config.strategies.some(
+              (name) => s.name.toLowerCase().includes(name.toLowerCase()),
+            ));
+          } else {
+            // No user selection — filter to candle-based strategies only
+            filtered = signals.filter((s) => BACKTEST_STRATEGIES.includes(s.name));
+          }
+          if (filtered.length === 0) filtered = signals;
+
+          // Classify regime from the current rolling window (no look-ahead)
+          // when --regime is enabled. The backtester operates on a single
+          // token's candles; for a true cross-asset regime read you'd swap
+          // BTC candles in here, but per-candle BTC/ETH/SOL trends are
+          // highly correlated so the asset's own candles are a fair proxy.
+          if (this.config.useRegime) {
+            regime = MarketRegimeDetector.classifyFromCandles(windowCandles).regime;
+          }
         }
 
         decision = computeTradeDecision(
-          filtered.length > 0 ? filtered : signals,
+          filtered,
           this.config.customWeights,
           undefined,
           undefined,
@@ -374,52 +526,103 @@ export class Backtester {
         continue; // skip candle if analysis fails
       }
 
-      // Execute paper trades
+      // ── Execute paper trades with FULL exit logic ──
+      // Matches the live system: stop-loss, take-profit, time stop, trailing,
+      // AND signal-based exits. Previously only checked SELL signals, so
+      // positions rode forever without stops.
+      const STOP_LOSS_PCT = 0.03;    // 3% stop — matches executor.ts
+      const TAKE_PROFIT_PCT = 0.06;  // 6% TP (2:1 R:R)
+      const TIME_STOP_HOURS = 48;    // 48h dead-money exit
+      const TRAIL_PCT = this.config.trailingStopPct ?? 0.025; // 2.5% trail
+
+      // Open a long on BUY/STRONG_BUY or a short on SELL/STRONG_SELL
+      // (only when flat — pyramid logic lives in the live executor).
       if (!position && (decision.action === 'BUY' || decision.action === 'STRONG_BUY')) {
-        // Enter long
         position = {
+          side: 'long',
           entryPrice: currentPrice,
           entryDate: currentDate,
           signal: decision.action,
-          highWaterMark: currentPrice,
+          extremePrice: currentPrice,
+          entryTimestamp: currentCandle.timestamp,
+        };
+      } else if (!position && (decision.action === 'SELL' || decision.action === 'STRONG_SELL')) {
+        position = {
+          side: 'short',
+          entryPrice: currentPrice,
+          entryDate: currentDate,
+          signal: decision.action,
+          extremePrice: currentPrice, // for shorts this becomes a low-water mark
+          entryTimestamp: currentCandle.timestamp,
         };
       } else if (position) {
-        // Update high-water mark for trailing stop
-        if (currentPrice > position.highWaterMark) {
-          position.highWaterMark = currentPrice;
+        const isShort = position.side === 'short';
+        // Track best favorable price: highest for longs, lowest for shorts
+        if (isShort) {
+          if (currentPrice < position.extremePrice) position.extremePrice = currentPrice;
+        } else {
+          if (currentPrice > position.extremePrice) position.extremePrice = currentPrice;
         }
 
-        // Check trailing stop FIRST — exits faster than waiting for SELL signal
-        const trailingStopHit = this.config.trailingStopPct !== undefined
-          && currentPrice <= position.highWaterMark * (1 - this.config.trailingStopPct);
-        const sellSignal = decision.action === 'SELL' || decision.action === 'STRONG_SELL';
+        // Direction-aware PnL (shorts profit when price falls)
+        const pnlPercent = isShort
+          ? (position.entryPrice - currentPrice) / position.entryPrice
+          : (currentPrice - position.entryPrice) / position.entryPrice;
+        const holdingHours = (currentCandle.timestamp - position.entryTimestamp) / (1000 * 60 * 60);
 
-        if (trailingStopHit || sellSignal) {
-          const pnlPercent = (currentPrice - position.entryPrice) / position.entryPrice;
+        // Check ALL exit conditions (priority order)
+        let exitReason: string | null = null;
+
+        // 1. Stop loss (3%) — pnlPercent is already direction-aware
+        if (pnlPercent <= -STOP_LOSS_PCT) {
+          exitReason = `STOP_LOSS (${(pnlPercent * 100).toFixed(1)}%)`;
+        }
+        // 2. Take profit (6%)
+        else if (pnlPercent >= TAKE_PROFIT_PCT) {
+          exitReason = `TAKE_PROFIT (+${(pnlPercent * 100).toFixed(1)}%)`;
+        }
+        // 3. Trailing stop — for longs, exit if price drops X% from high;
+        //    for shorts, exit if price rises X% from low.
+        else if (TRAIL_PCT > 0 && (isShort
+          ? currentPrice >= position.extremePrice * (1 + TRAIL_PCT)
+          : currentPrice <= position.extremePrice * (1 - TRAIL_PCT))) {
+          exitReason = `TRAILING_STOP (extreme $${position.extremePrice.toFixed(2)}, ${isShort ? '+' : '-'}${(TRAIL_PCT * 100).toFixed(1)}%)`;
+        }
+        // 4. Time stop (48h with <1% PnL)
+        else if (holdingHours > TIME_STOP_HOURS && Math.abs(pnlPercent) < 0.01) {
+          exitReason = `TIME_STOP (${(holdingHours / 24).toFixed(1)}d, ${(pnlPercent * 100).toFixed(1)}%)`;
+        }
+        // 5. Signal-flip exit: longs flip on SELL, shorts flip on BUY
+        else if (isShort
+          ? (decision.action === 'BUY' || decision.action === 'STRONG_BUY')
+          : (decision.action === 'SELL' || decision.action === 'STRONG_SELL')) {
+          exitReason = decision.action;
+        }
+
+        if (exitReason) {
           capital *= (1 + pnlPercent);
           returns.push(pnlPercent);
-
-          const exitReason = trailingStopHit ? `TRAILING_STOP (-${(this.config.trailingStopPct! * 100).toFixed(1)}%)` : decision.action;
           trades.push({
             entryDate: position.entryDate,
             exitDate: currentDate,
             entryPrice: position.entryPrice,
             exitPrice: currentPrice,
             pnlPercent,
-            signal: `${position.signal} → ${exitReason}`,
+            signal: `${position.signal}${isShort ? ' [SHORT]' : ''} → ${exitReason}`,
           });
-
           position = null;
         }
       }
     }
 
-    // Close any remaining position at last price
+    // Close any remaining position at last price (direction-aware)
     if (position && allCandles.length > 0) {
       const lastCandle = allCandles[allCandles.length - 1]!;
       const lastPrice = lastCandle.close;
       const lastDate = new Date(lastCandle.timestamp).toISOString().split('T')[0]!;
-      const pnlPercent = (lastPrice - position.entryPrice) / position.entryPrice;
+      const pnlPercent = position.side === 'short'
+        ? (position.entryPrice - lastPrice) / position.entryPrice
+        : (lastPrice - position.entryPrice) / position.entryPrice;
       capital *= (1 + pnlPercent);
       returns.push(pnlPercent);
 
@@ -429,7 +632,7 @@ export class Backtester {
         entryPrice: position.entryPrice,
         exitPrice: lastPrice,
         pnlPercent,
-        signal: `${position.signal} → CLOSE`,
+        signal: `${position.signal}${position.side === 'short' ? ' [SHORT]' : ''} → CLOSE`,
       });
     }
 

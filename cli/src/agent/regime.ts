@@ -42,7 +42,7 @@ export class MarketRegimeDetector {
 
   /**
    * Detect current market regime using BTC candles.
-   * Returns cached result if less than 15 minutes old.
+   * Returns cached result if less than 5 minutes old.
    */
   async detect(btcCandles: Candle[]): Promise<RegimeAnalysis> {
     // Check cache first
@@ -50,7 +50,10 @@ export class MarketRegimeDetector {
       const cached = await this.loadCache();
       const now = Date.now();
       const cacheAge = now - cached.timestamp;
-      const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+      // 5-minute TTL — cycles run every ~25min, but a 15min cache lagged real
+      // regime shifts by up to a full cycle. 5min keeps the cache useful for
+      // back-to-back short scans while staying close to live state.
+      const CACHE_DURATION = 5 * 60 * 1000;
 
       if (cacheAge < CACHE_DURATION) {
         return cached.analysis;
@@ -90,6 +93,11 @@ export class MarketRegimeDetector {
     const closes = candles.map((c) => c.close);
     const currentPrice = closes[closes.length - 1]!;
 
+    // ── Fast momentum override — shared with analyzeBtc ──
+    const momentumResult = this.checkMomentumOverride(candles, currentPrice);
+    if (momentumResult) return momentumResult;
+
+    // ── Standard EMA/ADX regime classification ──
     const ema50 = calculateEMA(closes, 50);
     const ema200 = calculateEMA(closes, 200);
     const currentEma50 = this.getLastValidValue(ema50);
@@ -169,6 +177,11 @@ export class MarketRegimeDetector {
     const closes = candles.map(c => c.close);
     const currentPrice = closes[closes.length - 1]!;
 
+    // ── Fast momentum override — shared with classifySync ──
+    const momentumResult = this.checkMomentumOverride(candles, currentPrice);
+    if (momentumResult) return momentumResult;
+
+    // ── Standard EMA/ADX regime classification ──
     // Calculate EMAs for trend detection
     const ema50 = calculateEMA(closes, 50);
     const ema200 = calculateEMA(closes, 200);
@@ -369,6 +382,78 @@ export class MarketRegimeDetector {
     } catch {
       return "neutral";
     }
+  }
+
+  /**
+   * Fast momentum check — catches intraday trends that EMA/ADX miss.
+   * Returns a RegimeAnalysis if momentum override fires, or null to fall
+   * through to the standard EMA/ADX classification.
+   *
+   * Threshold is volatility-adjusted: 1.5× the 14-candle ATR as a
+   * percentage of current price, floored at 2% and capped at 8%.
+   * - BTC (daily ATR ~2%): threshold ≈ 3% — same as before
+   * - SOL (daily ATR ~5%): threshold ≈ 7.5% — avoids false triggers on normal alt vol
+   * - FARTCOIN (daily ATR ~10%): threshold = 8% cap — only fires on genuinely unusual moves
+   *
+   * Requirements for trending-up: price above threshold AND in the upper
+   * half of the range (prevents false positives on bounces within a larger
+   * downtrend). Symmetric for trending-down.
+   */
+  private checkMomentumOverride(candles: Candle[], currentPrice: number): RegimeAnalysis | null {
+    const MOMENTUM_LOOKBACK = 24;
+    const MIN_THRESHOLD = 0.02; // floor: 2%
+    const MAX_THRESHOLD = 0.08; // cap: 8%
+    const ATR_MULTIPLIER = 1.5;
+
+    // Compute 14-period ATR as a percentage of current price for vol-adjustment
+    const atrValues = calculateATR(candles, 14);
+    const currentAtr = this.getLastValidValue(atrValues);
+    const atrPct = currentPrice > 0 && !isNaN(currentAtr) ? currentAtr / currentPrice : 0.02;
+    const threshold = Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, atrPct * ATR_MULTIPLIER));
+
+    // Compute volatility level BEFORE the override so it propagates
+    // into the returned RegimeAnalysis. Previously hardcoded "normal"
+    // which masked extreme volatility during fast moves.
+    const bb = calculateBollingerBands(candles, 20, 2.0);
+    const currentBbWidth = this.getLastValidValue(bb.width);
+    let volLevel: RegimeAnalysis["volatilityLevel"] = "normal";
+    if (!isNaN(currentBbWidth)) {
+      if (currentBbWidth < 0.04) volLevel = "low";
+      else if (currentBbWidth > 0.20) volLevel = "extreme";
+      else if (currentBbWidth > 0.10) volLevel = "high";
+    }
+
+    const recentCandles = candles.slice(-MOMENTUM_LOOKBACK);
+    const recentLow = Math.min(...recentCandles.map((c) => c.low));
+    const recentHigh = Math.max(...recentCandles.map((c) => c.high));
+    const pctAboveLow = recentLow > 0 ? (currentPrice - recentLow) / recentLow : 0;
+    const pctBelowHigh = recentHigh > 0 ? (recentHigh - currentPrice) / recentHigh : 0;
+
+    const recentMid = (recentHigh + recentLow) / 2;
+    const inUpperHalf = currentPrice >= recentMid;
+    const inLowerHalf = currentPrice <= recentMid;
+
+    if (pctAboveLow >= threshold && inUpperHalf) {
+      return {
+        regime: "trending-up",
+        confidence: Math.min(0.85, 0.5 + pctAboveLow * 5),
+        btcTrend: "up",
+        volatilityLevel: volLevel,
+        details: `Momentum override: price +${(pctAboveLow * 100).toFixed(1)}% above ${MOMENTUM_LOOKBACK}-candle low (threshold ${(threshold * 100).toFixed(1)}%, ATR-adjusted)`,
+        strategyAdjustments: this.getStrategyAdjustments("trending-up"),
+      };
+    }
+    if (pctBelowHigh >= threshold && inLowerHalf) {
+      return {
+        regime: "trending-down",
+        confidence: Math.min(0.85, 0.5 + pctBelowHigh * 5),
+        btcTrend: "down",
+        volatilityLevel: volLevel,
+        details: `Momentum override: price -${(pctBelowHigh * 100).toFixed(1)}% below ${MOMENTUM_LOOKBACK}-candle high (threshold ${(threshold * 100).toFixed(1)}%, ATR-adjusted)`,
+        strategyAdjustments: this.getStrategyAdjustments("trending-down"),
+      };
+    }
+    return null;
   }
 
   private getStrategyAdjustments(regime: MarketRegime): Record<string, number> {

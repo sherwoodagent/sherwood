@@ -38,6 +38,7 @@ import { CorrelationGuard } from "./correlation.js";
 import type { CorrelationCheck } from "./correlation.js";
 import { AlertSystem } from "./alerts.js";
 import type { Alert } from "./alerts.js";
+import { isX402WalletFunded } from "../lib/x402.js";
 
 export type { Signal, ScoringWeights, TradeDecision, Alert, TechnicalSignals };
 
@@ -54,6 +55,11 @@ export interface AgentConfig {
   weightProfile?: string;
   /** When true, includes paid x402 data (Nansen smart-money, Messari fundamentals) in analysis. */
   useX402?: boolean;
+  /** Only run x402 paid signals on the top N tokens by free-signal score.
+   *  Remaining tokens use free signals only. Reduces x402 cost from ~$1.60/run
+   *  (10 tokens × $0.16) to ~$0.48/run (3 tokens × $0.16).
+   *  Set to 0 or undefined to run x402 on all tokens (old behavior). */
+  x402TopN?: number;
   /** When true, smooth fast/noisy signals (HL flow, smartMoney, dexFlow, fundingRate)
    *  with a rolling 3-reading average before scoring. Reduces single-scan flicker.
    *  Default false. */
@@ -105,7 +111,7 @@ export class TradingAgent {
   }
 
   /** Analyze a single token — gather all data and score. */
-  async analyzeToken(tokenId: string): Promise<TokenAnalysis> {
+  async analyzeToken(tokenId: string, opts?: { skipX402?: boolean }): Promise<TokenAnalysis> {
     const signals: Signal[] = [];
     let technicalSignals: TechnicalSignals | undefined;
     let fearAndGreedValue: number | undefined;
@@ -173,6 +179,48 @@ export class TradingAgent {
       candles = ohlcResult.value;
       technicalSignals = getLatestSignals(candles);
       signals.push(scoreTechnical(technicalSignals));
+
+      // Price momentum signal — captures "the market is moving" before
+      // lagging indicators (RSI, MACD, EMA) catch up. Uses the same candle
+      // data we already have. Scored as a technical-category signal so it
+      // adds to (not replaces) the existing technical analysis.
+      if (candles.length >= 24) {
+        const recent = candles.slice(-24);
+        const currentClose = recent[recent.length - 1]!.close;
+        const recentLow = Math.min(...recent.map((c) => c.low));
+        const recentHigh = Math.max(...recent.map((c) => c.high));
+        const pctFromLow = recentLow > 0 ? (currentClose - recentLow) / recentLow : 0;
+        const pctFromHigh = recentHigh > 0 ? (recentHigh - currentClose) / recentHigh : 0;
+
+        let momentumValue = 0;
+        let momentumDetails = '';
+        // Bullish momentum: price near 24-candle highs
+        if (pctFromHigh < 0.01) {
+          momentumValue = Math.min(0.6, pctFromLow * 5); // scales: 3% move → 0.15, 5% → 0.25, 10% → 0.50
+          momentumDetails = `Price +${(pctFromLow * 100).toFixed(1)}% from 24-candle low, near highs`;
+        }
+        // Bearish momentum: price near 24-candle lows
+        else if (pctFromLow < 0.01) {
+          momentumValue = -Math.min(0.6, pctFromHigh * 5);
+          momentumDetails = `Price -${(pctFromHigh * 100).toFixed(1)}% from 24-candle high, near lows`;
+        }
+        // Mid-range: proportional to position within range
+        else if (recentHigh > recentLow) {
+          const rangePosition = (currentClose - recentLow) / (recentHigh - recentLow); // 0=low, 1=high
+          momentumValue = (rangePosition - 0.5) * 0.4; // -0.2 to +0.2
+          momentumDetails = `Mid-range (${(rangePosition * 100).toFixed(0)}th percentile of 24-candle range)`;
+        }
+
+        if (Math.abs(momentumValue) > 0.02) {
+          signals.push({
+            name: 'momentum',
+            value: momentumValue,
+            confidence: Math.min(0.7, 0.3 + Math.abs(momentumValue)),
+            source: 'Price Momentum',
+            details: momentumDetails,
+          });
+        }
+      }
     } else if (ohlcResult.status === 'rejected') {
       console.error(chalk.dim(`  Technical analysis failed for ${tokenId}: ${ohlcResult.reason}`));
     }
@@ -183,7 +231,11 @@ export class TradingAgent {
       fearAndGreedValue = fgData[0]!.value;
       const values = fgData.map((d) => d.value);
       sentimentZScore = this.sentiment.computeSentimentZScore(values);
-      signals.push(scoreSentiment(fearAndGreedValue, sentimentZScore));
+      // F&G is used as a regime-gate (extreme fear = allow BUY, extreme greed = allow SELL)
+      // NOT as a scoring signal. It fires at +0.76 on 100% of observations when F&G < 25,
+      // making it a constant bias rather than a directional signal. The sentimentContrarian
+      // strategy (which modulates based on actual F&G value) remains active.
+      // signals.push(scoreSentiment(fearAndGreedValue, sentimentZScore)); // REMOVED: constant bias
     } else if (fearGreedResult.status === 'rejected') {
       console.error(chalk.dim(`  Sentiment data failed: ${fearGreedResult.reason}`));
     }
@@ -233,82 +285,92 @@ export class TradingAgent {
     let nansenData: any = undefined;
     let messariData: any = undefined;
 
-    // Phase 2: Parallel research data fetching (Nansen + Messari) if x402 enabled
-    if (this.config.useX402) {
-      const [nansenResult, messariResult] = await Promise.allSettled([
-        // 4. Smart-money & on-chain data (via Nansen x402)
-        getResearchProvider("nansen").query({ type: "smart-money", target: tokenId }),
+    // Check x402 wallet USDC balance once per scan cycle.
+    // If wallet is unfunded, skip x402 calls entirely to avoid diluting scores.
+    // undefined = x402 not configured (don't exclude categories)
+    // true = x402 configured + wallet funded
+    // false = x402 configured but wallet empty → exclude dead categories
+    const x402Enabled = this.config.useX402 && !opts?.skipX402;
+    let x402Available: boolean | undefined = x402Enabled ? false : undefined;
+    if (x402Enabled) {
+      x402Available = await isX402WalletFunded();
+      if (!x402Available) {
+        console.error(chalk.yellow(`  x402 wallet has insufficient USDC — skipping paid signals (smartMoney, event) for this cycle`));
+      }
+    }
 
-        // 5. Fundamentals & events (via Messari x402)
-        getResearchProvider("messari").query({ type: "token", target: tokenId })
+    // Phase 2: Nansen x402 research data (Messari dropped — low value for majors)
+    //
+    // Two Nansen calls in parallel:
+    //   1. Smart-money netflows (multi-chain: ethereum, solana, base, L2s)
+    //      — was previously Base-only, returning empty for BTC/ETH/SOL
+    //   2. Hyperliquid smart-money perp trades — same venue we trade on,
+    //      shows what Funds/Smart Traders are doing right now
+    if (x402Enabled && x402Available) {
+      // Map tokenId to HL symbol for perp-trades query
+      const hlSymbolMap: Record<string, string> = {
+        bitcoin: "BTC", ethereum: "ETH", solana: "SOL",
+        arbitrum: "ARB", aave: "AAVE", uniswap: "UNI",
+        dogecoin: "DOGE", ripple: "XRP", hyperliquid: "HYPE",
+        "worldcoin-wld": "WLD", bittensor: "TAO", zcash: "ZEC",
+        fartcoin: "FARTCOIN", pepe: "PEPE", polkadot: "DOT",
+      };
+      const hlSymbol = hlSymbolMap[tokenId] ?? tokenId.toUpperCase();
+
+      const nansenProvider = getResearchProvider("nansen") as import("../providers/research/nansen.js").NansenProvider;
+
+      // Nansen netflow dropped — returns 422 for token_symbol filter.
+      // HL perp-trades is the higher-value signal (same venue we trade).
+      const [hlPerpResult] = await Promise.allSettled([
+        nansenProvider.queryHyperliquidSmartMoney(hlSymbol),
       ]);
 
-      // Process Nansen results
-      if (nansenResult.status === 'fulfilled') {
-        const smResult = nansenResult.value;
-        nansenData = smResult.data;
-        const flows = smResult.data.flows as Array<Record<string, unknown>> | undefined;
-        if (flows && flows.length > 0) {
-          // Interpret net flow: negative = leaving exchanges = bullish
-          const netflow = flows.reduce((sum, f) => sum + (Number(f.netflow ?? f.net_flow ?? 0)), 0);
-          signals.push(scoreOnChain({
-            exchangeNetFlow: netflow,
-            whaleAccumulating: netflow < 0,
-          }));
+      // Process HL perp trades — derive a smartMoney signal from recent trade direction
+      if (hlPerpResult.status === 'fulfilled') {
+        const hlResult = hlPerpResult.value;
+        const trades = hlResult.data.trades as Array<Record<string, unknown>> | undefined;
+        if (trades && trades.length > 0) {
+          // Count longs vs shorts among smart money's recent trades
+          let longValueUsd = 0;
+          let shortValueUsd = 0;
+          for (const t of trades) {
+            const val = Number(t.value_usd ?? 0);
+            const side = String(t.side ?? '').toLowerCase();
+            if (side === 'long') longValueUsd += val;
+            else if (side === 'short') shortValueUsd += val;
+          }
+          const totalValue = longValueUsd + shortValueUsd;
+          const longRatio = totalValue > 0 ? longValueUsd / totalValue : 0.5;
+          // longRatio 0.7+ = smart money heavily long = bullish
+          // longRatio 0.3- = smart money heavily short = bearish
+          const smBias = (longRatio - 0.5) * 2; // -1 to +1
+
+          // Push as a smartMoney signal. Scale to ±0.5 max (not ±0.8) —
+          // a single Nansen snapshot shouldn't dominate the entire score.
+          // At smartMoney weight 0.15 (majors profile), ±0.5 contributes
+          // ±0.075 to aggregate — meaningful but well below sentiment/onchain.
+          signals.push({
+            name: 'smartMoney',
+            value: smBias * 0.5,
+            confidence: Math.min(0.7, 0.3 + (trades.length / 30) * 0.4),
+            source: 'Nansen HL Smart Money',
+            details: `${trades.length} trades: $${(longValueUsd / 1e6).toFixed(1)}M long / $${(shortValueUsd / 1e6).toFixed(1)}M short (${(longRatio * 100).toFixed(0)}% long)`,
+          });
+          console.error(chalk.dim(`  x402 Nansen HL perps: ${trades.length} trades, ${(longRatio * 100).toFixed(0)}% long bias, cost ${hlResult.costUsdc} USDC`));
         } else {
-          signals.push(scoreOnChain({}));
+          console.error(chalk.dim(`  x402 Nansen HL perps: no recent trades for ${hlSymbol}`));
         }
-        console.error(chalk.dim(`  x402 Nansen smart-money: cost ${smResult.costUsdc} USDC`));
       } else {
-        console.error(chalk.dim(`  x402 Nansen smart-money unavailable: ${nansenResult.reason} — using free data only`));
-        signals.push(scoreOnChain({}));
+        console.error(chalk.dim(`  x402 Nansen HL perps unavailable: ${hlPerpResult.reason}`));
       }
 
-      // Process Messari results
-      if (messariResult.status === 'fulfilled') {
-        const tokenResult = messariResult.value;
-        messariData = tokenResult.data;
-        const d = tokenResult.data as Record<string, unknown>;
-        const metrics = d.metrics as Record<string, unknown> | undefined;
-        const profile = d.profile as Record<string, unknown> | undefined;
-
-        // Extract fundamental metrics from Messari data (replaces TVL-based fundamental if present)
-        const mcapToTvl = metrics
-          ? Number((metrics as Record<string, unknown>).mcap_to_tvl ?? 0) || undefined
-          : undefined;
-
-        // Remove any previously-pushed fundamental signal (from phase 1 TVL) to avoid duplicates
-        const existingFundIdx = signals.findIndex(s => s.name === "fundamental");
-        if (existingFundIdx >= 0) signals.splice(existingFundIdx, 1);
-
-        if (mcapToTvl || metrics) {
-          signals.push(scoreFundamental({ mcapToTvl }));
-        } else {
-          signals.push(scoreFundamental({}));
-        }
-
-        // Use profile/category data as an event signal
-        const hasPositiveCatalyst = profile
-          ? Boolean((profile as Record<string, unknown>).is_verified || (profile as Record<string, unknown>).tag_names)
-          : false;
-        signals.push(scoreEvent({ positiveEvent: hasPositiveCatalyst || undefined }));
-
-        console.error(chalk.dim(`  x402 Messari token: cost ${tokenResult.costUsdc} USDC`));
-      } else {
-        console.error(chalk.dim(`  x402 Messari unavailable: ${messariResult.reason} — using free data only`));
-        // Fall back: fundamental was already pushed from TVL above only if no TVL
-        if (!signals.some(s => s.name === "fundamental")) {
-          signals.push(scoreFundamental({}));
-        }
-        signals.push(scoreEvent({}));
-      }
-    } else {
-      // Only push fundamental if not already pushed from TVL data (phase 1)
-      if (!signals.some(s => s.name === "fundamental")) {
-        signals.push(scoreFundamental({}));
-      }
+      // Push event signal (no Messari — use free path)
       signals.push(scoreEvent({}));
     }
+    // Free path: don't push empty fundamental/event signals that always return
+    // value=0. They participate in per-category weight normalization and dilute
+    // signals that actually fire. Only push when there's real data (TVL from
+    // phase 1, or Nansen/Messari from x402).
 
     // Phase 3: Parallel strategy data fetching (symbol, funding rate, unlocks)
     let marketData: any = undefined;
@@ -460,6 +522,7 @@ export class TradingAgent {
       regimeAnalysis?.strategyAdjustments,
       correlationCheck,
       regimeAnalysis?.regime,
+      x402Available,
     );
 
     const result: TokenAnalysis = {
@@ -485,14 +548,53 @@ export class TradingAgent {
     this.config.tokens = tokens;
   }
 
-  /** Analyze all watchlist tokens. */
+  /** Analyze all watchlist tokens.
+   *
+   *  When `x402TopN` is set and x402 is enabled, uses a two-pass approach:
+   *  1. Score ALL tokens with free signals only (no x402 cost)
+   *  2. Re-score the top N tokens by free-signal score WITH x402 paid data
+   *
+   *  This reduces x402 cost from ~$0.16×10 = $1.60/run to ~$0.16×3 = $0.48/run
+   *  while concentrating paid data on the tokens most likely to fire trades.
+   */
   async analyzeAll(): Promise<TokenAnalysis[]> {
-    const results: TokenAnalysis[] = [];
-    for (const token of this.config.tokens) {
-      const result = await this.analyzeToken(token);
-      results.push(result);
+    const topN = this.config.x402TopN;
+    const shouldTwoPass = this.config.useX402 && topN && topN > 0 && topN < this.config.tokens.length;
+
+    if (!shouldTwoPass) {
+      // Original single-pass: analyze all tokens with whatever x402 config says
+      const results: TokenAnalysis[] = [];
+      for (const token of this.config.tokens) {
+        const result = await this.analyzeToken(token);
+        results.push(result);
+      }
+      return results;
     }
-    return results;
+
+    // Pass 1: all tokens with free signals only
+    console.error(chalk.dim(`  x402 top-${topN} mode: scoring all ${this.config.tokens.length} tokens with free signals first...`));
+    const freeResults: TokenAnalysis[] = [];
+    for (const token of this.config.tokens) {
+      const result = await this.analyzeToken(token, { skipX402: true });
+      freeResults.push(result);
+    }
+
+    // Sort by absolute score descending — top N get the x402 enrichment
+    const ranked = [...freeResults].sort(
+      (a, b) => Math.abs(b.decision.score) - Math.abs(a.decision.score),
+    );
+    const topTokens = new Set(ranked.slice(0, topN).map((r) => r.token));
+    console.error(chalk.dim(`  x402 enriching top ${topN}: ${[...topTokens].join(', ')}`));
+
+    // Pass 2: re-analyze top N with x402 enabled
+    const enrichedMap = new Map<string, TokenAnalysis>();
+    for (const token of topTokens) {
+      const enriched = await this.analyzeToken(token);
+      enrichedMap.set(token, enriched);
+    }
+
+    // Merge: use enriched results for top N, free results for the rest
+    return freeResults.map((r) => enrichedMap.get(r.token) ?? r);
   }
 
   /** Analyze all tokens and generate alerts for state changes. */
