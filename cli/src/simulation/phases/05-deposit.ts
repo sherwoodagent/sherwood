@@ -13,7 +13,7 @@ import { agentHomeDir } from "../agent-home.js";
 import { execSherwoodAsync } from "../exec.js";
 import { runInPool } from "../pool.js";
 import { updateAgent } from "../state.js";
-import { PERSONAS } from "../personas.js";
+import { getPersona } from "../personas.js";
 import type { SimLogger } from "../logger.js";
 
 export async function runPhase05(config: SimConfig, state: SimState, logger?: SimLogger): Promise<void> {
@@ -58,8 +58,13 @@ export async function runPhase05(config: SimConfig, state: SimState, logger?: Si
     const syn = state.syndicates.find((s) => s.subdomain === agent.syndicateSubdomain);
     const isWethVault = syn?.asset === "WETH";
 
-    const persona = PERSONAS.find((p) => p.index === agent.index);
-    const amount = isWethVault ? "0.004" : (persona?.depositAmount || "10");
+    const persona = getPersona(agent.index, config.chain);
+    // For WETH vaults: use persona's depositAmount if ETH-denominated (< 1.0),
+    // otherwise fall back to 0.004 (Base personas have USDC-denominated amounts like "10")
+    const wethDeposit = persona?.depositAmount && parseFloat(persona.depositAmount) < 1
+      ? persona.depositAmount
+      : "0.004";
+    const amount = isWethVault ? wethDeposit : (persona?.depositAmount || "10");
     const assetLabel = isWethVault ? "ETH (->WETH)" : "USDC";
 
     const agentHome = agentHomeDir(config.baseDir, agent.index);

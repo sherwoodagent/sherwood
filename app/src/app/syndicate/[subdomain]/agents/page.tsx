@@ -1,11 +1,15 @@
 import { notFound } from "next/navigation";
-import TorusKnotBackground from "@/components/TorusKnotBackground";
+import Link from "next/link";
+import AmbientBackground from "@/components/AmbientBackground";
 import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import SyndicateClient from "@/components/SyndicateClient";
 import { resolveSyndicateBySubdomain } from "@/lib/syndicate-data";
 import AttestationTimeline from "@/components/AttestationTimeline";
-import { truncateAddress } from "@/lib/contracts";
+import { truncateAddress, getAddresses } from "@/lib/contracts";
+import { TargetChainProvider } from "@/components/TargetChainContext";
+import JsonLd from "@/components/JsonLd";
+import { buildBreadcrumbLd } from "@/lib/structured-data";
 
 export async function generateMetadata({
   params,
@@ -43,23 +47,20 @@ export default async function AgentsPage({
     agentNames[agent.agentId.toString()] = displayName;
   }
   const creatorKey = data.creator.toLowerCase();
-  if (!addressNames[creatorKey]) {
-    addressNames[creatorKey] = name;
-  }
+  const hasIdentityRegistry = getAddresses(data.chainId).identityRegistry !== "0x0000000000000000000000000000000000000000";
 
   return (
-    <>
-      <TorusKnotBackground
-        radius={10}
-        tube={0.2}
-        tubularSegments={128}
-        radialSegments={16}
-        p={3}
-        q={4}
-        opacity={0.15}
-        fogDensity={0.08}
+    <TargetChainProvider chainId={data.chainId}>
+      <AmbientBackground />
+
+      <JsonLd
+        data={buildBreadcrumbLd([
+          { name: "Home", path: "/" },
+          { name: "Leaderboard", path: "/leaderboard" },
+          { name, path: `/syndicate/${subdomain}` },
+          { name: "Agents", path: `/syndicate/${subdomain}/agents` },
+        ])}
       />
-      <div className="scanlines" style={{ opacity: 0.2 }} />
 
       <div className="layout layout-normal">
         <main className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
@@ -76,6 +77,7 @@ export default async function AgentsPage({
             assetDecimals={data.assetDecimals}
             assetSymbol={data.assetSymbol}
             activeTab="agents"
+            hideAgentsTab={!hasIdentityRegistry}
           />
 
           {/* Stats bar */}
@@ -107,7 +109,7 @@ export default async function AgentsPage({
               style={{
                 textAlign: "center",
                 padding: "3rem 0",
-                color: "rgba(255,255,255,0.3)",
+                color: "rgba(255,255,255,0.55)",
                 fontFamily: "var(--font-plus-jakarta), sans-serif",
                 fontSize: "12px",
               }}
@@ -124,20 +126,22 @@ export default async function AgentsPage({
                 );
 
                 return (
-                  <div key={agent.agentAddress} className="agent-card" style={{ padding: "1.25rem" }}>
+                  <div key={agent.agentAddress} className="sh-card--agent" style={{ padding: "1.25rem" }}>
                     {/* Header: name + status */}
                     <div className="flex justify-between items-start mb-3">
                       <div>
-                        <div
-                          className="font-[family-name:var(--font-inter)]"
+                        <Link
+                          href={`/syndicate/${subdomain}/agents/${agent.agentId.toString()}`}
+                          className="font-[family-name:var(--font-inter)] no-underline hover:text-[var(--color-accent)] transition-colors"
                           style={{
                             fontSize: "16px",
                             fontWeight: 600,
                             color: "white",
+                            display: "block",
                           }}
                         >
-                          {displayName}
-                        </div>
+                          {displayName} →
+                        </Link>
                         <div
                           className="font-[family-name:var(--font-plus-jakarta)]"
                           style={{
@@ -185,20 +189,21 @@ export default async function AgentsPage({
                       className="font-[family-name:var(--font-plus-jakarta)] flex items-center gap-2"
                       style={{
                         fontSize: "11px",
-                        color: "rgba(255,255,255,0.35)",
+                        color: "rgba(255,255,255,0.6)",
                         marginTop: agent.identity?.description ? 0 : "0.5rem",
                       }}
                     >
                       <span>{truncateAddress(agent.agentAddress)}</span>
                     </div>
 
-                    {/* Agent attestation history */}
-                    {agentAttestations.length > 0 && (
+                    {/* Agent attestation history (only on chains with EAS support) */}
+                    {getAddresses(data.chainId).easExplorer && agentAttestations.length > 0 && (
                       <div style={{ marginTop: "1rem", borderTop: "1px solid var(--color-border)", paddingTop: "1rem" }}>
                         <AttestationTimeline
                           attestations={agentAttestations}
                           agentNames={agentNames}
                           addressNames={addressNames}
+                          chainId={data.chainId}
                         />
                       </div>
                     )}
@@ -211,6 +216,6 @@ export default async function AgentsPage({
       </div>
 
       <SiteFooter />
-    </>
+    </TargetChainProvider>
   );
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
   useReadContract,
@@ -12,8 +14,17 @@ import {
   ERC20_ABI,
   SYNDICATE_VAULT_ABI,
   getAddresses,
+  shareDecimals,
   truncateAddress,
 } from "@/lib/contracts";
+import { useToast } from "@/components/ui/Toast";
+import { GasEstimate } from "@/components/ui/GasEstimate";
+import {
+  trackTxSubmitted,
+  trackTxConfirmed,
+  trackTxFailed,
+  classifyError,
+} from "@/lib/analytics";
 
 interface DepositModalProps {
   vault: Address;
@@ -23,10 +34,33 @@ interface DepositModalProps {
   assetAddress: Address;
   assetDecimals: number;
   assetSymbol: string;
+  /** Chain the vault lives on — used to pick the right block explorer. */
+  chainId: number;
   onClose: () => void;
 }
 
 type Step = "input" | "approving" | "depositing" | "success" | "error";
+
+/** Inline spinner for the action button — a 12px version of .loading-spinner. */
+function ButtonSpinner({ label }: { label: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "0.5rem",
+      }}
+    >
+      <span
+        aria-hidden
+        className="loading-spinner"
+        style={{ width: 12, height: 12, borderWidth: 1.5 }}
+      />
+      {label}
+    </span>
+  );
+}
 
 export default function DepositModal({
   vault,
@@ -36,10 +70,16 @@ export default function DepositModal({
   assetAddress,
   assetDecimals,
   assetSymbol,
+  chainId,
   onClose,
 }: DepositModalProps) {
   const { address } = useAccount();
-  const addresses = getAddresses();
+  // Use the vault's chain — not the default — so explorer links resolve to
+  // basescan / hyperevmscan / etc correctly on multichain syndicates.
+  const addresses = getAddresses(chainId);
+  const toast = useToast();
+  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [amount, setAmount] = useState("");
   const [step, setStep] = useState<Step>("input");
@@ -104,6 +144,17 @@ export default function DepositModal({
     }
   })();
 
+  // Preview how many shares the user will receive at current exchange rate.
+  // ERC-4626 previewDeposit accounts for fees and rounding; prefer it over manual calc.
+  const { data: expectedSharesData } = useReadContract({
+    address: vault,
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "previewDeposit",
+    args: parsedAmount > 0n ? [parsedAmount] : undefined,
+    query: { enabled: parsedAmount > 0n },
+  });
+  const expectedShares = typeof expectedSharesData === "bigint" ? expectedSharesData : 0n;
+
   const needsApproval =
     parsedAmount > 0n && (allowance ?? 0n) < parsedAmount;
 
@@ -113,11 +164,21 @@ export default function DepositModal({
     parsedAmount > 0n &&
     parsedAmount <= (assetBalance ?? 0n);
 
-  // Handle approval confirmation
+  // Handle approval confirmation. Await the allowance refetch before
+  // exiting the "approving" step — otherwise the button rerenders with
+  // the stale allowance as "Approve" for one frame before the refetch
+  // lands and flips it to "Deposit". Staying in "approving" until
+  // refetch resolves keeps the CTA stable and honest.
   useEffect(() => {
     if (isApproveConfirmed && step === "approving") {
-      refetchAllowance();
-      setStep("input");
+      let cancelled = false;
+      (async () => {
+        await refetchAllowance();
+        if (!cancelled) setStep("input");
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
   }, [isApproveConfirmed, step, refetchAllowance]);
 
@@ -125,8 +186,25 @@ export default function DepositModal({
   useEffect(() => {
     if (isDepositConfirmed && step === "depositing") {
       setStep("success");
+      if (depositHash) trackTxConfirmed("deposit", vault, depositHash);
+      toast.success(
+        `Deposited ${amount} ${assetSymbol}`,
+        expectedShares > 0n
+          ? `Received ~${parseFloat(formatUnits(expectedShares, shareDecimals(assetDecimals))).toLocaleString(undefined, { maximumFractionDigits: 2 })} shares`
+          : "Your position is live onchain.",
+      );
+      // Pull fresh onchain data so the syndicate page picks up the new
+      // TVL, totalSupply, and the user's share balance without a manual
+      // page reload. router.refresh() re-runs server components (TVL,
+      // stats bar, vault overview); invalidating the wagmi readContract
+      // queries refetches any useReadContract-backed views (share
+      // balance on the header, active-strategy panel, etc.) without
+      // clobbering unrelated caches app-wide.
+      router.refresh();
+      queryClient.invalidateQueries({ queryKey: ["readContract"] });
+      queryClient.invalidateQueries({ queryKey: ["balance"] });
     }
-  }, [isDepositConfirmed, step]);
+  }, [isDepositConfirmed, step, toast, amount, assetSymbol, expectedShares, assetDecimals, depositHash, vault, router, queryClient]);
 
   function handleApprove() {
     if (!address) return;
@@ -139,10 +217,12 @@ export default function DepositModal({
         args: [vault, parsedAmount],
       },
       {
+        onSuccess: (hash) => trackTxSubmitted("approve", vault, hash),
         onError: (err) => {
           const msg = (err as { shortMessage?: string }).shortMessage || "Transaction was rejected or reverted.";
           setErrorMsg(msg);
           setStep("error");
+          trackTxFailed("approve", vault, classifyError(err));
         },
       },
     );
@@ -159,10 +239,12 @@ export default function DepositModal({
         args: [parsedAmount, address],
       },
       {
+        onSuccess: (hash) => trackTxSubmitted("deposit", vault, hash),
         onError: (err) => {
           const msg = (err as { shortMessage?: string }).shortMessage || "Transaction was rejected or reverted.";
           setErrorMsg(msg);
           setStep("error");
+          trackTxFailed("deposit", vault, classifyError(err));
         },
       },
     );
@@ -268,7 +350,7 @@ export default function DepositModal({
             <details
               style={{
                 fontSize: "10px",
-                color: "rgba(255,255,255,0.3)",
+                color: "rgba(255,255,255,0.55)",
                 maxHeight: "100px",
                 overflow: "auto",
                 wordBreak: "break-all",
@@ -328,6 +410,7 @@ export default function DepositModal({
                 }}
                 className="deposit-input"
                 disabled={step !== "input"}
+                aria-label={`Amount of ${assetSymbol} to deposit`}
               />
               <button
                 className="btn-follow"
@@ -338,6 +421,48 @@ export default function DepositModal({
               </button>
             </div>
 
+            {/* Shares preview */}
+            {parsedAmount > 0n && expectedShares > 0n && (
+              <div
+                className="font-[family-name:var(--font-plus-jakarta)]"
+                style={{
+                  marginTop: "0.75rem",
+                  padding: "0.75rem 1rem",
+                  background: "rgba(46, 230, 166, 0.04)",
+                  border: "1px solid rgba(46, 230, 166, 0.2)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  fontSize: "12px",
+                }}
+              >
+                <span style={{ color: "rgba(255,255,255,0.6)" }}>You will receive</span>
+                <span style={{ color: "var(--color-accent)", fontWeight: 600 }}>
+                  ~{parseFloat(formatUnits(expectedShares, shareDecimals(assetDecimals))).toLocaleString(undefined, { maximumFractionDigits: 4 })} shares
+                </span>
+              </div>
+            )}
+
+            {/* Pending tx link */}
+            {(step === "approving" || step === "depositing") && (approveHash || depositHash) && (
+              <div style={{ marginTop: "0.75rem", textAlign: "center" }}>
+                <a
+                  href={`${addresses.blockExplorer}/tx/${step === "approving" ? approveHash : depositHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "11px",
+                    letterSpacing: "0.1em",
+                    color: "var(--color-accent)",
+                    textDecoration: "underline",
+                  }}
+                >
+                  View pending transaction ↗
+                </a>
+              </div>
+            )}
+
             {/* Action button */}
             <div style={{ marginTop: "1.5rem" }}>
               {needsApproval ? (
@@ -347,9 +472,11 @@ export default function DepositModal({
                   onClick={handleApprove}
                   disabled={!canDeposit || isApprovePending || step === "approving"}
                 >
-                  {step === "approving"
-                    ? "Approving..."
-                    : `Approve ${amount || "0"} ${assetSymbol}`}
+                  {step === "approving" || isApprovePending ? (
+                    <ButtonSpinner label={isApprovePending ? "Confirm in wallet…" : "Approving…"} />
+                  ) : (
+                    `Approve ${amount || "0"} ${assetSymbol}`
+                  )}
                 </button>
               ) : (
                 <button
@@ -358,10 +485,29 @@ export default function DepositModal({
                   onClick={handleDeposit}
                   disabled={!canDeposit || isDepositPending || step === "depositing"}
                 >
-                  {step === "depositing"
-                    ? "Depositing..."
-                    : `Deposit ${amount || "0"} ${assetSymbol}`}
+                  {step === "depositing" || isDepositPending ? (
+                    <ButtonSpinner label={isDepositPending ? "Confirm in wallet…" : "Depositing…"} />
+                  ) : (
+                    `Deposit ${amount || "0"} ${assetSymbol}`
+                  )}
                 </button>
+              )}
+
+              {/* Pre-flight gas estimate. Re-runs as the amount changes. */}
+              {parsedAmount > 0n && step === "input" && address && (
+                <GasEstimate
+                  address={
+                    needsApproval ? assetAddress : vault
+                  }
+                  abi={needsApproval ? ERC20_ABI : SYNDICATE_VAULT_ABI}
+                  functionName={needsApproval ? "approve" : "deposit"}
+                  args={
+                    needsApproval
+                      ? [vault, parsedAmount]
+                      : [parsedAmount, address]
+                  }
+                  chainId={chainId}
+                />
               )}
             </div>
           </>

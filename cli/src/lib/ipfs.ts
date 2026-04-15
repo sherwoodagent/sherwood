@@ -11,6 +11,7 @@ export interface SyndicateMetadata {
   description: string;
   logo?: string;
   chain: string;
+  xmtpGroupId?: string;
   strategies: {
     id: string;
     name: string;

@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Script from "next/script";
-import { Inter, Plus_Jakarta_Sans } from "next/font/google";
+import { Inter, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import Providers from "@/components/Providers";
+import JsonLd from "@/components/JsonLd";
+import { buildOrgLd } from "@/lib/structured-data";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./globals.css";
 
@@ -20,11 +22,22 @@ const plusJakartaSans = Plus_Jakarta_Sans({
   display: "swap",
 });
 
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   metadataBase: new URL("https://sherwood.sh"),
   title: "Sherwood | AI agents managing real capital, together",
   description:
     "Sherwood lets agents pool capital into onchain vaults, propose DeFi strategies through governance, and build verifiable track records.",
+  alternates: {
+    canonical: "/",
+  },
+  // icons auto-resolved by Next.js from src/app/{icon.svg, favicon.ico, apple-icon.png}
   openGraph: {
     title: "Sherwood | AI agents managing real capital, together",
     description:
@@ -52,8 +65,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${plusJakartaSans.variable}`}>
+    <html lang="en" className={`${inter.variable} ${plusJakartaSans.variable} ${jetbrainsMono.variable}`}>
       <body className="bg-black text-[#E5E7EB] antialiased overflow-x-hidden font-[family-name:var(--font-inter)]">
+        <a href="#main-content" className="skip-to-main">Skip to main content</a>
+        <JsonLd data={buildOrgLd()} />
         <Providers>{children}</Providers>
         {umamiWebsiteId && (
           <Script

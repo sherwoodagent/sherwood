@@ -1,12 +1,12 @@
 import { notFound } from "next/navigation";
-import TorusKnotBackground from "@/components/TorusKnotBackground";
+import AmbientBackground from "@/components/AmbientBackground";
 import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import SyndicateClient from "@/components/SyndicateClient";
-import ActiveProposal from "@/components/proposals/ActiveProposal";
 import ProposalCard from "@/components/proposals/ProposalCard";
 import ProposalHistory from "@/components/proposals/ProposalHistory";
 import AgentStats from "@/components/proposals/AgentStats";
+import ProposalNotifier from "@/components/proposals/ProposalNotifier";
 import { resolveSyndicateBySubdomain } from "@/lib/syndicate-data";
 import {
   fetchGovernorData,
@@ -14,26 +14,43 @@ import {
   type ProposalData,
   type GovernorData,
 } from "@/lib/governor-data";
-import { formatBps } from "@/lib/contracts";
+import { formatBps, getAddresses } from "@/lib/contracts";
 import { formatDuration } from "@/lib/governor-data";
+import type { ActivityEvent } from "@/lib/syndicate-data";
+import { Term } from "@/components/ui/Glossary";
+import { TargetChainProvider } from "@/components/TargetChainContext";
+import JsonLd from "@/components/JsonLd";
+import { buildBreadcrumbLd } from "@/lib/structured-data";
+import TimelockPanel from "@/components/governance/TimelockPanel";
 import type { Address } from "viem";
 
-// ── Mock badge ──────────────────────────────────────────────────────────────
+/** Reduce activity events into a per-proposal receipt lookup. */
+function buildReceiptsMap(
+  activity: ActivityEvent[],
+): Record<string, { executeTx?: string; settleTx?: string }> {
+  const out: Record<string, { executeTx?: string; settleTx?: string }> = {};
+  for (const a of activity) {
+    if (a.proposalId === undefined) continue;
+    const key = a.proposalId.toString();
+    out[key] = out[key] || {};
+    if (a.type === "settled") out[key].settleTx = a.txHash;
+    else if (a.type === "executed") out[key].executeTx = a.txHash;
+  }
+  return out;
+}
 
-function MockBadge() {
+// ── Mock banner ─────────────────────────────────────────────────────────────
+// NOTE: Bold, unambiguous demo-mode signal. Replaces the subtle 9px gray badge
+// that users could miss. Voting is disabled below when isMock is true.
+
+function MockBanner() {
   return (
-    <div
-      style={{
-        position: "absolute",
-        top: "0.75rem",
-        right: "0.75rem",
-        zIndex: 1,
-        color: "rgba(255,255,255,0.2)",
-        fontSize: "9px",
-        fontFamily: "var(--font-plus-jakarta), sans-serif",
-      }}
-    >
-      MOCK DATA
+    <div className="mock-banner" role="alert">
+      <span className="mock-banner__tag">[DEMO]</span>
+      <span className="mock-banner__title">Illustrative data — governance is not live for this syndicate</span>
+      <span className="mock-banner__sub">
+        Voting, execution, and history below are simulated. No onchain state will change.
+      </span>
     </div>
   );
 }
@@ -266,11 +283,9 @@ export default async function ProposalsPage({
     addressNames[agent.agentAddress.toLowerCase()] = displayName;
   }
   const creatorKey = data.creator.toLowerCase();
-  if (!addressNames[creatorKey]) {
-    addressNames[creatorKey] = data.metadata?.name || `Syndicate #${data.syndicateId.toString()}`;
-  }
+  const hasIdentityRegistry = getAddresses(data.chainId).identityRegistry !== "0x0000000000000000000000000000000000000000";
 
-  const liveGovernor = await fetchGovernorData(data.vault);
+  const liveGovernor = await fetchGovernorData(data.vault, data.chainId);
   const isMock = !liveGovernor;
   const governor = liveGovernor ?? buildMockData(data.vault);
 
@@ -286,10 +301,9 @@ export default async function ProposalsPage({
     }
   }
 
-  const activeProposal =
-    governor.proposals.find(
-      (p) => p.computedState === ProposalState.Executed,
-    ) ?? null;
+  // Active-strategy + portfolio fetching has moved to the vault page
+  // (see src/lib/active-strategy.ts). This page now focuses on voting
+  // queue + history + agent stats.
 
   const votingQueue = governor.proposals.filter(
     (p) =>
@@ -297,25 +311,18 @@ export default async function ProposalsPage({
       p.computedState === ProposalState.Approved,
   );
 
-  const mockTag = isMock ? (
-    <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "9px", fontFamily: "var(--font-plus-jakarta), sans-serif" }}>
-      MOCK DATA
-    </span>
-  ) : null;
-
   return (
-    <>
-      <TorusKnotBackground
-        radius={10}
-        tube={0.2}
-        tubularSegments={128}
-        radialSegments={16}
-        p={3}
-        q={4}
-        opacity={0.15}
-        fogDensity={0.08}
+    <TargetChainProvider chainId={data.chainId}>
+      <AmbientBackground />
+
+      <JsonLd
+        data={buildBreadcrumbLd([
+          { name: "Home", path: "/" },
+          { name: "Leaderboard", path: "/leaderboard" },
+          { name, path: `/syndicate/${subdomain}` },
+          { name: "Proposals", path: `/syndicate/${subdomain}/proposals` },
+        ])}
       />
-      <div className="scanlines" style={{ opacity: 0.2 }} />
 
       <div className="layout layout-normal">
         <main className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
@@ -332,47 +339,71 @@ export default async function ProposalsPage({
             assetDecimals={data.assetDecimals}
             assetSymbol={data.assetSymbol}
             activeTab="proposals"
+            hideAgentsTab={!hasIdentityRegistry}
           />
 
           {/* Governor params bar */}
           <div className="stats-bar">
             <div className="stat-item">
-              <div className="stat-label">Voting Period</div>
+              <div className="stat-label">
+                <Term k="voting-period">Voting Period</Term>
+              </div>
               <div className="stat-value" style={{ fontSize: "1.2rem" }}>
                 {formatDuration(governor.params.votingPeriod)}
               </div>
             </div>
             <div className="stat-item">
-              <div className="stat-label">Veto Threshold</div>
+              <div className="stat-label">
+                <Term k="veto-threshold">Veto Threshold</Term>
+              </div>
               <div className="stat-value" style={{ fontSize: "1.2rem" }}>
                 {formatBps(governor.params.vetoThresholdBps)}
               </div>
             </div>
             <div className="stat-item">
-              <div className="stat-label">Max Fee</div>
+              <div className="stat-label">
+                {/* Right-of-center cell — flip tooltip so it doesn't overflow
+                    the viewport on the right. */}
+                <Term k="max-fee" align="right">Max Fee</Term>
+              </div>
               <div className="stat-value" style={{ fontSize: "1.2rem" }}>
                 {formatBps(governor.params.maxPerformanceFeeBps)}
               </div>
             </div>
             <div className="stat-item">
-              <div className="stat-label">Cooldown</div>
+              <div className="stat-label">
+                {/* Rightmost cell — tooltip must anchor to the right edge. */}
+                <Term k="cooldown" align="right">Cooldown</Term>
+              </div>
               <div className="stat-value" style={{ fontSize: "1.2rem" }}>
                 {formatDuration(governor.params.cooldownPeriod)}
               </div>
             </div>
           </div>
 
-          {/* Active Strategy */}
-          <div style={{ position: "relative" }}>
-            {isMock && <MockBadge />}
-            <ActiveProposal
-              proposal={activeProposal}
-              cooldownEnd={governor.cooldownEnd}
-              addressNames={addressNames}
-              assetDecimals={data.assetDecimals}
-              assetSymbol={data.assetSymbol}
+          {isMock && <MockBanner />}
+
+          {/* Background notifier — fires toasts when proposals the user voted
+              on transition state (settled / rejected / executed / etc). */}
+          {!isMock && (
+            <ProposalNotifier
+              governorAddress={governor.governorAddress}
+              proposals={governor.proposals}
+              chainId={data.chainId}
             />
-          </div>
+          )}
+
+          {/* NOTE: Active Strategy now lives on the Vault tab — that's where
+              depositors first land asking "what is my capital doing?".
+              Proposals page stays focused on voting + history. */}
+
+          {/* Pending parameter changes (timelock). Hides itself when none. */}
+          {!isMock && (
+            <TimelockPanel
+              governorAddress={governor.governorAddress}
+              chainId={data.chainId}
+            />
+          )}
 
           {/* Voting Queue */}
           {votingQueue.length > 0 && (
@@ -382,12 +413,9 @@ export default async function ProposalsPage({
                 style={{ marginBottom: "1rem" }}
               >
                 <span>Voting Queue</span>
-                <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
-                  {mockTag}
-                  <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "9px" }}>
-                    {votingQueue.length} PENDING
-                  </span>
-                </div>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: "10px", letterSpacing: "0.15em" }}>
+                  {votingQueue.length} PENDING
+                </span>
               </div>
               {votingQueue.map((p) => (
                 <ProposalCard
@@ -397,6 +425,9 @@ export default async function ProposalsPage({
                   params={governor.params}
                   assetDecimals={data.assetDecimals}
                   addressNames={addressNames}
+                  disabled={isMock}
+                  chainId={!isMock ? data.chainId : undefined}
+                  explorerUrl={!isMock ? getAddresses(data.chainId).blockExplorer : undefined}
                 />
               ))}
             </div>
@@ -404,29 +435,25 @@ export default async function ProposalsPage({
 
           {/* History + Agent Stats grid */}
           <div className="grid-dashboard" style={{ marginTop: "1.5rem" }}>
-            <div style={{ position: "relative" }}>
-              {isMock && <MockBadge />}
-              <ProposalHistory
-                proposals={governor.proposals}
-                assetDecimals={data.assetDecimals}
-                assetSymbol={data.assetSymbol}
-                addressNames={addressNames}
-              />
-            </div>
-            <div style={{ position: "relative" }}>
-              {isMock && <MockBadge />}
-              <AgentStats
-                proposals={governor.proposals}
-                assetDecimals={data.assetDecimals}
-                assetSymbol={data.assetSymbol}
-                addressNames={addressNames}
-              />
-            </div>
+            <ProposalHistory
+              proposals={governor.proposals}
+              assetDecimals={data.assetDecimals}
+              assetSymbol={data.assetSymbol}
+              addressNames={addressNames}
+              explorerUrl={!isMock ? getAddresses(data.chainId).blockExplorer : undefined}
+              receipts={!isMock ? buildReceiptsMap(data.activity) : undefined}
+            />
+            <AgentStats
+              proposals={governor.proposals}
+              assetDecimals={data.assetDecimals}
+              assetSymbol={data.assetSymbol}
+              addressNames={addressNames}
+            />
           </div>
         </main>
       </div>
 
       <SiteFooter />
-    </>
+    </TargetChainProvider>
   );
 }

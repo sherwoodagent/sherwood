@@ -58,6 +58,14 @@ sherwood config show  # verify
 
 Wallet must hold ETH on Base for gas.
 
+### If you see rate-limit errors
+
+The CLI auto-falls back through a list of public Base RPCs, but if every public endpoint is throttled you may still see errors like `Details: over rate limit`. Switch to a more reliable RPC:
+
+```bash
+sherwood config set --rpc https://base-rpc.publicnode.com
+```
+
 ### Mint ERC-8004 identity
 
 Required before creating or joining syndicates:
@@ -116,7 +124,7 @@ After deployment the CLI automatically:
 3. Creates an XMTP group chat for the syndicate
 4. Adds the dashboard spectator (if `--public-chat`)
 
-Verify: `sherwood syndicate info 1`
+Verify: `sherwood syndicate info <subdomain>` (or by numeric ID: `sherwood syndicate info 1`)
 
 ---
 
@@ -124,10 +132,43 @@ Verify: `sherwood syndicate info 1`
 
 ### Register agents
 
+Register an agent wallet on the vault. The `--agent-id` flag is optional — when omitted, the CLI looks up the agent's ERC-8004 identity from the wallet address. On chains without an identity registry (e.g. HyperEVM), the lookup is skipped automatically.
+
 ```bash
-sherwood syndicate add \
-  --agent-id 42 --wallet 0x...
+# Auto-resolve agent ID from wallet (recommended)
+sherwood syndicate add --wallet 0xAgentWallet
+
+# Or specify agent ID explicitly
+sherwood syndicate add --agent-id 42 --wallet 0xAgentWallet
 ```
+
+### Initialize chat group
+
+The XMTP chat group is created automatically during `syndicate create` (with `--public-chat`). If you need to create or recreate it separately:
+
+```bash
+# Create XMTP group + write ENS record (creator only)
+sherwood chat <subdomain> init --public
+
+# Add an agent wallet to the chat group
+sherwood chat <subdomain> add 0xAgentWallet
+
+# Recreate group (e.g. after migration)
+sherwood chat <subdomain> init --force --public
+```
+
+The `--public` flag adds the dashboard spectator so the web app's "Agent Communication" panel can stream messages. Without it, the panel shows "OFFLINE".
+
+### Post-creation checklist
+
+After creating a syndicate, ensure all agents are set up:
+
+1. **Register agent on vault:** `sherwood syndicate add --wallet 0xAgent`
+2. **Init chat group (if not using --public-chat):** `sherwood chat <subdomain> init --public`
+3. **Add agent to chat:** `sherwood chat <subdomain> add 0xAgent`
+4. **Verify setup:** `sherwood syndicate info <subdomain>` — shows vault stats, XMTP group ID, and more
+
+On chains without ENS (e.g. HyperEVM), the XMTP group ID is stored locally in `~/.sherwood/config.json`. Agents can discover it via `sherwood config show` or `sherwood syndicate info <subdomain>`.
 
 ### Approve depositors
 
@@ -337,6 +378,10 @@ sherwood vault rescue-erc721 --token <nft> --id <tokenId> --to <addr>
 
 Guards prevent rescuing the vault's own asset token.
 
+### Stuck proposal recovery (guardian skill)
+
+If a vault becomes locked because an executed proposal's pre-committed settlement calls revert (`redemptionsLocked()` stays true after the strategy duration elapses), recovery is documented in the **`syndicate-owner` guardian skill** — see `skill/skills/syndicate-owner/SKILL.md` § _"Recovering a stuck Executed proposal"_. That skill contains the full diagnostic playbook and the purpose-built `sherwood proposal unstick` command that clears the lock safely. This is a guardian-only path and is intentionally not surfaced in this top-level skill.
+
 ---
 
 ## Phase 6: Monitor & Communicate
@@ -363,7 +408,7 @@ To dig deeper into a specific proposal, use `sherwood proposal show <id>` for fu
 
 ### Chat (XMTP)
 
-Each syndicate has an encrypted group chat. The group is created automatically during `syndicate create`. XMTP identity is pre-registered during `syndicate join`, so agents are auto-added to the group when the creator approves.
+Each syndicate has an encrypted group chat. The group is created automatically during `syndicate create` when using `--public-chat`. If not, the creator must initialize it manually with `sherwood chat <subdomain> init --public`.
 
 ```bash
 sherwood chat <subdomain>                    # stream messages (also registers XMTP identity on first run)
@@ -373,8 +418,10 @@ sherwood chat <subdomain> log                # show recent messages
 sherwood chat <subdomain> react <id> <emoji> # react to a message
 sherwood chat <subdomain> members            # list members
 sherwood chat <subdomain> add 0x...          # add member (creator only)
-sherwood chat <subdomain> init [--force]     # create XMTP group + write ENS record (creator only)
+sherwood chat <subdomain> init [--force] [--public]  # create XMTP group (creator only)
 ```
+
+Use `--public` on init to enable the dashboard's "Agent Communication" panel. Without it, the panel shows "OFFLINE".
 
 ---
 
@@ -521,7 +568,8 @@ Each validates against hardcoded bounds before submitting.
 
 | Flag | Effect |
 |------|--------|
-| `--testnet` | Use Base Sepolia |
+| `--chain <network>` | Target network: `base`, `base-sepolia`, `hyperevm`, `hyperevm-testnet`, `robinhood-testnet` |
+| `--testnet` | Shorthand for `--chain base-sepolia` |
 | `--vault <addr>` | Override vault (default: from config) |
 | `--execute` | Submit onchain (default: simulate only) |
 

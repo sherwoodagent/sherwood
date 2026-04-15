@@ -170,7 +170,7 @@ export async function runPhase10(
           console.log(
             `  [${syndicate.subdomain}] No active proposals — creating cycle ${cycle} proposal...`,
           );
-          const spec = getProposalSpec(creator.index, vault, config.strategyDuration, cycle);
+          const spec = getProposalSpec(creator.index, vault, config.strategyDuration, cycle, config.chain);
 
           const output = execSherwood(
             creatorHome,

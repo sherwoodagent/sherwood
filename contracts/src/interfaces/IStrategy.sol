@@ -50,4 +50,25 @@ interface IStrategy {
 
     /// @notice Human-readable name of the strategy template
     function name() external view returns (string memory);
+
+    /// @notice Best-estimate current value of the strategy's position,
+    ///         denominated in the vault's asset() token.
+    /// @dev    The frontend reads this to display mid-strategy unrealized
+    ///         P&L without hardcoding a detector per strategy type.
+    ///
+    ///         Called as a `view` only — never trust this number as a
+    ///         fee or settlement basis. Pool spot prices (AMM quotes)
+    ///         are sandwichable; the return value may swing across
+    ///         blocks on thin liquidity.
+    ///
+    /// @return value Position value in the vault asset's units
+    ///               (e.g. USDC has 6 decimals, WETH has 18).
+    /// @return valid Whether `value` is computable for this strategy on
+    ///               this chain right now. `false` signals the frontend
+    ///               should hide the live P&L readout rather than
+    ///               render a misleading $0. Returned false before
+    ///               execute, after settle, and for strategies whose
+    ///               current position isn't queryable from this contract
+    ///               (external loans, offchain perps, etc.).
+    function positionValue() external view returns (uint256 value, bool valid);
 }

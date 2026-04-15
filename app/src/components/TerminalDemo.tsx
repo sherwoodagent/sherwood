@@ -4,9 +4,15 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 type LineType = "command" | "label" | "separator" | "output" | "success" | "dim" | "blank";
 
+interface Segment {
+  text: string;
+  accent?: boolean; // render in accent green
+}
+
 interface ScriptLine {
   type: LineType;
   text: string;
+  segments?: Segment[]; // if set, renders segments instead of text
   delay: number; // ms to wait before showing this line
 }
 
@@ -14,22 +20,17 @@ const SCENE_1: ScriptLine[] = [
   { type: "command", text: "$ sherwood syndicate create", delay: 0 },
   { type: "blank", text: "", delay: 600 },
   { type: "label", text: "  ◆ Create Syndicate", delay: 100 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
-  { type: "dim", text: "  Wallet:  0x7a3b...f29d", delay: 80 },
-  { type: "dim", text: "  Network: Base", delay: 80 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
-  { type: "blank", text: "", delay: 400 },
+  { type: "separator", text: "─".repeat(48), delay: 50 },
   { type: "dim", text: "  Uploading metadata to IPFS...", delay: 600 },
   { type: "success", text: "  ✓ Metadata pinned", delay: 300 },
   { type: "dim", text: "  Deploying vault via factory...", delay: 800 },
   { type: "blank", text: "", delay: 200 },
   { type: "label", text: "  ◆ Syndicate Created", delay: 100 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
-  { type: "output", text: "  ID:       #4", delay: 80 },
-  { type: "output", text: "  Vault:    0x9f2c...71aE", delay: 80 },
-  { type: "output", text: "  ENS:      levered-swap.sherwoodagent.eth", delay: 80 },
-  { type: "output", text: "  Chat:     sherwood chat levered-swap", delay: 80 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
+  { type: "separator", text: "─".repeat(48), delay: 50 },
+  { type: "output", text: "  Vault:    0x9f2c...71aE", delay: 80, segments: [{ text: "  Vault:", accent: true }, { text: "    0x9f2c...71aE" }] },
+  { type: "output", text: "  ENS:      levered-swap.sherwoodagent.eth", delay: 80, segments: [{ text: "  ENS:", accent: true }, { text: "      levered-swap.sherwoodagent.eth" }] },
+  { type: "output", text: "  Chat:     sherwood chat levered-swap", delay: 80, segments: [{ text: "  Chat:", accent: true }, { text: "     sherwood chat levered-swap" }] },
+  { type: "separator", text: "─".repeat(48), delay: 50 },
   { type: "success", text: "  ✓ Vault saved to ~/.sherwood/config.json", delay: 100 },
 ];
 
@@ -37,113 +38,54 @@ const SCENE_2: ScriptLine[] = [
   { type: "command", text: "$ sherwood strategy propose --template moonwell-supply", delay: 0 },
   { type: "blank", text: "", delay: 600 },
   { type: "dim", text: "  Cloning MoonwellSupply template...", delay: 500 },
-  { type: "success", text: "  ✓ Cloned: 0x4e8a...b3c2", delay: 200 },
-  { type: "dim", text: "  Initializing strategy...", delay: 500 },
-  { type: "success", text: "  ✓ Initialized", delay: 200 },
+  { type: "success", text: "  ✓ Cloned + initialized", delay: 200 },
   { type: "blank", text: "", delay: 300 },
   { type: "label", text: "  ◆ Proposal Summary", delay: 100 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
+  { type: "separator", text: "─".repeat(48), delay: 50 },
   { type: "output", text: "  Name:             Supply USDC to Moonwell", delay: 80 },
   { type: "output", text: "  Performance Fee:  10%", delay: 80 },
   { type: "output", text: "  Duration:         7 days", delay: 80 },
   { type: "output", text: "  Calls:            2 execute + 2 settle", delay: 80 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
+  { type: "separator", text: "─".repeat(48), delay: 50 },
   { type: "blank", text: "", delay: 300 },
   { type: "dim", text: "  Submitting proposal...", delay: 700 },
   { type: "success", text: "  ✓ Proposal #7 created", delay: 200 },
-  { type: "dim", text: "  Tx: basescan.org/tx/0x8b1f...e4a9", delay: 80 },
 ];
 
 const SCENE_3: ScriptLine[] = [
   { type: "command", text: "$ sherwood vault info", delay: 0 },
   { type: "blank", text: "", delay: 600 },
   { type: "label", text: "  ◆ Vault Overview", delay: 100 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
+  { type: "separator", text: "─".repeat(48), delay: 50 },
   { type: "output", text: "  Syndicate:    levered-swap", delay: 80 },
-  { type: "output", text: "  Vault:        0x9f2c...71aE", delay: 80 },
   { type: "output", text: "  TVL:          $24,800.00 USDC", delay: 80 },
   { type: "output", text: "  Depositors:   3", delay: 80 },
   { type: "output", text: "  Agents:       2 registered", delay: 80 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
+  { type: "separator", text: "─".repeat(48), delay: 50 },
   { type: "output", text: "  Status:       ACTIVE STRATEGY", delay: 80 },
   { type: "output", text: "  Strategy:     MoonwellSupply", delay: 80 },
-  { type: "output", text: "  Duration:     3d 14h remaining", delay: 80 },
-  { type: "output", text: "  Unrealized:   +$312.47 (+1.26%)", delay: 80 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
+  { type: "output", text: "  Unrealized:   +$312.47 (+1.26%)", delay: 80, segments: [{ text: "  Unrealized:   " }, { text: "+$312.47 (+1.26%)", accent: true }] },
+  { type: "separator", text: "─".repeat(48), delay: 50 },
 ];
 
 const SCENE_4: ScriptLine[] = [
   { type: "command", text: "$ sherwood strategy list", delay: 0 },
   { type: "blank", text: "", delay: 600 },
   { type: "label", text: "  ◆ Available Strategy Templates", delay: 100 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
+  { type: "separator", text: "─".repeat(48), delay: 50 },
   { type: "blank", text: "", delay: 100 },
-  { type: "output", text: "  moonwell-supply     Supply tokens to Moonwell", delay: 120 },
-  { type: "output", text: "  aerodrome-lp        LP on Aerodrome + gauge staking", delay: 120 },
-  { type: "output", text: "  venice-inference    Stake VVV for sVVV — AI inference", delay: 120 },
-  { type: "output", text: "  wsteth-moonwell     wstETH → Moonwell — stacked yield", delay: 120 },
-  { type: "output", text: "  mamo-yield          Optimized yield via Morpho vaults", delay: 120 },
+  { type: "output", text: "  moonwell-supply     Supply tokens to Moonwell", delay: 120, segments: [{ text: "  moonwell-supply", accent: true }, { text: "     Supply tokens to Moonwell" }] },
+  { type: "output", text: "  aerodrome-lp        LP on Aerodrome + gauge staking", delay: 120, segments: [{ text: "  aerodrome-lp", accent: true }, { text: "        LP on Aerodrome + gauge staking" }] },
+  { type: "output", text: "  venice-inference    Stake VVV for sVVV — AI inference", delay: 120, segments: [{ text: "  venice-inference", accent: true }, { text: "    Stake VVV for sVVV — AI inference" }] },
+  { type: "output", text: "  wsteth-moonwell     wstETH → Moonwell — stacked yield", delay: 120, segments: [{ text: "  wsteth-moonwell", accent: true }, { text: "     wstETH → Moonwell — stacked yield" }] },
+  { type: "output", text: "  mamo-yield          Optimized yield via Morpho vaults", delay: 120, segments: [{ text: "  mamo-yield", accent: true }, { text: "          Optimized yield via Morpho vaults" }] },
   { type: "blank", text: "", delay: 100 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
-  { type: "dim", text: "  5 templates available", delay: 80 },
-  { type: "dim", text: "  Run: sherwood strategy propose --template <name>", delay: 80 },
+  { type: "separator", text: "─".repeat(48), delay: 50 },
+  { type: "output", text: "  5 templates available", delay: 80 },
 ];
 
-const SCENE_5: ScriptLine[] = [
-  { type: "command", text: "$ sherwood proposal vote 7 --choice FOR", delay: 0 },
-  { type: "blank", text: "", delay: 600 },
-  { type: "label", text: "  ◆ Cast Vote", delay: 100 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
-  { type: "output", text: "  Proposal:  #7 — Supply USDC to Moonwell", delay: 80 },
-  { type: "output", text: "  Choice:    FOR", delay: 80 },
-  { type: "output", text: "  Weight:    25,000 shares", delay: 80 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
-  { type: "blank", text: "", delay: 300 },
-  { type: "dim", text: "  Submitting vote...", delay: 600 },
-  { type: "success", text: "  ✓ Vote cast", delay: 200 },
-  { type: "dim", text: "  Tx: basescan.org/tx/0xc4f2...a71b", delay: 80 },
-  { type: "blank", text: "", delay: 200 },
-  { type: "dim", text: "  Current tally: 3 FOR · 0 AGAINST · 0 ABSTAIN", delay: 80 },
-  { type: "success", text: "  ✓ Proposal approved — executing in 24h", delay: 100 },
-];
-
-const SCENE_6: ScriptLine[] = [
-  { type: "command", text: "$ sherwood research market ETH --provider messari --yes", delay: 0 },
-  { type: "blank", text: "", delay: 600 },
-  { type: "dim", text: "  Provider:  messari", delay: 80 },
-  { type: "dim", text: "  Type:      market", delay: 80 },
-  { type: "dim", text: "  Est. cost: ~$0.20 USDC (x402 micropayment)", delay: 80 },
-  { type: "blank", text: "", delay: 400 },
-  { type: "dim", text: "  Querying messari for ETH market data...", delay: 600 },
-  { type: "success", text: "  ✓ Market data received from messari", delay: 300 },
-  { type: "blank", text: "", delay: 200 },
-  { type: "label", text: "  Research: market ETH (messari)", delay: 100 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
-  { type: "output", text: "  name:      Ethereum", delay: 80 },
-  { type: "output", text: "  symbol:    ETH", delay: 80 },
-  { type: "output", text: "  rank:      2", delay: 80 },
-  { type: "output", text: "  sector:    Smart Contract Platforms", delay: 80 },
-  { type: "blank", text: "", delay: 100 },
-  { type: "label", text: "  marketData", delay: 80 },
-  { type: "output", text: "    priceUsd:       $2,843.21", delay: 80 },
-  { type: "output", text: "    volume24Hour:   $18,234,567,890", delay: 80 },
-  { type: "output", text: "    marketcap:      $342.1B", delay: 80 },
-  { type: "blank", text: "", delay: 100 },
-  { type: "label", text: "  returnOnInvestment", delay: 80 },
-  { type: "output", text: "    priceChange24h:  -2.34%", delay: 80 },
-  { type: "output", text: "    priceChange7d:   -8.12%", delay: 80 },
-  { type: "output", text: "    priceChangeYTD:  -42.07%", delay: 80 },
-  { type: "blank", text: "", delay: 100 },
-  { type: "label", text: "  allTimeHigh", delay: 80 },
-  { type: "output", text: "    allTimeHigh:     $4,891.70", delay: 80 },
-  { type: "output", text: "    percentDown:     -41.9%", delay: 80 },
-  { type: "output", text: "    cycleLow:        $1,508.32", delay: 80 },
-  { type: "separator", text: "─".repeat(52), delay: 50 },
-  { type: "dim", text: "  Cost: $0.20 USDC  •  Provider: messari", delay: 80 },
-];
-
-const SCENES = [SCENE_1, SCENE_2, SCENE_3, SCENE_4, SCENE_5, SCENE_6];
-const PAUSE_BETWEEN_SCENES = 3000;
+const SCENES = [SCENE_1, SCENE_2, SCENE_3, SCENE_4];
+const PAUSE_BETWEEN_SCENES = 8000;
 const TYPING_SPEED = 35; // ms per character for command lines
 
 export default function TerminalDemo() {
@@ -174,7 +116,7 @@ export default function TerminalDemo() {
     setIsTyping(false);
     clearTimers();
 
-    scene.forEach((line, i) => {
+    scene.forEach((line) => {
       cumulativeDelay += line.delay;
 
       if (line.type === "command") {
@@ -234,12 +176,20 @@ export default function TerminalDemo() {
           <span className="terminal-dot terminal-dot--yellow" />
           <span className="terminal-dot terminal-dot--green" />
         </div>
-        <span className="terminal-title">sherwood</span>
+        <span className="terminal-title">@sherwoodagent/cli</span>
       </div>
       <div className="terminal-body" ref={containerRef}>
         {visibleLines.map((line, i) => (
           <div key={i} className={`terminal-line terminal-line--${line.type}`}>
-            {line.text}
+            {line.segments
+              ? line.segments.map((seg, j) =>
+                  seg.accent ? (
+                    <span key={j} className="terminal-accent">{seg.text}</span>
+                  ) : (
+                    <span key={j}>{seg.text}</span>
+                  ),
+                )
+              : line.text}
           </div>
         ))}
         {isTyping && (

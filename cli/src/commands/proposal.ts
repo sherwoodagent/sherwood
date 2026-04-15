@@ -7,7 +7,9 @@
 
 import { Command } from "commander";
 import type { Address, Hex } from "viem";
-import { isAddress } from "viem";
+import { isAddress, encodeFunctionData } from "viem";
+import { getVaultOwner, getAssetAddress } from "../lib/vault.js";
+import { ERC20_ABI } from "../lib/abis.js";
 import chalk from "chalk";
 import ora from "ora";
 import { readFileSync } from "node:fs";
@@ -34,6 +36,7 @@ import {
   getVoteWeight,
   hasVoted,
   getCapitalSnapshot,
+  getActiveProposal,
   parseDuration,
   PROPOSAL_STATES,
   PROPOSAL_STATE,
@@ -549,6 +552,175 @@ export function registerProposalCommands(program: Command): void {
         }
 
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
+        console.log();
+      } catch (err) {
+        console.error(chalk.red(`\n  ✖ ${formatContractError(err)}`));
+        process.exit(1);
+      }
+    });
+
+  // ── proposal unstick ──
+  // Guardian-only recovery path. Hidden from `--help` on purpose: this is a
+  // last-resort command used by the syndicate-owner skill when an Executed
+  // proposal's pre-committed settlement calls revert, leaving the vault
+  // locked (`redemptionsLocked() == true`, `getActiveProposal(vault) != 0`).
+  //
+  // It calls `emergencySettle(id, [noopCall])` where `noopCall` is a
+  // harmless `asset.balanceOf(vault)` view-call on the vault's underlying
+  // asset. The governor's `_tryPrecommittedThenFallback` catches the
+  // pre-committed revert and runs this no-op fallback, causing
+  // `_finishSettlement` to mark the proposal `Settled` and clear
+  // `_activeProposal[vault]`. LPs can redeem afterwards.
+  //
+  // Docs: skill/skills/syndicate-owner/SKILL.md § "Recovering a stuck proposal"
+
+  proposal
+    .command("unstick", { hidden: true })
+    .description(
+      "Guardian-only: unstick a vault whose Executed proposal cannot settle (no funds moved)",
+    )
+    .requiredOption("--id <proposalId>", "Proposal ID to unstick")
+    .option("--yes", "Skip the interactive confirmation")
+    .option(
+      "--dry-run",
+      "Check preconditions and print the fallback call without broadcasting",
+    )
+    .action(async (opts) => {
+      try {
+        const proposalId = parseBigIntArg(opts.id, "proposal ID");
+        const account = getAccount();
+
+        const spinner = ora("Loading proposal...").start();
+        const p = await getProposal(proposalId);
+        const state = await getProposalState(proposalId);
+
+        // 1. State must be Executed
+        if (state !== PROPOSAL_STATE.Executed) {
+          spinner.fail(
+            `Proposal ${proposalId} is ${PROPOSAL_STATES[state] || "Unknown"} — unstick only applies to Executed proposals.`,
+          );
+          console.error(
+            DIM(
+              "\n  Other states have their own recovery path:\n" +
+                "    Draft/Pending    → sherwood proposal cancel --id <id>\n" +
+                "    Approved         → sherwood proposal veto <id>\n" +
+                "    Expired          → vault is not locked, nothing to do\n" +
+                "    Settled          → already settled\n" +
+                "    Cancelled        → governor upgrade required (issue #177)\n",
+            ),
+          );
+          process.exit(1);
+        }
+
+        // 2. Strategy duration must have elapsed (emergencySettle requires it)
+        const now = BigInt(Math.floor(Date.now() / 1000));
+        const expiresAt = p.executedAt + p.strategyDuration;
+        if (p.executedAt === 0n || now < expiresAt) {
+          spinner.fail("Strategy duration has not elapsed yet.");
+          const remaining = expiresAt - now;
+          console.error(
+            DIM(
+              `\n  Can unstick after: ${new Date(Number(expiresAt) * 1000).toLocaleString()} (in ~${formatDuration(remaining)})\n`,
+            ),
+          );
+          process.exit(1);
+        }
+
+        // 3. Vault must actually be locked by this proposal
+        const vault = p.vault as Address;
+        const active = await getActiveProposal(vault);
+        if (active !== proposalId) {
+          spinner.fail(
+            `Vault ${vault} active proposal is ${active}, not ${proposalId} — nothing to unstick for this proposal.`,
+          );
+          process.exit(1);
+        }
+
+        // 4. Caller must be vault owner
+        const vaultOwner = await getVaultOwner(vault);
+        if (account.address.toLowerCase() !== vaultOwner.toLowerCase()) {
+          spinner.fail("Only the vault owner can unstick a proposal.");
+          console.error(
+            DIM(`\n  Vault owner: ${vaultOwner}\n  Your wallet: ${account.address}\n`),
+          );
+          process.exit(1);
+        }
+
+        // 5. Craft the no-op fallback call: asset.balanceOf(vault)
+        // Cannot revert, costs ~2.5k gas, satisfies fallbackCalls.length > 0
+        // requirement in _tryPrecommittedThenFallback.
+        const asset = await getAssetAddress();
+        const noopCalldata = encodeFunctionData({
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [vault],
+        });
+        const fallbackCalls: BatchCall[] = [
+          { target: asset, data: noopCalldata, value: 0n },
+        ];
+
+        spinner.stop();
+
+        // Print plan
+        console.log();
+        console.log(BOLD("Unstick plan"));
+        SEP();
+        console.log(`  Proposal:     ${proposalId}`);
+        console.log(`  Vault:        ${vault}`);
+        console.log(`  Asset:        ${asset}`);
+        console.log(`  State:        ${PROPOSAL_STATES[state]} (duration elapsed)`);
+        console.log(`  Caller:       ${account.address} (vault owner ✓)`);
+        console.log();
+        console.log(LABEL("  Fallback call (no-op, cannot revert):"));
+        console.log(DIM(`    target: ${asset}`));
+        console.log(DIM(`    data:   ${noopCalldata}  // balanceOf(${vault})`));
+        console.log(DIM("    value:  0"));
+        console.log();
+        console.log(
+          DIM(
+            "  This calls emergencySettle(id, [noop]). The governor catches any revert\n" +
+              "  from the pre-committed settlement calls and runs the no-op instead. No\n" +
+              "  funds move. The proposal transitions to Settled and the vault unlocks.\n" +
+              "  LPs can then redeem via `sherwood vault redeem`.",
+          ),
+        );
+        console.log();
+
+        if (opts.dryRun) {
+          console.log(G("  (dry-run) Preconditions OK — not broadcasting.\n"));
+          return;
+        }
+
+        if (!opts.yes) {
+          process.stdout.write(chalk.yellow("  Proceed? [y/N] "));
+          const answer = await new Promise<string>((resolve) => {
+            process.stdin.resume();
+            process.stdin.setEncoding("utf-8");
+            process.stdin.once("data", (d) => resolve(String(d).trim().toLowerCase()));
+          });
+          process.stdin.pause();
+          if (answer !== "y" && answer !== "yes") {
+            console.log(DIM("  Cancelled.\n"));
+            return;
+          }
+        }
+
+        const send = ora("Broadcasting emergencySettle...").start();
+        const hash = await emergencySettle(proposalId, fallbackCalls);
+        send.succeed(G("Vault unstuck — proposal Settled"));
+        console.log(DIM(`  ${getExplorerUrl(hash)}`));
+
+        // Verify unlock
+        const stillActive = await getActiveProposal(vault);
+        if (stillActive === 0n) {
+          console.log(G("  redemptionsLocked cleared ✓"));
+        } else {
+          console.log(
+            chalk.yellow(
+              `  ⚠ getActiveProposal(vault) still returns ${stillActive} — check manually.`,
+            ),
+          );
+        }
         console.log();
       } catch (err) {
         console.error(chalk.red(`\n  ✖ ${formatContractError(err)}`));

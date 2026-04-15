@@ -6,9 +6,9 @@
 
 // dotenv loaded at entrypoint
 import type { Hex, TransactionReceipt } from "viem";
-import { createPublicClient, createWalletClient, http } from "viem";
+import { createPublicClient, createWalletClient, fallback, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { getChain, getRpcUrl } from "./network.js";
+import { getChain, getRpcUrls } from "./network.js";
 import { loadConfig } from "./config.js";
 import { formatContractError } from "./errors.js";
 export { formatContractError } from "./errors.js";
@@ -40,6 +40,20 @@ function getPrivateKey(): `0x${string}` {
   );
 }
 
+/**
+ * Build a viem fallback transport over the chain's RPC URL list.
+ * Transparently advances to the next URL on rate-limit / network errors
+ * (issue #182). `retryCount: 0` on the inner `http` avoids wasting 10+s
+ * spinning on a dead RPC before the fallback layer advances.
+ */
+function buildTransport() {
+  const urls = getRpcUrls();
+  return fallback(
+    urls.map((url) => http(url, { retryCount: 0, timeout: 8_000 })),
+    { rank: false, retryCount: 0 },
+  );
+}
+
 export function getPublicClient() {
   const chain = getChain();
   // Auto-invalidate if network changed since last creation
@@ -49,7 +63,7 @@ export function getPublicClient() {
   if (!_publicClient) {
     _publicClient = createPublicClient({
       chain,
-      transport: http(getRpcUrl()),
+      transport: buildTransport(),
     });
   }
   return _publicClient as ReturnType<typeof createPublicClient>;
@@ -66,7 +80,7 @@ export function getWalletClient() {
     _walletClient = createWalletClient({
       account,
       chain,
-      transport: http(getRpcUrl()),
+      transport: buildTransport(),
     });
   }
   return _walletClient as ReturnType<typeof createWalletClient>;

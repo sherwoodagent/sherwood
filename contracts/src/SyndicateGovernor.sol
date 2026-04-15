@@ -335,6 +335,7 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         }
 
         proposal.state = ProposalState.Cancelled;
+        delete _activeProposal[proposal.vault];
         emit ProposalCancelled(proposalId, msg.sender);
     }
 
@@ -352,6 +353,7 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         }
 
         proposal.state = ProposalState.Cancelled;
+        delete _activeProposal[proposal.vault];
         emit ProposalCancelled(proposalId, msg.sender);
     }
 
@@ -366,6 +368,7 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
         }
 
         proposal.state = ProposalState.Rejected;
+        delete _activeProposal[proposal.vault];
         emit ProposalVetoed(proposalId, msg.sender);
     }
 

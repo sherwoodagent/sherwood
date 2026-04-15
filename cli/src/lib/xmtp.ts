@@ -31,6 +31,7 @@ import {
   saveConfig,
   cacheGroupId,
   getCachedGroupId,
+  invalidateCachedGroupId,
 } from "./config.js";
 import { getTextRecord } from "./ens.js";
 import { getChainConfig } from "./network.js";
@@ -189,27 +190,33 @@ export async function getGroup(
   // Sync to get latest conversations (including MLS welcome messages)
   await client.conversations.syncAll([ConsentState.Allowed]);
 
-  // Try local cache
+  // Try local cache — validate it exists in the local DB before trusting.
+  // Stale cache entries (e.g. after `init --force` recreated the group) would
+  // otherwise short-circuit every downstream call with a nonexistent group.
   let groupId: string | undefined = getCachedGroupId(subdomain);
-
-  // Validate cached ID actually exists in the local DB
   if (groupId) {
     const conv = await client.conversations.getConversationById(groupId);
-    if (!conv) {
-      cacheGroupId(subdomain, ""); // invalidate stale entry
-      groupId = undefined;
+    if (conv) {
+      return groupId;
     }
+    // Stale cache — clear and fall through to ENS / name search.
+    invalidateCachedGroupId(subdomain);
+    groupId = undefined;
   }
 
-  // Fall back to on-chain ENS text record
+  // Fall back to on-chain ENS text record (may not exist on all chains)
   if (!groupId) {
-    const ensId = await getTextRecord(subdomain, "xmtpGroupId");
-    if (ensId) {
-      const conv = await client.conversations.getConversationById(ensId);
-      if (conv) {
-        groupId = ensId;
-        cacheGroupId(subdomain, groupId);
+    try {
+      const ensId = await getTextRecord(subdomain, "xmtpGroupId");
+      if (ensId) {
+        const conv = await client.conversations.getConversationById(ensId);
+        if (conv) {
+          groupId = ensId;
+          cacheGroupId(subdomain, groupId);
+        }
       }
+    } catch {
+      // ENS not available on this chain (e.g. HyperEVM) — skip
     }
   }
 

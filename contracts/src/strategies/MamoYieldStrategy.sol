@@ -98,4 +98,10 @@ contract MamoYieldStrategy is BaseStrategy {
     function _updateParams(bytes calldata) internal pure override {
         revert NoTunableParams();
     }
+
+    // ── positionValue ──
+    // Inherits BaseStrategy's (0, false) default. The Mamo strategy
+    // instance only exposes `deposit` / `withdraw` / `withdrawAll` — no
+    // public balance or value getter — so there is no onchain path to
+    // a current position value until Mamo adds one upstream.
 }

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { encodeFunctionData, type Address, type Hex } from "viem";
 import { getPublicClient, SYNDICATE_VAULT_ABI } from "@/lib/contracts";
+import { makeRateLimit } from "@/lib/rate-limit";
+
+// Tighter limit than /api/prices because each Tenderly call costs real money.
+const checkRateLimit = makeRateLimit({ windowMs: 60_000, max: 20 });
 
 // ── ABI fragment for encoding ────────────────────────────
 
@@ -131,6 +135,13 @@ function extractBatchCalls(trace: TenderlyCallTrace): CallResult[] {
 // ── Route handler ────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  if (!checkRateLimit(req)) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded — try again in a minute." },
+      { status: 429 },
+    );
+  }
+
   const accountSlug = process.env.TENDERLY_ACCOUNT_SLUG;
   const projectSlug = process.env.TENDERLY_PROJECT_SLUG;
   const accessKey = process.env.TENDERLY_ACCESS_KEY;

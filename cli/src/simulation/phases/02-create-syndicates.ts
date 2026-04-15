@@ -14,7 +14,7 @@ import { agentHomeDir, updateAgentConfig } from "../agent-home.js";
 import { execSherwoodAsync, parseVaultAddress } from "../exec.js";
 import { runInPool } from "../pool.js";
 import { updateAgent, updateSyndicate } from "../state.js";
-import { PERSONAS } from "../personas.js";
+import { getPersona } from "../personas.js";
 import { CHAIN_REGISTRY } from "../../lib/network.js";
 import type { SimLogger } from "../logger.js";
 
@@ -40,7 +40,7 @@ export async function runPhase02(config: SimConfig, state: SimState, logger?: Si
       return;
     }
 
-    const persona = PERSONAS.find((p) => p.index === creator.index);
+    const persona = getPersona(creator.index, config.chain);
     if (!persona || !persona.syndicateName || !persona.syndicateSubdomain) {
       console.error(`  [agent-${creator.index}] No syndicate persona — skipping`);
       return;

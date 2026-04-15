@@ -6,19 +6,22 @@
  */
 
 import { cache } from "react";
-import { type Address, namehash } from "viem";
+import { formatUnits, type Address, namehash } from "viem";
 import {
   CHAINS,
   type ChainEntry,
   getPublicClient,
   SYNDICATE_FACTORY_ABI,
   SYNDICATE_VAULT_ABI,
+  SYNDICATE_GOVERNOR_ABI,
   ERC20_ABI,
   IDENTITY_REGISTRY_ABI,
   L2_REGISTRY_ABI,
   formatAsset,
   formatBps,
 } from "./contracts";
+
+const ZERO: Address = "0x0000000000000000000000000000000000000000";
 import {
   fetchSyndicateAttestations,
   type AttestationItem,
@@ -58,6 +61,7 @@ export interface AgentInfo {
 export interface SyndicateMetadata {
   name: string;
   description: string;
+  xmtpGroupId?: string;
   strategies: {
     id: string;
     name: string;
@@ -306,6 +310,7 @@ async function resolveOnChain(
         functionName: "managementFeeBps",
       },
       { address: vault, abi: SYNDICATE_VAULT_ABI, functionName: "asset" },
+      { address: vault, abi: SYNDICATE_VAULT_ABI, functionName: "governor" },
     ],
   });
 
@@ -318,9 +323,37 @@ async function resolveOnChain(
   const redemptionsLocked = (vaultResults[6].result as boolean) ?? false;
   const managementFeeBps = (vaultResults[7].result as bigint) ?? 0n;
   const assetAddress = (vaultResults[8].result as Address) ?? addresses.usdc;
+  const governorAddress = (vaultResults[9].result as Address) ?? ZERO;
 
-  // TVL is the onchain totalAssets — the vault's actual asset balance
-  const effectiveTotalAssets = totalAssets;
+  // When a strategy is active, the vault's totalAssets only reflects what
+  // remains in the vault itself — the deployed capital has left. For TVL /
+  // "Your Value" display we want the full capital under management, so
+  // fall back to the proposal's capitalSnapshot (the vault balance at the
+  // moment of execution).
+  let effectiveTotalAssets = totalAssets;
+  if (redemptionsLocked && governorAddress !== ZERO) {
+    try {
+      const activeId = (await client.readContract({
+        address: governorAddress,
+        abi: SYNDICATE_GOVERNOR_ABI,
+        functionName: "getActiveProposal",
+        args: [vault],
+      })) as bigint;
+      if (activeId > 0n) {
+        const snapshot = (await client.readContract({
+          address: governorAddress,
+          abi: SYNDICATE_GOVERNOR_ABI,
+          functionName: "getCapitalSnapshot",
+          args: [activeId],
+        })) as bigint;
+        // Use the larger of (current vault balance, capital snapshot) — covers
+        // both the all-deployed case (vault ≈ 0) and partial-deployment case.
+        if (snapshot > effectiveTotalAssets) effectiveTotalAssets = snapshot;
+      }
+    } catch {
+      // fall back to raw totalAssets
+    }
+  }
 
   // Step 2c: Get asset decimals + symbol
   const assetInfoResults = await client.multicall({
@@ -391,13 +424,27 @@ async function resolveOnChain(
   }
 
   // Step 4: Parallel off-chain reads
-  const [metadata, xmtpGroupId, attestations, activity, equityCurve] = await Promise.all([
+  const [metadata, ensGroupId, attestations, activity, equityCurve] = await Promise.all([
     fetchMetadata(metadataURI),
     fetchXmtpGroupId(chainId, subdomain, addresses.l2Registry),
     fetchSyndicateAttestations(creator, syndicateId, chainId, vault),
-    fetchStrategyActivity(entry.subgraphUrl, syndicateId.toString()),
+    fetchStrategyActivity(entry.subgraphUrl, syndicateId.toString()).then(async (events) => {
+      // Subgraph empty / unavailable — try a bounded log scan of the vault
+      // so the activity feed isn't a black hole when The Graph blips.
+      if (events.length === 0) {
+        try {
+          return await fetchActivityFromLogs(chainId, vault);
+        } catch {
+          return events;
+        }
+      }
+      return events;
+    }),
     fetchEquityCurve(entry.subgraphUrl, syndicateId.toString(), assetDecimals, effectiveTotalAssets),
   ]);
+
+  // XMTP group ID: ENS text record → IPFS metadata fallback
+  const xmtpGroupId = ensGroupId || metadata?.xmtpGroupId || null;
 
   // Format display values based on asset
   const isUSD = assetSymbol === "USDC" || assetSymbol === "USDT";
@@ -517,51 +564,54 @@ async function fetchStrategyActivity(
   if (!subgraphUrl) return [];
 
   try {
+    // GraphQL variables instead of string interpolation. Defensive against
+    // any future change to syndicateId provenance — even though it currently
+    // comes from on-chain readContract.
+    const query = `query Activity($id: String!) {
+      deposits(
+        where: { syndicate: $id }
+        orderBy: timestamp
+        orderDirection: desc
+        first: 20
+      ) {
+        sender
+        assets
+        timestamp
+        txHash
+      }
+      withdrawals(
+        where: { syndicate: $id }
+        orderBy: timestamp
+        orderDirection: desc
+        first: 20
+      ) {
+        owner
+        assets
+        timestamp
+        txHash
+      }
+      proposals(
+        where: { syndicate: $id, state_in: ["Executed", "Settled", "Cancelled"] }
+        orderBy: createdAt
+        orderDirection: desc
+        first: 20
+      ) {
+        id
+        proposer
+        capitalSnapshot
+        finalPnl
+        state
+        executedAt
+        settledAt
+        createdAt
+        txHash
+      }
+    }`;
+
     const response = await fetch(subgraphUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: `{
-          deposits(
-            where: { syndicate: "${syndicateId}" }
-            orderBy: timestamp
-            orderDirection: desc
-            first: 20
-          ) {
-            sender
-            assets
-            timestamp
-            txHash
-          }
-          withdrawals(
-            where: { syndicate: "${syndicateId}" }
-            orderBy: timestamp
-            orderDirection: desc
-            first: 20
-          ) {
-            owner
-            assets
-            timestamp
-            txHash
-          }
-          proposals(
-            where: { syndicate: "${syndicateId}", state_in: ["Executed", "Settled", "Cancelled"] }
-            orderBy: createdAt
-            orderDirection: desc
-            first: 20
-          ) {
-            id
-            proposer
-            capitalSnapshot
-            finalPnl
-            state
-            executedAt
-            settledAt
-            createdAt
-            txHash
-          }
-        }`,
-      }),
+      body: JSON.stringify({ query, variables: { id: syndicateId } }),
       next: { revalidate: 60 },
     });
 
@@ -637,53 +687,142 @@ async function fetchStrategyActivity(
   }
 }
 
+// ── Event-log fallback for activity feed ──────────────────
+// When the subgraph is unavailable (or the syndicate is too new to be
+// indexed), scan the most recent ~60k blocks of vault Deposit/Withdraw
+// events directly. Costs an extra RPC roundtrip but keeps the feed alive.
+
+// Calendar window varies by chain (Base ≈ 7d at 2s blocks, HyperEVM ≈
+// ~1d at ~1s blocks, etc). The count stays bounded so RPC latency is
+// predictable; older history comes from the subgraph when available.
+const ACTIVITY_LOG_WINDOW = 60_000n;
+const ACTIVITY_LOG_MAX = 20;
+
+async function fetchActivityFromLogs(
+  chainId: number,
+  vault: Address,
+): Promise<ActivityEvent[]> {
+  const client = getPublicClient(chainId);
+  const head = await client.getBlockNumber();
+  const fromBlock = head > ACTIVITY_LOG_WINDOW ? head - ACTIVITY_LOG_WINDOW : 0n;
+
+  const [deposits, withdrawals] = await Promise.all([
+    client.getLogs({
+      address: vault,
+      event: {
+        type: "event",
+        name: "Deposit",
+        inputs: [
+          { name: "sender", type: "address", indexed: true },
+          { name: "owner", type: "address", indexed: true },
+          { name: "assets", type: "uint256", indexed: false },
+          { name: "shares", type: "uint256", indexed: false },
+        ],
+      },
+      fromBlock,
+      toBlock: head,
+    }),
+    client.getLogs({
+      address: vault,
+      event: {
+        type: "event",
+        name: "Withdraw",
+        inputs: [
+          { name: "sender", type: "address", indexed: true },
+          { name: "receiver", type: "address", indexed: true },
+          { name: "owner", type: "address", indexed: true },
+          { name: "assets", type: "uint256", indexed: false },
+          { name: "shares", type: "uint256", indexed: false },
+        ],
+      },
+      fromBlock,
+      toBlock: head,
+    }),
+  ]);
+
+  // Resolve block timestamps in batch (deduped) so we can sort.
+  const blockNumbers = Array.from(
+    new Set([...deposits, ...withdrawals].map((l) => l.blockNumber)),
+  );
+  const blocks = await Promise.all(
+    blockNumbers.map((bn) => client.getBlock({ blockNumber: bn })),
+  );
+  const tsByBlock = new Map<bigint, bigint>();
+  blocks.forEach((b, i) => tsByBlock.set(blockNumbers[i], b.timestamp));
+
+  const events: ActivityEvent[] = [];
+  for (const log of deposits) {
+    events.push({
+      type: "deposit",
+      actor: (log.args.owner as Address) ?? (log.args.sender as Address),
+      amount: (log.args.assets as bigint) ?? 0n,
+      timestamp: tsByBlock.get(log.blockNumber) ?? 0n,
+      txHash: log.transactionHash,
+    });
+  }
+  for (const log of withdrawals) {
+    events.push({
+      type: "withdrawal",
+      actor: (log.args.owner as Address) ?? (log.args.receiver as Address),
+      amount: (log.args.assets as bigint) ?? 0n,
+      timestamp: tsByBlock.get(log.blockNumber) ?? 0n,
+      txHash: log.transactionHash,
+    });
+  }
+
+  events.sort((a, b) =>
+    b.timestamp > a.timestamp ? 1 : b.timestamp < a.timestamp ? -1 : 0,
+  );
+  return events.slice(0, ACTIVITY_LOG_MAX);
+}
+
 // ── Equity curve ──────────────────────────────────────────
 
-async function fetchEquityCurve(
+export async function fetchEquityCurve(
   subgraphUrl: string | null,
   syndicateId: string,
   assetDecimals: number,
   currentTotalAssets: bigint,
 ): Promise<number[]> {
-  const currentTVL = Number(currentTotalAssets) / 10 ** assetDecimals;
+  const currentTVL = parseFloat(formatUnits(currentTotalAssets, assetDecimals));
 
   if (!subgraphUrl) return [currentTVL];
 
   try {
+    const curveQuery = `query EquityCurve($id: String!) {
+      deposits(
+        where: { syndicate: $id }
+        orderBy: timestamp
+        orderDirection: asc
+        first: 1000
+      ) {
+        assets
+        timestamp
+      }
+      withdrawals(
+        where: { syndicate: $id }
+        orderBy: timestamp
+        orderDirection: asc
+        first: 1000
+      ) {
+        assets
+        timestamp
+      }
+      proposals(
+        where: { syndicate: $id, state: "Settled" }
+        orderBy: settledAt
+        orderDirection: asc
+        first: 1000
+      ) {
+        finalPnl
+        settledAt
+      }
+    }`;
+
     const response = await fetch(subgraphUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: `{
-          deposits(
-            where: { syndicate: "${syndicateId}" }
-            orderBy: timestamp
-            orderDirection: asc
-            first: 1000
-          ) {
-            assets
-            timestamp
-          }
-          withdrawals(
-            where: { syndicate: "${syndicateId}" }
-            orderBy: timestamp
-            orderDirection: asc
-            first: 1000
-          ) {
-            assets
-            timestamp
-          }
-          proposals(
-            where: { syndicate: "${syndicateId}", state: "Settled" }
-            orderBy: settledAt
-            orderDirection: asc
-            first: 1000
-          ) {
-            finalPnl
-            settledAt
-          }
-        }`,
-      }),
+      body: JSON.stringify({ query: curveQuery, variables: { id: syndicateId } }),
       next: { revalidate: 60 },
     });
 
@@ -737,7 +876,7 @@ async function fetchEquityCurve(
           break;
         }
       }
-      curve.push(Number(dayTVL) / 10 ** assetDecimals);
+      curve.push(parseFloat(formatUnits(dayTVL, assetDecimals)));
     }
 
     // Replace last point with actual onchain TVL for accuracy

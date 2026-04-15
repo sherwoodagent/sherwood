@@ -3,10 +3,9 @@
   "configurations": [
     {
       "name": "app",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 3000,
-      "cwd": "app"
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "source ~/.nvm/nvm.sh && nvm use 20 && cd /Users/carlos/Desktop/github/sherwood/app && npx next dev"],
+      "port": 3000
     }
   ]
 }

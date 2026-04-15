@@ -42,14 +42,18 @@ contract SimulateExecution is Test {
         WstETHMoonwellStrategy strategy = WstETHMoonwellStrategy(CLONE);
 
         uint256 supplyAmount = strategy.supplyAmount();
-        uint256 minWstethOut = strategy.minWstethOut();
-        uint256 minWethOut = strategy.minWethOut();
+        uint256 minWstethOutPerWeth = strategy.minWstethOutPerWeth();
+        uint256 minWethOutPerWsteth = strategy.minWethOutPerWsteth();
+        uint256 amountIn = supplyAmount == 0 ? vaultBalance : supplyAmount;
+        uint256 minWstethOut = (amountIn * minWstethOutPerWeth) / 1e18;
 
         console2.log("=== DIAGNOSIS ===");
         console2.log("Vault WETH balance:", vaultBalance);
         console2.log("Strategy supplyAmount:", supplyAmount);
-        console2.log("Strategy minWstethOut:", minWstethOut);
-        console2.log("Strategy minWethOut:", minWethOut);
+        console2.log("Strategy minWstethOutPerWeth:", minWstethOutPerWeth);
+        console2.log("Strategy minWethOutPerWsteth:", minWethOutPerWsteth);
+        console2.log("Effective amountIn:", amountIn);
+        console2.log("Derived minWstethOut:", minWstethOut);
         console2.log("");
 
         // Check 1: Does vault have enough?
@@ -81,11 +85,12 @@ contract SimulateExecution is Test {
         reverseRoutes[0] = IAeroRouter.Route({from: WSTETH, to: WETH, stable: true, factory: AERO_FACTORY});
         uint256[] memory reverseAmounts = IAeroRouter(AERO_ROUTER).getAmountsOut(expectedWsteth, reverseRoutes);
         uint256 expectedWethBack = reverseAmounts[1];
+        uint256 minWethOut = (expectedWsteth * minWethOutPerWsteth) / 1e18;
 
         console2.log("");
         console2.log("=== SETTLEMENT SIMULATION ===");
         console2.log("wstETH -> WETH swap output:", expectedWethBack);
-        console2.log("minWethOut required:", minWethOut);
+        console2.log("Derived minWethOut:", minWethOut);
         if (expectedWethBack < minWethOut) {
             console2.log("!! FAIL: Reverse swap output < minWethOut (settle slippage check will revert)");
         } else {

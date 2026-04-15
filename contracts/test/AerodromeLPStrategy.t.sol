@@ -239,6 +239,22 @@ contract AerodromeLPStrategyTest is Test {
         AerodromeLPStrategy(clone).initialize(vault, proposer, abi.encode(p));
     }
 
+    // ==================== POSITION VALUE ====================
+    // Inherits BaseStrategy's (0, false) default. LP decomposition
+    // deferred to a follow-up — see contract comment for rationale.
+
+    function test_positionValue_alwaysStubbed() public {
+        (uint256 value, bool valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+
+        _executeStrategy();
+
+        (value, valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+    }
+
     // ==================== EXECUTE ====================
 
     function test_execute() public {

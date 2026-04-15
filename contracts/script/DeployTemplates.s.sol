@@ -9,6 +9,7 @@ import {AerodromeLPStrategy} from "../src/strategies/AerodromeLPStrategy.sol";
 import {VeniceInferenceStrategy} from "../src/strategies/VeniceInferenceStrategy.sol";
 import {WstETHMoonwellStrategy} from "../src/strategies/WstETHMoonwellStrategy.sol";
 import {MamoYieldStrategy} from "../src/strategies/MamoYieldStrategy.sol";
+import {HyperliquidPerpStrategy} from "../src/strategies/HyperliquidPerpStrategy.sol";
 
 /**
  * @notice Deploy strategy template singletons (one-time per chain).
@@ -30,6 +31,16 @@ contract DeployTemplates is ScriptBase {
     string constant VENICE_KEY = "VENICE_INFERENCE_TEMPLATE";
     string constant WSTETH_KEY = "WSTETH_MOONWELL_TEMPLATE";
     string constant MAMO_KEY = "MAMO_YIELD_TEMPLATE";
+    string constant HYPERLIQUID_KEY = "HYPERLIQUID_PERP_TEMPLATE";
+
+    struct Templates {
+        address moonwell;
+        address aerodrome;
+        address venice;
+        address wsteth;
+        address mamo;
+        address hyperliquid;
+    }
 
     function run() external {
         string memory path = string.concat(vm.projectRoot(), "/chains/", vm.toString(block.chainid), ".json");
@@ -37,18 +48,13 @@ contract DeployTemplates is ScriptBase {
 
         // ── 1. Check which templates are already deployed ──
 
-        address moonwellAddr = _tryReadAddress(json, MOONWELL_KEY);
-        address aerodromeAddr = _tryReadAddress(json, AERODROME_KEY);
-        address veniceAddr = _tryReadAddress(json, VENICE_KEY);
-        address wstethAddr = _tryReadAddress(json, WSTETH_KEY);
-        address mamoAddr = _tryReadAddress(json, MAMO_KEY);
-
-        // Verify addresses actually have code on-chain (catches stale dry-run addresses)
-        bool needMoonwell = moonwellAddr == address(0) || moonwellAddr.code.length == 0;
-        bool needAerodrome = aerodromeAddr == address(0) || aerodromeAddr.code.length == 0;
-        bool needVenice = veniceAddr == address(0) || veniceAddr.code.length == 0;
-        bool needWsteth = wstethAddr == address(0) || wstethAddr.code.length == 0;
-        bool needMamo = mamoAddr == address(0) || mamoAddr.code.length == 0;
+        Templates memory t;
+        t.moonwell = _tryReadAddress(json, MOONWELL_KEY);
+        t.aerodrome = _tryReadAddress(json, AERODROME_KEY);
+        t.venice = _tryReadAddress(json, VENICE_KEY);
+        t.wsteth = _tryReadAddress(json, WSTETH_KEY);
+        t.mamo = _tryReadAddress(json, MAMO_KEY);
+        t.hyperliquid = _tryReadAddress(json, HYPERLIQUID_KEY);
 
         bool anyDeployed = false;
 
@@ -58,64 +64,75 @@ contract DeployTemplates is ScriptBase {
 
         vm.startBroadcast();
 
-        if (needMoonwell) {
-            if (moonwellAddr != address(0)) {
-                console.log("  Stale    MoonwellSupplyStrategy:   %s (no code, redeploying)", moonwellAddr);
+        if (_needsDeploy(t.moonwell)) {
+            if (t.moonwell != address(0)) {
+                console.log("  Stale    MoonwellSupplyStrategy:   %s (no code, redeploying)", t.moonwell);
             }
-            MoonwellSupplyStrategy moonwell = new MoonwellSupplyStrategy();
-            moonwellAddr = address(moonwell);
-            console.log("  Deployed MoonwellSupplyStrategy:   %s", moonwellAddr);
+            t.moonwell = address(new MoonwellSupplyStrategy());
+            console.log("  Deployed MoonwellSupplyStrategy:   %s", t.moonwell);
             anyDeployed = true;
         } else {
-            console.log("  Skipped  MoonwellSupplyStrategy:   %s (already deployed)", moonwellAddr);
+            console.log("  Skipped  MoonwellSupplyStrategy:   %s (already deployed)", t.moonwell);
         }
 
-        if (needAerodrome) {
-            if (aerodromeAddr != address(0)) {
-                console.log("  Stale    AerodromeLPStrategy:      %s (no code, redeploying)", aerodromeAddr);
+        if (_needsDeploy(t.aerodrome)) {
+            if (t.aerodrome != address(0)) {
+                console.log("  Stale    AerodromeLPStrategy:      %s (no code, redeploying)", t.aerodrome);
             }
-            AerodromeLPStrategy aerodrome = new AerodromeLPStrategy();
-            aerodromeAddr = address(aerodrome);
-            console.log("  Deployed AerodromeLPStrategy:      %s", aerodromeAddr);
+            t.aerodrome = address(new AerodromeLPStrategy());
+            console.log("  Deployed AerodromeLPStrategy:      %s", t.aerodrome);
             anyDeployed = true;
         } else {
-            console.log("  Skipped  AerodromeLPStrategy:      %s (already deployed)", aerodromeAddr);
+            console.log("  Skipped  AerodromeLPStrategy:      %s (already deployed)", t.aerodrome);
         }
 
-        if (needVenice) {
-            if (veniceAddr != address(0)) {
-                console.log("  Stale    VeniceInferenceStrategy:  %s (no code, redeploying)", veniceAddr);
+        if (_needsDeploy(t.venice)) {
+            if (t.venice != address(0)) {
+                console.log("  Stale    VeniceInferenceStrategy:  %s (no code, redeploying)", t.venice);
             }
-            VeniceInferenceStrategy venice = new VeniceInferenceStrategy();
-            veniceAddr = address(venice);
-            console.log("  Deployed VeniceInferenceStrategy:  %s", veniceAddr);
+            t.venice = address(new VeniceInferenceStrategy());
+            console.log("  Deployed VeniceInferenceStrategy:  %s", t.venice);
             anyDeployed = true;
         } else {
-            console.log("  Skipped  VeniceInferenceStrategy:  %s (already deployed)", veniceAddr);
+            console.log("  Skipped  VeniceInferenceStrategy:  %s (already deployed)", t.venice);
         }
 
-        if (needWsteth) {
-            if (wstethAddr != address(0)) {
-                console.log("  Stale    WstETHMoonwellStrategy:   %s (no code, redeploying)", wstethAddr);
+        if (_needsDeploy(t.wsteth)) {
+            if (t.wsteth != address(0)) {
+                console.log("  Stale    WstETHMoonwellStrategy:   %s (no code, redeploying)", t.wsteth);
             }
-            WstETHMoonwellStrategy wsteth = new WstETHMoonwellStrategy();
-            wstethAddr = address(wsteth);
-            console.log("  Deployed WstETHMoonwellStrategy:   %s", wstethAddr);
+            t.wsteth = address(new WstETHMoonwellStrategy());
+            console.log("  Deployed WstETHMoonwellStrategy:   %s", t.wsteth);
             anyDeployed = true;
         } else {
-            console.log("  Skipped  WstETHMoonwellStrategy:   %s (already deployed)", wstethAddr);
+            console.log("  Skipped  WstETHMoonwellStrategy:   %s (already deployed)", t.wsteth);
         }
 
-        if (needMamo) {
-            if (mamoAddr != address(0)) {
-                console.log("  Stale    MamoYieldStrategy:        %s (no code, redeploying)", mamoAddr);
+        if (_needsDeploy(t.mamo)) {
+            if (t.mamo != address(0)) {
+                console.log("  Stale    MamoYieldStrategy:        %s (no code, redeploying)", t.mamo);
             }
-            MamoYieldStrategy mamo = new MamoYieldStrategy();
-            mamoAddr = address(mamo);
-            console.log("  Deployed MamoYieldStrategy:        %s", mamoAddr);
+            t.mamo = address(new MamoYieldStrategy());
+            console.log("  Deployed MamoYieldStrategy:        %s", t.mamo);
             anyDeployed = true;
         } else {
-            console.log("  Skipped  MamoYieldStrategy:        %s (already deployed)", mamoAddr);
+            console.log("  Skipped  MamoYieldStrategy:        %s (already deployed)", t.mamo);
+        }
+
+        // A1: HyperliquidPerpStrategy only deploys on HyperEVM (chain ID 999)
+        if (block.chainid == 999) {
+            if (_needsDeploy(t.hyperliquid)) {
+                if (t.hyperliquid != address(0)) {
+                    console.log("  Stale    HyperliquidPerpStrategy:  %s (no code, redeploying)", t.hyperliquid);
+                }
+                t.hyperliquid = address(new HyperliquidPerpStrategy());
+                console.log("  Deployed HyperliquidPerpStrategy:  %s", t.hyperliquid);
+                anyDeployed = true;
+            } else {
+                console.log("  Skipped  HyperliquidPerpStrategy:  %s (already deployed)", t.hyperliquid);
+            }
+        } else {
+            console.log("  Skipped  HyperliquidPerpStrategy:  N/A (not on HyperEVM, chainId=%s)", block.chainid);
         }
 
         vm.stopBroadcast();
@@ -123,11 +140,14 @@ contract DeployTemplates is ScriptBase {
         // ── 3. Save addresses ──
 
         if (anyDeployed) {
-            vm.writeJson(vm.toString(moonwellAddr), path, string.concat(".", MOONWELL_KEY));
-            vm.writeJson(vm.toString(aerodromeAddr), path, string.concat(".", AERODROME_KEY));
-            vm.writeJson(vm.toString(veniceAddr), path, string.concat(".", VENICE_KEY));
-            vm.writeJson(vm.toString(wstethAddr), path, string.concat(".", WSTETH_KEY));
-            vm.writeJson(vm.toString(mamoAddr), path, string.concat(".", MAMO_KEY));
+            vm.writeJson(vm.toString(t.moonwell), path, string.concat(".", MOONWELL_KEY));
+            vm.writeJson(vm.toString(t.aerodrome), path, string.concat(".", AERODROME_KEY));
+            vm.writeJson(vm.toString(t.venice), path, string.concat(".", VENICE_KEY));
+            vm.writeJson(vm.toString(t.wsteth), path, string.concat(".", WSTETH_KEY));
+            vm.writeJson(vm.toString(t.mamo), path, string.concat(".", MAMO_KEY));
+            if (block.chainid == 999) {
+                vm.writeJson(vm.toString(t.hyperliquid), path, string.concat(".", HYPERLIQUID_KEY));
+            }
             console.log("\n  Addresses saved to %s", path);
         } else {
             console.log("\n  All templates already deployed, nothing to save.");
@@ -136,15 +156,18 @@ contract DeployTemplates is ScriptBase {
         // ── 4. Validate ──
 
         console.log("\n=== Validation ===\n");
-        _validate(moonwellAddr, aerodromeAddr, veniceAddr, wstethAddr, mamoAddr);
+        _validate(t);
         console.log("\n  All validations passed.\n");
     }
 
     // ── Helpers ──
 
+    function _needsDeploy(address addr) internal view returns (bool) {
+        return addr == address(0) || addr.code.length == 0;
+    }
+
     /// @notice Try to read an address from JSON; return address(0) if key missing or zero.
     function _tryReadAddress(string memory json, string memory key) internal pure returns (address) {
-        // vm.parseJsonAddress reverts if key doesn't exist, so we use keyExists
         bytes memory raw = vm.parseJson(json, string.concat(".", key));
         if (raw.length == 0) return address(0);
         address addr = abi.decode(raw, (address));
@@ -152,55 +175,56 @@ contract DeployTemplates is ScriptBase {
     }
 
     /// @notice Validate all deployed templates have correct on-chain state.
-    function _validate(address moonwell, address aerodrome, address venice, address wsteth, address mamo)
-        internal
-        view
-    {
+    function _validate(Templates memory t) internal view {
         // Each template should have code deployed
-        require(moonwell.code.length > 0, "MoonwellSupplyStrategy: no code");
-        console.log("  MoonwellSupplyStrategy:  code OK (%s bytes)", moonwell.code.length);
+        require(t.moonwell.code.length > 0, "MoonwellSupplyStrategy: no code");
+        console.log("  MoonwellSupplyStrategy:  code OK (%s bytes)", t.moonwell.code.length);
 
-        require(aerodrome.code.length > 0, "AerodromeLPStrategy: no code");
-        console.log("  AerodromeLPStrategy:     code OK (%s bytes)", aerodrome.code.length);
+        require(t.aerodrome.code.length > 0, "AerodromeLPStrategy: no code");
+        console.log("  AerodromeLPStrategy:     code OK (%s bytes)", t.aerodrome.code.length);
 
-        require(venice.code.length > 0, "VeniceInferenceStrategy: no code");
-        console.log("  VeniceInferenceStrategy: code OK (%s bytes)", venice.code.length);
+        require(t.venice.code.length > 0, "VeniceInferenceStrategy: no code");
+        console.log("  VeniceInferenceStrategy: code OK (%s bytes)", t.venice.code.length);
 
-        require(wsteth.code.length > 0, "WstETHMoonwellStrategy: no code");
-        console.log("  WstETHMoonwellStrategy:  code OK (%s bytes)", wsteth.code.length);
+        require(t.wsteth.code.length > 0, "WstETHMoonwellStrategy: no code");
+        console.log("  WstETHMoonwellStrategy:  code OK (%s bytes)", t.wsteth.code.length);
 
-        require(mamo.code.length > 0, "MamoYieldStrategy: no code");
-        console.log("  MamoYieldStrategy:       code OK (%s bytes)", mamo.code.length);
+        require(t.mamo.code.length > 0, "MamoYieldStrategy: no code");
+        console.log("  MamoYieldStrategy:       code OK (%s bytes)", t.mamo.code.length);
+
+        // A1: Only validate Hyperliquid on HyperEVM (chain ID 999)
+        if (block.chainid == 999) {
+            require(t.hyperliquid.code.length > 0, "HyperliquidPerpStrategy: no code");
+            console.log("  HyperliquidPerpStrategy: code OK (%s bytes)", t.hyperliquid.code.length);
+        } else {
+            console.log("  HyperliquidPerpStrategy: skipped (not on HyperEVM)");
+        }
 
         // Verify each returns the correct strategy name
-        string memory moonwellName = IStrategy(moonwell).name();
-        require(keccak256(bytes(moonwellName)) == keccak256("Moonwell Supply"), "MoonwellSupplyStrategy: wrong name");
-        console.log("  MoonwellSupplyStrategy:  name OK (\"%s\")", moonwellName);
-
-        string memory aerodromeName = IStrategy(aerodrome).name();
-        require(keccak256(bytes(aerodromeName)) == keccak256("Aerodrome LP"), "AerodromeLPStrategy: wrong name");
-        console.log("  AerodromeLPStrategy:     name OK (\"%s\")", aerodromeName);
-
-        string memory veniceName = IStrategy(venice).name();
-        require(keccak256(bytes(veniceName)) == keccak256("Venice Inference"), "VeniceInferenceStrategy: wrong name");
-        console.log("  VeniceInferenceStrategy: name OK (\"%s\")", veniceName);
-
-        string memory wstethName = IStrategy(wsteth).name();
-        require(
-            keccak256(bytes(wstethName)) == keccak256("wstETH Moonwell Yield"), "WstETHMoonwellStrategy: wrong name"
-        );
-        console.log("  WstETHMoonwellStrategy:  name OK (\"%s\")", wstethName);
-
-        string memory mamoName = IStrategy(mamo).name();
-        require(keccak256(bytes(mamoName)) == keccak256("Mamo Yield"), "MamoYieldStrategy: wrong name");
-        console.log("  MamoYieldStrategy:       name OK (\"%s\")", mamoName);
+        _validateName(t.moonwell, "Moonwell Supply", "MoonwellSupplyStrategy");
+        _validateName(t.aerodrome, "Aerodrome LP", "AerodromeLPStrategy");
+        _validateName(t.venice, "Venice Inference", "VeniceInferenceStrategy");
+        _validateName(t.wsteth, "wstETH Moonwell Yield", "WstETHMoonwellStrategy");
+        _validateName(t.mamo, "Mamo Yield", "MamoYieldStrategy");
+        if (block.chainid == 999) {
+            _validateName(t.hyperliquid, "Hyperliquid Perp", "HyperliquidPerpStrategy");
+        }
 
         // Templates should NOT be initialized (vault == address(0))
-        require(IStrategy(moonwell).vault() == address(0), "MoonwellSupplyStrategy: already initialized");
-        require(IStrategy(aerodrome).vault() == address(0), "AerodromeLPStrategy: already initialized");
-        require(IStrategy(venice).vault() == address(0), "VeniceInferenceStrategy: already initialized");
-        require(IStrategy(wsteth).vault() == address(0), "WstETHMoonwellStrategy: already initialized");
-        require(IStrategy(mamo).vault() == address(0), "MamoYieldStrategy: already initialized");
+        require(IStrategy(t.moonwell).vault() == address(0), "MoonwellSupplyStrategy: already initialized");
+        require(IStrategy(t.aerodrome).vault() == address(0), "AerodromeLPStrategy: already initialized");
+        require(IStrategy(t.venice).vault() == address(0), "VeniceInferenceStrategy: already initialized");
+        require(IStrategy(t.wsteth).vault() == address(0), "WstETHMoonwellStrategy: already initialized");
+        require(IStrategy(t.mamo).vault() == address(0), "MamoYieldStrategy: already initialized");
+        if (block.chainid == 999) {
+            require(IStrategy(t.hyperliquid).vault() == address(0), "HyperliquidPerpStrategy: already initialized");
+        }
         console.log("  All templates: vault == address(0) (not initialized) OK");
+    }
+
+    function _validateName(address template, string memory expected, string memory label) internal view {
+        string memory actual = IStrategy(template).name();
+        require(keccak256(bytes(actual)) == keccak256(bytes(expected)), string.concat(label, ": wrong name"));
+        console.log("  %s: name OK (\"%s\")", label, actual);
     }
 }

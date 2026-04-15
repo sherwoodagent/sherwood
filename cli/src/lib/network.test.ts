@@ -4,6 +4,7 @@ import {
   getNetwork,
   getChain,
   getRpcUrl,
+  getRpcUrls,
   getExplorerUrl,
   isTestnet,
   getChainConfig,
@@ -94,7 +95,7 @@ describe("network", () => {
       const originalEnv = process.env.BASE_RPC_URL;
       delete process.env.BASE_RPC_URL;
       setNetwork("base");
-      expect(getRpcUrl()).toBe("https://mainnet.base.org");
+      expect(getRpcUrl()).toBe("https://base-rpc.publicnode.com");
       if (originalEnv) process.env.BASE_RPC_URL = originalEnv;
     });
 
@@ -102,7 +103,7 @@ describe("network", () => {
       const originalEnv = process.env.BASE_SEPOLIA_RPC_URL;
       delete process.env.BASE_SEPOLIA_RPC_URL;
       setNetwork("base-sepolia");
-      expect(getRpcUrl()).toBe("https://sepolia.base.org");
+      expect(getRpcUrl()).toBe("https://base-sepolia-rpc.publicnode.com");
       if (originalEnv) process.env.BASE_SEPOLIA_RPC_URL = originalEnv;
     });
 
@@ -116,6 +117,44 @@ describe("network", () => {
       process.env.BASE_RPC_URL = "https://custom-rpc.example.com";
       setNetwork("base");
       expect(getRpcUrl()).toBe("https://custom-rpc.example.com");
+      if (originalEnv) process.env.BASE_RPC_URL = originalEnv;
+      else delete process.env.BASE_RPC_URL;
+    });
+  });
+
+  describe("getRpcUrls", () => {
+    it("returns full Base fallback list in order", () => {
+      const originalEnv = process.env.BASE_RPC_URL;
+      delete process.env.BASE_RPC_URL;
+      setNetwork("base");
+      expect(getRpcUrls()).toEqual([
+        "https://base-rpc.publicnode.com",
+        "https://mainnet.base.org",
+        "https://base.llamarpc.com",
+        "https://base.drpc.org",
+      ]);
+      if (originalEnv) process.env.BASE_RPC_URL = originalEnv;
+    });
+
+    it("prepends env var ahead of public fallbacks", () => {
+      const originalEnv = process.env.BASE_RPC_URL;
+      process.env.BASE_RPC_URL = "https://custom-rpc.example.com";
+      setNetwork("base");
+      const urls = getRpcUrls();
+      expect(urls[0]).toBe("https://custom-rpc.example.com");
+      expect(urls).toContain("https://base-rpc.publicnode.com");
+      if (originalEnv) process.env.BASE_RPC_URL = originalEnv;
+      else delete process.env.BASE_RPC_URL;
+    });
+
+    it("dedupes when env var matches a public fallback entry", () => {
+      const originalEnv = process.env.BASE_RPC_URL;
+      process.env.BASE_RPC_URL = "https://mainnet.base.org";
+      setNetwork("base");
+      const urls = getRpcUrls();
+      expect(urls.filter((u) => u === "https://mainnet.base.org").length).toBe(
+        1,
+      );
       if (originalEnv) process.env.BASE_RPC_URL = originalEnv;
       else delete process.env.BASE_RPC_URL;
     });

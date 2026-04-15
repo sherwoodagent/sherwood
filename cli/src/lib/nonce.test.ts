@@ -46,6 +46,7 @@ vi.mock("viem/accounts", () => ({
 vi.mock("./network.js", () => ({
   getChain: () => ({ id: 8453, name: "Base" }),
   getRpcUrl: () => "https://mainnet.base.org",
+  getRpcUrls: () => ["https://mainnet.base.org"],
 }));
 
 vi.mock("./config.js", () => ({

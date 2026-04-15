@@ -75,9 +75,9 @@ export default function AgentStats({
     <div className="panel">
       <div className="panel-title">
         <span>Agent Performance</span>
-        <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "9px" }}>
+        {/* <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "9px" }}>
           {sorted.length} AGENTS
-        </span>
+        </span> */}
       </div>
 
       {sorted.length === 0 ? (
@@ -85,7 +85,7 @@ export default function AgentStats({
           style={{
             textAlign: "center",
             padding: "2rem 0",
-            color: "rgba(255,255,255,0.3)",
+            color: "rgba(255,255,255,0.55)",
             fontFamily: "var(--font-plus-jakarta), sans-serif",
             fontSize: "12px",
           }}
@@ -99,9 +99,7 @@ export default function AgentStats({
               <th scope="col">Agent</th>
               <th scope="col">Proposals</th>
               <th scope="col">Settled</th>
-              <th scope="col">Rejected</th>
               <th scope="col">Total P&L</th>
-              <th scope="col">Avg Fee</th>
             </tr>
           </thead>
           <tbody>
@@ -118,7 +116,7 @@ export default function AgentStats({
                 ? "var(--color-accent)"
                 : pnlNegative
                   ? "#ff4d4d"
-                  : "rgba(255,255,255,0.3)";
+                  : "rgba(255,255,255,0.55)";
 
               return (
                 <tr key={stat.address}>
@@ -127,13 +125,9 @@ export default function AgentStats({
                   <td style={{ color: "var(--color-accent)" }}>
                     {stat.settled}
                   </td>
-                  <td style={{ color: stat.rejected > 0 ? "#ff4d4d" : undefined }}>
-                    {stat.rejected}
-                  </td>
                   <td style={{ color: pnlColor, fontWeight: 600 }}>
                     {pnlText}
                   </td>
-                  <td>{formatBps(BigInt(stat.avgFeeBps))}</td>
                 </tr>
               );
             })}

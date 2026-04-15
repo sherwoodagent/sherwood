@@ -217,6 +217,14 @@ export const SYNDICATE_VAULT_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "bool" }],
   },
+  // OwnableUpgradeable
+  {
+    name: "owner",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
   // ERC-4626 views for LP balance
   {
     name: "convertToAssets",
@@ -231,6 +239,31 @@ export const SYNDICATE_VAULT_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "previewRedeem",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "shares", type: "uint256" }],
+    outputs: [{ name: "assets", type: "uint256" }],
+  },
+  {
+    name: "maxRedeem",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "shares", type: "uint256" }],
+  },
+  {
+    name: "redeem",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "shares", type: "uint256" },
+      { name: "receiver", type: "address" },
+      { name: "owner", type: "address" },
+    ],
+    outputs: [{ name: "assets", type: "uint256" }],
   },
   // ── Events ──
   {
@@ -1316,5 +1349,197 @@ export const BASE_STRATEGY_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "uint8" }],
+  },
+  {
+    // Canonical mid-strategy position value view added in #218.
+    // Returns (value, valid) — `valid=false` means the frontend should
+    // hide the live P&L chip rather than render a misleading $0.
+    name: "positionValue",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "value", type: "uint256" },
+      { name: "valid", type: "bool" },
+    ],
+  },
+] as const;
+
+// ── HyperliquidPerpStrategy (extends BaseStrategy with sweepToVault) ──
+
+export const HYPERLIQUID_PERP_STRATEGY_ABI = [
+  ...BASE_STRATEGY_ABI,
+  {
+    name: "sweepToVault",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: "settled",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "swept",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "hasActiveStopLoss",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "minReturnAmount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
+// ── PortfolioStrategy (extends BaseStrategy with rebalancing + views) ──
+
+export const PORTFOLIO_STRATEGY_ABI = [
+  // Inherited from BaseStrategy
+  ...BASE_STRATEGY_ABI,
+  // Rebalancing
+  {
+    name: "rebalance",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: "rebalanceDelta",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "priceReports", type: "bytes[]" }],
+    outputs: [],
+  },
+  // View functions
+  {
+    name: "getAllocations",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "token", type: "address" },
+          { name: "targetWeightBps", type: "uint256" },
+          { name: "tokenAmount", type: "uint256" },
+          { name: "investedAmount", type: "uint256" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "allocationCount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "asset",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "totalAmount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "maxSlippageBps",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "swapAdapter",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "getSwapExtraData",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes[]" }],
+  },
+  // Events
+  {
+    name: "WeightsUpdated",
+    type: "event",
+    inputs: [
+      { name: "tokens", type: "address[]", indexed: false },
+      { name: "oldWeights", type: "uint256[]", indexed: false },
+      { name: "newWeights", type: "uint256[]", indexed: false },
+    ],
+  },
+  {
+    name: "Rebalanced",
+    type: "event",
+    inputs: [
+      { name: "tokens", type: "address[]", indexed: false },
+      { name: "oldWeights", type: "uint256[]", indexed: false },
+      { name: "newWeights", type: "uint256[]", indexed: false },
+      { name: "oldBalances", type: "uint256[]", indexed: false },
+      { name: "newBalances", type: "uint256[]", indexed: false },
+      { name: "totalAssetValue", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    name: "RebalancedDelta",
+    type: "event",
+    inputs: [
+      { name: "tokens", type: "address[]", indexed: false },
+      { name: "oldWeights", type: "uint256[]", indexed: false },
+      { name: "newWeights", type: "uint256[]", indexed: false },
+      { name: "oldBalances", type: "uint256[]", indexed: false },
+      { name: "newBalances", type: "uint256[]", indexed: false },
+      { name: "totalAssetValue", type: "uint256", indexed: false },
+      { name: "swapsExecuted", type: "uint256", indexed: false },
+    ],
+  },
+] as const;
+
+// ── Synthra QuoterV2 (Robinhood testnet — different ABI from Uniswap) ──
+// Flat params (not struct), returns only amountOut (not 4-tuple).
+// Confirmed by ISynthraQuoter in contracts/src/adapters/SynthraSwapAdapter.sol:33-41.
+
+export const SYNTHRA_QUOTER_ABI = [
+  {
+    name: "quoteExactInputSingle",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "tokenIn", type: "address" },
+      { name: "tokenOut", type: "address" },
+      { name: "fee", type: "uint24" },
+      { name: "amountIn", type: "uint256" },
+      { name: "sqrtPriceLimitX96", type: "uint160" },
+    ],
+    outputs: [{ name: "amountOut", type: "uint256" }],
   },
 ] as const;

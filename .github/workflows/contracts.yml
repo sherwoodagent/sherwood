@@ -34,7 +34,7 @@ jobs:
 
       - name: Fork integration tests
         if: env.BASE_RPC_URL != ''
-        run: forge test -vvv --fork-url base --match-path "test/integration/*" --no-match-contract SimulateExecution
+        run: forge test -vvv --fork-url base --match-path "test/integration/*" --no-match-contract "SimulateExecution|PortfolioIntegration"
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
 

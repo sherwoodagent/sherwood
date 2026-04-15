@@ -2,52 +2,39 @@ import Link from "next/link";
 
 export default function NotFound() {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        minHeight: "100vh",
-        fontFamily: "var(--font-plus-jakarta), sans-serif",
-        color: "rgba(255,255,255,0.7)",
-        gap: "1.5rem",
-        padding: "2rem",
-        textAlign: "center",
-      }}
-    >
-      <h1
-        style={{
-          fontSize: "4rem",
-          fontWeight: 700,
-          color: "rgba(255,255,255,0.15)",
-          margin: 0,
-          lineHeight: 1,
-        }}
-      >
-        404
-      </h1>
-      <p
-        style={{
-          fontSize: "14px",
-          color: "rgba(255,255,255,0.4)",
-          margin: 0,
-        }}
-      >
-        Page not found.
-      </p>
-      <Link
-        href="/"
-        style={{
-          color: "var(--color-accent)",
-          fontSize: "12px",
-          textTransform: "uppercase",
-          letterSpacing: "0.1em",
-          textDecoration: "none",
-        }}
-      >
-        Back to Home
-      </Link>
-    </div>
+    <>
+      <div className="sh-bg-gradient" aria-hidden="true" />
+      <div className="scanlines" aria-hidden="true" style={{ opacity: 0.12 }} />
+      <main className="sh-error-layout" id="main-content">
+        <div
+          className="tag-bracket"
+          style={{ color: "#eab308", marginBottom: "-0.5rem" }}
+        >
+          P.404
+        </div>
+        <div className="sh-error-code">404</div>
+        <h1 className="sh-error-title">This endpoint is not on the network</h1>
+        <p className="sh-error-desc">
+          The page you&rsquo;re looking for isn&rsquo;t registered with Sherwood.
+          It may have moved, been renamed, or never existed.
+        </p>
+        <div className="sh-error-actions">
+          <Link href="/" className="sh-btn sh-btn--primary">
+            Back to homepage
+          </Link>
+          <Link href="/leaderboard" className="sh-btn sh-btn--secondary">
+            Browse syndicates
+          </Link>
+          <a
+            href="https://docs.sherwood.sh"
+            className="sh-btn sh-btn--ghost"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Open the docs ↗
+          </a>
+        </div>
+      </main>
+    </>
   );
 }

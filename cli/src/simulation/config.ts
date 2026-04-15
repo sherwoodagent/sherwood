@@ -21,7 +21,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Path to the CLI entry point (cli/src/index.ts), relative to this file
 const DEFAULT_SHERWOOD_BIN = path.resolve(__dirname, "..", "index.ts");
 
-const VALID_CHAINS: Network[] = ["base", "base-sepolia", "robinhood-testnet"];
+const VALID_CHAINS: Network[] = ["base", "base-sepolia", "robinhood-testnet", "hyperevm", "hyperevm-testnet"];
 
 export function loadSimConfig(chainOverride?: Network): SimConfig {
   const mnemonic = process.env.SIM_MNEMONIC;
@@ -42,7 +42,7 @@ export function loadSimConfig(chainOverride?: Network): SimConfig {
     rpcUrl = process.env[chainConfig.rpcEnvVar];
   }
   if (!rpcUrl) {
-    rpcUrl = chainConfig.rpcFallback;
+    rpcUrl = chainConfig.rpcFallbacks[0];
   }
 
   return {
@@ -61,5 +61,7 @@ export function loadSimConfig(chainOverride?: Network): SimConfig {
     strategyDuration: process.env.SIM_STRATEGY_DURATION || "3h",
     concurrency: parseInt(process.env.SIM_CONCURRENCY || "4", 10),
     compiled: process.env.SIM_COMPILED === "true",
+    hasIdentityRegistry: chain !== "robinhood-testnet",
+    hasEas: chain !== "robinhood-testnet",
   };
 }

@@ -207,22 +207,217 @@ export const PERSONAS: Persona[] = [
 ];
 
 /**
+ * Robinhood L2 Testnet personas — PortfolioStrategy with stock token combinations.
+ * All vaults are WETH-denominated (no USDC on Robinhood testnet).
+ * Token symbols map to addresses via CHAIN_REGISTRY at propose time.
+ */
+export const ROBINHOOD_PERSONAS: Persona[] = [
+  // ── Creators (indices 1-5) — each uses a different stock combo ──
+  {
+    index: 1,
+    name: "Tech Momentum Fund",
+    description: "Momentum-driven portfolio targeting high-growth tech equities. TSLA and AMZN weighted by market cap velocity.",
+    role: "creator",
+    syndicateName: "Tech Momentum Fund",
+    syndicateSubdomain: "tech-momentum",
+    syndicateDescription: "TSLA + AMZN portfolio weighted by momentum signals on Robinhood L2.",
+    vaultAsset: "WETH",
+    strategyTemplate: "portfolio",
+    chatLines: [
+      "TSLA up 12% week-over-week. Momentum signals strong — overweighting to 60%.",
+      "AMZN earnings beat. AWS revenue accelerating. Holding 40% allocation.",
+      "Portfolio rebalanced. Composite return ahead of benchmark. Staying the course.",
+    ],
+    depositAmount: "0.0005",
+  },
+  {
+    index: 2,
+    name: "Streaming Giants Fund",
+    description: "Concentrated bet on digital streaming and e-commerce dominance. AMZN and NFLX equal-weighted.",
+    role: "creator",
+    syndicateName: "Streaming Giants Fund",
+    syndicateSubdomain: "streaming-giants",
+    syndicateDescription: "AMZN + NFLX 50/50 — streaming and e-commerce at scale.",
+    vaultAsset: "WETH",
+    strategyTemplate: "portfolio",
+    chatLines: [
+      "NFLX subscriber growth beat estimates. Ad-tier revenue ramping fast.",
+      "AMZN Prime is a moat. Logistics + AWS + advertising all firing.",
+      "Equal-weight rebalance triggered. Both positions back to 50%. Clean.",
+    ],
+    depositAmount: "0.0005",
+  },
+  {
+    index: 3,
+    name: "Disruptors Alpha Fund",
+    description: "Diversified tech disruption exposure across EVs, data analytics, and advanced computing.",
+    role: "creator",
+    syndicateName: "Disruptors Alpha Fund",
+    syndicateSubdomain: "disruptors-alpha",
+    syndicateDescription: "TSLA + PLTR + AMD — EV, data, and silicon disruption basket.",
+    vaultAsset: "WETH",
+    strategyTemplate: "portfolio",
+    chatLines: [
+      "PLTR government contract pipeline expanding. TSLA FSD rollout accelerating. Both bullish.",
+      "AMD gaining server market share vs Intel. AI chip demand structural.",
+      "Three-way portfolio holding up. TSLA leading, AMD steady, PLTR catching bids.",
+    ],
+    depositAmount: "0.0005",
+  },
+  {
+    index: 4,
+    name: "Entertainment Tech Fund",
+    description: "Media and semiconductor exposure. NFLX content moat paired with AMD silicon leadership.",
+    role: "creator",
+    syndicateName: "Entertainment Tech Fund",
+    syndicateSubdomain: "entertainment-tech",
+    syndicateDescription: "NFLX + AMD — content platform + AI silicon, 60/40 allocation.",
+    vaultAsset: "WETH",
+    strategyTemplate: "portfolio",
+    chatLines: [
+      "NFLX password sharing crackdown driving subscriber additions. Revenue up.",
+      "AMD MI300X shipments ahead of schedule. Data center AI demand strong.",
+      "60/40 split holding well. NFLX providing stability, AMD adding alpha.",
+    ],
+    depositAmount: "0.0005",
+  },
+  {
+    index: 5,
+    name: "Mega Cap Diversified Fund",
+    description: "Broad exposure across the largest tech equities. Equal-weighted across TSLA, AMZN, NFLX, and PLTR.",
+    role: "creator",
+    syndicateName: "Mega Cap Diversified Fund",
+    syndicateSubdomain: "mega-cap-div",
+    syndicateDescription: "TSLA + AMZN + NFLX + PLTR equal-weight diversified tech basket.",
+    vaultAsset: "WETH",
+    strategyTemplate: "portfolio",
+    chatLines: [
+      "Four-asset basket provides sector diversification. No single name dominates.",
+      "Correlation between holdings is low right now — diversification benefit is real.",
+      "Quarterly rebalance complete. All positions within 2% of target weights.",
+    ],
+    depositAmount: "0.0005",
+  },
+
+  // ── Joiners (indices 6-12) — stock-market-themed ──
+  {
+    index: 6,
+    name: "Momentum Tracker",
+    description: "Quantitative momentum trader. Identifies trend continuation signals across tech equities.",
+    role: "joiner",
+    chatLines: [
+      "12-month momentum on TSLA still positive. Trend intact.",
+      "AMZN broke above resistance. Volume confirming the move.",
+      "Momentum signals mixed on PLTR. Watch for confirmation before adding.",
+    ],
+    depositAmount: "0.0005",
+  },
+  {
+    index: 7,
+    name: "Fundamental Analyst",
+    description: "Bottom-up equity researcher. Focuses on earnings quality and revenue durability.",
+    role: "joiner",
+    chatLines: [
+      "NFLX free cash flow conversion improving. FCF yield attractive at current price.",
+      "AMD gross margins expanding as mix shifts to data center. Quality improving.",
+      "AGAINST — TSLA multiple too rich relative to auto peers. Prefer PLTR here.",
+    ],
+    depositAmount: "0.0005",
+  },
+  {
+    index: 8,
+    name: "Volatility Arb",
+    description: "Options-informed investor. Reads implied volatility skew to gauge positioning and risk.",
+    role: "joiner",
+    chatLines: [
+      "TSLA IV crush post-earnings. Good entry window now.",
+      "AMZN skew flat — market not pricing downside. FOR.",
+      "AMD vol elevated before earnings. Size accordingly.",
+    ],
+    depositAmount: "0.0005",
+  },
+  {
+    index: 9,
+    name: "Index Arb Bot",
+    description: "Index rebalancing specialist. Tracks index inclusion events and forced buy flows.",
+    role: "joiner",
+    chatLines: [
+      "PLTR S&P 500 inclusion flow largely absorbed. Float-adjusted weights stable.",
+      "AMD index weight increasing as market cap grows. Passive bid ongoing.",
+      "TSLA weighting at top of index. Rebalance flows neutral this quarter.",
+    ],
+    depositAmount: "0.0005",
+  },
+  {
+    index: 10,
+    name: "Macro Overlay",
+    description: "Top-down macro strategist. Adjusts tech exposure based on rates, dollar, and growth expectations.",
+    role: "joiner",
+    chatLines: [
+      "Fed pause bullish for growth multiples. Overweight tech makes sense here.",
+      "Dollar softening — international revenues will get a boost for AMZN, NFLX.",
+      "Risk-off tone developing. Trimming high-beta TSLA exposure temporarily.",
+    ],
+    depositAmount: "0.0005",
+  },
+  {
+    index: 11,
+    name: "Sector Rotator",
+    description: "Relative value trader. Rotates between tech sub-sectors based on earnings cycle positioning.",
+    role: "joiner",
+    chatLines: [
+      "Semi cycle inflecting up. AMD is the cleanest play — rotating in.",
+      "Cloud spending reaccelerating. AMZN AWS margin expansion story intact.",
+      "EV demand softening near-term. Neutral TSLA until next catalyst.",
+    ],
+    depositAmount: "0.0005",
+  },
+  {
+    index: 12,
+    name: "Risk Manager",
+    description: "Portfolio risk oversight. Monitors concentration, drawdown limits, and correlation across positions.",
+    role: "joiner",
+    chatLines: [
+      "Portfolio concentration within limits. Max single-name at 60% for momentum fund.",
+      "Correlation between TSLA and AMD rising — diversification benefit compressing.",
+      "Drawdown threshold not breached. All positions within acceptable bands.",
+    ],
+    depositAmount: "0.0005",
+  },
+];
+
+/**
+ * Portfolio strategy specs per creator on Robinhood — stock token combos.
+ * Tokens are symbols (resolved to addresses by the CLI via TOKENS() on the active chain).
+ */
+export const ROBINHOOD_PORTFOLIO_SPECS: Record<number, { tokens: string; weights: string }> = {
+  1: { tokens: "TSLA,AMZN", weights: "6000,4000" },
+  2: { tokens: "AMZN,NFLX", weights: "5000,5000" },
+  3: { tokens: "TSLA,PLTR,AMD", weights: "4000,3000,3000" },
+  4: { tokens: "NFLX,AMD", weights: "6000,4000" },
+  5: { tokens: "TSLA,AMZN,NFLX,PLTR", weights: "3000,3000,2000,2000" },
+};
+
+/**
  * Get all creator personas (sorted by index).
  */
-export function getCreators(): Persona[] {
-  return PERSONAS.filter((p) => p.role === "creator").sort((a, b) => a.index - b.index);
+export function getCreators(chain?: string): Persona[] {
+  const list = chain === "robinhood-testnet" ? ROBINHOOD_PERSONAS : PERSONAS;
+  return list.filter((p) => p.role === "creator").sort((a, b) => a.index - b.index);
 }
 
 /**
  * Get all joiner personas (sorted by index).
  */
-export function getJoiners(): Persona[] {
-  return PERSONAS.filter((p) => p.role === "joiner").sort((a, b) => a.index - b.index);
+export function getJoiners(chain?: string): Persona[] {
+  const list = chain === "robinhood-testnet" ? ROBINHOOD_PERSONAS : PERSONAS;
+  return list.filter((p) => p.role === "joiner").sort((a, b) => a.index - b.index);
 }
 
 /**
  * Get a persona by agent index.
  */
-export function getPersona(index: number): Persona | undefined {
-  return PERSONAS.find((p) => p.index === index);
+export function getPersona(index: number, chain?: string): Persona | undefined {
+  const list = chain === "robinhood-testnet" ? ROBINHOOD_PERSONAS : PERSONAS;
+  return list.find((p) => p.index === index);
 }

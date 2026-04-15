@@ -5,7 +5,7 @@
  * Uses subgraph where available, falls back to onchain factory.getActiveSyndicates().
  */
 
-import { type Address } from "viem";
+import { formatUnits, type Address } from "viem";
 import {
   CHAINS,
   type ChainEntry,
@@ -17,7 +17,11 @@ import {
   ERC20_ABI,
   formatAsset,
 } from "./contracts";
-import { fetchMetadata, resolveAgentIdentities } from "./syndicate-data";
+import {
+  fetchMetadata,
+  resolveAgentIdentities,
+  fetchEquityCurve,
+} from "./syndicate-data";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -51,11 +55,73 @@ export interface SyndicateDisplay {
   name: string;
   strategy: string;
   tvl: string;
+  tvlRaw: number;
+  assetSymbol: string;
   agentCount: number;
   agents: AgentDisplay[];
   proposalCount: number;
   status: "ACTIVE_STRATEGY" | "VOTING" | "IDLE" | "NO_AGENTS";
   chainId: number;
+  /** Cumulative net flow direction. +1 deposits-positive, -1 withdrawals-dominant, 0 unknown. */
+  flowTrend?: -1 | 0 | 1;
+  /** Days since the syndicate was created. Used for the "NEW" badge. */
+  ageDays?: number;
+  /** 7-day TVL series for the leaderboard sparkline (see fetchEquityCurve). */
+  equityCurve?: number[];
+}
+
+/**
+ * Honest rank-supplemental signals from cheap subgraph fields.
+ * Kept lightweight on purpose — a real per-syndicate equity series would
+ * require N extra queries per leaderboard load.
+ */
+function computeFlowTrend(deposits: string, withdrawals: string): -1 | 0 | 1 {
+  try {
+    const d = BigInt(deposits || "0");
+    const w = BigInt(withdrawals || "0");
+    if (d === 0n && w === 0n) return 0;
+    if (w === 0n) return 1;
+    // Trend up if deposits > 1.1x withdrawals, down if reversed
+    if (d * 10n > w * 11n) return 1;
+    if (w * 10n > d * 11n) return -1;
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
+function computeAgeDays(createdAt: string): number {
+  try {
+    const ts = Number(createdAt);
+    if (!ts) return 0;
+    return Math.max(0, Math.floor((Date.now() / 1000 - ts) / 86400));
+  } catch {
+    return 0;
+  }
+}
+
+/** Compute aggregate protocol stats from a list of syndicates. */
+export function computeProtocolStats(syndicates: SyndicateDisplay[]) {
+  const totalAgents = syndicates.reduce((sum, s) => sum + s.agentCount, 0);
+  const totalProposals = syndicates.reduce((sum, s) => sum + s.proposalCount, 0);
+  // Sum TVL — only USD-denominated assets (USDC/USDT) for now
+  const totalTVL = syndicates.reduce((sum, s) => {
+    if (s.assetSymbol === "USDC" || s.assetSymbol === "USDT") return sum + s.tvlRaw;
+    return sum;
+  }, 0);
+  const fractionDigits = totalTVL < 1000 ? 2 : 0;
+  const totalTVLFormatted = totalTVL.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  });
+  return {
+    syndicateCount: syndicates.length,
+    totalAgents,
+    totalProposals,
+    totalTVL: totalTVLFormatted,
+  };
 }
 
 // ── Subgraph ───────────────────────────────────────────────
@@ -99,12 +165,20 @@ const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
  * To detect Pending/Approved (voting) proposals we also scan recent proposals
  * via `proposalCount()` + `getProposal(id)`.
  */
+interface ProposalStatusResult {
+  statuses: Map<string, "VOTING" | "ACTIVE_STRATEGY">;
+  /** vault address (lowercase) → capital-snapshot bigint for vaults with an
+   *  executing proposal. Used to render TVL that INCLUDES deployed capital. */
+  capitalSnapshots: Map<string, bigint>;
+}
+
 async function resolveProposalStatuses(
   chainId: number,
   vaults: Address[],
-): Promise<Map<string, "VOTING" | "ACTIVE_STRATEGY">> {
+): Promise<ProposalStatusResult> {
   const statusMap = new Map<string, "VOTING" | "ACTIVE_STRATEGY">();
-  if (vaults.length === 0) return statusMap;
+  const capitalSnapshots = new Map<string, bigint>();
+  if (vaults.length === 0) return { statuses: statusMap, capitalSnapshots };
 
   const client = getPublicClient(chainId);
 
@@ -124,7 +198,7 @@ async function resolveProposalStatuses(
       govVaults.push({ vault: vaults[i], governor: r.result as Address });
     }
   }
-  if (govVaults.length === 0) return statusMap;
+  if (govVaults.length === 0) return { statuses: statusMap, capitalSnapshots };
 
   // 2. Get active proposal ID for each vault + proposalCount from governor
   //    (all vaults share the same governor, so we only need proposalCount once)
@@ -148,14 +222,39 @@ async function resolveProposalStatuses(
 
   const proposalCount = Number(countResult);
 
-  // Mark vaults with an executed active proposal
+  // Mark vaults with an executed active proposal + collect proposal IDs so
+  // we can batch-read their capitalSnapshots in the next multicall.
   const vaultSet = new Set(govVaults.map((gv) => gv.vault.toLowerCase()));
+  const activeByVault: { vault: Address; proposalId: bigint }[] = [];
   for (let i = 0; i < govVaults.length; i++) {
     const r = activeResults[i];
     if (r.status === "success") {
       const pid = r.result as bigint;
       if (pid > 0n) {
         statusMap.set(govVaults[i].vault.toLowerCase(), "ACTIVE_STRATEGY");
+        activeByVault.push({ vault: govVaults[i].vault, proposalId: pid });
+      }
+    }
+  }
+
+  // Batch read capitalSnapshot for every active proposal so leaderboard TVL
+  // reflects capital that's out in strategies, not just the vault balance.
+  if (activeByVault.length > 0) {
+    const snapshotResults = await client.multicall({
+      contracts: activeByVault.map((av) => ({
+        address: governorAddress,
+        abi: SYNDICATE_GOVERNOR_ABI,
+        functionName: "getCapitalSnapshot" as const,
+        args: [av.proposalId] as const,
+      })),
+    });
+    for (let i = 0; i < activeByVault.length; i++) {
+      const r = snapshotResults[i];
+      if (r.status === "success") {
+        capitalSnapshots.set(
+          activeByVault[i].vault.toLowerCase(),
+          r.result as bigint,
+        );
       }
     }
   }
@@ -200,7 +299,7 @@ async function resolveProposalStatuses(
     }
   }
 
-  return statusMap;
+  return { statuses: statusMap, capitalSnapshots };
 }
 
 // ── Per-chain fetchers ────────────────────────────────────
@@ -294,7 +393,8 @@ async function fetchViaSubgraph(
 
   // Resolve proposal-aware statuses for all vaults
   const vaultAddresses = data.syndicates.map((s) => s.vault as Address);
-  const proposalStatuses = await resolveProposalStatuses(chainId, vaultAddresses);
+  const { statuses: proposalStatuses, capitalSnapshots } =
+    await resolveProposalStatuses(chainId, vaultAddresses);
 
   // Resolve ERC-8004 identities for all agents across syndicates
   const allAgents = data.syndicates.flatMap((s) => s.agents || []);
@@ -316,14 +416,31 @@ async function fetchViaSubgraph(
 
   return Promise.all(
     data.syndicates.map(async (s, i) => {
-      const metadata = await fetchMetadata(s.metadataURI);
-
-      const totalAssets = (vaultResults[i * 2]?.result as bigint) ?? 0n;
+      const rawTotalAssets = (vaultResults[i * 2]?.result as bigint) ?? 0n;
       const assetAddr = (vaultResults[i * 2 + 1]?.result as Address) ?? "";
       const info = assetInfo[assetAddr.toLowerCase()] ?? {
         decimals: 18,
         symbol: "ETH",
       };
+
+      // TVL / equity-curve snapshot uses the same bias as above (prefer
+      // the proposal's capitalSnapshot when the vault is mid-strategy).
+      const snapshotPeek = capitalSnapshots.get(s.vault.toLowerCase());
+      const totalAssetsForCurve =
+        snapshotPeek && snapshotPeek > rawTotalAssets
+          ? snapshotPeek
+          : rawTotalAssets;
+
+      const [metadata, equityCurve] = await Promise.all([
+        fetchMetadata(s.metadataURI),
+        fetchEquityCurve(
+          subgraphUrl,
+          s.id,
+          info.decimals,
+          totalAssetsForCurve,
+        ),
+      ]);
+
       const agentCount = s.agents?.length || 0;
 
       const strategy =
@@ -335,6 +452,11 @@ async function fetchViaSubgraph(
       if (agentCount > 0) {
         status = proposalStatuses.get(s.vault.toLowerCase()) ?? "IDLE";
       }
+
+      // During an active strategy the vault's totalAssets is drained (capital
+      // sits in the strategy contract). Fall back to the proposal's
+      // capitalSnapshot so the leaderboard TVL reflects full AUM.
+      const totalAssets = totalAssetsForCurve;
 
       const tvlFormatted = formatAsset(
         totalAssets,
@@ -361,8 +483,13 @@ async function fetchViaSubgraph(
         name: metadata?.name || `Syndicate #${s.id}`,
         strategy,
         tvl: `${tvlFormatted} ${info.symbol}`,
+        tvlRaw: parseFloat(formatUnits(totalAssets, info.decimals)),
+        assetSymbol: info.symbol,
         agentCount,
         proposalCount: (s.proposals || []).length,
+        flowTrend: computeFlowTrend(s.totalDeposits, s.totalWithdrawals),
+        ageDays: computeAgeDays(s.createdAt),
+        equityCurve,
         agents: (s.agents || []).map((a) => {
           const stats = agentPnl[a.agentAddress.toLowerCase()] ?? { count: 0, pnl: 0n };
           const pnlAbs = stats.pnl < 0n ? -stats.pnl : stats.pnl;
@@ -375,7 +502,7 @@ async function fetchViaSubgraph(
             agentName: identityMap[a.agentId],
             proposalCount: stats.count,
             totalPnl: stats.count > 0 ? pnlDisplay : "—",
-            totalPnlRaw: Number(stats.pnl) / 10 ** info.decimals,
+            totalPnlRaw: parseFloat(formatUnits(stats.pnl < 0n ? -stats.pnl : stats.pnl, info.decimals)) * (stats.pnl < 0n ? -1 : 1),
           };
         }),
         status,
@@ -546,12 +673,13 @@ async function fetchViaOnChain(
 
   // Resolve proposal-aware statuses for all vaults
   const vaultAddresses = rawSyndicates.map((s) => s.vault);
-  const proposalStatuses = await resolveProposalStatuses(chainId, vaultAddresses);
+  const { statuses: proposalStatuses, capitalSnapshots } =
+    await resolveProposalStatuses(chainId, vaultAddresses);
 
   // Build display objects
   return Promise.all(
     rawSyndicates.map(async (s, i) => {
-      const totalAssets = (vaultResults[i * 4]?.result as bigint) ?? 0n;
+      const rawTotalAssets = (vaultResults[i * 4]?.result as bigint) ?? 0n;
       const agentCount = Number(
         (vaultResults[i * 4 + 1]?.result as bigint) ?? 0n,
       );
@@ -573,6 +701,11 @@ async function fetchViaOnChain(
         status = proposalStatuses.get(s.vault.toLowerCase()) ?? "IDLE";
       }
 
+      // Include deployed capital in TVL when the strategy is active.
+      const snapshot = capitalSnapshots.get(s.vault.toLowerCase());
+      const totalAssets =
+        snapshot && snapshot > rawTotalAssets ? snapshot : rawTotalAssets;
+
       const tvlFormatted = formatAsset(
         totalAssets,
         info.decimals,
@@ -586,8 +719,15 @@ async function fetchViaOnChain(
         name: metadata?.name || `Syndicate #${s.id.toString()}`,
         strategy,
         tvl: `${tvlFormatted} ${info.symbol}`,
+        tvlRaw: parseFloat(formatUnits(totalAssets, info.decimals)),
+        assetSymbol: info.symbol,
         agentCount,
         proposalCount: 0, // not available without extra calls in onchain fallback
+        // equityCurve intentionally omitted: it's reconstructed from
+        // subgraph event history in fetchViaSubgraph, and this code path
+        // runs only when that subgraph is unreachable. Rows coming from
+        // this fallback render "—" in the Trend (7D) column, which is
+        // the correct graceful degradation.
         agents: agentsByVault[s.vault.toLowerCase()] ?? [],
         status,
         chainId,

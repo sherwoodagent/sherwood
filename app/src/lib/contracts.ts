@@ -8,6 +8,7 @@
 import {
   createPublicClient,
   defineChain,
+  formatUnits,
   http,
   type Address,
   type Chain,
@@ -40,6 +41,29 @@ export const robinhoodTestnet = defineChain({
   testnet: true,
 });
 
+// ── HyperEVM chain definition ────────────────────────────
+
+export const hyperevm = defineChain({
+  id: 999,
+  name: "HyperEVM",
+  nativeCurrency: { name: "Ethereum", symbol: "ETH", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.hyperliquid.xyz/evm"] },
+  },
+  blockExplorers: {
+    default: {
+      name: "Routescan",
+      url: "https://hyperevmscan.io",
+    },
+  },
+  contracts: {
+    multicall3: {
+      address: "0xcA11bde05977b3631167028862bE2a173976CA11",
+    },
+  },
+  testnet: false,
+});
+
 // ── Per-chain RPC ────────────────────────────────────────
 
 const RPC_CONFIG: Record<number, { envSuffix: string; fallback: string }> = {
@@ -48,6 +72,10 @@ const RPC_CONFIG: Record<number, { envSuffix: string; fallback: string }> = {
   46630: {
     envSuffix: "ROBINHOOD_TESTNET",
     fallback: "https://rpc.testnet.chain.robinhood.com",
+  },
+  999: {
+    envSuffix: "HYPEREVM",
+    fallback: "https://rpc.hyperliquid.xyz/evm",
   },
 };
 
@@ -68,6 +96,7 @@ export interface ChainAddresses {
   identityRegistry: Address;
   eas: Address;
   schemaRegistry: Address;
+  quoterV2: Address;
   easSchemas: {
     joinRequest: `0x${string}`;
     agentApproved: `0x${string}`;
@@ -88,6 +117,7 @@ const BASE_ADDRESSES: ChainAddresses = {
   usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   l2Registry: "0x7a019ce699e27b0ad1e5b51344a58116b9f3b9b1",
   identityRegistry: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+  quoterV2: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
   eas: "0x4200000000000000000000000000000000000021",
   schemaRegistry: "0x4200000000000000000000000000000000000020",
   easSchemas: {
@@ -111,6 +141,7 @@ const BASE_SEPOLIA_ADDRESSES: ChainAddresses = {
   usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
   l2Registry: "0x06eb7b85b59bc3e50fe4837be776cdd26de602cf",
   identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+  quoterV2: "0xC5290058841028F1614F3A6F0F5816cAd0df5E27",
   eas: "0x4200000000000000000000000000000000000021",
   schemaRegistry: "0x4200000000000000000000000000000000000020",
   easSchemas: {
@@ -130,10 +161,11 @@ const BASE_SEPOLIA_ADDRESSES: ChainAddresses = {
 };
 
 const ROBINHOOD_TESTNET_ADDRESSES: ChainAddresses = {
-  factory: "0xd5C4eE2E4c5B606b9401E69A3B3FeE169037C284",
+  factory: "0x6d026e2f5Ff0C34A01690EC46Cb601B8fF391985",
   usdc: ZERO,
   l2Registry: ZERO,
   identityRegistry: ZERO,
+  quoterV2: ZERO,
   eas: ZERO,
   schemaRegistry: ZERO,
   easSchemas: {
@@ -144,6 +176,25 @@ const ROBINHOOD_TESTNET_ADDRESSES: ChainAddresses = {
     x402Research: ZERO_BYTES32,
   },
   blockExplorer: "https://explorer.testnet.chain.robinhood.com",
+  easExplorer: "",
+};
+
+const HYPEREVM_ADDRESSES: ChainAddresses = {
+  factory: "0x4085EEa1E6d3D20E84D8Ae14964FAb8b899DA40a",
+  usdc: "0xb88339CB7199b77E23DB6E890353E22632Ba630f",
+  l2Registry: ZERO,
+  identityRegistry: ZERO,
+  quoterV2: ZERO,
+  eas: ZERO,
+  schemaRegistry: ZERO,
+  easSchemas: {
+    joinRequest: ZERO_BYTES32,
+    agentApproved: ZERO_BYTES32,
+    veniceInference: ZERO_BYTES32,
+    tradeExecuted: ZERO_BYTES32,
+    x402Research: ZERO_BYTES32,
+  },
+  blockExplorer: "https://hyperevmscan.io",
   easExplorer: "",
 };
 
@@ -172,6 +223,11 @@ const _ALL_CHAINS: Record<number, ChainEntry> = {
     addresses: BASE_ADDRESSES,
     subgraphUrl:
       "https://api.studio.thegraph.com/query/18207/sherwood/version/latest",
+  },
+  999: {
+    chain: hyperevm,
+    addresses: HYPEREVM_ADDRESSES,
+    subgraphUrl: null,
   },
 };
 
@@ -324,6 +380,27 @@ export const SYNDICATE_VAULT_ABI = [
     outputs: [{ name: "assets", type: "uint256" }],
   },
   {
+    name: "previewDeposit",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "assets", type: "uint256" }],
+    outputs: [{ name: "shares", type: "uint256" }],
+  },
+  {
+    name: "previewRedeem",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "shares", type: "uint256" }],
+    outputs: [{ name: "assets", type: "uint256" }],
+  },
+  {
+    name: "maxRedeem",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "maxShares", type: "uint256" }],
+  },
+  {
     name: "redeem",
     type: "function",
     stateMutability: "nonpayable",
@@ -435,6 +512,29 @@ export const SYNDICATE_VAULT_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "bool" }],
+  },
+  // Standard ERC-4626 events — used by the activity-feed event-log fallback
+  // when subgraph is unavailable.
+  {
+    type: "event",
+    name: "Deposit",
+    inputs: [
+      { name: "sender", type: "address", indexed: true },
+      { name: "owner", type: "address", indexed: true },
+      { name: "assets", type: "uint256", indexed: false },
+      { name: "shares", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "Withdraw",
+    inputs: [
+      { name: "sender", type: "address", indexed: true },
+      { name: "receiver", type: "address", indexed: true },
+      { name: "owner", type: "address", indexed: true },
+      { name: "assets", type: "uint256", indexed: false },
+      { name: "shares", type: "uint256", indexed: false },
+    ],
   },
 ] as const;
 
@@ -578,6 +678,187 @@ export const SYNDICATE_GOVERNOR_ABI = [
     inputs: [{ name: "vault", type: "address" }],
     outputs: [{ name: "", type: "bool" }],
   },
+  {
+    name: "getExecuteCalls",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "proposalId", type: "uint256" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "data", type: "bytes" },
+          { name: "value", type: "uint256" },
+        ],
+      },
+    ],
+  },
+  // Parameter-change reads (timelock surface).
+  // Function name + return tuple match GovernorParameters.sol exactly:
+  // returns PendingChange { newValue, effectiveAt, exists }.
+  {
+    name: "getPendingChange",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "paramKey", type: "bytes32" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "newValue", type: "uint256" },
+          { name: "effectiveAt", type: "uint256" },
+          { name: "exists", type: "bool" },
+        ],
+      },
+    ],
+  },
+  // Events
+  {
+    type: "event",
+    name: "VoteCast",
+    inputs: [
+      { name: "proposalId", type: "uint256", indexed: true },
+      { name: "voter", type: "address", indexed: true },
+      { name: "support", type: "uint8", indexed: false },
+      { name: "weight", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ParameterChangeQueued",
+    inputs: [
+      { name: "paramKey", type: "bytes32", indexed: true },
+      { name: "newValue", type: "uint256", indexed: false },
+      { name: "effectiveAt", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ParameterChangeFinalized",
+    inputs: [
+      { name: "paramKey", type: "bytes32", indexed: true },
+      { name: "oldValue", type: "uint256", indexed: false },
+      { name: "newValue", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "ParameterChangeCancelled",
+    inputs: [
+      { name: "paramKey", type: "bytes32", indexed: true },
+    ],
+  },
+] as const;
+
+// Minimal IStrategy surface — covers every clonable template (Moonwell,
+// Aerodrome, Venice, wstETH, Mamo, Portfolio). `positionValue()` was added
+// in PR #218 and shipped on every template in the #221 redeploy; strategies
+// cloned before that PR will revert on the call, which is why every reader
+// of it wraps in try/catch or ignores `valid === false`.
+export const ISTRATEGY_ABI = [
+  {
+    name: "positionValue",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "value", type: "uint256" },
+      { name: "valid", type: "bool" },
+    ],
+  },
+  {
+    name: "name",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+] as const;
+
+export const PORTFOLIO_STRATEGY_ABI = [
+  {
+    name: "name",
+    type: "function",
+    stateMutability: "pure",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    name: "getAllocations",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "token", type: "address" },
+          { name: "targetWeightBps", type: "uint256" },
+          { name: "tokenAmount", type: "uint256" },
+          { name: "investedAmount", type: "uint256" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "totalAmount",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "asset",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "maxSlippageBps",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "getSwapExtraData",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes[]" }],
+  },
+] as const;
+
+export const UNISWAP_QUOTER_V2_ABI = [
+  {
+    name: "quoteExactInputSingle",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        name: "params",
+        type: "tuple",
+        components: [
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "fee", type: "uint24" },
+          { name: "sqrtPriceLimitX96", type: "uint160" },
+        ],
+      },
+    ],
+    outputs: [
+      { name: "amountOut", type: "uint256" },
+      { name: "sqrtPriceX96After", type: "uint160" },
+      { name: "initializedTicksCrossed", type: "uint32" },
+      { name: "gasEstimate", type: "uint256" },
+    ],
+  },
 ] as const;
 
 export const ERC20_ABI = [
@@ -667,13 +948,14 @@ export function formatUSDC(raw: bigint): string {
   return formatAsset(raw, 6, "USD");
 }
 
-/** Format a raw uint256 token amount with the given decimals. */
+/** Format a raw uint256 token amount with the given decimals.
+ *  Uses viem's formatUnits for precision-safe bigint → string (avoids Number overflow >2^53). */
 export function formatAsset(
   raw: bigint,
   decimals: number,
   currency?: string,
 ): string {
-  const num = Number(raw) / 10 ** decimals;
+  const num = parseFloat(formatUnits(raw, decimals));
   if (currency === "USD") {
     return num.toLocaleString("en-US", {
       style: "currency",
@@ -691,15 +973,42 @@ export function formatAsset(
   });
 }
 
+/** Format a large number with K/M/B suffixes for compact display. */
+export function formatCompact(raw: bigint, decimals: number, currency?: string): string {
+  const num = parseFloat(formatUnits(raw, decimals));
+  const abs = Math.abs(num);
+  const sign = num < 0 ? "-" : "";
+  const prefix = currency === "USD" ? "$" : "";
+  const suffix = currency && currency !== "USD" ? ` ${currency}` : "";
+  let body: string;
+  if (abs >= 1_000_000_000) body = `${(abs / 1_000_000_000).toFixed(2)}B`;
+  else if (abs >= 1_000_000) body = `${(abs / 1_000_000).toFixed(2)}M`;
+  else if (abs >= 10_000) body = `${(abs / 1_000).toFixed(1)}K`;
+  else body = abs.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return `${sign}${prefix}${body}${suffix}`;
+}
+
 /** Format basis points to percentage string. */
 export function formatBps(bps: bigint): string {
   return `${(Number(bps) / 100).toFixed(1)}%`;
 }
 
-/** Format vault shares to a readable number.
- *  Shares have assetDecimals * 2 decimals due to _decimalsOffset() (12 for USDC). */
+/** Decimals of vault shares for an asset.
+ *
+ *  ERC-4626 with `_decimalsOffset() = asset.decimals()` (the convention this
+ *  protocol uses for inflation protection) means shares carry double the
+ *  asset's decimals — 12 for USDC's 6 decimals, 36 for WETH's 18.
+ *
+ *  Centralizing this avoids the `assetDecimals * 2` magic that callers were
+ *  open-coding everywhere. If the offset convention ever changes we update
+ *  one function instead of grepping the codebase. */
+export function shareDecimals(assetDecimals: number): number {
+  return assetDecimals * 2;
+}
+
+/** Format vault shares to a readable number. */
 export function formatShares(raw: bigint, decimals: number = 12): string {
-  const num = Number(raw) / 10 ** decimals;
+  const num = parseFloat(formatUnits(raw, decimals));
   return num.toLocaleString("en-US", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
@@ -715,4 +1024,5 @@ export const CHAIN_BADGES: Record<
   8453: { label: "BASE", bg: "rgba(59,130,246,0.2)", color: "#3b82f6" },
   84532: { label: "BASE SEPOLIA", bg: "rgba(59,130,246,0.2)", color: "#3b82f6" },
   46630: { label: "ROBINHOOD TESTNET", bg: "rgba(234,179,8,0.2)", color: "#eab308" },
+  999: { label: "HYPEREVM", bg: "rgba(46,230,166,0.2)", color: "#2EE6A6" },
 };

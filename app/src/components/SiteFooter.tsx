@@ -48,21 +48,38 @@ function GitHubIcon() {
 
 export default function SiteFooter() {
   return (
-    <footer className="border-t border-[rgba(255,255,255,0.08)] mt-24 font-[family-name:var(--font-plus-jakarta)]">
+    <footer className="border-t border-[rgba(255,255,255,0.08)] mt-24 font-[family-name:var(--font-plus-jakarta)] relative overflow-hidden">
+      {/* Status rail at the very top of the footer */}
+      <div className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[rgba(255,255,255,0.6)] border-b border-[rgba(255,255,255,0.06)]">
+        <div className="max-w-[1400px] mx-auto px-8 md:px-16 py-3 flex flex-wrap items-center justify-between gap-3">
+          <span className="flex items-center gap-2">
+            <span className="w-[6px] h-[6px] rounded-full bg-[var(--color-accent)]" style={{ boxShadow: "0 0 8px var(--color-accent)" }} />
+            {"// System Online"}
+          </span>
+          <span className="text-[rgba(255,255,255,0.55)]">
+            Base · HyperEVM
+          </span>
+          <span className="text-[rgba(255,255,255,0.55)]">
+            v0.2 · {new Date().getUTCFullYear()}
+          </span>
+        </div>
+      </div>
+
       <div className="max-w-[1400px] mx-auto px-8 md:px-16 py-16">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 md:gap-8">
           {/* Logo + tagline */}
           <div className="space-y-4">
             <LogoWordmark height={24} />
             <p className="text-sm text-[var(--color-fg-secondary)] leading-relaxed max-w-[260px]">
-              The operating system for agent-managed funds on Base & Robinhood.
+              The operating system for agent-managed funds on Base &amp; HyperEVM.
             </p>
             <div className="flex gap-3 pt-2">
               <a
                 href="https://x.com/sherwoodagent"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-9 h-9 rounded-full border border-[rgba(255,255,255,0.12)] flex items-center justify-center text-[var(--color-fg-secondary)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-colors"
+                aria-label="X / Twitter"
+                className="w-9 h-9 border border-[rgba(255,255,255,0.12)] flex items-center justify-center text-[var(--color-fg-secondary)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-colors"
               >
                 <XIcon />
               </a>
@@ -70,7 +87,8 @@ export default function SiteFooter() {
                 href="https://github.com/imthatcarlos/sherwood"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-9 h-9 rounded-full border border-[rgba(255,255,255,0.12)] flex items-center justify-center text-[var(--color-fg-secondary)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-colors"
+                aria-label="GitHub"
+                className="w-9 h-9 border border-[rgba(255,255,255,0.12)] flex items-center justify-center text-[var(--color-fg-secondary)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-colors"
               >
                 <GitHubIcon />
               </a>
@@ -78,10 +96,11 @@ export default function SiteFooter() {
           </div>
 
           {/* Link columns */}
-          {Object.entries(FOOTER_LINKS).map(([heading, links]) => (
+          {Object.entries(FOOTER_LINKS).map(([heading, links], colIdx) => (
             <div key={heading}>
-              <h4 className="text-xs uppercase tracking-[0.1em] text-[var(--color-fg-secondary)] mb-4 font-semibold">
-                {heading}
+              <h4 className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[var(--color-accent)] mb-5 font-medium flex items-baseline gap-2">
+                <span className="opacity-55">{String(colIdx + 1).padStart(2, "0")}</span>
+                <span>{heading}</span>
               </h4>
               <ul className="space-y-3">
                 {links.map((link) => (
@@ -103,11 +122,11 @@ export default function SiteFooter() {
 
         {/* Bottom bar */}
         <div className="border-t border-[rgba(255,255,255,0.06)] mt-12 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-xs text-[rgba(255,255,255,0.3)]">
-            &copy; {new Date().getFullYear()} Sherwood Protocol. All rights reserved.
+          <p className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[rgba(255,255,255,0.55)]">
+            © {new Date().getFullYear()} Sherwood Protocol
           </p>
-          <p className="text-xs text-[rgba(255,255,255,0.25)]">
-            Unaudited software. Not financial advice. Use at your own risk.
+          <p className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[rgba(255,255,255,0.55)]">
+            Unaudited · Not financial advice · Use at your own risk
           </p>
         </div>
       </div>

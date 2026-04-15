@@ -34,13 +34,18 @@ interface IAeroRouter {
  *   Settle:  redeem mwstETH → swap wstETH to WETH (Aerodrome stable pool) → push to vault
  *
  *   Batch calls from governor:
- *     Execute: [WETH.approve(strategy, supplyAmount), strategy.execute()]
+ *     Execute: [WETH.approve(strategy, amount), strategy.execute(), WETH.approve(strategy, 0)]
  *     Settle:  [strategy.settle()]
  *
- *   Tunable params (updatable by proposer between execution and settlement):
- *     - minWethOut: minimum WETH to accept on final settle swap (slippage)
- *     - minWstethOut: minimum wstETH to accept on execute swap (slippage)
- *     - deadlineOffset: seconds added to block.timestamp for swap deadlines
+ *   Slippage is expressed as *per-unit rates* (scaled by 1e18) so it works
+ *   for both fixed and dynamic-all mode:
+ *     - minWstethOutPerWeth:  min wstETH received per 1e18 WETH swapped (execute)
+ *     - minWethOutPerWsteth:  min WETH received per 1e18 wstETH swapped (settle)
+ *     minOut at swap time = (amountIn * rate) / 1e18
+ *
+ *   Tunable params (updatable by proposer):
+ *     - minWstethOutPerWeth, minWethOutPerWsteth, deadlineOffset
+ *     - supplyAmount: fixed WETH amount, or 0 to use the vault's full WETH balance at execute time
  */
 contract WstETHMoonwellStrategy is BaseStrategy {
     using SafeERC20 for IERC20;
@@ -60,8 +65,8 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         address aeroRouter;
         address aeroFactory;
         uint256 supplyAmount;
-        uint256 minWstethOut; // slippage: min wstETH from WETH→wstETH swap (execute)
-        uint256 minWethOut; // slippage: min WETH from wstETH→WETH swap (settle)
+        uint256 minWstethOutPerWeth; // rate (1e18): min wstETH per 1e18 WETH (execute swap)
+        uint256 minWethOutPerWsteth; // rate (1e18): min WETH per 1e18 wstETH (settle swap)
         uint256 deadlineOffset; // seconds added to block.timestamp for swap deadlines
     }
 
@@ -73,8 +78,8 @@ contract WstETHMoonwellStrategy is BaseStrategy {
     address public aeroFactory;
 
     uint256 public supplyAmount;
-    uint256 public minWstethOut;
-    uint256 public minWethOut;
+    uint256 public minWstethOutPerWeth;
+    uint256 public minWethOutPerWsteth;
     uint256 public deadlineOffset;
 
     /// @inheritdoc IStrategy
@@ -88,8 +93,7 @@ contract WstETHMoonwellStrategy is BaseStrategy {
 
         if (p.weth == address(0) || p.wsteth == address(0) || p.mwsteth == address(0)) revert ZeroAddress();
         if (p.aeroRouter == address(0) || p.aeroFactory == address(0)) revert ZeroAddress();
-        if (p.supplyAmount == 0) revert InvalidAmount();
-        if (p.minWstethOut == 0 || p.minWethOut == 0) revert InvalidAmount();
+        if (p.minWstethOutPerWeth == 0 || p.minWethOutPerWsteth == 0) revert InvalidAmount();
 
         weth = p.weth;
         wsteth = p.wsteth;
@@ -97,24 +101,29 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         aeroRouter = p.aeroRouter;
         aeroFactory = p.aeroFactory;
         supplyAmount = p.supplyAmount;
-        minWstethOut = p.minWstethOut;
-        minWethOut = p.minWethOut;
+        minWstethOutPerWeth = p.minWstethOutPerWeth;
+        minWethOutPerWsteth = p.minWethOutPerWsteth;
         deadlineOffset = p.deadlineOffset == 0 ? 300 : p.deadlineOffset;
     }
 
     /// @notice Pull WETH → swap to wstETH → supply to Moonwell
     function _execute() internal override {
+        uint256 amountIn = supplyAmount == 0 ? IERC20(weth).balanceOf(vault()) : supplyAmount;
+        if (amountIn == 0) revert InvalidAmount();
+
         // 1. Pull WETH from vault
-        _pullFromVault(weth, supplyAmount);
+        _pullFromVault(weth, amountIn);
 
         // 2. Swap WETH → wstETH via Aerodrome stable pool
-        IERC20(weth).forceApprove(aeroRouter, supplyAmount);
+        //    minOut scales with actual amountIn — safe for dynamic-all mode.
+        uint256 minWstethOut = (amountIn * minWstethOutPerWeth) / 1e18;
+        if (minWstethOut == 0) revert InvalidAmount();
+
+        IERC20(weth).forceApprove(aeroRouter, amountIn);
         IAeroRouter.Route[] memory routes = new IAeroRouter.Route[](1);
         routes[0] = IAeroRouter.Route({from: weth, to: wsteth, stable: true, factory: aeroFactory});
         uint256[] memory amounts = IAeroRouter(aeroRouter)
-            .swapExactTokensForTokens(
-                supplyAmount, minWstethOut, routes, address(this), block.timestamp + deadlineOffset
-            );
+            .swapExactTokensForTokens(amountIn, minWstethOut, routes, address(this), block.timestamp + deadlineOffset);
         uint256 wstethReceived = amounts[amounts.length - 1];
         if (wstethReceived == 0) revert SwapFailed();
 
@@ -138,8 +147,12 @@ contract WstETHMoonwellStrategy is BaseStrategy {
         }
 
         // 2. Swap wstETH → WETH via Aerodrome stable pool
+        //    minOut scales with actual wstETH balance — handles yield-accrued amounts safely.
         uint256 wstethBalance = IERC20(wsteth).balanceOf(address(this));
         if (wstethBalance > 0) {
+            uint256 minWethOut = (wstethBalance * minWethOutPerWsteth) / 1e18;
+            if (minWethOut == 0) revert InvalidAmount();
+
             IERC20(wsteth).forceApprove(aeroRouter, wstethBalance);
             IAeroRouter.Route[] memory routes = new IAeroRouter.Route[](1);
             routes[0] = IAeroRouter.Route({from: wsteth, to: weth, stable: true, factory: aeroFactory});
@@ -149,9 +162,12 @@ contract WstETHMoonwellStrategy is BaseStrategy {
                 );
         }
 
-        // 3. Push all WETH back to vault
+        // 3. Push all WETH back to vault. The router already enforced per-swap
+        //    slippage, but guard against a zero-balance edge case where the
+        //    Moonwell redeem or Aero swap silently returned nothing — we must
+        //    not silently "settle" a proposal with no funds returned.
         uint256 wethBalance = IERC20(weth).balanceOf(address(this));
-        if (wethBalance < minWethOut) revert InvalidAmount();
+        if (wethBalance == 0) revert InvalidAmount();
         _pushAllToVault(weth);
 
         // Push any residual dust
@@ -162,7 +178,7 @@ contract WstETHMoonwellStrategy is BaseStrategy {
      * @notice Update slippage params — allowed in Pending OR Executed state.
      * @dev Overrides BaseStrategy to relax the state check. Proposer can fix
      *      slippage before execution (Pending) or between execute/settle (Executed).
-     *      Decode: (uint256 newMinWethOut, uint256 newMinWstethOut, uint256 newDeadlineOffset)
+     *      Decode: (uint256 newMinWethOutPerWsteth, uint256 newMinWstethOutPerWeth, uint256 newDeadlineOffset)
      *      Pass 0 to keep current value.
      */
     function updateParams(bytes calldata data) external override onlyProposer {
@@ -171,10 +187,21 @@ contract WstETHMoonwellStrategy is BaseStrategy {
     }
 
     function _updateParams(bytes calldata data) internal override {
-        (uint256 newMinWethOut, uint256 newMinWstethOut, uint256 newDeadlineOffset) =
+        (uint256 newMinWethOutPerWsteth, uint256 newMinWstethOutPerWeth, uint256 newDeadlineOffset) =
             abi.decode(data, (uint256, uint256, uint256));
-        if (newMinWethOut > 0) minWethOut = newMinWethOut;
-        if (newMinWstethOut > 0) minWstethOut = newMinWstethOut;
+        if (newMinWethOutPerWsteth > 0) minWethOutPerWsteth = newMinWethOutPerWsteth;
+        if (newMinWstethOutPerWeth > 0) minWstethOutPerWeth = newMinWstethOutPerWeth;
         if (newDeadlineOffset > 0) deadlineOffset = newDeadlineOffset;
     }
+
+    // ── positionValue ──
+    // Inherits BaseStrategy's (0, false) default. On Base mainnet the
+    // bridged Lido wstETH (ERC20Bridged via OssifiableProxy) does NOT
+    // expose stEthPerToken / tokensPerStEth / any rate view — an earlier
+    // impl here that called stEthPerToken reverted on the forked
+    // mainnet integration test. The correct fix is to read Chainlink's
+    // WSTETH/ETH feed (Base: 0x43a5C292A453A3bF3606fa856197f09D7B74251a),
+    // which requires threading a new oracle address through InitParams
+    // and all construction callers (CLI + scripts). Deferred to a
+    // focused follow-up; keeping this stub honest in the meantime.
 }

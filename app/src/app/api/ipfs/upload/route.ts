@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { makeRateLimit } from "@/lib/rate-limit";
 
 const MAX_PAYLOAD_BYTES = 1024 * 512; // 512 KB
 
+// Pinata is paid per-pin; tighter limit + namespace by default.
+const checkRateLimit = makeRateLimit({ windowMs: 60_000, max: 10 });
+
 export async function POST(req: NextRequest) {
+  if (!checkRateLimit(req)) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded — try again in a minute." },
+      { status: 429 },
+    );
+  }
+
   const jwt = process.env.PINATA_JWT;
   if (!jwt) {
     return NextResponse.json(
@@ -37,7 +48,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const pinataName = body.name || "sherwood-upload";
+  // Default name carries a timestamp to avoid duplicate-pin collisions when
+  // callers don't supply their own.
+  const pinataName = body.name || `sherwood-upload-${Date.now()}`;
 
   const response = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
     method: "POST",

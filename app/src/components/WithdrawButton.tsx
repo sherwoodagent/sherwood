@@ -13,6 +13,7 @@ interface WithdrawButtonProps {
   assetSymbol: string;
   redemptionsLocked: boolean;
   paused: boolean;
+  chainId: number;
 }
 
 export default function WithdrawButton({
@@ -22,6 +23,7 @@ export default function WithdrawButton({
   assetSymbol,
   redemptionsLocked,
   paused,
+  chainId,
 }: WithdrawButtonProps) {
   const { address, isConnected } = useAccount();
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -36,6 +38,30 @@ export default function WithdrawButton({
 
   if (!isConnected || !shareBalance || shareBalance === 0n) {
     return null;
+  }
+
+  // Pre-flight: surface lock/pause disabled state inline rather than letting
+  // users open the modal only to see a warning.
+  const blockedReason = paused
+    ? { label: "WITHDRAWALS PAUSED", detail: "Vault is temporarily paused" }
+    : redemptionsLocked
+      ? { label: "REDEMPTIONS LOCKED", detail: "Active strategy in progress" }
+      : null;
+
+  if (blockedReason) {
+    return (
+      <div className="btn-disabled-wrap">
+        <button
+          className="btn-action-secondary"
+          disabled
+          style={{ opacity: 0.4, cursor: "not-allowed" }}
+          title={blockedReason.detail}
+        >
+          [ {blockedReason.label} ]
+        </button>
+        <div className="btn-disabled-wrap__sub">{blockedReason.detail}</div>
+      </div>
+    );
   }
 
   return (
@@ -55,6 +81,7 @@ export default function WithdrawButton({
           assetDecimals={assetDecimals}
           assetSymbol={assetSymbol}
           shareBalance={shareBalance}
+          chainId={chainId}
           onClose={() => setShowWithdraw(false)}
         />
       )}

@@ -4,7 +4,7 @@
 
 export interface SimConfig {
   mnemonic: string; // from SIM_MNEMONIC env
-  chain: "base" | "base-sepolia" | "robinhood-testnet"; // from --chain or SIM_CHAIN
+  chain: "base" | "base-sepolia" | "robinhood-testnet" | "hyperevm" | "hyperevm-testnet"; // from --chain or SIM_CHAIN
   agentCount: number; // default 12
   syndicateCount: number; // default 5
   baseDir: string; // default /tmp/sherwood-sim/agents
@@ -18,6 +18,8 @@ export interface SimConfig {
   strategyDuration: string; // default "3h", from SIM_STRATEGY_DURATION
   concurrency: number; // max parallel agent ops per batch, from SIM_CONCURRENCY (default 4)
   compiled: boolean; // use dist/index.js instead of npx tsx src/index.ts (from SIM_COMPILED)
+  hasIdentityRegistry: boolean; // false on chains without ERC-8004 (Robinhood testnet)
+  hasEas: boolean; // false on chains without EAS (Robinhood testnet)
 }
 
 /** A single structured log entry written as a JSONL line. */

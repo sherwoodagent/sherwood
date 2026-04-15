@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
   useReadContract,
@@ -13,6 +15,14 @@ import {
   getAddresses,
   truncateAddress,
 } from "@/lib/contracts";
+import { useToast } from "@/components/ui/Toast";
+import { GasEstimate } from "@/components/ui/GasEstimate";
+import {
+  trackTxSubmitted,
+  trackTxConfirmed,
+  trackTxFailed,
+  classifyError,
+} from "@/lib/analytics";
 
 interface WithdrawModalProps {
   vault: Address;
@@ -22,6 +32,8 @@ interface WithdrawModalProps {
   assetDecimals: number;
   assetSymbol: string;
   shareBalance: bigint;
+  /** Chain the vault lives on — used to pick the right block explorer. */
+  chainId: number;
   onClose: () => void;
 }
 
@@ -35,10 +47,15 @@ export default function WithdrawModal({
   assetDecimals,
   assetSymbol,
   shareBalance,
+  chainId,
   onClose,
 }: WithdrawModalProps) {
   const { address } = useAccount();
-  const addresses = getAddresses();
+  // Use the vault's chain so explorer links resolve to the right scanner.
+  const addresses = getAddresses(chainId);
+  const toast = useToast();
+  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [amount, setAmount] = useState("");
   const [isMax, setIsMax] = useState(false);
@@ -85,8 +102,30 @@ export default function WithdrawModal({
   useEffect(() => {
     if (isWithdrawConfirmed && step === "withdrawing") {
       setStep("success");
+      if (withdrawHash) trackTxConfirmed("withdraw", vault, withdrawHash);
+      toast.success(
+        "Withdrawal confirmed",
+        `Your ${assetSymbol} is back in your wallet.`,
+      );
+      // Pull fresh onchain data so the share balance on the header,
+      // TVL, totalSupply, and convertToAssets preview all reflect the
+      // post-redeem state without a manual reload. Same scoping as
+      // DepositModal — only invalidate read/balance caches so we don't
+      // trigger a cache-wide refetch stampede.
+      router.refresh();
+      queryClient.invalidateQueries({ queryKey: ["readContract"] });
+      queryClient.invalidateQueries({ queryKey: ["balance"] });
     }
-  }, [isWithdrawConfirmed, step]);
+  }, [
+    isWithdrawConfirmed,
+    step,
+    toast,
+    assetSymbol,
+    withdrawHash,
+    vault,
+    router,
+    queryClient,
+  ]);
 
   function handleWithdraw() {
     if (!address) return;
@@ -102,10 +141,12 @@ export default function WithdrawModal({
           args: [shareBalance, address, address],
         },
         {
+          onSuccess: (hash) => trackTxSubmitted("withdraw", vault, hash),
           onError: (err) => {
             const msg = (err as { shortMessage?: string }).shortMessage || "Transaction was rejected or reverted.";
             setErrorMsg(msg);
             setStep("error");
+            trackTxFailed("withdraw", vault, classifyError(err));
           },
         },
       );
@@ -119,10 +160,12 @@ export default function WithdrawModal({
           args: [parsedAmount, address, address],
         },
         {
+          onSuccess: (hash) => trackTxSubmitted("withdraw", vault, hash),
           onError: (err) => {
             const msg = (err as { shortMessage?: string }).shortMessage || "Transaction was rejected or reverted.";
             setErrorMsg(msg);
             setStep("error");
+            trackTxFailed("withdraw", vault, classifyError(err));
           },
         },
       );
@@ -238,7 +281,7 @@ export default function WithdrawModal({
             <details
               style={{
                 fontSize: "10px",
-                color: "rgba(255,255,255,0.3)",
+                color: "rgba(255,255,255,0.55)",
                 maxHeight: "100px",
                 overflow: "auto",
                 wordBreak: "break-all",
@@ -329,7 +372,42 @@ export default function WithdrawModal({
                   ? "Withdrawing..."
                   : `Withdraw ${isMax ? "All" : truncateDisplay(amount) || "0"} ${assetSymbol}`}
               </button>
+
+              {/* Pre-flight gas estimate. */}
+              {(isMax || parsedAmount > 0n) && step === "input" && address && (
+                <GasEstimate
+                  address={vault}
+                  abi={SYNDICATE_VAULT_ABI}
+                  functionName={isMax ? "redeem" : "withdraw"}
+                  args={
+                    isMax
+                      ? [shareBalance, address, address]
+                      : [parsedAmount, address, address]
+                  }
+                  chainId={chainId}
+                />
+              )}
             </div>
+
+            {/* Pending tx link */}
+            {step === "withdrawing" && withdrawHash && (
+              <div style={{ marginTop: "0.75rem", textAlign: "center" }}>
+                <a
+                  href={`${addresses.blockExplorer}/tx/${withdrawHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "11px",
+                    letterSpacing: "0.1em",
+                    color: "var(--color-accent)",
+                    textDecoration: "underline",
+                  }}
+                >
+                  View pending transaction ↗
+                </a>
+              </div>
+            )}
           </>
         )}
       </div>

@@ -23,7 +23,7 @@ export default function SiteHeader() {
   }, []);
 
   return (
-    <header ref={headerRef} className="site-header font-[family-name:var(--font-plus-jakarta)]">
+    <header ref={headerRef} className="site-header font-[family-name:var(--font-jetbrains-mono)]">
       <Link
         href="/"
         className="no-underline flex items-center"
@@ -31,18 +31,18 @@ export default function SiteHeader() {
         <LogoWordmark height={28} className="hidden md:block" />
         <LogoMark height={32} className="block md:hidden" />
       </Link>
-      <nav className="flex items-center">
+      <nav className="flex items-center gap-1">
         {/* Desktop nav links */}
         <Link
           href="/#roadmap"
-          className="hidden md:inline-flex !bg-transparent !text-white/80 px-4 py-2 text-sm font-semibold no-underline hover:!border-white/40 hover:!text-white transition-all"
+          className="hidden md:inline-flex !bg-transparent !text-white/70 px-4 py-2 text-[11px] uppercase tracking-[0.22em] font-medium no-underline hover:!text-[var(--color-accent)] transition-colors"
         >
           Roadmap
         </Link>
         <Link
           href="https://docs.sherwood.sh"
           target="_blank"
-          className="hidden md:inline-flex !bg-transparent !text-white/80 px-4 py-2 text-sm font-semibold no-underline hover:!border-white/40 hover:!text-white transition-all"
+          className="hidden md:inline-flex !bg-transparent !text-white/70 px-4 py-2 text-[11px] uppercase tracking-[0.22em] font-medium no-underline hover:!text-[var(--color-accent)] transition-colors"
         >
           Docs
         </Link>
@@ -50,20 +50,21 @@ export default function SiteHeader() {
         {/* Syndicates button — always visible */}
         <Link
           href="/leaderboard"
-          className="!bg-[var(--color-accent)] !text-black px-4 py-2 text-sm font-semibold no-underline hover:!opacity-90 transition-opacity"
+          className="!bg-[var(--color-accent)] !text-black px-4 py-2 ml-2 text-[11px] uppercase tracking-[0.22em] font-semibold no-underline hover:!shadow-[0_0_24px_rgba(46,230,166,0.35)] transition-all"
         >
-          Syndicates
+          Syndicates →
         </Link>
 
-        {/* Mobile hamburger */}
+        {/* Mobile hamburger — 44×44 touch target */}
         <button
           onClick={() => setMenuOpen((prev) => !prev)}
-          className="md:hidden ml-3 p-2 text-white/80 hover:text-white transition-colors cursor-pointer"
+          className="md:hidden ml-2 flex items-center justify-center w-11 h-11 text-white/80 hover:text-white transition-colors cursor-pointer"
           aria-label="Toggle menu"
+          aria-expanded={menuOpen}
         >
           <svg
-            width="20"
-            height="20"
+            width="22"
+            height="22"
             viewBox="0 0 20 20"
             fill="none"
             stroke="currentColor"

@@ -13,7 +13,7 @@ import { agentHomeDir } from "../agent-home.js";
 import { execSherwoodAsync } from "../exec.js";
 import { runInPool } from "../pool.js";
 import { updateSyndicate } from "../state.js";
-import { PERSONAS } from "../personas.js";
+import { getPersona } from "../personas.js";
 import type { SimLogger } from "../logger.js";
 
 export async function runPhase08(config: SimConfig, state: SimState, logger?: SimLogger): Promise<void> {
@@ -53,7 +53,7 @@ export async function runPhase08(config: SimConfig, state: SimState, logger?: Si
 
       let voteCount = 0;
       await runInPool(voters, config.concurrency, async (voter) => {
-        const persona = PERSONAS.find((p) => p.index === voter.index);
+        const persona = getPersona(voter.index, config.chain);
 
         // Risk Sentinel votes AGAINST sometimes to add realism
         const isRiskSentinel = persona?.name === "Risk Sentinel";

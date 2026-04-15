@@ -39,11 +39,23 @@ export interface SherwoodConfig {
   positions?: unknown[];        // open trade positions (typed in positions.ts)
   closedPositions?: unknown[];  // historical closed positions
   _xmtpMigrated?: boolean;     // one-time flag: revoked stale installations from ~/.xmtp/ era
+  /** Cached swap routes per chain: chainId → { tokenPair → SwapRoute } */
+  swapRoutes?: Record<string, Record<string, SwapRoute>>;
+}
+
+/** Persisted swap route detected by the CLI during portfolio strategy proposal. */
+export interface SwapRoute {
+  mode: "direct" | "multi-hop";
+  feeTier: number;                  // direct pool fee tier
+  hop?: { via: string; feeIn: number; feeOut: number }; // multi-hop details
+  detectedAt: number;               // unix timestamp
 }
 
 export function loadConfig(): SherwoodConfig {
   if (fs.existsSync(CONFIG_PATH)) {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+    if (!config.groupCache) config.groupCache = {};
+    return config;
   }
 
   return { groupCache: {} };
@@ -63,6 +75,14 @@ export function cacheGroupId(subdomain: string, groupId: string): void {
 export function getCachedGroupId(subdomain: string): string | undefined {
   const config = loadConfig();
   return config.groupCache[subdomain];
+}
+
+export function invalidateCachedGroupId(subdomain: string): void {
+  const config = loadConfig();
+  if (config.groupCache[subdomain]) {
+    delete config.groupCache[subdomain];
+    saveConfig(config);
+  }
 }
 
 export function setVeniceApiKey(apiKey: string): void {
@@ -232,4 +252,33 @@ export function getPrimarySyndicate(
   }
 
   return undefined;
+}
+
+// ── Swap Route Cache ──
+
+function swapRouteKey(asset: string, token: string): string {
+  return `${asset.toLowerCase()}→${token.toLowerCase()}`;
+}
+
+/** Get a cached swap route for a token pair on a chain. */
+export function getCachedSwapRoute(chainId: number, asset: string, token: string): SwapRoute | undefined {
+  const config = loadConfig();
+  return config.swapRoutes?.[String(chainId)]?.[swapRouteKey(asset, token)];
+}
+
+/** Save a detected swap route to the config cache. */
+export function cacheSwapRoute(chainId: number, asset: string, token: string, route: SwapRoute): void {
+  const config = loadConfig();
+  const cid = String(chainId);
+  if (!config.swapRoutes) config.swapRoutes = {};
+  if (!config.swapRoutes[cid]) config.swapRoutes[cid] = {};
+  config.swapRoutes[cid][swapRouteKey(asset, token)] = route;
+  saveConfig(config);
+}
+
+/** Clear all cached swap routes for a chain (e.g. after pool migration). */
+export function clearSwapRoutes(chainId: number): void {
+  const config = loadConfig();
+  delete config.swapRoutes?.[String(chainId)];
+  saveConfig(config);
 }

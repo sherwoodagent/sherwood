@@ -500,6 +500,15 @@ contract SyndicateGovernorTest is Test {
         assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Cancelled));
     }
 
+    function test_cancelProposal_clearsActiveProposal() public {
+        uint256 proposalId = _createSimpleProposal(1500, 7 days);
+        vm.prank(agent);
+        governor.cancelProposal(proposalId);
+        assertEq(governor.getActiveProposal(address(vault)), 0, "activeProposal should be cleared after cancel");
+        // Vault should not be locked after cancellation
+        assertFalse(vault.redemptionsLocked(), "vault should not be locked after cancel");
+    }
+
     function test_cancelProposal_notProposer_reverts() public {
         uint256 proposalId = _createSimpleProposal(1500, 7 days);
         vm.prank(random);
@@ -512,6 +521,16 @@ contract SyndicateGovernorTest is Test {
         vm.prank(owner);
         governor.emergencyCancel(proposalId);
         assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Cancelled));
+    }
+
+    function test_emergencyCancel_clearsActiveProposal() public {
+        uint256 proposalId = _createApprovedProposal(1500, 7 days);
+        vm.prank(owner);
+        governor.emergencyCancel(proposalId);
+        assertEq(
+            governor.getActiveProposal(address(vault)), 0, "activeProposal should be cleared after emergencyCancel"
+        );
+        assertFalse(vault.redemptionsLocked(), "vault should not be locked after emergencyCancel");
     }
 
     function test_emergencyCancel_executedProposal_reverts() public {
@@ -528,6 +547,14 @@ contract SyndicateGovernorTest is Test {
         vm.prank(owner);
         governor.vetoProposal(proposalId);
         assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Rejected));
+    }
+
+    function test_vetoProposal_clearsActiveProposal() public {
+        uint256 proposalId = _createSimpleProposal(1500, 7 days);
+        vm.prank(owner);
+        governor.vetoProposal(proposalId);
+        assertEq(governor.getActiveProposal(address(vault)), 0, "activeProposal should be cleared after veto");
+        assertFalse(vault.redemptionsLocked(), "vault should not be locked after veto");
     }
 
     function test_vetoProposal_approved() public {

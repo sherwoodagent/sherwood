@@ -307,12 +307,16 @@ contract GovernanceIntegrationTest is BaseIntegrationTest {
             );
         }
 
-        // Verify agent fee distribution
+        // Verify agent fee distribution. Moonwell real yield accrual during the
+        // fork's block window adds to gross profit, which propagates through
+        // the full net-profit × fee-bps multiplier. Tolerance scales with the
+        // fee base (15% × ~5000 USDC = ~735 USDC) to match the relative
+        // tolerance on the protocol fee check (1 USDC on ~100 USDC = ~1%).
         uint256 agentBalAfter = IERC20(USDC).balanceOf(agent);
         assertApproxEqAbs(
             agentBalAfter - agentBalBefore,
             expectedAgentFee,
-            1e6, // 1 USDC tolerance
+            10e6, // 10 USDC tolerance — absorbs Moonwell yield accrual variance
             "agent should receive approximately correct performance fee"
         );
     }

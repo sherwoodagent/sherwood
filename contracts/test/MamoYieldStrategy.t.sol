@@ -162,6 +162,25 @@ contract MamoYieldStrategyTest is Test {
         MamoYieldStrategy(clone).initialize(vault, proposer, initData);
     }
 
+    // ==================== POSITION VALUE ====================
+    // Inherits BaseStrategy's (0, false) default — Mamo has no public
+    // balance getter upstream.
+
+    function test_positionValue_alwaysStubbed() public {
+        (uint256 value, bool valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+
+        vm.prank(vault);
+        usdc.approve(address(strategy), VAULT_BALANCE);
+        vm.prank(vault);
+        strategy.execute();
+
+        (value, valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+    }
+
     // ==================== EXECUTE ====================
 
     function test_execute() public {

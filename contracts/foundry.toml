@@ -19,7 +19,20 @@ bracket_spacing = false
 [lint]
 exclude_lints = ["screaming-snake-case-immutable", "mixed-case-variable"]
 
+# HyperEVM big blocks: users must enable via L1 action (scripts/enable-big-blocks.py)
+# The block.gasLimit reported by the RPC is the global limit (3M for small blocks),
+# but big-block users can submit txs up to 30M. Override gas_limit per-profile
+# so Foundry doesn't reject large deploys based on the global block limit.
+[profile.hyperevm]
+gas_limit = 30_000_000
+block_gas_limit = 30_000_000
+
 [rpc_endpoints]
 base = "${BASE_RPC_URL}"
 base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
 robinhood_testnet = "${ROBINHOOD_TESTNET_RPC_URL}"
+hyperevm = "${HYPEREVM_RPC_URL}"
+hyperevm_testnet = "${HYPEREVM_TESTNET_RPC_URL}"
+
+[etherscan]
+hyperevm = { key = "${ETHERSCAN_API_KEY}", url = "https://api.etherscan.io/v2/api?chainid=999" }

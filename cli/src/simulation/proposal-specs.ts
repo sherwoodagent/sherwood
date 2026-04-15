@@ -5,7 +5,7 @@
  * Shared by phase 07 (initial propose) and phase 10 (lifecycle re-propose).
  */
 
-import { PERSONAS } from "./personas.js";
+import { PERSONAS, ROBINHOOD_PERSONAS, ROBINHOOD_PORTFOLIO_SPECS } from "./personas.js";
 
 export interface ProposalSpec {
   strategy: string; // template key: moonwell-supply, venice-inference, wsteth-moonwell
@@ -24,8 +24,10 @@ export function getProposalSpec(
   vault: string,
   duration: string,
   cycle: number = 1,
+  chain?: string,
 ): ProposalSpec {
-  const persona = PERSONAS.find((p) => p.index === creatorIndex);
+  const allPersonas = chain === "robinhood-testnet" ? ROBINHOOD_PERSONAS : PERSONAS;
+  const persona = allPersonas.find((p) => p.index === creatorIndex);
   const template = persona?.strategyTemplate || "moonwell-supply";
   const asset = persona?.vaultAsset || "USDC";
   const cycleSuffix = cycle > 1 ? ` #${cycle}` : "";
@@ -86,6 +88,28 @@ export function getProposalSpec(
         ],
         name,
         description: "WETH to wstETH to Moonwell lending.",
+      };
+    }
+
+    case "portfolio": {
+      const spec = ROBINHOOD_PORTFOLIO_SPECS[creatorIndex] ?? ROBINHOOD_PORTFOLIO_SPECS[1];
+      const name = `Portfolio Strategy${cycleSuffix}`;
+      return {
+        strategy: "portfolio",
+        args: [
+          "--vault", vault,
+          "--amount", "0.0003",
+          "--tokens", spec.tokens,
+          "--weights", spec.weights,
+          "--fee-tier", "3000",
+          "--max-slippage", "500",
+          "--name", name,
+          "--description", `Weighted stock basket: ${spec.tokens}. Duration: ${duration}.`,
+          "--performance-fee", "1000",
+          "--duration", duration,
+        ],
+        name,
+        description: `Weighted stock basket: ${spec.tokens}.`,
       };
     }
 

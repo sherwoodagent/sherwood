@@ -2,22 +2,34 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt, useChainId } from "wagmi";
 import { type Address } from "viem";
-import { SYNDICATE_GOVERNOR_ABI, formatShares } from "@/lib/contracts";
+import { SYNDICATE_GOVERNOR_ABI, formatShares, getAddresses } from "@/lib/contracts";
+import { useToast } from "@/components/ui/Toast";
+import { GasEstimate } from "@/components/ui/GasEstimate";
+import { trackTxSubmitted, trackTxConfirmed, trackTxFailed, classifyError } from "@/lib/analytics";
 
 interface VoteButtonProps {
   governorAddress: Address;
   proposalId: bigint;
   voteEnd: bigint;
+  /** Fired on tx submit so the parent can apply an optimistic vote-bar update. */
+  onOptimistic?: (weight: bigint, support: 0 | 1) => void;
+  /** Fired on tx confirm OR error so the parent can drop the optimistic overlay
+   *  (router.refresh re-fetches the canonical onchain numbers). */
+  onResolved?: () => void;
 }
 
 export default function VoteButton({
   governorAddress,
   proposalId,
   voteEnd,
+  onOptimistic,
+  onResolved,
 }: VoteButtonProps) {
   const router = useRouter();
+  const toast = useToast();
+  const chainId = useChainId();
   const { address, isConnected } = useAccount();
   const [votingEnded, setVotingEnded] = useState(
     () => voteEnd <= BigInt(Math.floor(Date.now() / 1000)),
@@ -54,27 +66,68 @@ export default function VoteButton({
   const { writeContract, data: txHash, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
 
+  // Local submitting flag — flips true synchronously inside castVote (before
+  // wagmi's isPending catches up) so both FOR/AGAINST buttons lock out as
+  // soon as the user clicks. Without this there's a window between
+  // onOptimistic firing and isPending becoming true where a second click
+  // could overwrite the optimistic bar with the opposite direction.
+  const [submitting, setSubmitting] = useState(false);
+
   // Re-fetch page data once the vote tx is confirmed
   useEffect(() => {
-    if (isConfirmed) {
+    if (isConfirmed && txHash) {
+      trackTxConfirmed("vote", governorAddress, txHash);
+      toast.success(
+        "Vote confirmed",
+        `Proposal #${proposalId.toString()} — your vote is recorded onchain.`,
+      );
       router.refresh();
+      setSubmitting(false);
+      // Drop the optimistic overlay — refresh will pull canonical numbers.
+      onResolved?.();
     }
-  }, [isConfirmed, router]);
+  }, [isConfirmed, router, txHash, governorAddress, proposalId, toast, onResolved]);
 
-  const busy = isPending || isConfirming;
+  const busy = submitting || isPending || isConfirming;
+  const explorerUrl = getAddresses(chainId)?.blockExplorer;
 
-  function castVote(support: number) {
+  function castVote(support: 0 | 1) {
     // Re-check at click time to prevent submitting after deadline
     if (voteEnd <= BigInt(Math.floor(Date.now() / 1000))) {
       setVotingEnded(true);
       return;
     }
-    writeContract({
-      address: governorAddress,
-      abi: SYNDICATE_GOVERNOR_ABI,
-      functionName: "vote",
-      args: [proposalId, support],
-    });
+    // Belt-and-suspenders: ignore if already mid-flight.
+    if (submitting || isPending || isConfirming) return;
+    setSubmitting(true);
+    // Apply optimistic overlay BEFORE writeContract so the UI updates the
+    // moment the user clicks (before the wallet popup even appears).
+    if (voteWeight && voteWeight > 0n) {
+      onOptimistic?.(voteWeight, support);
+    }
+    writeContract(
+      {
+        address: governorAddress,
+        abi: SYNDICATE_GOVERNOR_ABI,
+        functionName: "vote",
+        args: [proposalId, support],
+      },
+      {
+        onSuccess: (hash) => trackTxSubmitted("vote", governorAddress, hash),
+        onError: (err) => {
+          const reason = classifyError(err);
+          trackTxFailed("vote", governorAddress, reason);
+          setSubmitting(false);
+          // Roll back the optimistic overlay on submission failure (rejected
+          // signatures, RPC errors, etc.) so the bar reverts immediately.
+          onResolved?.();
+          if (reason !== "user_rejected") {
+            const msg = (err as { shortMessage?: string }).shortMessage || err.message;
+            toast.error("Vote failed", msg);
+          }
+        },
+      },
+    );
   }
 
   const btnBase: React.CSSProperties = {
@@ -113,7 +166,7 @@ export default function VoteButton({
       <div
         style={{
           fontSize: "11px",
-          color: "rgba(255,255,255,0.3)",
+          color: "rgba(255,255,255,0.55)",
           fontFamily: "var(--font-plus-jakarta), sans-serif",
           padding: "0.5rem 0",
         }}
@@ -143,7 +196,7 @@ export default function VoteButton({
       <div
         style={{
           fontSize: "11px",
-          color: "rgba(255,255,255,0.3)",
+          color: "rgba(255,255,255,0.55)",
           fontFamily: "var(--font-plus-jakarta), sans-serif",
           padding: "0.5rem 0",
         }}
@@ -195,6 +248,36 @@ export default function VoteButton({
           {busy ? "..." : "Vote AGAINST"}
         </button>
       </div>
+      {/* Pre-flight gas estimate. We estimate the FOR path arbitrarily —
+          gas usage for vote(proposalId, 0) vs vote(proposalId, 1) is
+          essentially identical (same storage writes). */}
+      {!busy && voteWeight && voteWeight > 0n && (
+        <GasEstimate
+          address={governorAddress}
+          abi={SYNDICATE_GOVERNOR_ABI}
+          functionName="vote"
+          args={[proposalId, 0]}
+          chainId={chainId}
+        />
+      )}
+      {busy && txHash && explorerUrl && (
+        <div style={{ marginTop: "0.5rem" }}>
+          <a
+            href={`${explorerUrl}/tx/${txHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "10px",
+              letterSpacing: "0.1em",
+              color: "var(--color-accent)",
+              textDecoration: "underline",
+            }}
+          >
+            View pending tx ↗
+          </a>
+        </div>
+      )}
     </div>
   );
 }
