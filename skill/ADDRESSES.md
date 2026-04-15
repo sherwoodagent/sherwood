@@ -78,13 +78,25 @@ ERC-1167 clonable singletons. Use `sherwood strategy list` to see current addres
 
 | Template | Address |
 |----------|---------|
-| MoonwellSupplyStrategy | `0x72216571Ac847b29E1a5e3378e6ebCca3C2882da` |
-| AerodromeLPStrategy | `0x1c61c740702690B86b874ab929A6F04A4Ec56C1c` |
-| VeniceInferenceStrategy | `0xd882056ba6b0aEd8908c541884B327121E2f2C9C` |
-| WstETHMoonwellStrategy | `0x6d026e2f5Ff0C34A01690EC46Cb601B8fF391985` |
-| MamoYieldStrategy | `0x5c98808Ce5e51767ba2d969F75312eEFF0b14a6A` |
+| MoonwellSupplyStrategy | `0x649f8d24096a5eb17b8C73ee5113825AcA259F00` |
+| AerodromeLPStrategy | `0x6ccdD48C6A83cCdD6712DEB02E85FbEA8CF426CE` |
+| VeniceInferenceStrategy | `0x49BFDae8353ba15954924274573D427211CCe41b` |
+| WstETHMoonwellStrategy | `0xA31851Ab35F9992b0411749ec02Df053e904D1e6` |
+| MamoYieldStrategy | `0x9ca8A9B75a46261F107B610b634ecE69D7E6DF42` |
 | PortfolioStrategy | `0x7865eEA4063c22d0F55FdD412D345495c7b73f64` |
 | UniswapSwapAdapter | `0x121AaC2B96Ec365e457fcCc1C2ED5a6142064069` |
+
+All clonable strategy singletons expose the `positionValue() → (uint256, bool)` view (shipped in #218). Existing clones deployed before this redeploy lack the view; frontend callers should wrap in try/catch.
+
+## Strategy Templates (Base Sepolia)
+
+| Template | Address |
+|----------|---------|
+| MoonwellSupplyStrategy | `0xf67107afd786b6CB8829e55634b1686B8Bb7937a` |
+| AerodromeLPStrategy | `0xDf45018C64f5d6fd254B5d5437e96A27D5F01D09` |
+| VeniceInferenceStrategy | `0xB3E20A505D6e086eaEE02a58C264D41cb746E76E` |
+| WstETHMoonwellStrategy | `0x8F75B609519cEC5a9B9DF3cb74BcF095be5Ee2fD` |
+| MamoYieldStrategy | `0x49ea76685D79ff41bF7F60e22d9D367d0981bD58` |
 
 ## Uniswap Trading API
 
