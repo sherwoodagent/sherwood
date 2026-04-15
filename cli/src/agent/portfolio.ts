@@ -228,6 +228,8 @@ export class PortfolioTracker {
 
     const fullPosition: Position = {
       ...position,
+      addCount: position.addCount ?? 0,
+      lastAddTimestamp: position.lastAddTimestamp ?? position.entryTimestamp,
       pnlPercent: 0,
       pnlUsd: 0,
     };
@@ -241,6 +243,59 @@ export class PortfolioTracker {
 
     await this.save(this.state);
     return fullPosition;
+  }
+
+  /**
+   * Pyramid into an existing position.
+   * Computes a quantity-weighted average entry price and increments `addCount`.
+   * Cash is debited at the new fill price. Stops/take-profits stay anchored to
+   * the prior values (caller is free to widen them after).
+   *
+   * Throws if no existing position exists or the side disagrees.
+   */
+  async addToPosition(
+    tokenId: string,
+    addPrice: number,
+    addQuantity: number,
+    side: 'long' | 'short',
+  ): Promise<Position> {
+    if (addQuantity <= 0) throw new Error(`Invalid add quantity: ${addQuantity}`);
+    if (addPrice <= 0) throw new Error(`Invalid add price: ${addPrice}`);
+    await this.load();
+
+    const idx = this.state.positions.findIndex((p) => p.tokenId === tokenId);
+    if (idx === -1) throw new Error(`No open position for ${tokenId} to pyramid into`);
+
+    const pos = this.state.positions[idx]!;
+    const existingSide = pos.side ?? 'long';
+    if (existingSide !== side) {
+      throw new Error(`Cannot pyramid ${side} on existing ${existingSide} position in ${tokenId}`);
+    }
+
+    // Weighted-average entry price across the combined quantity
+    const newQty = pos.quantity + addQuantity;
+    const weightedEntry = (pos.entryPrice * pos.quantity + addPrice * addQuantity) / newQty;
+
+    const updated: Position = {
+      ...pos,
+      entryPrice: weightedEntry,
+      quantity: newQty,
+      currentPrice: addPrice,
+      addCount: (pos.addCount ?? 0) + 1,
+      lastAddTimestamp: Date.now(),
+      pnlPercent: 0, // recomputed on next price update
+      pnlUsd: 0,
+    };
+
+    this.state.positions[idx] = updated;
+    this.state.cash -= addPrice * addQuantity;
+    this.state.totalValue = this.state.cash + this.state.positions.reduce(
+      (sum, p) => sum + p.quantity * p.currentPrice,
+      0,
+    );
+
+    await this.save(this.state);
+    return updated;
   }
 
   /** Close a position and record trade */

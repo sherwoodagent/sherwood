@@ -92,36 +92,39 @@ export class TradeExecutor {
     error?: string;
     dryRun: boolean;
   }> {
-    // Handle SELL/STRONG_SELL: in dry-run mode close existing positions; in perp mode open shorts
+    // Handle SELL/STRONG_SELL outside hyperliquid-perp mode.
+    //   • If an existing LONG exists → close it (signal flip / take-profit-by-signal).
+    //   • Otherwise (no position OR existing SHORT) → fall through to the
+    //     standard open/pyramid path below, which opens a paper short or
+    //     pyramids into the existing short. This was previously a hard error
+    //     ("No open position to sell") — paper shorting was effectively dead
+    //     code, masking SHORT signal performance in dry-run.
     if ((decision.action === 'SELL' || decision.action === 'STRONG_SELL') && this.config.mode !== 'hyperliquid-perp') {
       const sellState = await this.portfolio.load();
       const existing = sellState.positions.find((p) => p.tokenId === tokenId);
-      if (!existing) {
-        return {
-          success: false,
-          error: `No open position in ${tokenId} to sell`,
-          dryRun: this.config.dryRun,
-        };
-      }
+      const existingSide = existing?.side ?? 'long';
 
-      try {
-        const reason = decision.action === 'STRONG_SELL' ? 'Strong sell signal' : 'Sell signal';
-        if (this.config.dryRun) {
-          console.error(chalk.cyan(`[DRY RUN] Paper trade: SELL ${existing.quantity.toFixed(6)} ${tokenId} @ $${currentPrice.toFixed(4)}`));
+      if (existing && existingSide === 'long') {
+        try {
+          const reason = decision.action === 'STRONG_SELL' ? 'Strong sell signal' : 'Sell signal';
+          if (this.config.dryRun) {
+            console.error(chalk.cyan(`[DRY RUN] Paper trade: SELL ${existing.quantity.toFixed(6)} ${tokenId} @ $${currentPrice.toFixed(4)}`));
+          }
+          const closeResult = await this.portfolio.closePosition(tokenId, currentPrice, reason);
+          return {
+            success: true,
+            position: { ...existing, currentPrice, pnlUsd: closeResult.pnl, pnlPercent: closeResult.pnlPercent },
+            dryRun: this.config.dryRun,
+          };
+        } catch (err) {
+          return {
+            success: false,
+            error: `Failed to close position: ${(err as Error).message}`,
+            dryRun: this.config.dryRun,
+          };
         }
-        const closeResult = await this.portfolio.closePosition(tokenId, currentPrice, reason);
-        return {
-          success: true,
-          position: { ...existing, currentPrice, pnlUsd: closeResult.pnl, pnlPercent: closeResult.pnlPercent },
-          dryRun: this.config.dryRun,
-        };
-      } catch (err) {
-        return {
-          success: false,
-          error: `Failed to close position: ${(err as Error).message}`,
-          dryRun: this.config.dryRun,
-        };
       }
+      // else: no existing long — fall through to open/pyramid a paper short
     }
 
     // Only execute buys/sells; HOLD does nothing
@@ -156,6 +159,7 @@ export class TradeExecutor {
     //   Take profit: 6% (2:1 R:R) — achievable in 1-2 days on crypto vol
     //   Time stop: 48h (see risk.ts) — if it hasn't moved, it's dead money
     const isShort = decision.action === 'SELL' || decision.action === 'STRONG_SELL';
+    const direction: 'long' | 'short' = isShort ? 'short' : 'long';
     const STOP_LOSS_PCT = 0.03;   // 3% stop
     const RR_RATIO = 2.0;         // 2:1 reward/risk → 6% take profit
     const stopLossDistance = currentPrice * STOP_LOSS_PCT;
@@ -166,6 +170,17 @@ export class TradeExecutor {
       ? currentPrice * (1 - STOP_LOSS_PCT * RR_RATIO)    // profit below for shorts
       : currentPrice * (1 + STOP_LOSS_PCT * RR_RATIO);   // profit above for longs
 
+    // Detect a pyramid (same-direction add to an existing position) and halve
+    // the size for each add. Geometric decay (1.0x → 0.5x → 0.25x) caps total
+    // exposure on a single name at 1.75x the original size.
+    const existingSameSide = state.positions.find(
+      (p) => p.tokenId === tokenId && (p.side ?? 'long') === direction,
+    );
+    const isPyramid = existingSameSide !== undefined;
+    const sizeMultiplier = isPyramid
+      ? 0.5 ** ((existingSameSide!.addCount ?? 0) + 1)
+      : 1.0;
+
     // Size the position using risk management
     const sizing = this.riskManager.calculatePositionSize(
       currentPrice,
@@ -173,7 +188,12 @@ export class TradeExecutor {
       state.totalValue,
     );
 
-    if (sizing.quantity <= 0 || sizing.sizeUsd <= 0) {
+    // Apply the pyramid haircut after sizing — the calculator picks a
+    // risk-appropriate base size, then we shrink it for each subsequent add.
+    const pyramidQuantity = sizing.quantity * sizeMultiplier;
+    const pyramidSizeUsd = sizing.sizeUsd * sizeMultiplier;
+
+    if (pyramidQuantity <= 0 || pyramidSizeUsd <= 0) {
       return {
         success: false,
         error: 'Position sizing returned zero — check portfolio value and stop distance',
@@ -181,8 +201,8 @@ export class TradeExecutor {
       };
     }
 
-    // Check if risk manager allows this trade
-    const check = this.riskManager.canOpenPosition(tokenId, sizing.sizeUsd);
+    // Check if risk manager allows this trade (passes pyramid + direction context)
+    const check = this.riskManager.canOpenPosition(tokenId, pyramidSizeUsd, direction);
     if (!check.allowed) {
       return {
         success: false,
@@ -194,7 +214,7 @@ export class TradeExecutor {
     const order: OrderParams = {
       tokenId,
       side: isShort ? 'sell' : 'buy',
-      amountUsd: sizing.sizeUsd,
+      amountUsd: pyramidSizeUsd,
       maxSlippage: 0.015,
       stopLoss: stopLossPrice,
       takeProfit: takeProfitPrice,
@@ -202,7 +222,7 @@ export class TradeExecutor {
 
     if (this.config.dryRun) {
       try {
-        const position = await this.executeDryRun(order, currentPrice);
+        const position = await this.executeDryRun(order, currentPrice, isPyramid);
         return { success: true, position, dryRun: true };
       } catch (err) {
         return {
@@ -215,18 +235,20 @@ export class TradeExecutor {
       try {
         const result = await this.executeLive(order, currentPrice);
         // If live execution succeeded, also track in portfolio
-        const position = await this.portfolio.openPosition({
-          tokenId,
-          symbol: tokenId.toUpperCase(),
-          side: isShort ? 'short' : 'long',
-          entryPrice: result.executedPrice,
-          currentPrice: result.executedPrice,
-          quantity: sizing.quantity,
-          entryTimestamp: Date.now(),
-          stopLoss: order.stopLoss,
-          takeProfit: order.takeProfit,
-          strategy: decision.signals[0]?.source ?? 'agent',
-        });
+        const position = isPyramid
+          ? await this.portfolio.addToPosition(tokenId, result.executedPrice, pyramidQuantity, direction)
+          : await this.portfolio.openPosition({
+              tokenId,
+              symbol: tokenId.toUpperCase(),
+              side: direction,
+              entryPrice: result.executedPrice,
+              currentPrice: result.executedPrice,
+              quantity: pyramidQuantity,
+              entryTimestamp: Date.now(),
+              stopLoss: order.stopLoss,
+              takeProfit: order.takeProfit,
+              strategy: decision.signals[0]?.source ?? 'agent',
+            });
         return { success: true, position, dryRun: false };
       } catch (err) {
         return {
@@ -269,17 +291,24 @@ export class TradeExecutor {
   }
 
   /** Dry-run execution — paper trade */
-  private async executeDryRun(order: OrderParams, currentPrice: number): Promise<Position> {
+  private async executeDryRun(order: OrderParams, currentPrice: number, isPyramid = false): Promise<Position> {
     const quantity = order.amountUsd / currentPrice;
-    const sideLabel = order.side === 'sell' ? 'SHORT' : 'BUY';
+    const direction: 'long' | 'short' = order.side === 'sell' ? 'short' : 'long';
+    const sideLabel = isPyramid
+      ? (direction === 'short' ? 'PYRAMID SHORT' : 'PYRAMID BUY')
+      : (direction === 'short' ? 'SHORT' : 'BUY');
 
     console.error(chalk.cyan(`[DRY RUN] Paper trade: ${sideLabel} ${quantity.toFixed(6)} ${order.tokenId} @ $${currentPrice.toFixed(4)}`));
     console.error(chalk.cyan(`  Size: $${order.amountUsd.toFixed(2)} | SL: $${order.stopLoss.toFixed(4)} | TP: $${order.takeProfit.toFixed(4)}`));
 
+    if (isPyramid) {
+      return this.portfolio.addToPosition(order.tokenId, currentPrice, quantity, direction);
+    }
+
     const position = await this.portfolio.openPosition({
       tokenId: order.tokenId,
       symbol: order.tokenId.toUpperCase(),
-      side: order.side === 'sell' ? 'short' : 'long',
+      side: direction,
       entryPrice: currentPrice,
       currentPrice,
       quantity,

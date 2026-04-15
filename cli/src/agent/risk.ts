@@ -31,6 +31,12 @@ export interface Position {
   strategy: string;
   pnlPercent: number;
   pnlUsd: number;
+  /** Number of pyramid adds since initial entry (0 = base position).
+   *  Capped by RiskManager.canOpenPosition; each add halves the prior add size. */
+  addCount?: number;
+  /** Timestamp of the most recent add (or initial entry).
+   *  Used to enforce minimum spacing between adds. */
+  lastAddTimestamp?: number;
 }
 
 export interface RiskConfig {
@@ -112,6 +118,12 @@ export const RECOMMENDED_TRAILING_CONFIG = {
   ],
 } as const;
 
+/** Pyramiding configuration — conservative defaults to limit blowup risk
+ *  on a single name. With MAX_PYRAMID_ADDS=2 and halving size each add,
+ *  total exposure caps at 1.0x + 0.5x + 0.25x = 1.75x of the base size. */
+export const MAX_PYRAMID_ADDS = 2;
+export const PYRAMID_MIN_SPACING_MS = 4 * 60 * 60 * 1000; // 4 hours
+
 const EMPTY_PORTFOLIO: PortfolioState = {
   totalValue: 0,
   positions: [],
@@ -130,8 +142,11 @@ export class RiskManager {
     this.portfolio = { ...EMPTY_PORTFOLIO };
   }
 
-  /** Check if we can open a new position */
-  canOpenPosition(token: string, sizeUsd: number): { allowed: boolean; reason?: string } {
+  /** Check if we can open a new position (or pyramid into an existing one).
+   *  When `direction` is omitted, defaults to 'long' for backward compatibility.
+   *  An existing position with a different direction always rejects (no flips
+   *  via pyramid — flips must explicitly close the prior position first). */
+  canOpenPosition(token: string, sizeUsd: number, direction: 'long' | 'short' = 'long'): { allowed: boolean; reason?: string } {
     // Check concurrent trades limit
     if (this.portfolio.positions.length >= this.config.maxConcurrentTrades) {
       return { allowed: false, reason: `Max concurrent trades (${this.config.maxConcurrentTrades}) reached` };
@@ -172,10 +187,28 @@ export class RiskManager {
       }
     }
 
-    // Check if we already have a position in this token
+    // Check if we already have a position in this token.
+    // Pyramiding (adding to a winning position) is allowed up to MAX_PYRAMID_ADDS
+    // total adds, with at least PYRAMID_MIN_SPACING_MS between adds. The caller
+    // (TradeExecutor) is responsible for halving the size each add and matching
+    // the existing direction. If those preconditions aren't met, the executor
+    // should not call canOpenPosition for an add.
     const existing = this.portfolio.positions.find((p) => p.tokenId === token);
     if (existing) {
-      return { allowed: false, reason: `Already have an open position in ${token}` };
+      const existingSide = existing.side ?? 'long';
+      if (existingSide !== direction) {
+        return { allowed: false, reason: `Conflicting position in ${token} (existing ${existingSide}, signal ${direction}) — close first` };
+      }
+      const addCount = existing.addCount ?? 0;
+      if (addCount >= MAX_PYRAMID_ADDS) {
+        return { allowed: false, reason: `Pyramid cap reached for ${token} (${MAX_PYRAMID_ADDS} adds)` };
+      }
+      const lastAdd = existing.lastAddTimestamp ?? existing.entryTimestamp;
+      const elapsed = Date.now() - lastAdd;
+      if (elapsed < PYRAMID_MIN_SPACING_MS) {
+        const remainHrs = ((PYRAMID_MIN_SPACING_MS - elapsed) / 3_600_000).toFixed(1);
+        return { allowed: false, reason: `Pyramid spacing not met for ${token} (next add in ${remainHrs}h)` };
+      }
     }
 
     // Check cash availability

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { RiskManager, DEFAULT_RISK_CONFIG, RECOMMENDED_TRAILING_CONFIG, type Position, type RiskConfig } from "./risk.js";
+import { RiskManager, DEFAULT_RISK_CONFIG, RECOMMENDED_TRAILING_CONFIG, MAX_PYRAMID_ADDS, PYRAMID_MIN_SPACING_MS, type Position, type RiskConfig } from "./risk.js";
 
 // Helper to create a minimal Position for tests
 function makePosition(overrides: Partial<Position> = {}): Position {
@@ -69,16 +69,76 @@ describe("RiskManager", () => {
       expect(result.reason).toMatch(/Insufficient cash/);
     });
 
-    it("rejects when duplicate token already held", () => {
-      const existingPos = makePosition({ tokenId: "bitcoin", symbol: "BTC" });
+    it("rejects pyramid add when spacing not met (within 4h of prior fill)", () => {
+      // Existing long opened just now — should be inside the spacing window
+      const existingPos = makePosition({
+        tokenId: "bitcoin",
+        symbol: "BTC",
+        side: "long",
+        addCount: 0,
+        lastAddTimestamp: Date.now(),
+      });
       rm.updatePortfolio({
         totalValue: 50000,
         cash: 40000,
         positions: [existingPos],
       });
-      const result = rm.canOpenPosition("bitcoin", 500);
+      const result = rm.canOpenPosition("bitcoin", 500, "long");
       expect(result.allowed).toBe(false);
-      expect(result.reason).toMatch(/Already have an open position/);
+      expect(result.reason).toMatch(/Pyramid spacing/);
+    });
+
+    it("rejects pyramid when MAX_PYRAMID_ADDS already reached", () => {
+      const existingPos = makePosition({
+        tokenId: "bitcoin",
+        symbol: "BTC",
+        side: "long",
+        addCount: MAX_PYRAMID_ADDS,
+        lastAddTimestamp: Date.now() - PYRAMID_MIN_SPACING_MS - 1000, // spacing OK
+      });
+      rm.updatePortfolio({
+        totalValue: 50000,
+        cash: 40000,
+        positions: [existingPos],
+      });
+      const result = rm.canOpenPosition("bitcoin", 500, "long");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(/Pyramid cap reached/);
+    });
+
+    it("allows pyramid add when below cap and past spacing window", () => {
+      const existingPos = makePosition({
+        tokenId: "bitcoin",
+        symbol: "BTC",
+        side: "long",
+        addCount: 0,
+        lastAddTimestamp: Date.now() - PYRAMID_MIN_SPACING_MS - 1000,
+      });
+      rm.updatePortfolio({
+        totalValue: 50000,
+        cash: 40000,
+        positions: [existingPos],
+      });
+      const result = rm.canOpenPosition("bitcoin", 500, "long");
+      expect(result.allowed).toBe(true);
+    });
+
+    it("rejects opposite-direction add (no flip via pyramid)", () => {
+      const existingPos = makePosition({
+        tokenId: "bitcoin",
+        symbol: "BTC",
+        side: "long",
+        addCount: 0,
+        lastAddTimestamp: Date.now() - PYRAMID_MIN_SPACING_MS - 1000,
+      });
+      rm.updatePortfolio({
+        totalValue: 50000,
+        cash: 40000,
+        positions: [existingPos],
+      });
+      const result = rm.canOpenPosition("bitcoin", 500, "short");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(/Conflicting position/);
     });
 
     it("rejects when drawdown limit is hit", () => {
