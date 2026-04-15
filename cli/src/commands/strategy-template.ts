@@ -21,7 +21,7 @@ import { getPublicClient, getAccount, writeContractWithRetry, waitForReceipt, fo
 import { getChain, getExplorerUrl, getNetwork, CHAIN_REGISTRY } from "../lib/network.js";
 import { getCachedSwapRoute, cacheSwapRoute, type SwapRoute } from "../lib/config.js";
 import { TOKENS, MOONWELL, VENICE, AERODROME, UNISWAP, STRATEGY_TEMPLATES, SYNTHRA, CHAINLINK } from "../lib/addresses.js";
-import { BASE_STRATEGY_ABI, PORTFOLIO_STRATEGY_ABI } from "../lib/abis.js";
+import { BASE_STRATEGY_ABI, PORTFOLIO_STRATEGY_ABI, SYNDICATE_VAULT_ABI } from "../lib/abis.js";
 import { cloneTemplate } from "../lib/clone.js";
 import type { BatchCall } from "../lib/batch.js";
 import { formatBatch } from "../lib/batch.js";
@@ -1002,6 +1002,51 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
 
       const { def, address: templateAddr } = resolveTemplate(templateKey);
 
+      // 0. Preflight — bail out before burning gas on clone + init for a
+      //    proposal the governor will refuse anyway. Two read-only checks,
+      //    no gas cost.
+      const account = getAccount();
+      const preflightSpinner = ora("Preflight checks...").start();
+      try {
+        const publicClient = getPublicClient();
+
+        // (a) Signer must be a registered active agent on this vault.
+        const isRegistered = await publicClient.readContract({
+          address: vault,
+          abi: SYNDICATE_VAULT_ABI,
+          functionName: "isAgent",
+          args: [account.address],
+        });
+        if (!isRegistered) {
+          preflightSpinner.fail("Preflight failed");
+          console.error(
+            chalk.red(
+              `  Signer ${account.address} is not a registered agent on ${vault}.\n` +
+                `  Register first via: sherwood syndicate approve --wallet ${account.address}`,
+            ),
+          );
+          process.exit(1);
+        }
+
+        // (b) Vault must not be paused (deposits + governance ops would revert).
+        const paused = await publicClient.readContract({
+          address: vault,
+          abi: SYNDICATE_VAULT_ABI,
+          functionName: "paused",
+        });
+        if (paused) {
+          preflightSpinner.fail("Preflight failed");
+          console.error(chalk.red(`  Vault ${vault} is paused. Cannot propose.`));
+          process.exit(1);
+        }
+
+        preflightSpinner.succeed("Preflight OK");
+      } catch (err) {
+        preflightSpinner.fail("Preflight failed");
+        console.error(chalk.red(formatContractError(err)));
+        process.exit(1);
+      }
+
       // 1. Clone
       const cloneSpinner = ora(`Cloning ${def.name} template...`).start();
       let clone: Address;
@@ -1027,8 +1072,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
         assetAmount = built.assetAmount;
         extraApprovals = built.extraApprovals;
 
-        const account = getAccount();
-
+        // account hoisted above during preflight — reuse.
         const initHash = await writeContractWithRetry({
           account,
           chain: getChain(),
@@ -1111,7 +1155,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
         process.exit(1);
       }
       const strategyDuration = parseDuration(opts.duration as string);
-      const account = getAccount();
+      // account already hoisted at preflight.
 
       const metaSpinner = ora("Pinning metadata to IPFS...").start();
       let metadataURI: string;

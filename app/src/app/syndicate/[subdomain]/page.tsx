@@ -233,6 +233,7 @@ export default async function SyndicateDetailPage({
                 addressNames={addressNames}
                 assetDecimals={data.assetDecimals}
                 assetSymbol={data.assetSymbol}
+                assetAddress={data.assetAddress}
                 portfolioAllocations={activeStrategy.portfolioAllocations}
                 enrichedPortfolio={activeStrategy.enrichedPortfolio}
                 governorAddress={activeStrategy.governor.governorAddress}
