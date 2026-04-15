@@ -201,6 +201,20 @@ export class TradeExecutor {
       };
     }
 
+    // Enforce Hyperliquid minimum notional ($15) AFTER the pyramid haircut.
+    // calculatePositionSize() applies its own floor on the BASE size, but
+    // halving (0.5x) and quartering (0.25x) for subsequent adds can push
+    // the order below minimum. In dry-run this is harmless paper trading;
+    // in hyperliquid-perp mode the order would revert at the venue.
+    const MIN_PYRAMID_USD = 15;
+    if (isPyramid && pyramidSizeUsd < MIN_PYRAMID_USD) {
+      return {
+        success: false,
+        error: `Pyramid add #${(existingSameSide!.addCount ?? 0) + 1} would be $${pyramidSizeUsd.toFixed(2)} — below $${MIN_PYRAMID_USD} HL minimum notional. Skipping.`,
+        dryRun: this.config.dryRun,
+      };
+    }
+
     // Check if risk manager allows this trade (passes pyramid + direction context)
     const check = this.riskManager.canOpenPosition(tokenId, pyramidSizeUsd, direction);
     if (!check.allowed) {

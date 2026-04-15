@@ -84,6 +84,15 @@ interface ReplayPosition {
   signal: string;
 }
 
+/**
+ * Trade record kept inline during replay so we can compute realistic
+ * Sharpe annualization from actual trade cadence rather than guessing.
+ */
+interface ReplayTrade {
+  pnlPercent: number;
+  durationMs: number;
+}
+
 // ── Loader ──
 
 /** Read signal-history.jsonl into typed rows. Skips malformed lines. */
@@ -127,6 +136,7 @@ function replayToken(
 ): TokenResult {
   let position: ReplayPosition | null = null;
   const returns: number[] = [];
+  const trades: ReplayTrade[] = []; // hold-duration tracked for Sharpe annualization
   const equityCurve: number[] = [1.0]; // normalized; multiply by (1+ret) per realized trade
   let equity = 1.0;
 
@@ -212,6 +222,7 @@ function replayToken(
         equity *= 1 + pnlPercent;
         equityCurve.push(equity);
         returns.push(pnlPercent);
+        trades.push({ pnlPercent, durationMs: ts - position.entryTimestamp });
         position = null;
       }
     }
@@ -238,9 +249,11 @@ function replayToken(
       const pnlPercent = position.side === 'short'
         ? (position.entryPrice - lastValidPrice) / position.entryPrice
         : (lastValidPrice - position.entryPrice) / position.entryPrice;
+      const lastTs = Date.parse(tokenRows[tokenRows.length - 1]!.timestamp);
       equity *= 1 + pnlPercent;
       equityCurve.push(equity);
       returns.push(pnlPercent);
+      trades.push({ pnlPercent, durationMs: lastTs - position.entryTimestamp });
     }
   }
 
@@ -248,17 +261,19 @@ function replayToken(
   const totalReturn = equity - 1.0;
   const winRate = returns.length > 0 ? returns.filter((r) => r > 0).length / returns.length : 0;
 
-  // Sharpe from per-trade returns. Annualize by trades-per-year using
-  // rough average trade duration. Conservative when sample is tiny.
+  // Sharpe from per-trade returns, annualized using ACTUAL average hold
+  // duration (not a fixed 52/year guess). Same formula as PortfolioTracker.
   let sharpeRatio = 0;
   if (returns.length > 1) {
     const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
     const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / (returns.length - 1);
     const stdDev = Math.sqrt(variance);
     if (stdDev > 0) {
-      // Conservative annualization: assume ~52 trades/year (weekly cadence)
-      // — replay calibrator can't reliably infer cadence with so few trades.
-      sharpeRatio = (mean / stdDev) * Math.sqrt(52);
+      const avgHoldDays = trades.length > 0
+        ? trades.reduce((s, t) => s + t.durationMs, 0) / trades.length / (1000 * 60 * 60 * 24)
+        : 1;
+      const tradesPerYear = Math.max(252 / Math.max(avgHoldDays, 1), 1);
+      sharpeRatio = (mean / stdDev) * Math.sqrt(tradesPerYear);
     }
   }
 

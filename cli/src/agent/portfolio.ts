@@ -288,6 +288,12 @@ export class PortfolioTracker {
     };
 
     this.state.positions[idx] = updated;
+    // Paper-trading simplification: debit full notional on cash regardless
+    // of direction. For longs this is correct (you buy tokens). For shorts
+    // on a perp venue the correct model is margin (a fraction of notional),
+    // not full notional. This module does not yet model leverage / margin —
+    // when real perp accounting lands, branch on `side` here and in
+    // openPosition / closePosition together.
     this.state.cash -= addPrice * addQuantity;
     this.state.totalValue = this.state.cash + this.state.positions.reduce(
       (sum, p) => sum + p.quantity * p.currentPrice,

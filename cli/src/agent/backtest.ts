@@ -218,17 +218,6 @@ export class Backtester {
   }
 
   /**
-   * Per-candle precomputed inputs for `simulate()`. Lets callers (notably the
-   * calibrator) gather strategy signals + regime ONCE per candle, then replay
-   * the scoring + position math against many weight/threshold configurations
-   * without re-running the (network-bound) strategy stack each time.
-   *
-   * Aligned by index to `allCandles`. Entries with index < windowSize or with
-   * insufficient data are stored as null.
-   */
-  static precomputedCandle = {} as { signals: import('./scoring.js').Signal[]; regime?: MarketRegime };
-
-  /**
    * Pre-compute per-candle strategy signals and regime classification.
    * Called once per token by the calibrator; result is fed back into
    * `simulate(..., precomputed)` to skip the network-bound strategy stack.

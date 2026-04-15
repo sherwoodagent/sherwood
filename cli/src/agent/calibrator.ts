@@ -11,8 +11,25 @@ import type { ScoringWeights } from "./scoring.js";
 import type { Candle } from "./technical.js";
 
 // ── Weight Profiles ──
+//
+// IMPORTANT: this set deliberately includes BOTH the live production
+// profiles (default-live, majors-live, altcoin-live — pulled from
+// scoring.ts WEIGHT_PROFILES) AND exploratory profiles for tuning.
+// Without the live profiles in the sweep, the calibrator can never tell
+// you "the current production weights are the best" — you'd only see
+// rankings of variants. The live entries are SUFFIXED `-live` so they're
+// obvious in the ranked output.
+//
+// To keep this in sync after a scoring.ts weight change: update the
+// `*-live` rows below to match the new production weights.
 
 export const WEIGHT_PROFILES: Record<string, ScoringWeights> = {
+  // ── Live production profiles (from scoring.ts; keep in sync) ──
+  "default-live": { smartMoney: 0.15, technical: 0.10, sentiment: 0.40, onchain: 0.20, fundamental: 0.10, event: 0.05 },
+  "majors-live":  { smartMoney: 0.15, technical: 0.10, sentiment: 0.40, onchain: 0.35, fundamental: 0.00, event: 0.00 },
+  "altcoin-live": { smartMoney: 0.15, technical: 0.15, sentiment: 0.30, onchain: 0.20, fundamental: 0.10, event: 0.10 },
+
+  // ── Exploratory profiles (historical baselines + variants) ──
   default:    { smartMoney: 0.25, technical: 0.20, sentiment: 0.20, onchain: 0.15, fundamental: 0.10, event: 0.10 },
   techHeavy:  { smartMoney: 0.10, technical: 0.40, sentiment: 0.15, onchain: 0.15, fundamental: 0.10, event: 0.10 },
   sentHeavy:  { smartMoney: 0.10, technical: 0.15, sentiment: 0.40, onchain: 0.15, fundamental: 0.10, event: 0.10 },

@@ -433,6 +433,11 @@ export function registerChatCommands(program: Command): void {
         case "send": {
           let message = actionArgs[0];
           if (opts.stdin) {
+            // If stdin is a terminal, the user forgot to pipe — readStdin
+            // would block forever waiting for EOF (Ctrl+D). Warn explicitly.
+            if (process.stdin.isTTY) {
+              console.error(chalk.yellow("--stdin specified but stdin is a terminal. Either pipe the message in or omit --stdin and pass it as an argument. Press Ctrl+D to send what you've typed, Ctrl+C to abort."));
+            }
             // Read entire stdin into the message — sidesteps bash $-expansion
             // when callers (cron jobs, scripts) construct dynamic message text.
             message = await readStdin();
