@@ -28,34 +28,43 @@ export class SentimentContrarianStrategy implements Strategy {
     let value = 0;
     let confidence = 0.3;
 
-    // Only fire on EXTREMES — moderate fear/greed (20–35, 65–80) used to add a
-    // persistent +0.2 to +0.5 contrarian bias during prolonged sentiment
-    // regimes. Audit data showed sentimentContrarian held a constant +0.68
-    // mean across 458 observations, dominating the sentiment category and
-    // pushing every score upward regardless of price action. Restricting
-    // contributions to extremes preserves the high-conviction edge while
-    // killing the structural bias.
-    if (fg < 20) {
-      // Extreme fear: strong buy. Linear: fg=0 → +1.0, fg=20 → +0.6
-      value = 1.0 - (fg / 20) * 0.4;
+    // Fire on F&G extremes — moderate zones add a persistent contrarian bias
+    // that washes out price signal (audit showed +0.68 constant mean).
+    // Threshold widened from <20 / >80 to <25 / >75 to match alternative.me's
+    // own "Extreme Fear" / "Extreme Greed" classification cutoffs and to
+    // avoid sitting silent during real-but-just-shy-of-extreme regimes (e.g.
+    // F&G=23 should clearly fire bullish contrarian; the prior <20 cutoff
+    // missed it).
+    const FEAR_CUTOFF = 25;
+    const GREED_CUTOFF = 75;
+    let fired = false;
+    if (fg < FEAR_CUTOFF) {
+      // Extreme fear: strong buy. Linear: fg=0 → +1.0, fg=25 → +0.5
+      value = 1.0 - (fg / FEAR_CUTOFF) * 0.5;
       confidence = 0.9;
+      fired = true;
       details.push(`Extreme fear (F&G=${fg}): strong contrarian buy signal`);
-    } else if (fg > 80) {
-      // Extreme greed: strong sell. Linear: fg=80 → -0.6, fg=100 → -1.0
-      value = -(0.6 + ((fg - 80) / 20) * 0.4);
+    } else if (fg > GREED_CUTOFF) {
+      // Extreme greed: strong sell. Linear: fg=75 → -0.5, fg=100 → -1.0
+      value = -(0.5 + ((fg - GREED_CUTOFF) / (100 - GREED_CUTOFF)) * 0.5);
       confidence = 0.9;
+      fired = true;
       details.push(`Extreme greed (F&G=${fg}): strong contrarian sell signal`);
     } else {
       // Moderate / neutral zone: no contrarian edge — emit a near-zero
       // confidence signal so the scoring layer effectively ignores it.
       value = 0.0;
       confidence = 0.1;
-      const label = fg < 35 ? 'mild fear' : fg > 65 ? 'mild greed' : 'neutral';
+      const label = fg < 40 ? 'mild fear' : fg > 60 ? 'mild greed' : 'neutral';
       details.push(`${label} (F&G=${fg}): below extremes, no edge`);
     }
 
-    // Z-score adjustment: extreme social sentiment reinforces the signal
-    if (ctx.sentimentZScore !== undefined) {
+    // Z-score adjustment ONLY when the main F&G logic actually fired. In the
+    // moderate zone we explicitly returned value=0 to disclaim signal — the
+    // Z-score block was bypassing that and re-introducing ±0.1 noise, which
+    // produced false directional pulls (e.g. value=-0.1 with confidence=0.1
+    // showing up in production logs even when "no edge" was the verdict).
+    if (fired && ctx.sentimentZScore !== undefined) {
       const z = ctx.sentimentZScore;
       // If Z-score agrees with F&G direction, strengthen; if contradicts, weaken
       let adjustment = 0;
