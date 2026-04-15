@@ -84,7 +84,7 @@ Roadmap, milestones, and a running log of everything shipped. Building in public
 - ✅ Design shareToken/WOOD Aerodrome Slipstream pools for secondary market exit
 - ✅ PR #169 docs: WOOD tokenomics v4 — under review
 - 🔄 Finalize tokenomics parameters with team review
-- 🔄 Decide token launch mechanism (Fjord LBP vs direct Aerodrome pool)
+- ✅ Decide token launch mechanism — **Aero Launch** (direct Aerodrome pool seeding, Clanker-style two-sided + single-sided WOOD; no LBP, no public sale tranche). See PR #47.
 - ⬜️ Implement v4 contracts (WoodToken, VotingEscrow, FeeDistributor, BootstrapRewards, BuybackEngine)
 - ⬜️ Deploy v4 contracts to Base Sepolia testnet
 - ⬜️ Audit v4 contracts (5 contracts, estimated 3-5 weeks)
@@ -94,9 +94,8 @@ Roadmap, milestones, and a running log of everything shipped. Building in public
 
 - ⬜️ Deploy WoodToken.sol (LayerZero OFT, 500M minted at genesis)
 - ⬜️ Execute initial distribution (all allocations to respective addresses)
-- ⬜️ Run public sale / LBP (100M WOOD, 20% of supply)
-- ⬜️ Seed WOOD/WETH Aerodrome Slipstream pool (from POL allocation)
-- ⬜️ Seed shareToken/WOOD pools for existing syndicates (genesis cohort)
+- ⬜️ Aero Launch — seed WOOD/WETH Aerodrome Slipstream pool: two-sided concentrated (~90M WOOD + ~5 ETH from treasury) + single-sided WOOD above launch price (Clanker-style)
+- ⬜️ Seed shareToken/WOOD pools for the genesis cohort (~60M WOOD single-sided, drawn from the 150M POL allocation)
 - ⬜️ Deploy VotingEscrow — enable WOOD locking for veWOOD
 - ⬜️ Deploy FeeDistributor — begin USDC fee distribution to veWOOD holders
 - ⬜️ Deploy BootstrapRewards — start non-transferable bootstrapping incentives

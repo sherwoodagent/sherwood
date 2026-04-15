@@ -313,21 +313,23 @@ Each syndicate vault produces share tokens (e.g., `swUSDC`, `swETH`). Per-syndic
 
 **Primary WOOD/WETH pool (one-time):**
 
-A deep WOOD/WETH pool on Aerodrome Slipstream serves as the canonical market for WOOD price discovery:
+A deep WOOD/WETH pool on Aerodrome Slipstream serves as the canonical market for WOOD price discovery. We seed it directly at TGE — no public sale or LBP — using the two-sided + single-sided Clanker-style approach:
 
 1. Call `CLFactory.createPool(WOOD, WETH, tickSpacing, sqrtPriceX96)` — tick spacing 100 (≈0.3% fee equivalent)
-2. Seed full-range position: ~20M WOOD + equivalent WETH from genesis allocation via `NonfungiblePositionManager.mint()`
-3. Remaining ~30M WOOD from POL allocation held as reserve for deepening or per-syndicate pool seeding
-4. Position NFT held by protocol multisig — no active rebalancing needed for full-range
-5. Optionally request an Aerodrome gauge to earn AERO rewards on protocol-owned LP
+2. Seed two-sided concentrated position around the launch price: protocol-paired WOOD + ~5 ETH from treasury via `NonfungiblePositionManager.mint()`
+3. Seed single-sided WOOD-only position above launch price — acts as a permanent limit-sell ladder (Clanker-style), price-discovery anchor, and protocol revenue source
+4. Combined deployment: ~90M WOOD + ~5 ETH from the 150M POL allocation
+5. Position NFTs held by protocol multisig — locked, no active rebalancing
+6. Optionally request an Aerodrome gauge to earn AERO rewards on protocol-owned LP
 
 **Per-syndicate shareToken/WOOD pools:**
 
 1. **Create pool:** Call `CLFactory.createPool(shareToken, WOOD, tickSpacing, sqrtPriceX96)` — **permissionless**, anyone can do this
 3. **Seed liquidity (single-sided WOOD):**
    - Protocol seeds WOOD-only into a tick range above the current price for the first N syndicates (genesis cohort, e.g. first 10)
+   - Total budget: ~60M WOOD across the genesis cohort, drawn from the 150M POL allocation
    - Pool becomes two-sided as depositors sell shareTokens for early exit
-4. **Self-bootstrap:** After the genesis cohort, new syndicates create their own pools permissionlessly. Syndicate agents or community members can seed liquidity.
+4. **Self-bootstrap:** After the genesis cohort, new syndicates create their own pools permissionlessly. Syndicate agents or community members can seed liquidity. Per-syndicate LP rewards or depositor exit incentives, when needed, are funded from the **Community / grants (15%)** bucket — not a separate token allocation.
 
 **Bootstrapping via early exit demand:**
 
@@ -480,11 +482,10 @@ Aerodrome protocol-owned LP positions (WOOD/WETH + shareToken/WOOD)
 
 | Allocation | Amount | % | Vesting / Notes |
 |------------|--------|---|-----------------|
-| Public sale / LBP | 100M | 20% | Liquid at TGE. Largest single allocation — ensures deep initial liquidity |
-| Protocol-owned liquidity | 50M | 10% | WOOD/WETH + shareToken/WOOD pool seeding. Protocol-owned, managed by multisig |
+| Protocol-owned liquidity | 150M | 30% | Seeded directly into Aerodrome pools at TGE — no public sale tranche. Two-sided WOOD/WETH primary (~90M WOOD + ~5 ETH from treasury) plus single-sided WOOD on shareToken/WOOD genesis-cohort pools (~60M WOOD). All positions protocol-owned and locked, managed by multisig |
 | Team | 75M | 15% | 1-month cliff + 6-month linear vest |
 | Protocol treasury | 75M | 15% | Operational spending, multisig-controlled |
-| Community / grants | 75M | 15% | Distributed over time, multisig-controlled |
+| Community / grants | 75M | 15% | Distributed over time, multisig-controlled. **Also funds** depositor exit-liquidity incentives and LP rewards for the genesis cohort (no separate carve-out — these are community programs by definition) |
 | Bootstrapping incentives | 75M | 15% | Non-transferable 6 months. Distributed over 12 months with steep decay |
 | Strategic partnerships | 25M | 5% | Held in treasury, deployed for integrations |
 | Protocol reserve | 25M | 5% | Emergency fund — bug bounties, emergency liquidity, audits |
@@ -499,13 +500,13 @@ Aerodrome protocol-owned LP positions (WOOD/WETH + shareToken/WOOD)
 
 ```
 TGE (Day 0):
-  Public sale:            100M  (liquid)
-  POL:                     50M  (in Aerodrome pools — technically circulating but providing liquidity)
-  Bootstrap rewards:        0M  (earned over time, non-transferable)
-  Everything else:          0M  (vesting/locked/treasury)
+  POL — WOOD/WETH primary:   90M  (in two-sided + single-sided Aerodrome positions)
+  POL — shareToken/WOOD:     60M  (single-sided WOOD above launch price, genesis cohort pools)
+  Bootstrap rewards:          0M  (earned over time, non-transferable)
+  Everything else:            0M  (vesting/locked/treasury)
   ─────────────────────────────
-  Circulating:            ~150M (30% of supply)
-  Float (tradeable):      ~100M (20% of supply)
+  Circulating:              ~150M (30% of supply, all in protocol-owned LP positions)
+  Float (tradeable):           0M (no public sale — float emerges as depositors sell into shareToken/WOOD pools and as bootstrap rewards convert)
 
 Month 7 (team fully vested at 1mo cliff + 6mo linear):
   + Team vested:           75M
@@ -568,12 +569,13 @@ Sherwood uses **Aerodrome Slipstream** (concentrated liquidity, Uniswap V3-compa
 
 ### Pool Creation Flow
 
-**Primary WOOD/WETH pool (one-time):**
+**Primary WOOD/WETH pool (one-time, Aero Launch — no public sale):**
 1. Call `CLFactory.createPool(WOOD, WETH, tickSpacing, sqrtPriceX96)` — tick spacing 100 (≈0.3% fee equivalent)
-2. Seed full-range position: ~20M WOOD + equivalent WETH from genesis allocation via `NonfungiblePositionManager.mint()`
-3. Remaining ~30M WOOD from POL allocation reserved for per-syndicate pool seeding
-4. Position NFT held by protocol multisig
-5. Optionally request a gauge from Aerodrome governance to earn AERO rewards on protocol-owned LP
+2. Seed two-sided concentrated position at launch price: protocol-paired WOOD + ~5 ETH from treasury via `NonfungiblePositionManager.mint()`
+3. Seed single-sided WOOD-only position above launch price — Clanker-style limit-sell ladder
+4. Combined: ~90M WOOD + ~5 ETH from the 150M POL allocation. Remaining ~60M WOOD reserved for per-syndicate pool seeding
+5. Position NFTs held by protocol multisig — locked
+6. Optionally request a gauge from Aerodrome governance to earn AERO rewards on protocol-owned LP
 
 **Per-syndicate shareToken/WOOD pools:**
 1. **Create pool:** Call `CLFactory.createPool(shareToken, WOOD, tickSpacing, sqrtPriceX96)` — permissionless
@@ -694,7 +696,7 @@ The explicit revenue sharing model (60% of fees to veWOOD) is transparent but di
 ### Recommendations
 
 1. **Engage securities counsel** before TGE — the fee revenue share model needs explicit legal sign-off
-2. **Geographic restrictions** — consider excluding US persons from public sale/LBP
+2. **Geographic restrictions** — N/A under Aero Launch (no public sale tranche). Standard secondary-market disclaimers still apply for the WOOD/WETH pool
 3. **Utility-first messaging** — position WOOD as a protocol fee-sharing token, not a yield-bearing investment
 4. **Avoid profit language** — use "protocol fee share", not "yield", "dividends", "returns"
 5. **SAFT structure** for any pre-sale allocations
@@ -754,14 +756,13 @@ The explicit revenue sharing model (60% of fees to veWOOD) is transparent but di
 
 Reduced from 5 phases (v3) to 2 phases. Fewer contracts = faster deployment.
 
-### Phase 0: Token Launch
+### Phase 0: Token Launch (Aero Launch — no public sale)
 
 - Deploy `WoodToken.sol` (LayerZero OFT, 500M minted at genesis)
 - Execute initial distribution (all allocations to respective addresses/contracts)
-- Run LBP or public sale (100M WOOD)
-- Seed WOOD/WETH Aerodrome Slipstream pool (from POL allocation)
-- Seed shareToken/WOOD pools for existing syndicates
-- **Gate:** Token is live and liquid on at least one DEX. WOOD/WETH pool has >$100K liquidity.
+- Seed WOOD/WETH Aerodrome Slipstream pool: two-sided concentrated (~90M WOOD + ~5 ETH from treasury) + single-sided WOOD above launch price (Clanker-style)
+- Seed shareToken/WOOD pools for the genesis cohort syndicates (~60M WOOD single-sided)
+- **Gate:** Token is live and liquid on Aerodrome. WOOD/WETH pool has >$100K liquidity. Genesis-cohort shareToken/WOOD pools created.
 
 ### Phase 1: Core Tokenomics
 
@@ -795,7 +796,8 @@ Reduced from 5 phases (v3) to 2 phases. Fewer contracts = faster deployment.
 | **Bootstrapping** | Permanent emissions + bribes | 75M non-transferable WOOD over 12 months | Zero sell pressure during critical growth period |
 | **shareToken/WOOD pools** | Required for gauge eligibility | Kept — for secondary market exit only | Still critical for depositor exit during locked redemptions |
 | **Contract count** | 9 | 5 | Smaller attack surface, faster audit |
-| **Public sale** | 75M (15%) | 100M (20%) | More initial liquidity, healthier float |
+| **Launch mechanism** | LBP / public sale (75M, 15%) | Aero Launch — direct pool seeding, no public sale | Cleaner regulatory posture, no sale tranche to allocate or geo-restrict |
+| **POL allocation** | 50M (10%) | 150M (30%) — collapses prior `Public sale` + `POL` lines | Single bucket reflects single launch mechanism |
 | **Team vest** | 1mo cliff + 6mo linear | 1mo cliff + 6mo linear | Unchanged |
 | **Fee-funded buyback** | 20% of protocol fees | 20% of protocol fees (unchanged) | Still good — kept |
 | **veWOOD locking** | 4wk-1yr, linear decay, auto-max-lock | Same mechanics, but for fee sharing not governance | Still good — kept |
@@ -840,7 +842,7 @@ Reduced from 5 phases (v3) to 2 phases. Fewer contracts = faster deployment.
 
 ## Open Questions
 
-1. **WOOD token launch mechanism:** Same options as v3 (Fjord Foundry LBP recommended, direct Aerodrome pool as fallback). Decision: TBD.
+1. ~~**WOOD token launch mechanism:**~~ **Resolved** — Aero Launch (direct Aerodrome pool seeding, Clanker-style two-sided + single-sided WOOD). No LBP, no public sale tranche. See PR #47 for the full plan.
 
 2. ~~**Multi-token fee distribution UX:**~~ **Resolved** — FeeDistributor is USDC-only. Non-USDC fees converted off-chain via CoW Protocol (MEV-free) before deposit. No on-chain swap logic.
 
