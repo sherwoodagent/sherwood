@@ -52,7 +52,11 @@ export const WEIGHT_PROFILES: Record<string, ScoringWeights> = {
   // Majors (BTC/ETH/SOL): no TVL/event data, sentiment removed as constant bias.
   // 4 active categories: smartMoney (Nansen HL perps), technical (momentum + breakout + multiTF),
   // sentiment (sentimentContrarian only), onchain (fundingRate + HL flow + dexFlow).
-  majors:    { smartMoney: 0.25, technical: 0.35, sentiment: 0.15, onchain: 0.25, fundamental: 0.00, event: 0.00 },
+  // Technical weight reduced from 0.35 to 0.20 — it's the most lagging signal
+  // (MACD 26-period, EMA 50/200) and consistently cancels real-time bullish
+  // signals. Redistributed to onchain (funding rate, HL flow — real-time) and
+  // sentiment (sentimentContrarian — daily F&G, less laggy than technicals).
+  majors:    { smartMoney: 0.25, technical: 0.20, sentiment: 0.20, onchain: 0.35, fundamental: 0.00, event: 0.00 },
   // Altcoins: keep fundamental (TVL data exists) and event.
   altcoin:   { smartMoney: 0.20, technical: 0.25, sentiment: 0.15, onchain: 0.20, fundamental: 0.10, event: 0.10 },
   // sentHeavy/techHeavy removed — unvalidated, added parameter complexity without evidence of benefit
