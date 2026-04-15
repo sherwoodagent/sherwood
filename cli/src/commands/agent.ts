@@ -31,13 +31,24 @@ import type { RiskConfig } from "../agent/risk.js";
 import { Reporter } from "../agent/reporter.js";
 import { Backtester } from "../agent/backtest.js";
 import type { BacktestConfig, WalkForwardConfig } from "../agent/backtest.js";
+import { runCalibration, formatCalibrationTable, DEFAULT_CALIBRATION_TOKENS } from "../agent/calibrator.js";
 import { AlertFormatter } from "../agent/alert-formatter.js";
 import { ExecutionPipeline, DEFAULT_SCALED_SIZING } from "../agent/execution-pipeline.js";
 import { auditSignalHistory, suggestRenormalizedWeights, diffAudits } from "../agent/signal-audit.js";
 import type { AuditResult } from "../agent/signal-audit.js";
 import { DEFAULT_WEIGHTS } from "../agent/scoring.js";
 
-const DEFAULT_TOKENS = ["ethereum", "bitcoin", "solana", "aave", "uniswap"];
+// Expanded default universe — covers majors, L1/L2s, DeFi blue-chips, top
+// memes, and HL-listed alts so the scanner has more shots on goal each cycle.
+// Every token here has Hyperliquid perp coverage (executor.ts TOKEN_TO_ASSET_INDEX)
+// and CoinGecko OHLC. Use --auto for fully dynamic selection from HL volume.
+const DEFAULT_TOKENS = [
+  "bitcoin", "ethereum", "solana",                               // majors
+  "ripple", "dogecoin", "avalanche-2", "polkadot", "near",       // L1s
+  "arbitrum",                                                    // L2
+  "aave", "uniswap", "chainlink",                                // DeFi
+  "hyperliquid", "bittensor", "fartcoin",                        // HL natives / themes
+];
 
 function makeConfig(overrides?: Partial<AgentConfig>): AgentConfig {
   return {
@@ -664,6 +675,48 @@ export function registerAgentCommands(program: Command): void {
           spinner.fail(`Backtest failed: ${(err as Error).message}`);
           process.exitCode = 1;
         }
+      }
+    });
+
+  // ── calibrate ──
+  agent
+    .command("calibrate")
+    .description("Sweep weight profiles × BUY/SELL thresholds against historical data; ranks by Sharpe")
+    .option("--tokens <list>", "Comma-separated CoinGecko IDs (default: bitcoin,ethereum,solana,aave,uniswap,chainlink,arbitrum)")
+    .option("--days <n>", "Lookback window in days", "60")
+    .option("--capital <amount>", "Initial capital per token in USD", "10000")
+    .option("--top <n>", "Show top N configs in the ranked table", "20")
+    .action(async (options: { tokens?: string; days: string; capital: string; top: string }) => {
+      const tokens = options.tokens
+        ? options.tokens.split(",").map((t) => t.trim()).filter(Boolean)
+        : DEFAULT_CALIBRATION_TOKENS;
+      const days = parseInt(options.days, 10);
+      const capital = parseFloat(options.capital);
+      const topN = parseInt(options.top, 10);
+
+      if (!Number.isFinite(days) || days <= 0) {
+        console.error(chalk.red(`Invalid --days: ${options.days}`));
+        process.exitCode = 1;
+        return;
+      }
+      if (!Number.isFinite(capital) || capital <= 0) {
+        console.error(chalk.red(`Invalid --capital: ${options.capital}`));
+        process.exitCode = 1;
+        return;
+      }
+
+      console.log(chalk.bold(`\n  Calibrating ${tokens.length} tokens over ${days}d (200 configs per token)...\n`));
+      try {
+        const results = await runCalibration({
+          tokens,
+          days,
+          capital,
+          onProgress: (msg) => console.log(chalk.dim(`  ${msg}`)),
+        });
+        console.log(formatCalibrationTable(results, topN));
+      } catch (err) {
+        console.error(chalk.red(`\n  Calibration failed: ${(err as Error).message}\n`));
+        process.exitCode = 1;
       }
     });
 

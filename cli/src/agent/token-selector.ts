@@ -186,7 +186,7 @@ export class DynamicTokenSelector {
   async selectTokens(criteria?: Partial<SelectionCriteria>): Promise<TokenSelection> {
     const config: SelectionCriteria = {
       minVolume24h: 5_000_000,    // $5M minimum
-      topByVolume: 10,
+      topByVolume: 18,            // bumped 10 → 18 for more shots on goal per cycle
       fundingExtremes: 5,
       minFundingRate: 0.0003,     // 0.03%
       ...criteria
@@ -323,8 +323,9 @@ export class DynamicTokenSelector {
       }
     }
 
-    // Cap at 20 tokens to respect CoinGecko rate limits
-    const tokens = Array.from(selectedTokens).slice(0, 20);
+    // Cap at 25 tokens — bumped from 20 to fit the wider topByVolume sweep
+    // while staying under CoinGecko's free-tier rate limit (~30 req/min).
+    const tokens = Array.from(selectedTokens).slice(0, 25);
 
     return {
       tokens,
