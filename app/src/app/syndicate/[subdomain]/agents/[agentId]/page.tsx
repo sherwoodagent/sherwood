@@ -11,6 +11,9 @@ import { resolveSyndicateBySubdomain } from "@/lib/syndicate-data";
 import { fetchGovernorData, ProposalState } from "@/lib/governor-data";
 import { truncateAddress, formatAsset, getAddresses } from "@/lib/contracts";
 import { TargetChainProvider } from "@/components/TargetChainContext";
+import JsonLd from "@/components/JsonLd";
+import { buildBreadcrumbLd } from "@/lib/structured-data";
+import ShareButton from "@/components/ShareButton";
 
 interface PageParams {
   subdomain: string;
@@ -26,7 +29,26 @@ export async function generateMetadata({
   const data = await resolveSyndicateBySubdomain(subdomain);
   const agent = data?.agents.find((a) => a.agentId.toString() === agentId);
   const name = agent?.identity?.name || `Agent #${agentId}`;
-  return { title: `Sherwood // ${name}` };
+  const description = agent?.identity?.description
+    ? agent.identity.description.slice(0, 160)
+    : `Agent on ${subdomain}.sherwoodagent.eth — ERC-8004 identity #${agentId}.`;
+  const canonical = `/syndicate/${subdomain}/agents/${agentId}`;
+  return {
+    title: `Sherwood // ${name}`,
+    description,
+    alternates: { canonical },
+    openGraph: {
+      title: `${name} · Sherwood`,
+      description,
+      type: "profile",
+      // opengraph-image.tsx in this dir auto-generates the rich card.
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${name} · Sherwood`,
+      description,
+    },
+  };
 }
 
 export default async function AgentDetailPage({
@@ -89,6 +111,20 @@ export default async function AgentDetailPage({
   return (
     <TargetChainProvider chainId={data.chainId}>
       <AmbientBackground />
+
+      <JsonLd
+        data={buildBreadcrumbLd([
+          { name: "Home", path: "/" },
+          { name: "Leaderboard", path: "/leaderboard" },
+          { name: syndicateName, path: `/syndicate/${subdomain}` },
+          { name: "Agents", path: `/syndicate/${subdomain}/agents` },
+          {
+            name: displayName,
+            path: `/syndicate/${subdomain}/agents/${agentId}`,
+          },
+        ])}
+      />
+
       <div className="layout layout-normal">
         <main
           id="main-content"
@@ -179,29 +215,44 @@ export default async function AgentDetailPage({
                   </p>
                 )}
               </div>
-              <Badge variant={agent.active ? "success" : "danger"}>
-                {agent.active ? "Active" : "Inactive"}
-              </Badge>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  gap: "0.75rem",
+                }}
+              >
+                <Badge variant={agent.active ? "success" : "danger"}>
+                  {agent.active ? "Active" : "Inactive"}
+                </Badge>
+                {/* Share button — pre-fills a tweet linking to this agent's
+                    detail page; OG card auto-renders a rich preview. */}
+                <ShareButton
+                  path={`/syndicate/${subdomain}/agents/${agent.agentId.toString()}`}
+                  text={`${displayName} on Sherwood — ERC-8004 #${agent.agentId.toString()} · ${syndicateName}`}
+                />
+              </div>
             </div>
           </div>
 
           {/* Track record */}
           <div className="metrics-grid" style={{ marginTop: "1.5rem" }}>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Proposals</div>
               <div className="metric-val">{agentProposals.length}</div>
             </div>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Settled</div>
               <div className="metric-val">{settled.length}</div>
             </div>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Win rate</div>
               <div className="metric-val">
                 {settled.length === 0 ? "—" : `${winRate.toFixed(0)}%`}
               </div>
             </div>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Net P&amp;L</div>
               <div
                 className="metric-val"

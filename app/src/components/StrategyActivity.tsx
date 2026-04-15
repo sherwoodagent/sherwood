@@ -35,7 +35,7 @@ const EVENT_CONFIG: Record<
   cancelled: {
     label: "CANCELLED",
     bg: "rgba(255, 255, 255, 0.1)",
-    color: "rgba(255,255,255,0.3)",
+    color: "rgba(255,255,255,0.55)",
   },
 };
 
@@ -108,7 +108,7 @@ export default function StrategyActivity({
           style={{
             textAlign: "center",
             padding: "2rem 0",
-            color: "rgba(255,255,255,0.3)",
+            color: "rgba(255,255,255,0.55)",
             fontFamily: "var(--font-plus-jakarta), sans-serif",
             fontSize: "12px",
           }}

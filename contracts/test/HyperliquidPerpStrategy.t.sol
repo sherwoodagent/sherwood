@@ -171,6 +171,23 @@ contract HyperliquidPerpStrategyTest is Test {
         assertEq(HyperliquidPerpStrategy(clone).leverage(), 50);
     }
 
+    // ==================== POSITION VALUE ====================
+    // Inherits BaseStrategy's (0, false) default — HyperCore precompile
+    // integration is deferred to a HyperEVM-gated follow-up.
+
+    function test_positionValue_alwaysStubbed() public {
+        (uint256 value, bool valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+
+        vm.prank(vault);
+        strategy.execute();
+
+        (value, valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+    }
+
     // ==================== EXECUTE ====================
 
     function test_execute() public {

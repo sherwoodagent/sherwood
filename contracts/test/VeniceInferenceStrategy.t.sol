@@ -187,6 +187,25 @@ contract VeniceInferenceStrategy_DirectTest is Test {
         VeniceInferenceStrategy(clone).initialize(vault, proposer, abi.encode(p));
     }
 
+    // ── Position value ──
+    // Inherits BaseStrategy's (0, false) default — loan model; no
+    // asset held by the strategy mid-execution.
+
+    function test_positionValue_alwaysStubbed() public {
+        (uint256 value, bool valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+
+        vm.prank(vault);
+        vvvToken.approve(address(strategy), VVV_AMOUNT);
+        vm.prank(vault);
+        strategy.execute();
+
+        (value, valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+    }
+
     // ── Execute (direct VVV) ──
 
     function test_execute() public {

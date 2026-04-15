@@ -14,6 +14,7 @@ import {
   truncateAddress,
 } from "@/lib/contracts";
 import { useToast } from "@/components/ui/Toast";
+import { GasEstimate } from "@/components/ui/GasEstimate";
 import {
   trackTxSubmitted,
   trackTxConfirmed,
@@ -259,7 +260,7 @@ export default function WithdrawModal({
             <details
               style={{
                 fontSize: "10px",
-                color: "rgba(255,255,255,0.3)",
+                color: "rgba(255,255,255,0.55)",
                 maxHeight: "100px",
                 overflow: "auto",
                 wordBreak: "break-all",
@@ -350,6 +351,21 @@ export default function WithdrawModal({
                   ? "Withdrawing..."
                   : `Withdraw ${isMax ? "All" : truncateDisplay(amount) || "0"} ${assetSymbol}`}
               </button>
+
+              {/* Pre-flight gas estimate. */}
+              {(isMax || parsedAmount > 0n) && step === "input" && address && (
+                <GasEstimate
+                  address={vault}
+                  abi={SYNDICATE_VAULT_ABI}
+                  functionName={isMax ? "redeem" : "withdraw"}
+                  args={
+                    isMax
+                      ? [shareBalance, address, address]
+                      : [parsedAmount, address, address]
+                  }
+                  chainId={chainId}
+                />
+              )}
             </div>
 
             {/* Pending tx link */}

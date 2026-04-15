@@ -175,7 +175,7 @@ export default function AttestationTimeline({
     <div className="panel">
       <div className="panel-title">
         <span>Attestation History</span>
-        <span style={{ color: "rgba(255,255,255,0.3)" }}>
+        <span style={{ color: "rgba(255,255,255,0.55)" }}>
           {attestations.length}
         </span>
       </div>
@@ -183,7 +183,7 @@ export default function AttestationTimeline({
       {attestations.length === 0 ? (
         <div
           className="font-[family-name:var(--font-plus-jakarta)] text-xs"
-          style={{ color: "rgba(255,255,255,0.3)", padding: "2rem 0" }}
+          style={{ color: "rgba(255,255,255,0.55)", padding: "2rem 0" }}
         >
           No attestations yet
         </div>
@@ -209,7 +209,7 @@ export default function AttestationTimeline({
 
                   <div
                     className="flex items-center gap-3 mt-1 font-[family-name:var(--font-plus-jakarta)]"
-                    style={{ fontSize: "9px", color: "rgba(255,255,255,0.3)" }}
+                    style={{ fontSize: "9px", color: "rgba(255,255,255,0.55)" }}
                   >
                     <span>{formatTime(att.time)}</span>
                     <span>from {attesterName(att)}</span>

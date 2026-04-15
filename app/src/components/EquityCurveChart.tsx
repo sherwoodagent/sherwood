@@ -145,7 +145,7 @@ export default function EquityCurveChart({
                     if (Math.abs(v) < 0.01) return v.toPrecision(4);
                     return v.toLocaleString("en-US", { maximumFractionDigits: 2 });
                   },
-                  color: "rgba(255,255,255,0.3)",
+                  color: "rgba(255,255,255,0.55)",
                   font: { size: 10, family: "Plus Jakarta Sans" },
                 },
               },

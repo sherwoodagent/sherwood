@@ -548,6 +548,27 @@ contract PortfolioStrategyTest is Test {
         assertEq(uint256(strategy.state()), uint256(BaseStrategy.State.Settled));
     }
 
+    // ==================== POSITION VALUE ====================
+    // PortfolioStrategy inherits BaseStrategy's (0, false) default —
+    // Chainlink Data Streams verify is non-view. The frontend uses
+    // getAllocations() + offchain prices for its P&L readout.
+
+    function test_positionValue_alwaysStubbed() public {
+        // Before execute
+        (uint256 value, bool valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+
+        // After execute — still stubbed (no onchain price path)
+        vm.prank(vault);
+        weth.approve(address(strategy), TOTAL_AMOUNT);
+        vm.prank(vault);
+        strategy.execute();
+        (value, valid) = strategy.positionValue();
+        assertEq(value, 0);
+        assertFalse(valid);
+    }
+
     // ==================== CLONING ====================
 
     function test_clonesHaveIsolatedStorage() public {

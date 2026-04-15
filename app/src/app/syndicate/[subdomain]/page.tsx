@@ -1,12 +1,12 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
+import dynamic from "next/dynamic";
 import AmbientBackground from "@/components/AmbientBackground";
 import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import SyndicateClient from "@/components/SyndicateClient";
 import DepositButton from "@/components/DepositButton";
 import WithdrawButton from "@/components/WithdrawButton";
-import EquityCurveChart from "@/components/EquityCurveChart";
 import RiskMetricsPanel from "@/components/RiskMetricsPanel";
 import VaultOverview from "@/components/VaultOverview";
 import AgentRoster from "@/components/AgentRoster";
@@ -18,8 +18,31 @@ import StrategyActivity from "@/components/StrategyActivity";
 import ReferralBanner from "@/components/ReferralBanner";
 import { RecentlyViewedTracker } from "@/components/RecentlyViewed";
 import { TargetChainProvider } from "@/components/TargetChainContext";
+import RedemptionUnlockWatcher from "@/components/RedemptionUnlockWatcher";
 import { resolveSyndicateBySubdomain } from "@/lib/syndicate-data";
 import { loadActiveStrategy } from "@/lib/active-strategy";
+import JsonLd from "@/components/JsonLd";
+import { buildSyndicateLd, buildBreadcrumbLd } from "@/lib/structured-data";
+
+// Equity chart pulls chart.js (~50kB gzip). Lives below the fold on the
+// vault page; dynamic-importing it shifts that weight out of the route's
+// initial JS bundle.
+// EquityCurveChart already has "use client" — dropping ssr: false (which
+// isn't allowed in server-component dynamic imports) lets Next render
+// the loading placeholder server-side and hydrate the chart on the client.
+const EquityCurveChart = dynamic(() => import("@/components/EquityCurveChart"), {
+  loading: () => (
+    <div
+      style={{
+        height: 320,
+        background: "rgba(255,255,255,0.02)",
+        animation: "sh-skel-shimmer 1.5s ease-in-out infinite",
+      }}
+      aria-busy="true"
+      aria-label="Loading equity chart"
+    />
+  ),
+});
 
 export async function generateMetadata({
   params,
@@ -91,9 +114,30 @@ export default async function SyndicateDetailPage({
     data.activity,
   );
 
+  const tvlDisplay = data.display?.tvl;
+
   return (
     <TargetChainProvider chainId={data.chainId}>
       <AmbientBackground />
+
+      <JsonLd
+        data={buildSyndicateLd({
+          subdomain,
+          name,
+          description: data.metadata?.description || undefined,
+          tvl: tvlDisplay,
+          agentCount: Number(data.agentCount),
+          assetSymbol: data.assetSymbol,
+          chainId: data.chainId,
+        })}
+      />
+      <JsonLd
+        data={buildBreadcrumbLd([
+          { name: "Home", path: "/" },
+          { name: "Leaderboard", path: "/leaderboard" },
+          { name, path: `/syndicate/${subdomain}` },
+        ])}
+      />
 
       <div className="layout layout-normal">
         <main className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
@@ -128,6 +172,15 @@ export default async function SyndicateDetailPage({
             chainId={data.chainId}
           />
 
+          {/* Toasts the connected wallet when redemptions unlock on this
+              vault — only fires when the user holds shares + the vault
+              transitions locked → open. */}
+          <RedemptionUnlockWatcher
+            vault={data.vault}
+            vaultName={name}
+            chainId={data.chainId}
+          />
+
           {/* Stats bar + Deposit */}
           <div className="stats-bar-row">
             <div className="stats-bar" style={{ flex: 1, marginBottom: 0 }}>
@@ -149,6 +202,7 @@ export default async function SyndicateDetailPage({
                   vaultName={name}
                   openDeposits={data.openDeposits}
                   paused={data.paused}
+                  redemptionsLocked={data.redemptionsLocked}
                   assetAddress={data.assetAddress}
                   assetDecimals={data.assetDecimals}
                   assetSymbol={data.assetSymbol}

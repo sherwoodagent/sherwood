@@ -3,7 +3,7 @@
 import { useAccount, useReadContract } from "wagmi";
 import { formatUnits, type Address } from "viem";
 import SyndicateHeader, { type TabId } from "./SyndicateHeader";
-import { SYNDICATE_VAULT_ABI, formatAsset } from "@/lib/contracts";
+import { SYNDICATE_VAULT_ABI, formatAsset, shareDecimals } from "@/lib/contracts";
 
 interface SyndicateClientProps {
   name: string;
@@ -97,7 +97,7 @@ export default function SyndicateClient({
           <div className="stat-item">
             <div className="stat-label">Your Shares</div>
             <div className="stat-value">
-              {parseFloat(formatUnits(userShares, assetDecimals * 2)).toLocaleString()}
+              {parseFloat(formatUnits(userShares, shareDecimals(assetDecimals))).toLocaleString()}
             </div>
           </div>
           <div className="stat-item">

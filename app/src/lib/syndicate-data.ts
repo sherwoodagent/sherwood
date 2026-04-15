@@ -778,7 +778,7 @@ async function fetchActivityFromLogs(
 
 // ── Equity curve ──────────────────────────────────────────
 
-async function fetchEquityCurve(
+export async function fetchEquityCurve(
   subgraphUrl: string | null,
   syndicateId: string,
   assetDecimals: number,

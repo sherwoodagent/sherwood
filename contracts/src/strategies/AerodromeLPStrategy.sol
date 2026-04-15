@@ -228,4 +228,11 @@ contract AerodromeLPStrategy is BaseStrategy {
         if (newMinAmountAOut > 0) minAmountAOut = newMinAmountAOut;
         if (newMinAmountBOut > 0) minAmountBOut = newMinAmountBOut;
     }
+
+    // ── positionValue ──
+    // Inherits BaseStrategy's (0, false) default. Deferred to a follow-up:
+    // requires decomposing the LP (including any gauge-staked portion) via
+    // pool reserves + totalSupply, converting the non-asset leg through an
+    // Aerodrome quote, and correctly handling the stable vs volatile
+    // pricing curves. See issue #188 for rationale.
 }

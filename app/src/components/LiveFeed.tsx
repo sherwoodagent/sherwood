@@ -338,7 +338,7 @@ export default function LiveFeed({
               </div>
               <div
                 style={{
-                  color: "rgba(255,255,255,0.3)",
+                  color: "rgba(255,255,255,0.55)",
                   fontSize: "9px",
                   marginTop: "2px",
                   fontFamily: "var(--font-mono)",

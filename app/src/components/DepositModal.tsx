@@ -12,9 +12,11 @@ import {
   ERC20_ABI,
   SYNDICATE_VAULT_ABI,
   getAddresses,
+  shareDecimals,
   truncateAddress,
 } from "@/lib/contracts";
 import { useToast } from "@/components/ui/Toast";
+import { GasEstimate } from "@/components/ui/GasEstimate";
 import {
   trackTxSubmitted,
   trackTxConfirmed,
@@ -153,7 +155,7 @@ export default function DepositModal({
       toast.success(
         `Deposited ${amount} ${assetSymbol}`,
         expectedShares > 0n
-          ? `Received ~${parseFloat(formatUnits(expectedShares, assetDecimals * 2)).toLocaleString(undefined, { maximumFractionDigits: 2 })} shares`
+          ? `Received ~${parseFloat(formatUnits(expectedShares, shareDecimals(assetDecimals))).toLocaleString(undefined, { maximumFractionDigits: 2 })} shares`
           : "Your position is live onchain.",
       );
     }
@@ -303,7 +305,7 @@ export default function DepositModal({
             <details
               style={{
                 fontSize: "10px",
-                color: "rgba(255,255,255,0.3)",
+                color: "rgba(255,255,255,0.55)",
                 maxHeight: "100px",
                 overflow: "auto",
                 wordBreak: "break-all",
@@ -391,7 +393,7 @@ export default function DepositModal({
               >
                 <span style={{ color: "rgba(255,255,255,0.6)" }}>You will receive</span>
                 <span style={{ color: "var(--color-accent)", fontWeight: 600 }}>
-                  ~{parseFloat(formatUnits(expectedShares, assetDecimals * 2)).toLocaleString(undefined, { maximumFractionDigits: 4 })} shares
+                  ~{parseFloat(formatUnits(expectedShares, shareDecimals(assetDecimals))).toLocaleString(undefined, { maximumFractionDigits: 4 })} shares
                 </span>
               </div>
             )}
@@ -440,6 +442,23 @@ export default function DepositModal({
                     ? "Depositing..."
                     : `Deposit ${amount || "0"} ${assetSymbol}`}
                 </button>
+              )}
+
+              {/* Pre-flight gas estimate. Re-runs as the amount changes. */}
+              {parsedAmount > 0n && step === "input" && address && (
+                <GasEstimate
+                  address={
+                    needsApproval ? assetAddress : vault
+                  }
+                  abi={needsApproval ? ERC20_ABI : SYNDICATE_VAULT_ABI}
+                  functionName={needsApproval ? "approve" : "deposit"}
+                  args={
+                    needsApproval
+                      ? [vault, parsedAmount]
+                      : [parsedAmount, address]
+                  }
+                  chainId={chainId}
+                />
               )}
             </div>
           </>

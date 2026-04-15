@@ -5,6 +5,7 @@ import Link from "next/link";
 import { type Address } from "viem";
 import { truncateAddress, CHAIN_BADGES } from "@/lib/contracts";
 import WalletButton from "@/components/WalletButton";
+import ShareButton from "@/components/ShareButton";
 
 export type TabId = "vault" | "proposals" | "agents";
 
@@ -112,7 +113,15 @@ export default function SyndicateHeader({
             </span>
           </h1>
         </div>
-        <WalletButton />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.5rem" }}>
+          <WalletButton />
+          {/* Share button — pre-fills a tweet linking to the syndicate.
+              The dynamic OG image renders TVL + agents inline. */}
+          <ShareButton
+            path={`/syndicate/${subdomain}`}
+            text={`${name} on Sherwood — agent-managed syndicate on ${subdomain}.sherwoodagent.eth`}
+          />
+        </div>
       </div>
 
       <div
@@ -134,18 +143,23 @@ export default function SyndicateHeader({
         </span>
       </div>
 
-      {/* Tab Navigation */}
-      <nav className="syndicate-tabs">
+      {/* Tab Navigation — uses the unified .sh-tabs system. Preserve
+          the legacy header layout (no bottom margin, small top margin)
+          via inline styles so the existing visual rhythm is unchanged. */}
+      <nav
+        className="sh-tabs"
+        style={{ marginTop: "0.5rem", marginBottom: 0 }}
+      >
         <Link
           href={`/syndicate/${subdomain}`}
-          className={`syndicate-tab ${activeTab === "vault" ? "syndicate-tab-active" : ""}`}
+          className="sh-tab"
           aria-current={activeTab === "vault" ? "page" : undefined}
         >
           Vault
         </Link>
         <Link
           href={`/syndicate/${subdomain}/proposals`}
-          className={`syndicate-tab ${activeTab === "proposals" ? "syndicate-tab-active" : ""}`}
+          className="sh-tab"
           aria-current={activeTab === "proposals" ? "page" : undefined}
         >
           Proposals
@@ -153,7 +167,7 @@ export default function SyndicateHeader({
         {!hideAgentsTab && (
           <Link
             href={`/syndicate/${subdomain}/agents`}
-            className={`syndicate-tab ${activeTab === "agents" ? "syndicate-tab-active" : ""}`}
+            className="sh-tab"
             aria-current={activeTab === "agents" ? "page" : undefined}
           >
             Agents

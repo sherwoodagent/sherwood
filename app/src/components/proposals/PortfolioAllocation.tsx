@@ -165,7 +165,7 @@ export default function PortfolioAllocation({
             <span
               style={{
                 fontSize: "11px",
-                color: "rgba(255,255,255,0.35)",
+                color: "rgba(255,255,255,0.6)",
                 fontFamily: "var(--font-plus-jakarta), sans-serif",
               }}
             >

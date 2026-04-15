@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import { Inter, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import Providers from "@/components/Providers";
+import JsonLd from "@/components/JsonLd";
+import { buildOrgLd } from "@/lib/structured-data";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./globals.css";
 
@@ -66,6 +68,7 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${plusJakartaSans.variable} ${jetbrainsMono.variable}`}>
       <body className="bg-black text-[#E5E7EB] antialiased overflow-x-hidden font-[family-name:var(--font-inter)]">
         <a href="#main-content" className="skip-to-main">Skip to main content</a>
+        <JsonLd data={buildOrgLd()} />
         <Providers>{children}</Providers>
         {umamiWebsiteId && (
           <Script

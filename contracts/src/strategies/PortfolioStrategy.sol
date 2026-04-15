@@ -406,4 +406,12 @@ contract PortfolioStrategy is BaseStrategy {
     function getSwapExtraData() external view returns (bytes[] memory) {
         return _swapExtraData;
     }
+
+    // ── positionValue ──
+    // Inherits BaseStrategy's (0, false) default — PortfolioStrategy has no
+    // cheap *view* path to a current value. Chainlink Data Streams `verify`
+    // is non-view (charges LINK) and the ISwapAdapter quote is likewise
+    // non-view. The frontend reads `getAllocations()` + offchain prices
+    // (CoinGecko) to compute display-only P&L for Portfolio, which is a
+    // better signal than any onchain spot-quote we could synthesize here.
 }

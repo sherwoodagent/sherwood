@@ -19,6 +19,9 @@ import { formatDuration } from "@/lib/governor-data";
 import type { ActivityEvent } from "@/lib/syndicate-data";
 import { Term } from "@/components/ui/Glossary";
 import { TargetChainProvider } from "@/components/TargetChainContext";
+import JsonLd from "@/components/JsonLd";
+import { buildBreadcrumbLd } from "@/lib/structured-data";
+import TimelockPanel from "@/components/governance/TimelockPanel";
 import type { Address } from "viem";
 
 /** Reduce activity events into a per-proposal receipt lookup. */
@@ -312,6 +315,15 @@ export default async function ProposalsPage({
     <TargetChainProvider chainId={data.chainId}>
       <AmbientBackground />
 
+      <JsonLd
+        data={buildBreadcrumbLd([
+          { name: "Home", path: "/" },
+          { name: "Leaderboard", path: "/leaderboard" },
+          { name, path: `/syndicate/${subdomain}` },
+          { name: "Proposals", path: `/syndicate/${subdomain}/proposals` },
+        ])}
+      />
+
       <div className="layout layout-normal">
         <main className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
           <SiteHeader />
@@ -385,6 +397,14 @@ export default async function ProposalsPage({
               depositors first land asking "what is my capital doing?".
               Proposals page stays focused on voting + history. */}
 
+          {/* Pending parameter changes (timelock). Hides itself when none. */}
+          {!isMock && (
+            <TimelockPanel
+              governorAddress={governor.governorAddress}
+              chainId={data.chainId}
+            />
+          )}
+
           {/* Voting Queue */}
           {votingQueue.length > 0 && (
             <div style={{ marginTop: "1.5rem" }}>
@@ -393,7 +413,7 @@ export default async function ProposalsPage({
                 style={{ marginBottom: "1rem" }}
               >
                 <span>Voting Queue</span>
-                <span style={{ color: "rgba(255,255,255,0.35)", fontSize: "10px", letterSpacing: "0.15em" }}>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: "10px", letterSpacing: "0.15em" }}>
                   {votingQueue.length} PENDING
                 </span>
               </div>

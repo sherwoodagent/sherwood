@@ -50,16 +50,16 @@ export default function SiteFooter() {
   return (
     <footer className="border-t border-[rgba(255,255,255,0.08)] mt-24 font-[family-name:var(--font-plus-jakarta)] relative overflow-hidden">
       {/* Status rail at the very top of the footer */}
-      <div className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[rgba(255,255,255,0.35)] border-b border-[rgba(255,255,255,0.06)]">
+      <div className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[rgba(255,255,255,0.6)] border-b border-[rgba(255,255,255,0.06)]">
         <div className="max-w-[1400px] mx-auto px-8 md:px-16 py-3 flex flex-wrap items-center justify-between gap-3">
           <span className="flex items-center gap-2">
             <span className="w-[6px] h-[6px] rounded-full bg-[var(--color-accent)]" style={{ boxShadow: "0 0 8px var(--color-accent)" }} />
             {"// System Online"}
           </span>
-          <span className="text-[rgba(255,255,255,0.3)]">
+          <span className="text-[rgba(255,255,255,0.55)]">
             Base · HyperEVM
           </span>
-          <span className="text-[rgba(255,255,255,0.3)]">
+          <span className="text-[rgba(255,255,255,0.55)]">
             v0.2 · {new Date().getUTCFullYear()}
           </span>
         </div>
@@ -122,10 +122,10 @@ export default function SiteFooter() {
 
         {/* Bottom bar */}
         <div className="border-t border-[rgba(255,255,255,0.06)] mt-12 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[rgba(255,255,255,0.3)]">
+          <p className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[rgba(255,255,255,0.55)]">
             © {new Date().getFullYear()} Sherwood Protocol
           </p>
-          <p className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[rgba(255,255,255,0.25)]">
+          <p className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[rgba(255,255,255,0.55)]">
             Unaudited · Not financial advice · Use at your own risk
           </p>
         </div>

@@ -1,16 +1,44 @@
+import dynamic from "next/dynamic";
 import {
   type ProposalData,
   ProposalState,
   formatDuration,
 } from "@/lib/governor-data";
 import { truncateAddress, formatAsset, formatBps } from "@/lib/contracts";
-import PortfolioAllocation from "./PortfolioAllocation";
-import PortfolioDashboard from "./PortfolioDashboard";
 import ExecutionCallPreview from "./ExecutionCallPreview";
 import { ProposalStepper } from "@/components/ui/ProposalStepper";
 import { Countdown } from "@/components/ui/Countdown";
 import { EmptyState } from "@/components/ui/EmptyState";
 import type { Address } from "viem";
+
+// Lazy-load the chart.js consumers — they only render when an active
+// proposal exists with portfolio data, and pulling chart.js + react-chartjs-2
+// out of the route's initial JS dropped the vault page from ~82kB → ~10kB.
+// Both already have "use client" so SSR isn't an issue; we just ship them
+// as a separate chunk.
+const PortfolioAllocation = dynamic(() => import("./PortfolioAllocation"), {
+  loading: () => <ChartSkeleton />,
+});
+const PortfolioDashboard = dynamic(() => import("./PortfolioDashboard"), {
+  loading: () => <ChartSkeleton />,
+});
+
+function ChartSkeleton() {
+  return (
+    <div
+      style={{
+        height: 220,
+        marginTop: "1rem",
+        background:
+          "linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
+        backgroundSize: "200% 100%",
+        animation: "sh-skel-shimmer 1.5s ease-in-out infinite",
+      }}
+      aria-busy="true"
+      aria-label="Loading allocation chart"
+    />
+  );
+}
 
 interface PortfolioAllocProps {
   allocations: { symbol: string; weightPct: number }[];
@@ -151,19 +179,19 @@ export default function ActiveProposal({
       </div>
 
       <div className="metrics-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Agent</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {addressNames?.[proposal.proposer.toLowerCase()] || truncateAddress(proposal.proposer)}
           </div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Capital Deployed</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {formatAsset(proposal.deployedCapital, assetDecimals)} {assetSymbol}
           </div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Settles In</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {timeLeft > 0n ? (
@@ -173,7 +201,7 @@ export default function ActiveProposal({
             )}
           </div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Performance Fee</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {formatBps(proposal.performanceFeeBps)}

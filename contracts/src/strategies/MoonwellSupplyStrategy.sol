@@ -105,4 +105,17 @@ contract MoonwellSupplyStrategy is BaseStrategy {
         if (newSupplyAmount > 0) supplyAmount = newSupplyAmount;
         if (newMinRedeemAmount > 0) minRedeemAmount = newMinRedeemAmount;
     }
+
+    // ── positionValue ──
+
+    /// @dev Current underlying value of the supplied position. Uses
+    ///      `exchangeRateStored` (last-accrued) rather than accruing
+    ///      fresh interest — the one-block staleness is acceptable for
+    ///      a display-only readout and keeps this cheap + pure view.
+    function _positionValue() internal view override returns (uint256, bool) {
+        uint256 cBal = ICToken(mToken).balanceOf(address(this));
+        if (cBal == 0) return (0, true);
+        uint256 rate = ICToken(mToken).exchangeRateStored();
+        return ((cBal * rate) / 1e18, true);
+    }
 }
