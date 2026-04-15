@@ -1,0 +1,13 @@
+{
+  "source": "chain",
+  "type": "ProposalSettled",
+  "block": 22502100,
+  "tx": "0xddd444",
+  "args": {
+    "proposalId": "42",
+    "vault": "0xVault000000000000000000000000000000000002",
+    "pnl": "1500000000",
+    "performanceFee": "150000000",
+    "duration": "604800"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "source": "xmtp",
+  "id": "msg-sig-1",
+  "from": "0xAgent0000000000000000000000000000000001",
+  "type": "TRADE_SIGNAL",
+  "text": "Detected arbitrage opportunity: USDC/USDbC +0.12%",
+  "sentAt": "2026-04-15T10:33:00.000Z"
+}

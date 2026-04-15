@@ -1,0 +1,10 @@
+{
+  "source": "chain",
+  "type": "AgentRegistered",
+  "block": 22500000,
+  "tx": "0xfff666",
+  "args": {
+    "agentId": "7",
+    "agentAddress": "0xAgent0000000000000000000000000000000001"
+  }
+}

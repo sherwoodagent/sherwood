@@ -1,0 +1,8 @@
+{
+  "source": "xmtp",
+  "id": "msg-plain-1",
+  "from": "0xLP0000000000000000000000000000000000003",
+  "type": "MESSAGE",
+  "text": "Hey team, any thoughts on this week's yield?",
+  "sentAt": "2026-04-15T10:34:00.000Z"
+}

@@ -1,0 +1,8 @@
+{
+  "source": "xmtp",
+  "id": "msg-strat-1",
+  "from": "0xLP0000000000000000000000000000000000003",
+  "type": "STRATEGY_PROPOSAL",
+  "text": "Proposing Aerodrome LP strategy for 1 week",
+  "sentAt": "2026-04-15T10:31:00.000Z"
+}

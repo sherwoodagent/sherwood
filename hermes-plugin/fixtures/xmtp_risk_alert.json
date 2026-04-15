@@ -1,0 +1,8 @@
+{
+  "source": "xmtp",
+  "id": "msg-risk-1",
+  "from": "0xAgent0000000000000000000000000000000001",
+  "type": "RISK_ALERT",
+  "text": "Moonwell position health factor at 1.15 — action required",
+  "sentAt": "2026-04-15T10:30:00.000Z"
+}
