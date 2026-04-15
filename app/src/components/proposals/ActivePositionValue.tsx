@@ -142,7 +142,7 @@ export default function ActivePositionValue({
         : undefined;
 
   return (
-    <div className="metric-card" title={title}>
+    <div className="sh-card--metric" title={title}>
       <div className="metric-label">Position Value</div>
       <div className="metric-val" style={{ fontSize: "1rem" }}>
         {display}

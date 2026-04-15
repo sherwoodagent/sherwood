@@ -143,18 +143,23 @@ export default function SyndicateHeader({
         </span>
       </div>
 
-      {/* Tab Navigation */}
-      <nav className="syndicate-tabs">
+      {/* Tab Navigation — uses the unified .sh-tabs system. Preserve
+          the legacy header layout (no bottom margin, small top margin)
+          via inline styles so the existing visual rhythm is unchanged. */}
+      <nav
+        className="sh-tabs"
+        style={{ marginTop: "0.5rem", marginBottom: 0 }}
+      >
         <Link
           href={`/syndicate/${subdomain}`}
-          className={`syndicate-tab ${activeTab === "vault" ? "syndicate-tab-active" : ""}`}
+          className="sh-tab"
           aria-current={activeTab === "vault" ? "page" : undefined}
         >
           Vault
         </Link>
         <Link
           href={`/syndicate/${subdomain}/proposals`}
-          className={`syndicate-tab ${activeTab === "proposals" ? "syndicate-tab-active" : ""}`}
+          className="sh-tab"
           aria-current={activeTab === "proposals" ? "page" : undefined}
         >
           Proposals
@@ -162,7 +167,7 @@ export default function SyndicateHeader({
         {!hideAgentsTab && (
           <Link
             href={`/syndicate/${subdomain}/agents`}
-            className={`syndicate-tab ${activeTab === "agents" ? "syndicate-tab-active" : ""}`}
+            className="sh-tab"
             aria-current={activeTab === "agents" ? "page" : undefined}
           >
             Agents

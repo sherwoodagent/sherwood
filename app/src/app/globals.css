@@ -155,8 +155,8 @@ select:focus-visible {
 }
 
 /* Display card used for Problem/Security/FAQ — hairline border,
-   subtle top accent that animates on hover. */
-.spec-card {
+   subtle top accent that animates on hover. Variant of .sh-card. */
+.sh-card--spec {
   position: relative;
   padding: 2rem 1.75rem;
   border: 1px solid var(--color-border-soft);
@@ -164,7 +164,7 @@ select:focus-visible {
   transition: border-color 0.25s ease, background 0.25s ease;
 }
 
-.spec-card::before {
+.sh-card--spec::before {
   content: "";
   position: absolute;
   top: -1px;
@@ -175,16 +175,16 @@ select:focus-visible {
   transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.spec-card:hover {
+.sh-card--spec:hover {
   border-color: rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.025);
 }
 
-.spec-card:hover::before {
+.sh-card--spec:hover::before {
   width: calc(100% + 2px);
 }
 
-.spec-card__index {
+.sh-card--spec__index {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.22em;
@@ -194,7 +194,7 @@ select:focus-visible {
   margin-bottom: 1rem;
 }
 
-.spec-card__title {
+.sh-card--spec__title {
   font-size: 1.05rem;
   font-weight: 500;
   color: #fff;
@@ -202,7 +202,7 @@ select:focus-visible {
   margin-bottom: 0.75rem;
 }
 
-.spec-card__body {
+.sh-card--spec__body {
   font-family: var(--font-body);
   font-size: 13.5px;
   color: rgba(255, 255, 255, 0.6);
@@ -441,9 +441,9 @@ select:focus-visible {
 /* Two-column grid: a left ID rail with the proposal index in
    monospace, and a body containing title, meta, description,
    vote-progress, and actions. Reads like a trading desk order
-   ticket. */
+   ticket. Variant of .sh-card. */
 
-.prop-card {
+.sh-card--prop {
   display: grid;
   grid-template-columns: 64px 1fr;
   gap: 1.25rem;
@@ -455,12 +455,12 @@ select:focus-visible {
   margin-bottom: 1rem;
 }
 
-.prop-card:hover {
+.sh-card--prop:hover {
   border-color: rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.02);
 }
 
-.prop-card__id {
+.sh-card--prop__id {
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.16em;
@@ -476,7 +476,7 @@ select:focus-visible {
   text-align: right;
 }
 
-.prop-card__id-num {
+.sh-card--prop__id-num {
   font-family: var(--font-mono);
   font-size: 22px;
   font-weight: 600;
@@ -485,14 +485,14 @@ select:focus-visible {
   line-height: 1;
 }
 
-.prop-card__id-label {
+.sh-card--prop__id-label {
   font-size: 9px;
   letter-spacing: 0.28em;
   color: rgba(255, 255, 255, 0.4);
   text-transform: uppercase;
 }
 
-.prop-card__head {
+.sh-card--prop__head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -500,7 +500,7 @@ select:focus-visible {
   margin-bottom: 0.75rem;
 }
 
-.prop-card__title {
+.sh-card--prop__title {
   font-size: 16px;
   color: #fff;
   font-weight: 500;
@@ -508,7 +508,7 @@ select:focus-visible {
   line-height: 1.3;
 }
 
-.prop-card__meta {
+.sh-card--prop__meta {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.18em;
@@ -520,17 +520,17 @@ select:focus-visible {
   margin-top: 0.4rem;
 }
 
-.prop-card__meta-key {
+.sh-card--prop__meta-key {
   opacity: 0.55;
   margin-right: 0.45em;
 }
 
-.prop-card__meta-val {
+.sh-card--prop__meta-val {
   color: rgba(255, 255, 255, 0.85);
   letter-spacing: 0.05em;
 }
 
-.prop-card__desc {
+.sh-card--prop__desc {
   margin-top: 0.85rem;
   font-size: 13px;
   color: rgba(255, 255, 255, 0.7);
@@ -538,13 +538,13 @@ select:focus-visible {
   font-family: var(--font-body);
 }
 
-.prop-card__vote {
+.sh-card--prop__vote {
   margin-top: 1.25rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--color-border-soft);
 }
 
-.prop-card__vote-numbers {
+.sh-card--prop__vote-numbers {
   display: flex;
   align-items: baseline;
   gap: 1rem;
@@ -553,22 +553,22 @@ select:focus-visible {
   margin-bottom: 0.6rem;
 }
 
-.prop-card__vote-pct {
+.sh-card--prop__vote-pct {
   font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1;
 }
 
-.prop-card__vote-pct--for { color: var(--color-accent); }
-.prop-card__vote-pct--against { color: #ff4d4d; }
+.sh-card--prop__vote-pct--for { color: var(--color-accent); }
+.sh-card--prop__vote-pct--against { color: #ff4d4d; }
 
-.prop-card__vote-divider {
+.sh-card--prop__vote-divider {
   font-size: 18px;
   color: rgba(255, 255, 255, 0.15);
 }
 
-.prop-card__vote-foot {
+.sh-card--prop__vote-foot {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -580,7 +580,7 @@ select:focus-visible {
   margin-top: 0.6rem;
 }
 
-.prop-card__no-votes {
+.sh-card--prop__no-votes {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.22em;
@@ -592,8 +592,8 @@ select:focus-visible {
 }
 
 @media (max-width: 640px) {
-  .prop-card { grid-template-columns: 1fr; }
-  .prop-card__id {
+  .sh-card--prop { grid-template-columns: 1fr; }
+  .sh-card--prop__id {
     border-right: none;
     border-bottom: 1px dashed var(--color-border-soft);
     padding-right: 0;
@@ -1533,40 +1533,7 @@ select:focus-visible {
   box-shadow: 0 0 15px var(--color-accent-dim);
 }
 
-/* ── Syndicate Tab Navigation ─────────────────────────── */
-
-.syndicate-tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--color-border);
-  margin-top: 0.5rem;
-}
-
-.syndicate-tab {
-  font-family: var(--font-plus-jakarta), "Plus Jakarta Sans", sans-serif;
-  font-size: 14px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: rgba(255, 255, 255, 0.6);
-  text-decoration: none;
-  padding: 0.75rem 1.5rem;
-  border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
-  margin-bottom: -1px;
-}
-
-.syndicate-tab:hover {
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.syndicate-tab-active {
-  color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
-}
-
-.syndicate-tab-active:hover {
-  color: var(--color-accent);
-}
+/* Syndicate tab navigation migrated to .sh-tabs / .sh-tab — see line ~2492. */
 
 /* ── Stats Bar Row (stats + deposit button) ──────────── */
 
@@ -1628,6 +1595,8 @@ select:focus-visible {
   color: rgba(255, 255, 255, 0.4);
   border-bottom: 1px solid var(--color-border);
   font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
 }
 
 .table-container td {
@@ -1700,7 +1669,7 @@ select:focus-visible {
   gap: 1rem;
 }
 
-.metric-card {
+.sh-card--metric {
   padding: 1rem;
   border: 1px solid var(--color-border);
   background: rgba(255, 255, 255, 0.02);
@@ -1980,7 +1949,7 @@ select:focus-visible {
 
 /* ── Agent Cards ───────────────────────────────────────── */
 
-.agent-card {
+.sh-card--agent {
   border: 1px solid var(--color-border);
   background: rgba(255, 255, 255, 0.02);
   padding: 1rem;
@@ -2331,7 +2300,7 @@ select:focus-visible {
 }
 
 /* Demo-mode notice inside proposal cards where vote UI would be. */
-.prop-card__demo-notice {
+.sh-card--prop__demo-notice {
   padding: 0.75rem 1rem;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -2517,9 +2486,15 @@ select:focus-visible {
 }
 .sh-tab:hover { color: var(--color-fg); }
 .sh-tab[aria-selected="true"],
+.sh-tab[aria-current="page"],
 .sh-tab--active {
   color: var(--color-accent);
   border-bottom-color: var(--color-accent);
+}
+/* Link-mode tabs (anchor elements with href) — strip the default
+   text-decoration so they match button-mode tabs visually. */
+a.sh-tab {
+  text-decoration: none;
 }
 
 /* sh-tooltip: simple hover tooltip.

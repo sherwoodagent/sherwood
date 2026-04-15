@@ -8,6 +8,8 @@ import { resolveSyndicateBySubdomain } from "@/lib/syndicate-data";
 import AttestationTimeline from "@/components/AttestationTimeline";
 import { truncateAddress, getAddresses } from "@/lib/contracts";
 import { TargetChainProvider } from "@/components/TargetChainContext";
+import JsonLd from "@/components/JsonLd";
+import { buildBreadcrumbLd } from "@/lib/structured-data";
 
 export async function generateMetadata({
   params,
@@ -50,6 +52,15 @@ export default async function AgentsPage({
   return (
     <TargetChainProvider chainId={data.chainId}>
       <AmbientBackground />
+
+      <JsonLd
+        data={buildBreadcrumbLd([
+          { name: "Home", path: "/" },
+          { name: "Leaderboard", path: "/leaderboard" },
+          { name, path: `/syndicate/${subdomain}` },
+          { name: "Agents", path: `/syndicate/${subdomain}/agents` },
+        ])}
+      />
 
       <div className="layout layout-normal">
         <main className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">
@@ -115,7 +126,7 @@ export default async function AgentsPage({
                 );
 
                 return (
-                  <div key={agent.agentAddress} className="agent-card" style={{ padding: "1.25rem" }}>
+                  <div key={agent.agentAddress} className="sh-card--agent" style={{ padding: "1.25rem" }}>
                     {/* Header: name + status */}
                     <div className="flex justify-between items-start mb-3">
                       <div>

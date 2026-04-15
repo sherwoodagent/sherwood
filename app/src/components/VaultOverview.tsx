@@ -30,7 +30,7 @@ export default function VaultOverview({
       <div className="panel-title">Vault Configuration</div>
 
       <div className="metrics-grid">
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Deposits</div>
           {/* The on-chain `openDeposits` flag is the *permission policy*
               (anyone vs. whitelist), not whether deposits are accepted right
@@ -62,11 +62,11 @@ export default function VaultOverview({
             </Tooltip>
           )}
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Management Fee</div>
           <div className="metric-val">{formatBps(managementFeeBps)}</div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">
             <Term k="redemptions-locked">Redemptions</Term>
           </div>
@@ -80,7 +80,7 @@ export default function VaultOverview({
             )}
           </div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Status</div>
           <div
             className="metric-val"
