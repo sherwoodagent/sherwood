@@ -28,35 +28,30 @@ export class SentimentContrarianStrategy implements Strategy {
     let value = 0;
     let confidence = 0.3;
 
+    // Only fire on EXTREMES — moderate fear/greed (20–35, 65–80) used to add a
+    // persistent +0.2 to +0.5 contrarian bias during prolonged sentiment
+    // regimes. Audit data showed sentimentContrarian held a constant +0.68
+    // mean across 458 observations, dominating the sentiment category and
+    // pushing every score upward regardless of price action. Restricting
+    // contributions to extremes preserves the high-conviction edge while
+    // killing the structural bias.
     if (fg < 20) {
-      // Extreme fear: strong buy
-      // Linear: fg=0 → +1.0, fg=20 → +0.6
+      // Extreme fear: strong buy. Linear: fg=0 → +1.0, fg=20 → +0.6
       value = 1.0 - (fg / 20) * 0.4;
       confidence = 0.9;
       details.push(`Extreme fear (F&G=${fg}): strong contrarian buy signal`);
-    } else if (fg < 35) {
-      // Fear: buy
-      // Linear: fg=20 → +0.5, fg=35 → +0.2
-      value = 0.5 - ((fg - 20) / 15) * 0.3;
-      confidence = 0.7;
-      details.push(`Fear (F&G=${fg}): contrarian buy signal`);
-    } else if (fg <= 65) {
-      // Neutral: hold
-      value = 0.0;
-      confidence = 0.3;
-      details.push(`Neutral sentiment (F&G=${fg}): no contrarian edge`);
-    } else if (fg <= 80) {
-      // Greed: sell
-      // Linear: fg=65 → -0.2, fg=80 → -0.5
-      value = -(0.2 + ((fg - 65) / 15) * 0.3);
-      confidence = 0.7;
-      details.push(`Greed (F&G=${fg}): contrarian sell signal`);
-    } else {
-      // Extreme greed: strong sell
-      // Linear: fg=80 → -0.6, fg=100 → -1.0
+    } else if (fg > 80) {
+      // Extreme greed: strong sell. Linear: fg=80 → -0.6, fg=100 → -1.0
       value = -(0.6 + ((fg - 80) / 20) * 0.4);
       confidence = 0.9;
       details.push(`Extreme greed (F&G=${fg}): strong contrarian sell signal`);
+    } else {
+      // Moderate / neutral zone: no contrarian edge — emit a near-zero
+      // confidence signal so the scoring layer effectively ignores it.
+      value = 0.0;
+      confidence = 0.1;
+      const label = fg < 35 ? 'mild fear' : fg > 65 ? 'mild greed' : 'neutral';
+      details.push(`${label} (F&G=${fg}): below extremes, no edge`);
     }
 
     // Z-score adjustment: extreme social sentiment reinforces the signal
