@@ -309,7 +309,7 @@ Each syndicate vault produces share tokens (e.g., `swUSDC`, `swETH`). Per-syndic
 2. **Organic WOOD demand.** Depositors sell shareTokens → get WOOD → sell WOOD on WOOD/WETH → exit to stables. This creates natural buy-side demand for WOOD.
 3. **Price discovery.** ShareTokens are equity-like claims on syndicate performance. The pool price reflects the market's assessment of a syndicate's strategy quality.
 
-**Note:** These pools exist purely for depositor exit liquidity and price discovery — pools exist purely for depositor exit liquidity and price discovery. Pool creation is **permissionless** — anyone can create a pool for any syndicate.
+**Note:** These pools exist purely for depositor exit liquidity and price discovery. Pool creation is **permissionless** — anyone can create a pool for any syndicate.
 
 **Primary WOOD/WETH pool (one-time):**
 
@@ -506,7 +506,7 @@ TGE (Day 0):
   Everything else:            0M  (vesting/locked/treasury)
   ─────────────────────────────
   Circulating:              ~150M (30% of supply, all in protocol-owned LP positions)
-  Float (tradeable):           0M (no public sale — float emerges as depositors sell into shareToken/WOOD pools and as bootstrap rewards convert)
+  Float (unencumbered):        0M (all 150M sits in protocol-owned LP positions — tradeable float emerges organically as buyers trade against the WOOD/WETH single-sided sell-side and as depositors sell into shareToken/WOOD pools)
 
 Month 7 (team fully vested at 1mo cliff + 6mo linear):
   + Team vested:           75M
@@ -583,6 +583,7 @@ Sherwood uses **Aerodrome Slipstream** (concentrated liquidity, Uniswap V3-compa
    - Calculate tick range above current price (pool acts as limit sell for WOOD)
    - Call `NonfungiblePositionManager.mint()` with WOOD only
    - Pool becomes two-sided as depositors sell shareTokens for early exit
+3. **Budget:** ~60M WOOD across the genesis cohort (drawn from the 150M POL allocation). Per-syndicate LP rewards or depositor exit incentives, when needed, are funded from the **Community / grants (15%)** bucket — not a separate token allocation.
 
 ### Fee Harvesting
 
@@ -696,7 +697,7 @@ The explicit revenue sharing model (60% of fees to veWOOD) is transparent but di
 ### Recommendations
 
 1. **Engage securities counsel** before TGE — the fee revenue share model needs explicit legal sign-off
-2. **Geographic restrictions** — N/A under Aero Launch (no public sale tranche). Standard secondary-market disclaimers still apply for the WOOD/WETH pool
+2. **No geographic restrictions needed for token launch** under Aero Launch (no public sale tranche to gate). Standard secondary-market disclaimers still apply for the WOOD/WETH pool
 3. **Utility-first messaging** — position WOOD as a protocol fee-sharing token, not a yield-bearing investment
 4. **Avoid profit language** — use "protocol fee share", not "yield", "dividends", "returns"
 5. **SAFT structure** for any pre-sale allocations
@@ -801,7 +802,6 @@ Reduced from 5 phases (v3) to 2 phases. Fewer contracts = faster deployment.
 | **Team vest** | 1mo cliff + 6mo linear | 1mo cliff + 6mo linear | Unchanged |
 | **Fee-funded buyback** | 20% of protocol fees | 20% of protocol fees (unchanged) | Still good — kept |
 | **veWOOD locking** | 4wk-1yr, linear decay, auto-max-lock | Same mechanics, but for fee sharing not governance | Still good — kept |
-| **Protocol-owned liquidity** | WOOD/WETH + shareToken/WOOD pools | Same (unchanged) | Still good — kept |
 
 ### What Was Removed
 
