@@ -14,9 +14,9 @@ def test_register_calls_all_ctx_methods(tmp_path: Path, mock_ctx):
         from sherwood_monitor import register
         register(mock_ctx)
 
-    # 3 tools, 5 hooks (session_start, session_end, pre_tool_call, post_tool_call, pre_llm_call),
+    # 4 tools, 5 hooks (session_start, session_end, pre_tool_call, post_tool_call, pre_llm_call),
     # 4 CLI commands, 1 skill
-    assert mock_ctx.register_tool.call_count == 3
+    assert mock_ctx.register_tool.call_count == 4
     assert mock_ctx.register_hook.call_count == 5
     assert mock_ctx.register_cli_command.call_count == 4
     assert mock_ctx.register_skill.call_count == 1
@@ -29,7 +29,7 @@ def test_register_with_missing_cli_still_registers(tmp_path: Path, mock_ctx):
         register(mock_ctx)
 
     # Tools/hooks still register even when CLI is missing
-    assert mock_ctx.register_tool.call_count == 3
+    assert mock_ctx.register_tool.call_count == 4
     # pre_llm_call hook was registered (buffer carries the warning now)
     hook_names = [call.args[0] for call in mock_ctx.register_hook.call_args_list]
     assert "pre_llm_call" in hook_names

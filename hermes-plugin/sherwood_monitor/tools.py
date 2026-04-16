@@ -4,12 +4,14 @@ from __future__ import annotations
 import json
 from typing import Any, Awaitable, Callable
 
+from .config import Config
+from .exposure import aggregate_exposure, check_concentration
 from .supervisor import Supervisor
 
 ToolHandler = Callable[[dict], Awaitable[str]]
 
 
-def make_handlers(sup: Supervisor) -> dict[str, ToolHandler]:
+def make_handlers(sup: Supervisor, cfg: Config | None = None) -> dict[str, ToolHandler]:
     async def start(args: dict, **_: Any) -> str:
         try:
             sub = args.get("subdomain")
@@ -36,8 +38,30 @@ def make_handlers(sup: Supervisor) -> dict[str, ToolHandler]:
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 
+    async def exposure(args: dict, **_: Any) -> str:
+        try:
+            _cfg = cfg or Config()
+            report = await aggregate_exposure(_cfg.sherwood_bin, _cfg.syndicates)
+            alerts = check_concentration(report, _cfg.concentration_threshold_pct)
+            return json.dumps({
+                "total_aum_usd": report.total_aum_usd,
+                "by_protocol": report.by_protocol,
+                "concentration_pct": report.concentration_pct,
+                "alerts": [
+                    {
+                        "protocol": a.protocol,
+                        "pct": a.pct,
+                        "syndicates_exposed": a.syndicates_exposed,
+                    }
+                    for a in alerts
+                ],
+            })
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
     return {
         "sherwood_monitor_start": start,
         "sherwood_monitor_stop": stop,
         "sherwood_monitor_status": status,
+        "sherwood_monitor_exposure": exposure,
     }

@@ -1,0 +1,8 @@
+{
+  "aumUsd": "50000",
+  "currentExposureUsd": "20000",
+  "allowedProtocols": ["aerodrome"],
+  "positions": [
+    {"protocol": "aerodrome", "usd": 20000}
+  ]
+}

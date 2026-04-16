@@ -46,3 +46,15 @@ STATUS = {
     ),
     "parameters": {"type": "object", "properties": {}, "required": []},
 }
+
+EXPOSURE = {
+    "name": "sherwood_monitor_exposure",
+    "description": (
+        "Aggregate exposure across all configured syndicates. Returns total "
+        "AUM, per-protocol breakdown, concentration percentages, and any "
+        "concentration alerts above the configured threshold. Use this to "
+        "answer questions like 'what\u2019s my total Aerodrome exposure?' or "
+        "'which protocols am I over-exposed to?'"
+    ),
+    "parameters": {"type": "object", "properties": {}, "required": []},
+}

@@ -13,12 +13,12 @@ import logging
 _log = logging.getLogger(__name__)
 
 
-async def default_state_fetcher(sherwood_bin: str, subdomain: str) -> dict:
-    defaults = {
-        "vault_aum_usd": 0.0,
-        "current_exposure_usd": 0.0,
-        "allowed_protocols": [],
-    }
+async def fetch_vault_info(sherwood_bin: str, subdomain: str) -> dict | None:
+    """Shell out to `sherwood vault info <subdomain> --json` and return the raw dict.
+
+    Returns None on any failure (non-zero exit, parse error, subprocess error).
+    Callers are responsible for providing defaults.
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
             sherwood_bin,
@@ -31,10 +31,22 @@ async def default_state_fetcher(sherwood_bin: str, subdomain: str) -> dict:
         )
         stdout, _stderr = await proc.communicate()
         if proc.returncode != 0:
-            return defaults
-        payload = json.loads(stdout.decode("utf-8", "replace") or "{}")
+            return None
+        return json.loads(stdout.decode("utf-8", "replace") or "{}") or None
     except Exception as exc:
-        _log.warning("state fetch failed for %s: %s", subdomain, exc)
+        _log.warning("fetch_vault_info failed for %s: %s", subdomain, exc)
+        return None
+
+
+async def default_state_fetcher(sherwood_bin: str, subdomain: str) -> dict:
+    """Thin adapter: calls fetch_vault_info and projects into risk-check shape."""
+    defaults = {
+        "vault_aum_usd": 0.0,
+        "current_exposure_usd": 0.0,
+        "allowed_protocols": [],
+    }
+    payload = await fetch_vault_info(sherwood_bin, subdomain)
+    if payload is None:
         return defaults
 
     try:
