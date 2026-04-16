@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { RiskManager, DEFAULT_RISK_CONFIG, RECOMMENDED_TRAILING_CONFIG, MAX_PYRAMID_ADDS, PYRAMID_MIN_SPACING_MS, type Position, type RiskConfig } from "./risk.js";
+import { RiskManager, DEFAULT_RISK_CONFIG, RECOMMENDED_TRAILING_CONFIG, MAX_PYRAMID_ADDS, PYRAMID_MIN_SPACING_MS, STOP_COOLDOWN_MS, type Position, type RiskConfig } from "./risk.js";
 
 // Helper to create a minimal Position for tests
 function makePosition(overrides: Partial<Position> = {}): Position {
@@ -151,6 +151,29 @@ describe("RiskManager", () => {
       const result = rm.canOpenPosition("bitcoin", 500);
       expect(result.allowed).toBe(false);
       expect(result.reason).toMatch(/loss limit/i);
+    });
+
+    it("rejects entry during post-stop cooldown", () => {
+      rm.updatePortfolio({
+        totalValue: 50000,
+        cash: 40000,
+        positions: [],
+        stopCooldowns: { bitcoin: Date.now() - 1000 }, // stopped 1 sec ago
+      });
+      const result = rm.canOpenPosition("bitcoin", 500, "long");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(/Stop cooldown/);
+    });
+
+    it("allows entry after stop cooldown expires", () => {
+      rm.updatePortfolio({
+        totalValue: 50000,
+        cash: 40000,
+        positions: [],
+        stopCooldowns: { bitcoin: Date.now() - STOP_COOLDOWN_MS - 1000 }, // 4h+ ago
+      });
+      const result = rm.canOpenPosition("bitcoin", 500, "long");
+      expect(result.allowed).toBe(true);
     });
   });
 

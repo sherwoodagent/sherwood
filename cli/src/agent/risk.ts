@@ -14,6 +14,9 @@ export interface PortfolioState {
   lastDailyReset?: number;
   lastWeeklyReset?: number;
   lastMonthlyReset?: number;
+  /** Token → timestamp of last stop-loss exit. Used to enforce cooldown
+   *  before re-entry to prevent the stop-reentry-stop pattern. */
+  stopCooldowns?: Record<string, number>;
 }
 
 export interface Position {
@@ -123,6 +126,7 @@ export const RECOMMENDED_TRAILING_CONFIG = {
  *  total exposure caps at 1.0x + 0.5x + 0.25x = 1.75x of the base size. */
 export const MAX_PYRAMID_ADDS = 2;
 export const PYRAMID_MIN_SPACING_MS = 4 * 60 * 60 * 1000; // 4 hours
+export const STOP_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours after a stop-loss
 
 const EMPTY_PORTFOLIO: PortfolioState = {
   totalValue: 0,
@@ -184,6 +188,17 @@ export class RiskManager {
           allowed: false,
           reason: `Total portfolio risk ${(totalRiskExposure / portfolioValue * 100).toFixed(1)}% would exceed max ${(this.config.maxPortfolioRisk * 100).toFixed(0)}%`,
         };
+      }
+    }
+
+    // Check post-stop cooldown — prevent rapid re-entry after a stop loss
+    const cooldowns = this.portfolio.stopCooldowns ?? {};
+    const lastStop = cooldowns[token];
+    if (lastStop !== undefined) {
+      const elapsed = Date.now() - lastStop;
+      if (elapsed < STOP_COOLDOWN_MS) {
+        const remainHrs = ((STOP_COOLDOWN_MS - elapsed) / 3_600_000).toFixed(1);
+        return { allowed: false, reason: `Stop cooldown active for ${token} (${remainHrs}h remaining)` };
       }
     }
 

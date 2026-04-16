@@ -357,6 +357,12 @@ export class PortfolioTracker {
       0,
     );
 
+    // Record stop-loss cooldown to prevent rapid re-entry
+    if (reason.toLowerCase().includes('stop')) {
+      if (!this.state.stopCooldowns) this.state.stopCooldowns = {};
+      this.state.stopCooldowns[tokenId] = Date.now();
+    }
+
     await this.save(this.state);
 
     return { pnl: pnlUsd, pnlPercent, duration };
