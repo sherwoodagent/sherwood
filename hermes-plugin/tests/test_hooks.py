@@ -4,40 +4,38 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sherwood_monitor.config import Config
+from sherwood_monitor.event_buffer import EventBuffer
 from sherwood_monitor.hooks import make_session_hooks, on_session_end_factory
 
 
 @pytest.mark.asyncio
 async def test_session_start_injects_catchup_summary(fixture):
     cfg = Config(sherwood_bin="sherwood", syndicates=["alpha"], auto_start=False)
-    ctx = MagicMock()
+    buffer = MagicMock(spec=EventBuffer)
     sup = MagicMock()
     sup.start = AsyncMock()
 
     payload = json.dumps(fixture("session_check_output"))
-
-    async def fake_comm():
-        return (payload.encode(), b"")
 
     proc = MagicMock()
     proc.communicate = AsyncMock(side_effect=[(payload.encode(), b"")])
     proc.wait = AsyncMock(return_value=0)
 
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
-        hooks = make_session_hooks(cfg=cfg, ctx=ctx, supervisor=sup)
+        hooks = make_session_hooks(cfg=cfg, buffer=buffer, supervisor=sup)
         await hooks["on_session_start"]()
 
-    # Injected a catch-up summary referencing the syndicate
+    # Pushed a catch-up summary referencing the syndicate
     assert any(
-        "alpha" in call.kwargs.get("content", "")
-        for call in ctx.inject_message.call_args_list
+        "alpha" in call.args[0]
+        for call in buffer.push.call_args_list
     )
 
 
 @pytest.mark.asyncio
 async def test_session_start_auto_starts_supervisors(fixture):
     cfg = Config(sherwood_bin="sherwood", syndicates=["alpha"], auto_start=True)
-    ctx = MagicMock()
+    buffer = MagicMock(spec=EventBuffer)
     sup = MagicMock()
     sup.start = AsyncMock()
 
@@ -49,7 +47,7 @@ async def test_session_start_auto_starts_supervisors(fixture):
     proc.wait = AsyncMock(return_value=0)
 
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
-        hooks = make_session_hooks(cfg=cfg, ctx=ctx, supervisor=sup)
+        hooks = make_session_hooks(cfg=cfg, buffer=buffer, supervisor=sup)
         await hooks["on_session_start"]()
 
     sup.start.assert_awaited_once_with("alpha")
@@ -217,3 +215,24 @@ async def test_post_tool_call_swallows_writer_error():
         params={"command": "sherwood proposal execute alpha 42"},
         result='{"tx": "0xabc"}',
     )
+
+
+from sherwood_monitor.hooks import make_pre_llm_call_hook
+
+
+@pytest.mark.asyncio
+async def test_pre_llm_call_drains_buffer_and_returns_context():
+    buf = EventBuffer()
+    buf.push("<a>1</a>")
+    buf.push("<b>2</b>")
+    hook = make_pre_llm_call_hook(buf)
+    result = await hook(session_id="s1", user_message="hi")
+    assert result == {"context": "<a>1</a>\n\n<b>2</b>"}
+    assert len(buf) == 0
+
+
+@pytest.mark.asyncio
+async def test_pre_llm_call_returns_none_when_empty():
+    hook = make_pre_llm_call_hook(EventBuffer())
+    result = await hook(session_id="s1")
+    assert result is None

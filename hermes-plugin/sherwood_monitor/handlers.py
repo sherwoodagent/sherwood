@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 from .config import Config
+from .event_buffer import EventBuffer
 from .models import ChainEvent, SessionMessage
 
 _log = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ _CHAIN_SUMMARY_FORMATTERS: dict[str, Callable[[ChainEvent], str]] = {
 async def handle_chain_event(
     subdomain: str,
     ev: ChainEvent,
-    ctx: Any,
+    buffer: EventBuffer,
     cfg: Config,
     post_fn: PostFn,
 ) -> None:
@@ -116,7 +117,7 @@ async def handle_chain_event(
         _log.warning("unhandled chain event type: %s", ev.type)
         return
 
-    ctx.inject_message(content=_format_chain_injection(subdomain, ev), role="user")
+    buffer.push(_format_chain_injection(subdomain, ev))
 
     if ev.type in CHAIN_INJECT_AND_POST and cfg.xmtp_summaries:
         formatter = _CHAIN_SUMMARY_FORMATTERS.get(ev.type)
@@ -157,7 +158,7 @@ def _format_xmtp_injection(subdomain: str, msg: SessionMessage, priority: str) -
 async def handle_xmtp_message(
     subdomain: str,
     msg: SessionMessage,
-    ctx: Any,
+    buffer: EventBuffer,
     cfg: Config,
     post_fn: PostFn,
 ) -> None:
@@ -169,9 +170,7 @@ async def handle_xmtp_message(
     if msg.type == "MESSAGE":
         if cfg.inject_mentions_only and "@" not in msg.text:
             return
-        ctx.inject_message(
-            content=_format_xmtp_injection(subdomain, msg, "normal"), role="user"
-        )
+        buffer.push(_format_xmtp_injection(subdomain, msg, "normal"))
         return
 
     priority = _XMTP_PRIORITY.get(msg.type)
@@ -179,6 +178,4 @@ async def handle_xmtp_message(
         _log.info("unhandled xmtp message type: %s", msg.type)
         return
 
-    ctx.inject_message(
-        content=_format_xmtp_injection(subdomain, msg, priority), role="user"
-    )
+    buffer.push(_format_xmtp_injection(subdomain, msg, priority))

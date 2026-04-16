@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Any
 
 from .config import Config
+from .event_buffer import EventBuffer
 from .handlers import PostFn, handle_chain_event, handle_xmtp_message
 from .models import ChainEvent, SessionMessage, decode_record
 
@@ -14,8 +15,8 @@ _log = logging.getLogger(__name__)
 
 
 class EventRouter:
-    def __init__(self, ctx: Any, cfg: Config, post_fn: PostFn) -> None:
-        self._ctx = ctx
+    def __init__(self, buffer: EventBuffer, cfg: Config, post_fn: PostFn) -> None:
+        self._buffer = buffer
         self._cfg = cfg
         self._post_fn = post_fn
         self._events_seen: dict[str, int] = defaultdict(int)
@@ -33,9 +34,9 @@ class EventRouter:
 
         try:
             if isinstance(rec, ChainEvent):
-                await handle_chain_event(subdomain, rec, self._ctx, self._cfg, self._post_fn)
+                await handle_chain_event(subdomain, rec, self._buffer, self._cfg, self._post_fn)
             elif isinstance(rec, SessionMessage):
-                await handle_xmtp_message(subdomain, rec, self._ctx, self._cfg, self._post_fn)
+                await handle_xmtp_message(subdomain, rec, self._buffer, self._cfg, self._post_fn)
         except Exception as exc:
             _log.exception("handler error on %s: %s", subdomain, exc)
 

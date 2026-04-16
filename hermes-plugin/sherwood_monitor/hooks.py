@@ -9,6 +9,7 @@ import shlex
 from typing import Any, Awaitable, Callable
 
 from .config import Config
+from .event_buffer import EventBuffer
 from .memory import MemoryWriter, write_settlement
 from .risk import ProposeParams, evaluate_propose
 from .supervisor import Supervisor
@@ -50,15 +51,13 @@ def _format_catchup_injection(subdomain: str, payload: dict) -> str:
 
 
 def make_session_hooks(
-    cfg: Config, ctx: Any, supervisor: Supervisor
+    cfg: Config, buffer: EventBuffer, supervisor: Supervisor
 ) -> dict[str, Callable[[], Awaitable[None]]]:
     async def on_session_start() -> None:
         for sub in cfg.syndicates:
             payload = await _catchup_one(cfg.sherwood_bin, sub)
             if payload is not None:
-                ctx.inject_message(
-                    content=_format_catchup_injection(sub, payload), role="user"
-                )
+                buffer.push(_format_catchup_injection(sub, payload))
             if cfg.auto_start:
                 try:
                     await supervisor.start(sub)
@@ -73,6 +72,16 @@ def on_session_end_factory(supervisor: Supervisor) -> Callable[[], Awaitable[Non
         await supervisor.stop_all()
 
     return on_session_end
+
+
+def make_pre_llm_call_hook(buffer: EventBuffer) -> Callable[..., Awaitable[dict | None]]:
+    async def hook(**_: Any) -> dict | None:
+        blocks = buffer.drain()
+        if not blocks:
+            return None
+        return {"context": "\n\n".join(blocks)}
+
+    return hook
 
 
 # Match `sherwood proposal create <sub>` or `sherwood strategy propose <sub>`

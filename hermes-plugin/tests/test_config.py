@@ -27,6 +27,7 @@ xmtp_summaries: false
 sherwood_bin: /usr/local/bin/sherwood
 backoff_max_seconds: 60
 inject_mentions_only: false
+concentration_threshold_pct: 25.0
 """.strip()
     )
     cfg = load_config(cfg_path)
@@ -36,6 +37,7 @@ inject_mentions_only: false
     assert cfg.sherwood_bin == "/usr/local/bin/sherwood"
     assert cfg.backoff_max_seconds == 60
     assert cfg.inject_mentions_only is False
+    assert cfg.concentration_threshold_pct == 25.0
 
 
 def test_load_malformed_yaml_raises(tmp_path: Path):
@@ -57,3 +59,9 @@ def test_load_negative_backoff_raises(tmp_path: Path):
     cfg_path.write_text("backoff_max_seconds: -1")
     with pytest.raises(ValueError, match="backoff_max_seconds must be positive"):
         load_config(cfg_path)
+
+
+def test_load_default_concentration_threshold(tmp_path: Path):
+    cfg_path = tmp_path / "config.yaml"
+    cfg = load_config(cfg_path)
+    assert cfg.concentration_threshold_pct == 30.0

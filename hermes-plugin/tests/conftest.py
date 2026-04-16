@@ -29,5 +29,4 @@ def mock_ctx():
     ctx.register_hook = MagicMock()
     ctx.register_cli_command = MagicMock()
     ctx.register_skill = MagicMock()
-    ctx.inject_message = MagicMock()
     return ctx

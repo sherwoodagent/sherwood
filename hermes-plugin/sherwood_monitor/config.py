@@ -14,6 +14,7 @@ xmtp_summaries: true
 sherwood_bin: sherwood
 backoff_max_seconds: 30
 inject_mentions_only: true
+concentration_threshold_pct: 30.0
 """
 
 
@@ -25,6 +26,7 @@ class Config:
     sherwood_bin: str = "sherwood"
     backoff_max_seconds: int = 30
     inject_mentions_only: bool = True
+    concentration_threshold_pct: float = 30.0
 
 
 def load_config(path: Path) -> Config:
@@ -54,4 +56,5 @@ def load_config(path: Path) -> Config:
         sherwood_bin=str(raw.get("sherwood_bin", "sherwood")),
         backoff_max_seconds=backoff_max,
         inject_mentions_only=bool(raw.get("inject_mentions_only", True)),
+        concentration_threshold_pct=float(raw.get("concentration_threshold_pct", 30.0)),
     )

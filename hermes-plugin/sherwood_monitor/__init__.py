@@ -8,8 +8,10 @@ from typing import Any
 
 from .cli import register_cli
 from .config import load_config
+from .event_buffer import EventBuffer
 from .hooks import (
     make_post_tool_call_hook,
+    make_pre_llm_call_hook,
     make_pre_tool_call_hook,
     make_session_hooks,
     on_session_end_factory,
@@ -35,15 +37,14 @@ def register(ctx: Any) -> None:
     cfg_path = _plugin_root() / "config.yaml"
     cfg = load_config(cfg_path)
 
+    buffer = EventBuffer()
+
     # Preflight: warn if CLI missing/misconfigured, but continue registering
     pre = run_preflight(cfg.sherwood_bin)
     for warn in pre.warnings:
-        ctx.inject_message(
-            content=f"<sherwood-monitor-warning>\n{warn}\n</sherwood-monitor-warning>",
-            role="user",
-        )
+        buffer.push(f"<sherwood-monitor-warning>\n{warn}\n</sherwood-monitor-warning>")
 
-    router = EventRouter(ctx=ctx, cfg=cfg, post_fn=post_summary)
+    router = EventRouter(buffer=buffer, cfg=cfg, post_fn=post_summary)
     supervisor = Supervisor(cfg=cfg, router=router)
 
     tool_handlers = make_handlers(supervisor)
@@ -51,13 +52,14 @@ def register(ctx: Any) -> None:
     ctx.register_tool(name=STOP["name"], schema=STOP, handler=tool_handlers["sherwood_monitor_stop"])
     ctx.register_tool(name=STATUS["name"], schema=STATUS, handler=tool_handlers["sherwood_monitor_status"])
 
-    session_hooks = make_session_hooks(cfg=cfg, ctx=ctx, supervisor=supervisor)
+    session_hooks = make_session_hooks(cfg=cfg, buffer=buffer, supervisor=supervisor)
     ctx.register_hook("on_session_start", session_hooks["on_session_start"])
     ctx.register_hook("on_session_end", on_session_end_factory(supervisor))
 
     state_fetcher = partial(default_state_fetcher, cfg.sherwood_bin)
     ctx.register_hook("pre_tool_call", make_pre_tool_call_hook(state_fetcher=state_fetcher))
     ctx.register_hook("post_tool_call", make_post_tool_call_hook(memory_writer=stderr_memory_writer))
+    ctx.register_hook("pre_llm_call", make_pre_llm_call_hook(buffer))
 
     register_cli(ctx, supervisor)
 
