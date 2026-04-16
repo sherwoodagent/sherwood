@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable
 
 from .config import Config
 from .event_buffer import EventBuffer
-from .memory import MemoryWriter, write_settlement
+from .memory import MemoryWriter, build_record
 from .risk import ProposeParams, evaluate_propose
 from .supervisor import Supervisor
 
@@ -164,7 +164,19 @@ _SHERWOOD_SETTLE_RE = re.compile(
 )
 
 
-def make_post_tool_call_hook(memory_writer: MemoryWriter):
+def _format_settlement_block(record: dict) -> str:
+    return (
+        f'<sherwood-settlement syndicate="{record["syndicate"]}" '
+        f'action="{record["action"]}" '
+        f'proposal_id="{record.get("proposal_id", "?")}" '
+        f'pnl_usd="{record.get("pnl_usd", "n/a")}" '
+        f'tx="{record.get("tx_hash", "?")}">\n'
+        f"REMEMBER THIS — use the remember-settlement skill to persist it to memory.\n"
+        f"</sherwood-settlement>"
+    )
+
+
+def make_post_tool_call_hook(memory_writer: MemoryWriter, buffer: EventBuffer):
     async def hook(
         tool_name: str = "",
         params: dict | None = None,
@@ -180,13 +192,20 @@ def make_post_tool_call_hook(memory_writer: MemoryWriter):
         action = m.group(1)
         subdomain = m.group(2)
         result_str = result if isinstance(result, str) else json.dumps(result)
-        write_settlement(
-            memory_writer,
+        record = build_record(
             subdomain=subdomain,
             action=action,
             command=command,
             result_json=result_str,
         )
+        try:
+            memory_writer(record)
+        except Exception:
+            pass
+        try:
+            buffer.push(_format_settlement_block(record))
+        except Exception:
+            pass
         return None
 
     return hook

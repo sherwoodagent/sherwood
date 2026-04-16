@@ -60,7 +60,7 @@ def register(ctx: Any) -> None:
 
     state_fetcher = partial(default_state_fetcher, cfg.sherwood_bin)
     ctx.register_hook("pre_tool_call", make_pre_tool_call_hook(state_fetcher=state_fetcher))
-    ctx.register_hook("post_tool_call", make_post_tool_call_hook(memory_writer=stderr_memory_writer))
+    ctx.register_hook("post_tool_call", make_post_tool_call_hook(memory_writer=stderr_memory_writer, buffer=buffer))
     ctx.register_hook("pre_llm_call", make_pre_llm_call_hook(buffer))
 
     register_cli(ctx, supervisor)
