@@ -5,6 +5,7 @@ import json
 from typing import Any, Awaitable, Callable
 
 from .config import Config
+from .cron_tick import cron_tick
 from .exposure import aggregate_exposure, check_concentration
 from .supervisor import Supervisor
 
@@ -59,9 +60,27 @@ def make_handlers(sup: Supervisor, cfg: Config | None = None) -> dict[str, ToolH
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 
+    async def cron_tick_handler(args: dict, **_: Any) -> str:
+        try:
+            _cfg = cfg or Config()
+            sub = args.get("subdomain")
+            if not sub:
+                return json.dumps({"error": "subdomain required"})
+            result = await cron_tick(
+                _cfg.sherwood_bin,
+                sub,
+                include_exposure=args.get("include_exposure", False),
+                syndicates_for_exposure=_cfg.syndicates,
+                concentration_threshold_pct=_cfg.concentration_threshold_pct,
+            )
+            return json.dumps(result)
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
     return {
         "sherwood_monitor_start": start,
         "sherwood_monitor_stop": stop,
         "sherwood_monitor_status": status,
         "sherwood_monitor_exposure": exposure,
+        "sherwood_monitor_cron_tick": cron_tick_handler,
     }

@@ -58,3 +58,23 @@ EXPOSURE = {
     ),
     "parameters": {"type": "object", "properties": {}, "required": []},
 }
+
+CRON_TICK = {
+    "name": "sherwood_monitor_cron_tick",
+    "description": (
+        "Autonomous tick: catch new interesting events for a syndicate since "
+        "the last tick (ProposalCreated/Settled/Cancelled/Executed, RISK_ALERT, "
+        "APPROVAL_REQUEST). Updates the tick cursor. Pass include_exposure=true "
+        "to also compute concentration alerts. Used by the plugin's cron job to "
+        "deliver digests via Hermes' gateway (Telegram/Discord). Returns empty "
+        "events list when nothing interesting happened \u2014 that's the normal case."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "subdomain": {"type": "string"},
+            "include_exposure": {"type": "boolean", "default": False},
+        },
+        "required": ["subdomain"],
+    },
+}

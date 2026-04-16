@@ -13,3 +13,17 @@ For each syndicate in `~/.hermes/plugins/sherwood-monitor/config.yaml`:
 If `sherwood_monitor_status()` returns an empty list, note that no
 syndicates are configured and remind the user how to add one:
 `edit ~/.hermes/plugins/sherwood-monitor/config.yaml`.
+
+## Cron setup (one-time)
+
+If no `sherwood-monitor` cron is registered:
+1. Call `cronjob(action="list")` to check.
+2. If absent, call:
+   ```
+   cronjob(
+     action="create",
+     prompt="For each syndicate in ~/.hermes/plugins/sherwood-monitor/config.yaml, call sherwood_monitor_cron_tick(subdomain, include_exposure=true). Compose a concise digest of any returned events and concentration alerts. If all ticks returned empty events and no alerts, say nothing (deliver no message). Otherwise deliver the digest.",
+     schedule="*/15 * * * *",
+     name="sherwood-monitor"
+   )
+   ```

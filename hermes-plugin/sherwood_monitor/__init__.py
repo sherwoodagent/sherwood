@@ -18,7 +18,7 @@ from .hooks import (
 )
 from .preflight import run_preflight
 from .router import EventRouter
-from .schemas import EXPOSURE, START, STATUS, STOP
+from .schemas import CRON_TICK, EXPOSURE, START, STATUS, STOP
 from .state_fetcher import default_state_fetcher, stderr_memory_writer
 from .supervisor import Supervisor
 from .tools import make_handlers
@@ -52,6 +52,7 @@ def register(ctx: Any) -> None:
     ctx.register_tool(name=STOP["name"], schema=STOP, handler=tool_handlers["sherwood_monitor_stop"])
     ctx.register_tool(name=STATUS["name"], schema=STATUS, handler=tool_handlers["sherwood_monitor_status"])
     ctx.register_tool(name=EXPOSURE["name"], schema=EXPOSURE, handler=tool_handlers["sherwood_monitor_exposure"])
+    ctx.register_tool(name=CRON_TICK["name"], schema=CRON_TICK, handler=tool_handlers["sherwood_monitor_cron_tick"])
 
     session_hooks = make_session_hooks(cfg=cfg, buffer=buffer, supervisor=supervisor)
     ctx.register_hook("on_session_start", session_hooks["on_session_start"])
