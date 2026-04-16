@@ -240,7 +240,8 @@ export class AgentLoop {
           const currentPrice = priceData?.[result.token]?.usd;
 
           if (typeof currentPrice === 'number' && currentPrice > 0) {
-            const execResult = await this.executor.execute(result.decision, result.token, currentPrice);
+            const atr = result.data?.technicalSignals?.atr;
+            const execResult = await this.executor.execute(result.decision, result.token, currentPrice, atr);
             if (execResult.success) {
               tradesExecuted++;
               console.log(this.executor.formatExecution(execResult));

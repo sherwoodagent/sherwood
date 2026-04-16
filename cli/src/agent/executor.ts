@@ -37,10 +37,19 @@ export interface OrderParams {
   takeProfit: number;
 }
 
+/** Score-based position sizing multiplier. Higher-conviction entries get larger positions. */
+function convictionMultiplier(score: number): number {
+  const absScore = Math.abs(score);
+  if (absScore >= 0.45) return 2.0;
+  if (absScore >= 0.35) return 1.5;
+  return 1.0;
+}
+
 export class TradeExecutor {
   private config: ExecutionConfig;
   private riskManager: RiskManager;
   private portfolio: PortfolioTracker;
+  private lastAtr?: number;
 
   constructor(config: ExecutionConfig, riskManager: RiskManager, portfolio: PortfolioTracker) {
     this.config = config;
@@ -86,6 +95,7 @@ export class TradeExecutor {
     decision: TradeDecision,
     tokenId: string,
     currentPrice: number,
+    atr?: number,
   ): Promise<{
     success: boolean;
     position?: Position;
@@ -160,15 +170,24 @@ export class TradeExecutor {
     //   Time stop: 48h (see risk.ts) — if it hasn't moved, it's dead money
     const isShort = decision.action === 'SELL' || decision.action === 'STRONG_SELL';
     const direction: 'long' | 'short' = isShort ? 'short' : 'long';
-    const STOP_LOSS_PCT = 0.03;   // 3% stop
-    const RR_RATIO = 2.0;         // 2:1 reward/risk → 6% take profit
-    const stopLossDistance = currentPrice * STOP_LOSS_PCT;
+    const RR_RATIO = 2.0;
+    const ATR_STOP_MULTIPLIER = 1.5;
+    const STOP_FLOOR = 0.02;   // minimum 2%
+    const STOP_CAP = 0.10;     // maximum 10%
+    const FALLBACK_STOP = 0.03; // when no ATR available
+
+    const atrPct = (atr && currentPrice > 0 && !isNaN(atr))
+      ? atr / currentPrice
+      : FALLBACK_STOP / ATR_STOP_MULTIPLIER;
+    const stopPct = Math.min(STOP_CAP, Math.max(STOP_FLOOR, atrPct * ATR_STOP_MULTIPLIER));
+    this.lastAtr = atr;
+    const stopLossDistance = currentPrice * stopPct;
     const stopLossPrice = isShort
       ? currentPrice + stopLossDistance      // stop above for shorts
       : currentPrice - stopLossDistance;     // stop below for longs
     const takeProfitPrice = isShort
-      ? currentPrice * (1 - STOP_LOSS_PCT * RR_RATIO)    // profit below for shorts
-      : currentPrice * (1 + STOP_LOSS_PCT * RR_RATIO);   // profit above for longs
+      ? currentPrice * (1 - stopPct * RR_RATIO)    // profit below for shorts
+      : currentPrice * (1 + stopPct * RR_RATIO);   // profit above for longs
 
     // Detect a pyramid (same-direction add to an existing position) and halve
     // the size for each add. Geometric decay (1.0x → 0.5x → 0.25x) caps total
@@ -190,8 +209,9 @@ export class TradeExecutor {
 
     // Apply the pyramid haircut after sizing — the calculator picks a
     // risk-appropriate base size, then we shrink it for each subsequent add.
-    const pyramidQuantity = sizing.quantity * sizeMultiplier;
-    const pyramidSizeUsd = sizing.sizeUsd * sizeMultiplier;
+    const conviction = convictionMultiplier(decision.score);
+    const pyramidQuantity = sizing.quantity * sizeMultiplier * conviction;
+    const pyramidSizeUsd = sizing.sizeUsd * sizeMultiplier * conviction;
 
     if (pyramidQuantity <= 0 || pyramidSizeUsd <= 0) {
       return {
