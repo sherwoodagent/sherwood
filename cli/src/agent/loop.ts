@@ -106,6 +106,14 @@ export class AgentLoop {
     }
 
     console.log(chalk.bold('\n  Agent loop stopped.\n'));
+
+    // Force-exit after a short grace period. XMTP client, CoinGecko HTTP
+    // agents, and other async handles can keep the Node event loop alive
+    // indefinitely. In cron mode (single cycle) this manifests as the
+    // process hanging after "Shutting down gracefully..." until hermes
+    // kills it at script_timeout_seconds. 500ms is enough for any pending
+    // file writes (portfolio.json, cycles.jsonl) to flush.
+    setTimeout(() => process.exit(0), 500);
   }
 
   /** Run a single analysis + execution cycle */
@@ -327,15 +335,18 @@ export class AgentLoop {
 
 }
 
-/** Parse cycle interval string to milliseconds */
+/** Parse cycle interval string to milliseconds.
+ *  Accepts: "15m", "4h", or bare number "1" (treated as minutes). */
 function parseCycleInterval(cycle: string): number {
+  // Try with explicit unit first
   const match = cycle.match(/^(\d+)(m|h)$/);
-  if (!match) return 4 * 60 * 60 * 1000; // default 4h
-
-  const value = parseInt(match[1]!, 10);
-  const unit = match[2];
-
-  if (unit === 'm') return value * 60 * 1000;
-  if (unit === 'h') return value * 60 * 60 * 1000;
-  return 4 * 60 * 60 * 1000;
+  if (match) {
+    const value = parseInt(match[1]!, 10);
+    if (match[2] === 'h') return value * 60 * 60 * 1000;
+    return value * 60 * 1000; // minutes
+  }
+  // Bare number → treat as minutes (common in cron: --cycle 1 = 1 minute)
+  const bare = parseInt(cycle, 10);
+  if (!isNaN(bare) && bare > 0) return bare * 60 * 1000;
+  return 4 * 60 * 60 * 1000; // default 4h
 }
