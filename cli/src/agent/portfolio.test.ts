@@ -403,3 +403,101 @@ describe("PortfolioTracker.addToPosition", () => {
     await expect(tracker.addToPosition("bitcoin", 0, 1, "long")).rejects.toThrow(/Invalid add price/);
   });
 });
+
+describe("PortfolioTracker.closePartial", () => {
+  // Tracks portfolio.json and trades.json separately so appendTradeRecord
+  // doesn't accidentally parse the portfolio state as a trades array.
+  function setupBacking() {
+    const backing = { state: null as string | null, trades: null as string | null };
+    mockReadFile.mockImplementation(async (path: any) => {
+      const p = String(path);
+      if (p.includes("trades")) {
+        if (backing.trades === null) throw new Error("ENOENT: no such file");
+        return backing.trades;
+      }
+      if (backing.state === null) throw new Error("ENOENT: no such file");
+      return backing.state;
+    });
+    return backing;
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { writeFile, rename, mkdir } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(rename).mockResolvedValue(undefined);
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+  });
+
+  it("reduces quantity by fraction and records trade", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (path: any, data: any) => {
+      const content = typeof data === "string" ? data : data.toString();
+      if (String(path).includes("trades")) {
+        backing.trades = content;
+      } else {
+        backing.state = content;
+      }
+    });
+    const tracker = new PortfolioTracker();
+
+    await tracker.openPosition({
+      tokenId: "bitcoin", symbol: "BTC", side: "long",
+      entryPrice: 100, currentPrice: 120, quantity: 10,
+      entryTimestamp: Date.now(),
+      stopLoss: 97, takeProfit: 130, strategy: "test",
+    });
+
+    const result = await tracker.closePartial("bitcoin", 0.5, 120, "Partial profit");
+    expect(result.quantityClosed).toBe(5);
+    expect(result.pnlPercent).toBeCloseTo(0.20, 2); // (120-100)/100
+    expect(result.pnl).toBeCloseTo(100, 0); // 20 * 5
+  });
+
+  it("sets partialTaken flag on remaining position", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (path: any, data: any) => {
+      const content = typeof data === "string" ? data : data.toString();
+      if (String(path).includes("trades")) {
+        backing.trades = content;
+      } else {
+        backing.state = content;
+      }
+    });
+    const tracker = new PortfolioTracker();
+
+    await tracker.openPosition({
+      tokenId: "ethereum", symbol: "ETH", side: "long",
+      entryPrice: 2000, currentPrice: 2100, quantity: 1,
+      entryTimestamp: Date.now(),
+      stopLoss: 1940, takeProfit: 2200, strategy: "test",
+    });
+
+    await tracker.closePartial("ethereum", 0.5, 2100, "Partial profit");
+
+    // Verify partialTaken by loading the persisted state
+    const state = await tracker.load();
+    const pos = state.positions.find((p) => p.tokenId === "ethereum");
+    expect(pos).toBeDefined();
+    expect(pos!.quantity).toBeCloseTo(0.5, 4);
+    expect(pos!.partialTaken).toBe(true);
+  });
+
+  it("rejects invalid fraction", async () => {
+    const tracker = new PortfolioTracker();
+    await expect(tracker.closePartial("bitcoin", 0, 100, "test")).rejects.toThrow(/Invalid fraction/);
+    await expect(tracker.closePartial("bitcoin", 1, 100, "test")).rejects.toThrow(/Invalid fraction/);
+    await expect(tracker.closePartial("bitcoin", 1.5, 100, "test")).rejects.toThrow(/Invalid fraction/);
+  });
+
+  it("rejects when no position exists", async () => {
+    mockReadFile.mockResolvedValueOnce(JSON.stringify({
+      totalValue: 10000, cash: 10000, positions: [],
+      dailyPnl: 0, weeklyPnl: 0, monthlyPnl: 0,
+    }));
+    const tracker = new PortfolioTracker();
+    await expect(tracker.closePartial("bitcoin", 0.5, 100, "test")).rejects.toThrow(/No open position/);
+  });
+});

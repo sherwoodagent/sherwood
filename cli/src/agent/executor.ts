@@ -322,6 +322,41 @@ export class TradeExecutor {
       }
     }
 
+    // --- Partial profit exits (50% at +3%) ---
+    const PARTIAL_PROFIT_TRIGGER = 0.03; // +3% unrealized gain
+    const PARTIAL_FRACTION = 0.5;
+
+    const refreshedState = await this.portfolio.load();
+    for (const pos of refreshedState.positions) {
+      if (pos.partialTaken) continue; // already took partial
+      const price = currentPrices[pos.tokenId];
+      if (price === undefined) continue;
+
+      const isShort = pos.side === 'short';
+      const pnlPercent = isShort
+        ? (pos.entryPrice - price) / (pos.entryPrice || 1)
+        : (price - pos.entryPrice) / (pos.entryPrice || 1);
+
+      if (pnlPercent >= PARTIAL_PROFIT_TRIGGER) {
+        try {
+          const partial = await this.portfolio.closePartial(
+            pos.tokenId, PARTIAL_FRACTION, price, `Partial profit at ${(pnlPercent * 100).toFixed(1)}%`,
+          );
+          results.push({
+            position: { ...pos, currentPrice: price },
+            exitPrice: price,
+            reason: `PARTIAL_PROFIT (${(pnlPercent * 100).toFixed(1)}%, closed ${(PARTIAL_FRACTION * 100).toFixed(0)}%)`,
+            pnl: partial.pnl,
+          });
+          console.error(
+            chalk.cyan(`  Partial exit: ${pos.symbol} ${(PARTIAL_FRACTION * 100).toFixed(0)}% @ $${price.toFixed(4)} — locked $${partial.pnl.toFixed(2)}`),
+          );
+        } catch (err) {
+          console.error(chalk.red(`Failed partial close ${pos.symbol}: ${(err as Error).message}`));
+        }
+      }
+    }
+
     return results;
   }
 

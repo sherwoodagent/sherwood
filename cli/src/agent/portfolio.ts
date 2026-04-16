@@ -368,6 +368,67 @@ export class PortfolioTracker {
     return { pnl: pnlUsd, pnlPercent, duration };
   }
 
+  /**
+   * Close a fraction of a position. Records a partial trade and reduces
+   * the position's quantity. Entry price and stops are preserved.
+   */
+  async closePartial(
+    tokenId: string,
+    fraction: number,
+    exitPrice: number,
+    reason: string,
+  ): Promise<{ pnl: number; pnlPercent: number; quantityClosed: number }> {
+    if (fraction <= 0 || fraction >= 1) {
+      throw new Error(`Invalid fraction: ${fraction} (must be between 0 and 1 exclusive)`);
+    }
+    await this.load();
+
+    const idx = this.state.positions.findIndex((p) => p.tokenId === tokenId);
+    if (idx === -1) throw new Error(`No open position for ${tokenId}`);
+
+    const pos = this.state.positions[idx]!;
+    const isShort = pos.side === 'short';
+    const quantityClosed = pos.quantity * fraction;
+    const pnlUsd = isShort
+      ? (pos.entryPrice - exitPrice) * quantityClosed
+      : (exitPrice - pos.entryPrice) * quantityClosed;
+    const pnlPercent = isShort
+      ? (pos.entryPrice - exitPrice) / (pos.entryPrice || 1)
+      : (exitPrice - pos.entryPrice) / (pos.entryPrice || 1);
+
+    // Record partial trade
+    const record: TradeRecord = {
+      tokenId: pos.tokenId,
+      symbol: pos.symbol,
+      side: pos.side ?? 'long',
+      entryPrice: pos.entryPrice,
+      exitPrice,
+      quantity: quantityClosed,
+      pnlUsd,
+      pnlPercent,
+      entryTimestamp: pos.entryTimestamp,
+      exitTimestamp: Date.now(),
+      duration: Math.floor((Date.now() - pos.entryTimestamp) / 1000),
+      strategy: pos.strategy,
+      exitReason: reason,
+    };
+    await this.appendTradeRecord(record);
+
+    // Reduce position, mark partial taken
+    pos.quantity -= quantityClosed;
+    pos.partialTaken = true;
+    this.state.cash += exitPrice * quantityClosed;
+    this.state.dailyPnl += pnlUsd;
+    this.state.weeklyPnl += pnlUsd;
+    this.state.monthlyPnl += pnlUsd;
+    this.state.totalValue = this.state.cash + this.state.positions.reduce(
+      (sum, p) => sum + p.quantity * p.currentPrice, 0,
+    );
+
+    await this.save(this.state);
+    return { pnl: pnlUsd, pnlPercent, quantityClosed };
+  }
+
   /** Update current prices for all positions */
   async updatePrices(prices: Record<string, number>): Promise<PortfolioState> {
     await this.load();
