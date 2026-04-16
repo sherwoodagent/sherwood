@@ -29,6 +29,7 @@ export interface SherwoodConfig {
   xmtpInboxId?: string;
   groupCache: Record<string, string>; // subdomain → XMTP group ID
   veniceApiKey?: string; // Venice AI inference API key
+  anthropicApiKey?: string; // Anthropic Claude API key (for LLM judge)
   agentId?: number; // ERC-8004 identity token ID
   contracts?: Record<string, ChainContracts>; // chainId → user addresses
   syndicates?: Record<string, SyndicateMembership[]>; // chainId → syndicate memberships
@@ -93,6 +94,18 @@ export function setVeniceApiKey(apiKey: string): void {
 
 export function getVeniceApiKey(): string | undefined {
   return loadConfig().veniceApiKey ?? process.env.VENICE_API_KEY;
+}
+
+// ── Anthropic API Key ──
+
+export function setAnthropicApiKey(apiKey: string): void {
+  const config = loadConfig();
+  config.anthropicApiKey = apiKey;
+  saveConfig(config);
+}
+
+export function getAnthropicApiKey(): string | undefined {
+  return loadConfig().anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
 }
 
 export function setAgentId(agentId: number): void {

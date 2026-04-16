@@ -61,6 +61,7 @@ function makeConfig(overrides?: Partial<AgentConfig>): AgentConfig {
     useX402: true, // Paid signals (Nansen + Messari) on by default — opt out with --no-x402
     x402TopN: 1,   // Only run x402 on top 1 token by free-signal score — 96 calls/day vs 288
     smoothFastSignals: true, // Rolling-window smoothing for noisy signals — prevents single-scan flicker
+    // judge: undefined — off by default, enable with --use-judge
     ...overrides,
   };
 }
@@ -82,7 +83,10 @@ export function registerAgentCommands(program: Command): void {
     .option("--weight-profile <name>", "Weight profile: default | majors | altcoin | sentHeavy | techHeavy (auto: majors for BTC/ETH/SOL)")
     .option("--scaled-sizing", "Score-weighted position sizing (smaller positions for marginal scores)")
     .option("--smooth", "Smooth fast signals with rolling 3-reading window")
-    .action(async (tokens: string[], options: { all?: boolean; auto?: boolean; json?: boolean; x402: boolean; telegram?: boolean; proposals?: boolean; weightProfile?: string; scaledSizing?: boolean; smooth?: boolean }) => {
+    .option("--use-judge", "Enable LLM judge to confirm/veto borderline trades (requires Anthropic API key)")
+    .option("--judge-model <model>", "Judge model ID (default: claude-haiku-4-5-20251001)")
+    .option("--judge-top-n <n>", "Max tokens to judge per cycle (default: 3)", parseInt)
+    .action(async (tokens: string[], options: { all?: boolean; auto?: boolean; json?: boolean; x402: boolean; telegram?: boolean; proposals?: boolean; weightProfile?: string; scaledSizing?: boolean; smooth?: boolean; useJudge?: boolean; judgeModel?: string; judgeTopN?: number }) => {
       let tokenList: string[];
       let selectionSummary: string | undefined;
 
@@ -111,7 +115,16 @@ export function registerAgentCommands(program: Command): void {
       const scaledSizing = options.scaledSizing
         ? { ...DEFAULT_SCALED_SIZING, enabled: true }
         : undefined;
-      const config = makeConfig({ tokens: tokenList, useX402: options.x402, weightProfile: options.weightProfile, smoothFastSignals: options.smooth });
+      const config = makeConfig({
+        tokens: tokenList, useX402: options.x402, weightProfile: options.weightProfile, smoothFastSignals: options.smooth,
+        ...(options.useJudge ? {
+          judge: {
+            enabled: true,
+            ...(options.judgeModel ? { model: options.judgeModel } : {}),
+            ...(options.judgeTopN ? { topN: options.judgeTopN } : {}),
+          },
+        } : {}),
+      });
       const tradingAgent = new TradingAgent(config);
       const spinner = ora("Analyzing tokens...").start();
 
@@ -315,7 +328,10 @@ export function registerAgentCommands(program: Command): void {
     .option("--weight-profile <name>", "Weight profile: default | majors | altcoin | sentHeavy | techHeavy (auto: majors for BTC/ETH/SOL)")
     .option("--scaled-sizing", "Score-weighted position sizing (smaller positions for marginal scores)")
     .option("--smooth", "Smooth fast signals with rolling 3-reading window")
-    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; auto?: boolean; log?: string; mode?: string; strategyClone?: string; chain?: string; assetIndex?: string; x402: boolean; weightProfile?: string; scaledSizing?: boolean; smooth?: boolean }) => {
+    .option("--use-judge", "Enable LLM judge to confirm/veto borderline trades (requires Anthropic API key)")
+    .option("--judge-model <model>", "Judge model ID (default: claude-haiku-4-5-20251001)")
+    .option("--judge-top-n <n>", "Max tokens to judge per cycle (default: 3)", parseInt)
+    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; auto?: boolean; log?: string; mode?: string; strategyClone?: string; chain?: string; assetIndex?: string; x402: boolean; weightProfile?: string; scaledSizing?: boolean; smooth?: boolean; useJudge?: boolean; judgeModel?: string; judgeTopN?: number }) => {
       let tokenList: string[];
 
       if (options.auto) {
@@ -365,7 +381,17 @@ export function registerAgentCommands(program: Command): void {
       }
 
       const loopConfig: LoopConfig = {
-        agent: makeConfig({ tokens: tokenList, cycle, dryRun: !isLive, useX402: options.x402, weightProfile: options.weightProfile, smoothFastSignals: options.smooth }),
+        agent: makeConfig({
+          tokens: tokenList, cycle, dryRun: !isLive, useX402: options.x402,
+          weightProfile: options.weightProfile, smoothFastSignals: options.smooth,
+          ...(options.useJudge ? {
+            judge: {
+              enabled: true,
+              ...(options.judgeModel ? { model: options.judgeModel } : {}),
+              ...(options.judgeTopN ? { topN: options.judgeTopN } : {}),
+            },
+          } : {}),
+        }),
         execution: {
           dryRun: !isLive,
           mode: (options.mode ?? 'dry-run') as 'dry-run' | 'hyperliquid-perp',

@@ -27,6 +27,9 @@ import { FundingRateProvider } from "../providers/data/funding-rate.js";
 import { TokenUnlocksProvider } from "../providers/data/token-unlocks.js";
 import { TwitterSentimentProvider } from "../providers/data/twitter.js";
 import { logSignal } from "./signal-logger.js";
+import type { JudgeLogData } from "./signal-logger.js";
+import { judge, selectJudgeCandidates, DEFAULT_JUDGE_CONFIG } from "./judge.js";
+import type { JudgeConfig, JudgeVerdict, JudgeContext } from "./judge.js";
 import { SignalSmoother, FileSmootherStorage, DEFAULT_SMOOTHER_CONFIG } from "./signal-smoother.js";
 import { join as joinPath } from "node:path";
 import { homedir as getHomedir } from "node:os";
@@ -66,6 +69,8 @@ export interface AgentConfig {
   smoothFastSignals?: boolean;
   /** Per-strategy configuration overrides. */
   strategyConfigs?: Record<string, StrategyConfig>;
+  /** LLM judge configuration — confirms or vetoes borderline trade decisions. */
+  judge?: Partial<JudgeConfig>;
 }
 
 export interface TokenAnalysis {
@@ -75,9 +80,14 @@ export interface TokenAnalysis {
     technicalSignals?: TechnicalSignals;
     fearAndGreed?: number;
     tvl?: number;
+    price?: number;
   };
   regime?: RegimeAnalysis;
   correlation?: CorrelationCheck;
+  /** LLM judge verdict (present only when judge is enabled and token was judged). */
+  judgeResult?: { verdict: JudgeVerdict; cached: boolean; latencyMs: number };
+  /** Original action/score before judge veto (present only when judge vetoed). */
+  preJudge?: { action: string; score: number };
 }
 
 export class TradingAgent {
@@ -547,10 +557,13 @@ export class TradingAgent {
       x402Available,
     );
 
+    const currentPrice = hyperliquidData?.markPrice
+      ?? (candles && candles.length > 0 ? candles[candles.length - 1]!.close : 0);
+
     const result: TokenAnalysis = {
       token: tokenId,
       decision,
-      data: { technicalSignals, fearAndGreed: fearAndGreedValue, tvl },
+      data: { technicalSignals, fearAndGreed: fearAndGreedValue, tvl, price: currentPrice },
       regime: regimeAnalysis,
       correlation: correlationCheck,
     };
@@ -558,8 +571,6 @@ export class TradingAgent {
     // Persist analysis to ~/.sherwood/agent/signal-history.jsonl so the
     // signal-audit tool can measure fire rates over time. Fire-and-forget —
     // never blocks scoring, never crashes on disk failure.
-    const currentPrice = hyperliquidData?.markPrice
-      ?? (candles && candles.length > 0 ? candles[candles.length - 1]!.close : 0);
     logSignal(result, currentPrice, resolvedWeights);
 
     return result;
@@ -583,40 +594,85 @@ export class TradingAgent {
     const topN = this.config.x402TopN;
     const shouldTwoPass = this.config.useX402 && topN && topN > 0 && topN < this.config.tokens.length;
 
+    let results: TokenAnalysis[];
+
     if (!shouldTwoPass) {
       // Original single-pass: analyze all tokens with whatever x402 config says
-      const results: TokenAnalysis[] = [];
+      results = [];
       for (const token of this.config.tokens) {
         const result = await this.analyzeToken(token);
         results.push(result);
       }
-      return results;
+    } else {
+      // Pass 1: all tokens with free signals only
+      console.error(chalk.dim(`  x402 top-${topN} mode: scoring all ${this.config.tokens.length} tokens with free signals first...`));
+      const freeResults: TokenAnalysis[] = [];
+      for (const token of this.config.tokens) {
+        const result = await this.analyzeToken(token, { skipX402: true });
+        freeResults.push(result);
+      }
+
+      // Sort by absolute score descending — top N get the x402 enrichment
+      const ranked = [...freeResults].sort(
+        (a, b) => Math.abs(b.decision.score) - Math.abs(a.decision.score),
+      );
+      const topTokens = new Set(ranked.slice(0, topN).map((r) => r.token));
+      console.error(chalk.dim(`  x402 enriching top ${topN}: ${[...topTokens].join(', ')}`));
+
+      // Pass 2: re-analyze top N with x402 enabled
+      const enrichedMap = new Map<string, TokenAnalysis>();
+      for (const token of topTokens) {
+        const enriched = await this.analyzeToken(token);
+        enrichedMap.set(token, enriched);
+      }
+
+      // Merge: use enriched results for top N, free results for the rest
+      results = freeResults.map((r) => enrichedMap.get(r.token) ?? r);
     }
 
-    // Pass 1: all tokens with free signals only
-    console.error(chalk.dim(`  x402 top-${topN} mode: scoring all ${this.config.tokens.length} tokens with free signals first...`));
-    const freeResults: TokenAnalysis[] = [];
-    for (const token of this.config.tokens) {
-      const result = await this.analyzeToken(token, { skipX402: true });
-      freeResults.push(result);
+    // ── LLM Judge pass ──
+    // After all tokens scored, apply the judge to borderline actionable decisions.
+    // Budget-gated: only the top-N borderline candidates are judged per cycle.
+    const judgeConfig: JudgeConfig = { ...DEFAULT_JUDGE_CONFIG, ...this.config.judge };
+    if (judgeConfig.enabled) {
+      const candidates = selectJudgeCandidates(
+        results.map((r) => ({ token: r.token, score: r.decision.score, action: r.decision.action })),
+        judgeConfig,
+      );
+
+      if (candidates.size > 0) {
+        console.error(chalk.dim(`  [judge] Reviewing ${candidates.size} borderline decision(s): ${[...candidates].join(', ')}`));
+      }
+
+      for (const result of results) {
+        if (!candidates.has(result.token)) continue;
+
+        const ctx: JudgeContext = {
+          tokenId: result.token,
+          currentPrice: result.data.price ?? 0,
+          decision: result.decision,
+          technicalSignals: result.data.technicalSignals,
+          fearAndGreed: result.data.fearAndGreed,
+          regime: result.regime?.regime,
+          btcBias: result.correlation?.btcBias,
+          suppressionFactor: result.correlation?.suppressionFactor,
+          portfolio: { openCount: 0, cashPct: 1, hasPositionThisToken: false, inStopCooldown: false, dailyPnlPct: 0 },
+        };
+
+        const judgeResult = await judge(ctx, judgeConfig);
+        result.judgeResult = judgeResult;
+
+        if (judgeResult.verdict.verdict === "veto") {
+          result.preJudge = { action: result.decision.action, score: result.decision.score };
+          result.decision = { ...result.decision, action: "HOLD" };
+          console.error(chalk.yellow(`  [judge] VETO ${result.token}: ${judgeResult.verdict.reasoning}`));
+        } else if (judgeResult.verdict.verdict === "confirm" && judgeResult.verdict.reasoning !== "fallback") {
+          console.error(chalk.dim(`  [judge] Confirmed ${result.token} (${judgeResult.cached ? "cached" : `${judgeResult.latencyMs}ms`})`));
+        }
+      }
     }
 
-    // Sort by absolute score descending — top N get the x402 enrichment
-    const ranked = [...freeResults].sort(
-      (a, b) => Math.abs(b.decision.score) - Math.abs(a.decision.score),
-    );
-    const topTokens = new Set(ranked.slice(0, topN).map((r) => r.token));
-    console.error(chalk.dim(`  x402 enriching top ${topN}: ${[...topTokens].join(', ')}`));
-
-    // Pass 2: re-analyze top N with x402 enabled
-    const enrichedMap = new Map<string, TokenAnalysis>();
-    for (const token of topTokens) {
-      const enriched = await this.analyzeToken(token);
-      enrichedMap.set(token, enriched);
-    }
-
-    // Merge: use enriched results for top N, free results for the rest
-    return freeResults.map((r) => enrichedMap.get(r.token) ?? r);
+    return results;
   }
 
   /** Analyze all tokens and generate alerts for state changes. */

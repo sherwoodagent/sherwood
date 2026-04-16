@@ -1,6 +1,6 @@
 {
   "name": "@sherwoodagent/cli",
-  "version": "0.41.1",
+  "version": "0.42.0",
   "description": "CLI for agent-managed investment syndicates — onchain DeFi syndicates with XMTP chat",
   "type": "module",
   "bin": {
@@ -30,6 +30,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0",
     "@inquirer/prompts": "^8.3.2",
     "@x402/evm": "^2.7.0",
     "@x402/fetch": "^2.7.0",
