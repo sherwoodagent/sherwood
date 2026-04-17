@@ -19,6 +19,8 @@ export interface PortfolioState {
 export interface Position {
   tokenId: string;
   symbol: string;
+  /** 'long' (default for backward compat) or 'short'. */
+  side?: 'long' | 'short';
   entryPrice: number;
   currentPrice: number;
   quantity: number;
@@ -29,6 +31,12 @@ export interface Position {
   strategy: string;
   pnlPercent: number;
   pnlUsd: number;
+  /** Number of pyramid adds since initial entry (0 = base position).
+   *  Capped by RiskManager.canOpenPosition; each add halves the prior add size. */
+  addCount?: number;
+  /** Timestamp of the most recent add (or initial entry).
+   *  Used to enforce minimum spacing between adds. */
+  lastAddTimestamp?: number;
 }
 
 export interface RiskConfig {
@@ -76,7 +84,7 @@ export const DEFAULT_RISK_CONFIG: RiskConfig = {
   maxSinglePosition: 0.10,
   maxCorrelatedExposure: 0.20,
   maxConcurrentTrades: 8,
-  hardStopPercent: 0.12,
+  hardStopPercent: 0.05,          // 5% hard stop — short-term trades shouldn't bleed past this
   trailingStopAtr: 1.5,
   trailingStopPct: 0,         // OFF — opt in via config
   breakevenTriggerPct: 0,     // OFF — opt in via config
@@ -96,15 +104,25 @@ export const DEFAULT_RISK_CONFIG: RiskConfig = {
  *   sherwood agent config --set breakevenTriggerPct=0.02
  *   (profitLockSteps currently requires editing config.json directly)
  */
+/**
+ * Short-term trailing config (1-2 day holds).
+ * Tighter stops and faster profit-locking than swing trading.
+ */
 export const RECOMMENDED_TRAILING_CONFIG = {
-  trailingStopPct: 0.05,
-  breakevenTriggerPct: 0.02,
+  trailingStopPct: 0.025,           // 2.5% trail — tighter for short-term
+  breakevenTriggerPct: 0.015,       // move to breakeven after +1.5% gain
   profitLockSteps: [
-    { trigger: 0.05, lock: 0.02 },
-    { trigger: 0.10, lock: 0.05 },
-    { trigger: 0.20, lock: 0.10 },
+    { trigger: 0.02, lock: 0.005 }, // after +2%, lock in +0.5%
+    { trigger: 0.04, lock: 0.02 },  // after +4%, lock in +2%
+    { trigger: 0.06, lock: 0.04 },  // after +6%, lock in +4% (near TP)
   ],
 } as const;
+
+/** Pyramiding configuration — conservative defaults to limit blowup risk
+ *  on a single name. With MAX_PYRAMID_ADDS=2 and halving size each add,
+ *  total exposure caps at 1.0x + 0.5x + 0.25x = 1.75x of the base size. */
+export const MAX_PYRAMID_ADDS = 2;
+export const PYRAMID_MIN_SPACING_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 const EMPTY_PORTFOLIO: PortfolioState = {
   totalValue: 0,
@@ -124,8 +142,11 @@ export class RiskManager {
     this.portfolio = { ...EMPTY_PORTFOLIO };
   }
 
-  /** Check if we can open a new position */
-  canOpenPosition(token: string, sizeUsd: number): { allowed: boolean; reason?: string } {
+  /** Check if we can open a new position (or pyramid into an existing one).
+   *  When `direction` is omitted, defaults to 'long' for backward compatibility.
+   *  An existing position with a different direction always rejects (no flips
+   *  via pyramid — flips must explicitly close the prior position first). */
+  canOpenPosition(token: string, sizeUsd: number, direction: 'long' | 'short' = 'long'): { allowed: boolean; reason?: string } {
     // Check concurrent trades limit
     if (this.portfolio.positions.length >= this.config.maxConcurrentTrades) {
       return { allowed: false, reason: `Max concurrent trades (${this.config.maxConcurrentTrades}) reached` };
@@ -166,10 +187,28 @@ export class RiskManager {
       }
     }
 
-    // Check if we already have a position in this token
+    // Check if we already have a position in this token.
+    // Pyramiding (adding to a winning position) is allowed up to MAX_PYRAMID_ADDS
+    // total adds, with at least PYRAMID_MIN_SPACING_MS between adds. The caller
+    // (TradeExecutor) is responsible for halving the size each add and matching
+    // the existing direction. If those preconditions aren't met, the executor
+    // should not call canOpenPosition for an add.
     const existing = this.portfolio.positions.find((p) => p.tokenId === token);
     if (existing) {
-      return { allowed: false, reason: `Already have an open position in ${token}` };
+      const existingSide = existing.side ?? 'long';
+      if (existingSide !== direction) {
+        return { allowed: false, reason: `Conflicting position in ${token} (existing ${existingSide}, signal ${direction}) — close first` };
+      }
+      const addCount = existing.addCount ?? 0;
+      if (addCount >= MAX_PYRAMID_ADDS) {
+        return { allowed: false, reason: `Pyramid cap reached for ${token} (${MAX_PYRAMID_ADDS} adds)` };
+      }
+      const lastAdd = existing.lastAddTimestamp ?? existing.entryTimestamp;
+      const elapsed = Date.now() - lastAdd;
+      if (elapsed < PYRAMID_MIN_SPACING_MS) {
+        const remainHrs = ((PYRAMID_MIN_SPACING_MS - elapsed) / 3_600_000).toFixed(1);
+        return { allowed: false, reason: `Pyramid spacing not met for ${token} (next add in ${remainHrs}h)` };
+      }
     }
 
     // Check cash availability
@@ -223,7 +262,7 @@ export class RiskManager {
     }
 
     const riskPct = maxRiskPercent ?? this.config.riskPerTrade;
-    const riskUsd = portfolioValue * riskPct;
+    let riskUsd = portfolioValue * riskPct;
     const riskPerUnit = Math.abs(entryPrice - stopLossPrice);
 
     if (riskPerUnit <= 0) {
@@ -231,18 +270,26 @@ export class RiskManager {
     }
 
     // positionSize = (portfolioValue * maxRiskPercent) / (entryPrice - stopLossPrice)
-    const quantity = riskUsd / riskPerUnit;
-    const sizeUsd = quantity * entryPrice;
+    let quantity = riskUsd / riskPerUnit;
+    let sizeUsd = quantity * entryPrice;
 
-    // Cap at max single position size
+    // Cap at max single position size FIRST — floor must not exceed cap.
     const maxSizeUsd = portfolioValue * this.config.maxSinglePosition;
     if (sizeUsd > maxSizeUsd) {
-      const cappedQuantity = maxSizeUsd / entryPrice;
-      return {
-        quantity: cappedQuantity,
-        sizeUsd: maxSizeUsd,
-        riskUsd: cappedQuantity * riskPerUnit,
-      };
+      sizeUsd = maxSizeUsd;
+      quantity = maxSizeUsd / entryPrice;
+      riskUsd = quantity * riskPerUnit;
+    }
+
+    // Minimum position floor: Hyperliquid requires ~$10+ notional per order.
+    // Applied AFTER the cap so floor never exceeds maxSinglePosition.
+    // Only scales up if vault can afford 2× the floor (safety buffer).
+    const MIN_POSITION_USD = 15;
+    const effectiveFloor = Math.min(MIN_POSITION_USD, maxSizeUsd);
+    if (sizeUsd < effectiveFloor && portfolioValue >= MIN_POSITION_USD * 2) {
+      sizeUsd = effectiveFloor;
+      quantity = sizeUsd / entryPrice;
+      riskUsd = quantity * riskPerUnit;
     }
 
     return { quantity, sizeUsd, riskUsd };
@@ -311,35 +358,64 @@ export class RiskManager {
     return positions.map((pos) => {
       if (pos.currentPrice <= 0 || pos.entryPrice <= 0) return pos;
 
-      const pnlPct = (pos.currentPrice - pos.entryPrice) / pos.entryPrice;
+      const isShort = pos.side === 'short';
+      // Direction-aware PnL
+      const pnlPct = isShort
+        ? (pos.entryPrice - pos.currentPrice) / (pos.entryPrice || 1)
+        : (pos.currentPrice - pos.entryPrice) / (pos.entryPrice || 1);
       let newStop = pos.stopLoss;
 
-      // 1. Breakeven
-      if (
-        this.config.breakevenTriggerPct > 0
-        && pnlPct >= this.config.breakevenTriggerPct
-      ) {
-        newStop = Math.max(newStop, pos.entryPrice);
-      }
+      if (isShort) {
+        // For SHORTS: stops move DOWN (tighter = lower price).
+        // "Never loosen" = never move stop UP (higher) for shorts.
 
-      // 2. Profit-lock steps — pick the highest triggered lock
-      if (this.config.profitLockSteps.length > 0) {
+        // 1. Breakeven: move stop down to entry (from above)
+        if (this.config.breakevenTriggerPct > 0 && pnlPct >= this.config.breakevenTriggerPct) {
+          newStop = Math.min(newStop, pos.entryPrice);
+        }
+
+        // 2. Profit-lock: lock in gains by moving stop further down
+        for (const step of this.config.profitLockSteps) {
+          if (pnlPct >= step.trigger) {
+            const lockedStop = pos.entryPrice * (1 - step.lock);
+            newStop = Math.min(newStop, lockedStop);
+          }
+        }
+
+        // 3. Percent-trail: track new lows
+        if (this.config.trailingStopPct > 0) {
+          const trailStop = pos.currentPrice * (1 + this.config.trailingStopPct);
+          newStop = Math.min(newStop, trailStop);
+        }
+
+        if (newStop < pos.stopLoss) {
+          return { ...pos, stopLoss: newStop, trailingStop: newStop };
+        }
+      } else {
+        // For LONGS: stops move UP (tighter = higher price).
+
+        // 1. Breakeven
+        if (this.config.breakevenTriggerPct > 0 && pnlPct >= this.config.breakevenTriggerPct) {
+          newStop = Math.max(newStop, pos.entryPrice);
+        }
+
+        // 2. Profit-lock steps
         for (const step of this.config.profitLockSteps) {
           if (pnlPct >= step.trigger) {
             const lockedStop = pos.entryPrice * (1 + step.lock);
             newStop = Math.max(newStop, lockedStop);
           }
         }
-      }
 
-      // 3. Percent-trail
-      if (this.config.trailingStopPct > 0) {
-        const trailStop = pos.currentPrice * (1 - this.config.trailingStopPct);
-        newStop = Math.max(newStop, trailStop);
-      }
+        // 3. Percent-trail
+        if (this.config.trailingStopPct > 0) {
+          const trailStop = pos.currentPrice * (1 - this.config.trailingStopPct);
+          newStop = Math.max(newStop, trailStop);
+        }
 
-      if (newStop > pos.stopLoss) {
-        return { ...pos, stopLoss: newStop, trailingStop: newStop };
+        if (newStop > pos.stopLoss) {
+          return { ...pos, stopLoss: newStop, trailingStop: newStop };
+        }
       }
       return pos;
     });
@@ -381,43 +457,54 @@ export class RiskManager {
       const price = currentPrices[pos.tokenId];
       if (price === undefined) continue;
 
-      // Update current price for evaluation
       const updatedPos = { ...pos, currentPrice: price };
-      const pnlPercent = (price - pos.entryPrice) / pos.entryPrice;
+      const isShort = pos.side === 'short';
 
-      // Hard stop loss check
+      // PnL calculation — direction-aware
+      const pnlPercent = isShort
+        ? (pos.entryPrice - price) / (pos.entryPrice || 1)
+        : (price - pos.entryPrice) / (pos.entryPrice || 1);
+
+      // Hard stop loss check (direction-aware via pnlPercent)
       if (pnlPercent <= -this.config.hardStopPercent) {
         toClose.push(updatedPos);
         reasons[pos.tokenId] = `Hard stop hit: ${(pnlPercent * 100).toFixed(1)}% loss (limit: -${(this.config.hardStopPercent * 100).toFixed(0)}%)`;
         continue;
       }
 
-      // Stop loss check
-      if (price <= pos.stopLoss) {
+      // Stop loss check — for shorts, stop is ABOVE entry (price >= stopLoss)
+      // for longs, stop is BELOW entry (price <= stopLoss)
+      const stopHit = isShort ? price >= pos.stopLoss : price <= pos.stopLoss;
+      if (stopHit) {
         toClose.push(updatedPos);
         reasons[pos.tokenId] = `Stop loss hit at $${pos.stopLoss.toFixed(4)} (price: $${price.toFixed(4)})`;
         continue;
       }
 
-      // Trailing stop check
-      if (pos.trailingStop !== undefined && price <= pos.trailingStop) {
-        toClose.push(updatedPos);
-        reasons[pos.tokenId] = `Trailing stop hit at $${pos.trailingStop.toFixed(4)} (price: $${price.toFixed(4)})`;
-        continue;
+      // Trailing stop check — same direction logic as stop loss
+      if (pos.trailingStop !== undefined) {
+        const trailHit = isShort ? price >= pos.trailingStop : price <= pos.trailingStop;
+        if (trailHit) {
+          toClose.push(updatedPos);
+          reasons[pos.tokenId] = `Trailing stop hit at $${pos.trailingStop.toFixed(4)} (price: $${price.toFixed(4)})`;
+          continue;
+        }
       }
 
-      // Take profit check
-      if (price >= pos.takeProfit) {
+      // Take profit check — for shorts, TP is BELOW entry (price <= takeProfit)
+      // for longs, TP is ABOVE entry (price >= takeProfit)
+      const tpHit = isShort ? price <= pos.takeProfit : price >= pos.takeProfit;
+      if (tpHit) {
         toClose.push(updatedPos);
         reasons[pos.tokenId] = `Take profit hit at $${pos.takeProfit.toFixed(4)} (price: $${price.toFixed(4)})`;
         continue;
       }
 
-      // Time-based exit: positions open > 7 days with < 2% profit
-      const holdingDays = (Date.now() - pos.entryTimestamp) / (1000 * 60 * 60 * 24);
-      if (holdingDays > 7 && pnlPercent < 0.02 && pnlPercent > -0.02) {
+      // Time-based exit: close after 48h if PnL is flat (<1%)
+      const holdingHours = (Date.now() - pos.entryTimestamp) / (1000 * 60 * 60);
+      if (holdingHours > 48 && pnlPercent < 0.01 && pnlPercent > -0.01) {
         toClose.push(updatedPos);
-        reasons[pos.tokenId] = `Time stop: held ${holdingDays.toFixed(0)} days with only ${(pnlPercent * 100).toFixed(1)}% PnL`;
+        reasons[pos.tokenId] = `Time stop: held ${(holdingHours / 24).toFixed(1)} days with only ${(pnlPercent * 100).toFixed(1)}% PnL`;
         continue;
       }
     }

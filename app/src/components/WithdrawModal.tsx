@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
   useReadContract,
@@ -52,6 +54,8 @@ export default function WithdrawModal({
   // Use the vault's chain so explorer links resolve to the right scanner.
   const addresses = getAddresses(chainId);
   const toast = useToast();
+  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [amount, setAmount] = useState("");
   const [isMax, setIsMax] = useState(false);
@@ -103,8 +107,25 @@ export default function WithdrawModal({
         "Withdrawal confirmed",
         `Your ${assetSymbol} is back in your wallet.`,
       );
+      // Pull fresh onchain data so the share balance on the header,
+      // TVL, totalSupply, and convertToAssets preview all reflect the
+      // post-redeem state without a manual reload. Same scoping as
+      // DepositModal — only invalidate read/balance caches so we don't
+      // trigger a cache-wide refetch stampede.
+      router.refresh();
+      queryClient.invalidateQueries({ queryKey: ["readContract"] });
+      queryClient.invalidateQueries({ queryKey: ["balance"] });
     }
-  }, [isWithdrawConfirmed, step, toast, assetSymbol, withdrawHash, vault]);
+  }, [
+    isWithdrawConfirmed,
+    step,
+    toast,
+    assetSymbol,
+    withdrawHash,
+    vault,
+    router,
+    queryClient,
+  ]);
 
   function handleWithdraw() {
     if (!address) return;

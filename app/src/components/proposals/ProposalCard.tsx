@@ -11,6 +11,7 @@ import {
 import { truncateAddress, formatBps, formatShares, shareDecimals } from "@/lib/contracts";
 import VoteButton from "./VoteButton";
 import ExecutionCallPreview from "./ExecutionCallPreview";
+import SwapRiskWarning from "./SwapRiskWarning";
 import VoteConcentration from "./VoteConcentration";
 import { ProposalStepper } from "@/components/ui/ProposalStepper";
 
@@ -87,34 +88,34 @@ export default function ProposalCard({
   const idStr = String(proposal.id).padStart(2, "0");
 
   return (
-    <div className="prop-card">
+    <div className="sh-card--prop">
       {/* Left ID rail */}
-      <div className="prop-card__id">
-        <span className="prop-card__id-label">Prop</span>
-        <span className="prop-card__id-num">#{idStr}</span>
+      <div className="sh-card--prop__id">
+        <span className="sh-card--prop__id-label">Prop</span>
+        <span className="sh-card--prop__id-num">#{idStr}</span>
       </div>
 
       {/* Body */}
       <div>
-        <div className="prop-card__head">
+        <div className="sh-card--prop__head">
           <div style={{ minWidth: 0 }}>
-            <div className="prop-card__title">{title}</div>
-            <div className="prop-card__meta">
+            <div className="sh-card--prop__title">{title}</div>
+            <div className="sh-card--prop__meta">
               <span>
-                <span className="prop-card__meta-key">By</span>
-                <span className="prop-card__meta-val">{proposerLabel}</span>
+                <span className="sh-card--prop__meta-key">By</span>
+                <span className="sh-card--prop__meta-val">{proposerLabel}</span>
               </span>
               <span>
-                <span className="prop-card__meta-key">Fee</span>
-                <span className="prop-card__meta-val">{formatBps(proposal.performanceFeeBps)}</span>
+                <span className="sh-card--prop__meta-key">Fee</span>
+                <span className="sh-card--prop__meta-val">{formatBps(proposal.performanceFeeBps)}</span>
               </span>
               <span>
-                <span className="prop-card__meta-key">{isPending ? "Voting" : "Execution"}</span>
-                <span className="prop-card__meta-val">{timerLabel}</span>
+                <span className="sh-card--prop__meta-key">{isPending ? "Voting" : "Execution"}</span>
+                <span className="sh-card--prop__meta-val">{timerLabel}</span>
               </span>
             </div>
             {truncatedDescription && (
-              <div className="prop-card__desc font-[family-name:var(--font-plus-jakarta)]">
+              <div className="sh-card--prop__desc font-[family-name:var(--font-plus-jakarta)]">
                 {truncatedDescription}
               </div>
             )}
@@ -132,13 +133,13 @@ export default function ProposalCard({
 
         {/* Vote progress */}
         {totalVotes > 0n ? (
-          <div className="prop-card__vote">
-            <div className="prop-card__vote-numbers">
-              <span className="prop-card__vote-pct prop-card__vote-pct--for">
+          <div className="sh-card--prop__vote">
+            <div className="sh-card--prop__vote-numbers">
+              <span className="sh-card--prop__vote-pct sh-card--prop__vote-pct--for">
                 {forPct.toFixed(1)}%
               </span>
-              <span className="prop-card__vote-divider">/</span>
-              <span className="prop-card__vote-pct prop-card__vote-pct--against">
+              <span className="sh-card--prop__vote-divider">/</span>
+              <span className="sh-card--prop__vote-pct sh-card--prop__vote-pct--against">
                 {againstPct.toFixed(1)}%
               </span>
             </div>
@@ -152,7 +153,7 @@ export default function ProposalCard({
                 style={{ width: `${againstPct}%` }}
               />
             </div>
-            <div className="prop-card__vote-foot">
+            <div className="sh-card--prop__vote-foot">
               <span style={{ color: "var(--color-accent)" }}>For</span>
               <span>
                 {formatShares(totalVotes, shareDecimals(assetDecimals))} shares · Veto ≥ {formatBps(params.vetoThresholdBps)}
@@ -161,12 +162,12 @@ export default function ProposalCard({
             </div>
           </div>
         ) : (
-          <div className="prop-card__no-votes">{"// No Votes Yet"}</div>
+          <div className="sh-card--prop__no-votes">{"// No Votes Yet"}</div>
         )}
 
         {/* Mobile: stack the optimistic vote bar text so percentages
             remain readable beside a narrow progress bar. Handled via CSS
-            class on .prop-card__vote (globals.css).  */}
+            class on .sh-card--prop__vote (globals.css).  */}
 
         {/* Proposal state stepper */}
         <div style={{ marginTop: "0.75rem", marginBottom: "0.5rem" }}>
@@ -182,6 +183,11 @@ export default function ProposalCard({
               chainId={chainId}
               explorerUrl={explorerUrl}
             />
+            <SwapRiskWarning
+              governorAddress={governorAddress}
+              proposalId={proposal.id}
+              chainId={chainId}
+            />
             <VoteConcentration
               governorAddress={governorAddress}
               proposalId={proposal.id}
@@ -195,7 +201,7 @@ export default function ProposalCard({
         {isPending && (
           <div style={{ marginTop: "1rem" }}>
             {disabled ? (
-              <div className="prop-card__demo-notice" role="note">
+              <div className="sh-card--prop__demo-notice" role="note">
                 Demo mode — voting disabled. Connect a live syndicate to participate.
               </div>
             ) : (

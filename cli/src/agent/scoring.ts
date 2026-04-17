@@ -25,13 +25,20 @@ export interface ScoringWeights {
   event: number;
 }
 
+// Replay calibration over 5 days × 15 tokens / 1817 production observations
+// ranked the `contrarian` profile (sentiment 0.40) #1 with Sharpe 1.354,
+// while the prior `default` (sentiment 0.20) ranked 21st with Sharpe 0.296.
+// Rebalanced to lift sentiment, cut the most-lagging signals (technical),
+// and reduce smartMoney since x402 Nansen is often unfunded in practice.
+// `onchain` slightly boosted — HL flow + fundingRate are the highest-firing
+// live categories. Sums to 1.00.
 export const DEFAULT_WEIGHTS: ScoringWeights = {
-  smartMoney: 0.25,
-  technical: 0.20,
-  sentiment: 0.20,
-  onchain: 0.15,
+  smartMoney: 0.15,
+  technical: 0.10,
+  sentiment: 0.40,
+  onchain: 0.20,
   fundamental: 0.10,
-  event: 0.10,
+  event: 0.05,
 };
 
 /**
@@ -49,10 +56,19 @@ export const DEFAULT_WEIGHTS: ScoringWeights = {
  */
 export const WEIGHT_PROFILES: Record<string, ScoringWeights> = {
   default: DEFAULT_WEIGHTS,
-  majors:    { smartMoney: 0.30, technical: 0.30, sentiment: 0.20, onchain: 0.20, fundamental: 0.00, event: 0.00 },
-  altcoin:   { smartMoney: 0.20, technical: 0.15, sentiment: 0.15, onchain: 0.15, fundamental: 0.20, event: 0.15 },
-  sentHeavy: { smartMoney: 0.10, technical: 0.15, sentiment: 0.40, onchain: 0.15, fundamental: 0.10, event: 0.10 },
-  techHeavy: { smartMoney: 0.10, technical: 0.40, sentiment: 0.15, onchain: 0.15, fundamental: 0.10, event: 0.10 },
+  // Majors (BTC/ETH/SOL): no TVL/event data. 4 active categories.
+  // Same rebalance rationale as DEFAULT_WEIGHTS — replay calibration showed
+  // sentiment-heavy profiles dominating production-stack data; this profile
+  // concentrates the freed-up weight into sentiment + onchain (the two
+  // categories that produce directional opinions on majors). Technical and
+  // smartMoney shrink because both are lagging or unfunded in practice.
+  majors:    { smartMoney: 0.15, technical: 0.10, sentiment: 0.40, onchain: 0.35, fundamental: 0.00, event: 0.00 },
+  // Altcoins: keep fundamental (TVL data exists) and event. Sentiment lifted
+  // here too but less aggressively — altcoins respond more to TVL/flow than
+  // majors, and the sentimentContrarian extremes-only fix means sentiment
+  // weight is dormant most of the time.
+  altcoin:   { smartMoney: 0.15, technical: 0.15, sentiment: 0.30, onchain: 0.20, fundamental: 0.10, event: 0.10 },
+  // sentHeavy/techHeavy removed — unvalidated, added parameter complexity without evidence of benefit
 };
 
 /** Tokens that get the "majors" profile when auto-selection is enabled. */
@@ -110,7 +126,11 @@ export const DEFAULT_THRESHOLDS: ActionThresholds = {
 export const REGIME_THRESHOLDS: Record<MarketRegime, ActionThresholds> = {
   "trending-up": { strongBuy: 0.55, buy: 0.25, sell: -0.40, strongSell: -0.70 },
   "trending-down": { strongBuy: 0.70, buy: 0.40, sell: -0.25, strongSell: -0.55 },
-  "ranging":        { strongBuy: 0.65, buy: 0.40, sell: -0.40, strongSell: -0.65 },
+  // Ranging BUY lowered 0.30 → 0.25 to match trending-up. Production cycles
+  // showed scores capping at 0.27 for hours at a time during ranging regimes,
+  // missing real entries (BTC 0.272, DOGE 0.266, AAVE 0.266 all HOLD'd).
+  // Symmetric SELL lowered to -0.25 to keep the band balanced.
+  "ranging":        { strongBuy: 0.55, buy: 0.25, sell: -0.25, strongSell: -0.55 },
   "high-volatility":{ strongBuy: 0.70, buy: 0.45, sell: -0.45, strongSell: -0.70 },
   "low-volatility": { strongBuy: 0.60, buy: 0.30, sell: -0.30, strongSell: -0.60 },
 };
@@ -439,37 +459,70 @@ export function scoreEvent(data: {
 
 // ── Combine All Signals Into Trade Decision ──
 
+/** Lagging technical indicators whose weight is dampened during momentum moves. */
+const LAGGING_TECHNICAL_SIGNALS = new Set(['technical', 'meanReversion']);
+
+/** Signal name → weight category mapping. */
+const SIGNAL_CATEGORY_MAP: Record<string, keyof ScoringWeights> = {
+  technical: "technical",
+  sentiment: "sentiment",
+  onchain: "onchain",
+  fundamental: "fundamental",
+  event: "event",
+  smartMoney: "smartMoney",
+
+  // Strategy signal mappings to categories
+  // momentum intentionally has no key in getStrategyAdjustments() — it keeps
+  // full weight during momentum overrides (not dampened like lagging indicators).
+  momentum: "technical",
+  breakoutOnChain: "technical",
+  meanReversion: "technical",
+  multiTimeframe: "technical",
+  dexFlow: "onchain",
+  fundingRate: "onchain",          // FIX 2: was "fundamental" — wasted on majors (0.00 weight)
+  tvlMomentum: "fundamental",
+  sentimentContrarian: "sentiment",
+  twitterSentiment: "sentiment",
+  tokenUnlock: "event",
+  hyperliquidFlow: "onchain",
+};
+
+/** Categories that rely on x402 paid data (Nansen, Messari). */
+const X402_CATEGORIES: Set<keyof ScoringWeights> = new Set(["smartMoney", "event"]);
+
 export function computeTradeDecision(
   signals: Signal[],
   weights?: ScoringWeights,
   regimeAdjustments?: Record<string, number>,
   correlationCheck?: CorrelationCheck,
   regime?: MarketRegime,
+  x402Available?: boolean,
 ): TradeDecision {
   const w = weights ?? DEFAULT_WEIGHTS;
   const thresholds = thresholdsForRegime(regime);
 
-  // Map signal names to weight keys
-  const weightMap: Record<string, number> = {
-    technical: w.technical,
-    sentiment: w.sentiment,
-    onchain: w.onchain,
-    fundamental: w.fundamental,
-    event: w.event,
-    smartMoney: w.smartMoney,
+  // FIX 1: When x402 was configured but wallet is unfunded, exclude
+  // x402-dependent categories (smartMoney, event) so their zero-value signals
+  // don't dilute the aggregate. Only when x402Available is explicitly false
+  // (meaning x402 was intended but failed) — undefined means x402 was never
+  // configured, so no exclusion (the agent may have those signals from other
+  // sources, e.g. backtest or manual injection).
+  const excludedCategories = new Set<keyof ScoringWeights>();
+  if (x402Available === false) {
+    for (const cat of X402_CATEGORIES) {
+      if (w[cat] > 0) excludedCategories.add(cat);
+    }
+  }
 
-    // Strategy signal mappings to categories
-    breakoutOnChain: w.technical,
-    meanReversion: w.technical,
-    multiTimeframe: w.technical,
-    dexFlow: w.onchain,
-    fundingRate: w.fundamental,
-    tvlMomentum: w.fundamental,
-    sentimentContrarian: w.sentiment,
-    twitterSentiment: w.sentiment,
-    tokenUnlock: w.event,
-    hyperliquidFlow: w.onchain,
-  };
+  // FIX 3: Normalize per-category weights.
+  // Count how many signals fire per category, then split category weight among them.
+  const categoryCounts: Record<string, number> = {};
+  for (const signal of signals) {
+    if (signal._weightOverride !== undefined) continue; // manual overrides skip normalization
+    const category = SIGNAL_CATEGORY_MAP[signal.name];
+    if (!category || excludedCategories.has(category)) continue;
+    categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+  }
 
   // Weighted sum
   let totalWeight = 0;
@@ -477,7 +530,22 @@ export function computeTradeDecision(
   let weightedConfidence = 0;
 
   for (const signal of signals) {
-    const signalWeight = signal._weightOverride ?? weightMap[signal.name] ?? 0.1;
+    // Determine signal weight
+    let signalWeight: number;
+
+    if (signal._weightOverride !== undefined) {
+      signalWeight = signal._weightOverride;
+    } else {
+      const category = SIGNAL_CATEGORY_MAP[signal.name];
+
+      // FIX 1: skip signals in excluded x402 categories
+      if (category && excludedCategories.has(category)) continue;
+
+      const categoryWeight = category ? w[category] : 0.1;
+      const count = category ? (categoryCounts[category] ?? 1) : 1;
+      // FIX 3: split category weight among all signals in that category
+      signalWeight = categoryWeight / count;
+    }
 
     // Apply regime adjustment if available
     let adjustedValue = signal.value;
@@ -489,6 +557,21 @@ export function computeTradeDecision(
       adjustedConfidence *= adjustment;
     }
 
+    // Dampen lagging technical indicators during momentum moves.
+    // RSI/MACD/EMA read bearish alignment during the first hours of a pump
+    // because they lag by construction (14-period RSI, 26-period MACD, 50/200 EMA).
+    // This cancels real-time bullish signals — ETH scored 0.00 during a +7.8% rally
+    // because scoreTechnical() was reading stale bearish MACD/EMA.
+    //
+    // When the regime is a momentum override (trending-up/down), cut the weight
+    // of lagging technical signals by 50%. The momentum signal (which is NOT lagged)
+    // and breakoutOnChain (which uses recent price action) keep their full weight.
+    // LAGGING_TECHNICAL_SIGNALS hoisted to module level for GC efficiency
+    if (regime && (regime === 'trending-up' || regime === 'trending-down')
+        && LAGGING_TECHNICAL_SIGNALS.has(signal.name)) {
+      signalWeight *= 0.5;
+    }
+
     weightedSum += adjustedValue * signalWeight;
     weightedConfidence += adjustedConfidence * signalWeight;
     totalWeight += signalWeight;
@@ -496,6 +579,50 @@ export function computeTradeDecision(
 
   let score = totalWeight > 0 ? weightedSum / totalWeight : 0;
   const confidence = totalWeight > 0 ? weightedConfidence / totalWeight : 0;
+
+  // ── Convergence bonus ──
+  // When multiple independent categories agree on direction, amplify the score.
+  // The weighted average treats disagreement and agreement symmetrically — a
+  // 5/6 bullish consensus scores the same as if those 5 categories had smaller
+  // values. In reality, broad agreement across uncorrelated sources (technical +
+  // sentiment + on-chain + funding) is stronger evidence than any single source
+  // at high conviction.
+  //
+  // On the Apr 13-14 BTC pump: 4-5 categories were bullish but the score
+  // capped at 0.27. With convergence bonus: 0.27 × 1.15 = 0.31 → fires BUY.
+  if (Math.abs(score) > 0.01) {
+    const scoreSign = Math.sign(score);
+    // Compute net direction per active category.
+    // NOTE: uses raw signal.value (not dampened). This means a dampened
+    // technical signal at -0.30 still votes "bearish" in convergence even
+    // though its weighted contribution is halved. This is intentional:
+    // dampening reduces a lagging signal's INFLUENCE on the score, but
+    // its DIRECTIONAL OPINION still counts for convergence. If we used
+    // dampened values, a 50% weight cut would make a -0.30 signal appear
+    // as -0.15, potentially flipping the category to "neutral" and
+    // artificially inflating the convergence count.
+    const categoryNetDirection = new Map<string, number>();
+    for (const signal of signals) {
+      const category = SIGNAL_CATEGORY_MAP[signal.name];
+      if (!category || excludedCategories.has(category)) continue;
+      if (signal._weightOverride !== undefined) continue;
+      const current = categoryNetDirection.get(category) ?? 0;
+      categoryNetDirection.set(category, current + signal.value);
+    }
+    // Count categories that agree with the aggregate direction
+    let agreeing = 0;
+    let totalActive = 0;
+    for (const [, netValue] of categoryNetDirection) {
+      totalActive++;
+      if (Math.sign(netValue) === scoreSign) agreeing++;
+    }
+    // Bonus kicks in at 4+ agreeing categories out of at least 4 active.
+    // Scale: 4/N → 1.15x, 5/N → 1.30x, 6/N → 1.45x. Capped at 1.45x.
+    if (agreeing >= 4 && totalActive >= 4) {
+      const bonus = 1.0 + 0.15 * (agreeing - 3);
+      score *= Math.min(bonus, 1.45);
+    }
+  }
 
   // Apply correlation-aware adjustment if provided
   // BTC bearish → suppress longs, boost shorts
@@ -515,9 +642,14 @@ export function computeTradeDecision(
       score *= correlationCheck.suppressionFactor;
     }
 
-    // Clamp the final score
     score = Math.max(-1, Math.min(1, score));
   }
+
+  // Unconditional clamp — convergence bonus and correlation boost can both
+  // push score beyond [-1, 1]. Clamp was previously only inside the
+  // correlationCheck block; scores flowed unclamped when no correlation
+  // data was available.
+  score = Math.max(-1, Math.min(1, score));
 
   // Determine action using regime-conditional thresholds
   let action: TradeDecision["action"];

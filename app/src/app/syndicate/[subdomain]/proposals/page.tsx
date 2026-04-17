@@ -19,6 +19,8 @@ import { formatDuration } from "@/lib/governor-data";
 import type { ActivityEvent } from "@/lib/syndicate-data";
 import { Term } from "@/components/ui/Glossary";
 import { TargetChainProvider } from "@/components/TargetChainContext";
+import JsonLd from "@/components/JsonLd";
+import { buildBreadcrumbLd } from "@/lib/structured-data";
 import TimelockPanel from "@/components/governance/TimelockPanel";
 import type { Address } from "viem";
 
@@ -312,6 +314,15 @@ export default async function ProposalsPage({
   return (
     <TargetChainProvider chainId={data.chainId}>
       <AmbientBackground />
+
+      <JsonLd
+        data={buildBreadcrumbLd([
+          { name: "Home", path: "/" },
+          { name: "Leaderboard", path: "/leaderboard" },
+          { name, path: `/syndicate/${subdomain}` },
+          { name: "Proposals", path: `/syndicate/${subdomain}/proposals` },
+        ])}
+      />
 
       <div className="layout layout-normal">
         <main className="px-4 md:px-8 lg:px-16 mx-auto w-full max-w-[1400px]">

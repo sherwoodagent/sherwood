@@ -1,0 +1,53 @@
+{
+  "jobs": [
+    {
+      "name": "sherwood-trade-scanner",
+      "schedule": { "kind": "interval", "minutes": 15, "display": "every 15m" },
+      "skills": ["sherwood-trade-scanner"],
+      "prompt": "Run the sherwood-trade-scanner skill from <REPO_DIR>. Post the cycle summary to chat <SYNDICATE_NAME> on chain <CHAIN> using the --stdin send pattern. Always post a summary (this is the data-collection job).",
+      "deliver": "origin",
+      "enabled": true,
+      "_comment": "15-minute cadence. Runs one dry-run cycle per tick. Posts to XMTP."
+    },
+    {
+      "name": "sherwood-vault-monitor",
+      "schedule": { "kind": "interval", "minutes": 120, "display": "every 120m" },
+      "skills": ["sherwood-vault-monitor"],
+      "prompt": "Run the sherwood-vault-monitor skill for vault <VAULT_ADDRESS> on chain <CHAIN>. Report only on anomalies (locked redemptions w/o active proposal, agent count = 0, RPC errors, non-vault contract). totalAssets() = 0 is normal. Respond [SILENT] if healthy.",
+      "deliver": "origin",
+      "enabled": true,
+      "_comment": "Every 2h. Silent unless something is wrong."
+    },
+    {
+      "name": "sherwood-proposal-monitor",
+      "schedule": { "kind": "interval", "minutes": 240, "display": "every 240m" },
+      "skills": ["sherwood-proposal-monitor"],
+      "prompt": "Run the sherwood-proposal-monitor skill for vault <VAULT_ADDRESS> on chain <CHAIN>. List vault proposals and surface only those that need execution, settlement, or investigation. Respond [SILENT] if nothing actionable.",
+      "deliver": "origin",
+      "enabled": true,
+      "_comment": "Every 4h. Surfaces only actionable proposals."
+    },
+    {
+      "name": "sherwood-xmtp-checker",
+      "schedule": { "kind": "interval", "minutes": 120, "display": "every 120m" },
+      "skills": ["sherwood-xmtp-checker"],
+      "prompt": "Run the sherwood-xmtp-checker skill for chat <SYNDICATE_NAME> on chain <CHAIN>. Our wallet is <AGENT_WALLET>. Surface only direct asks or action items from other members. Respond [SILENT] if nothing actionable.",
+      "deliver": "origin",
+      "enabled": true,
+      "_comment": "Every 2h. Silent unless someone asked us something."
+    }
+  ],
+  "_placeholders": {
+    "REPO_DIR": "Local sherwood checkout (e.g. /home/you/code/sherwood)",
+    "SYNDICATE_NAME": "Your XMTP chat identifier (e.g. hyperliquid-algo)",
+    "CHAIN": "Chain alias for the syndicate (e.g. hyperevm, base)",
+    "VAULT_ADDRESS": "Your syndicate vault contract address (0x...)",
+    "AGENT_WALLET": "The wallet address the cron runs on behalf of (0x...)"
+  },
+  "_notes": [
+    "This is a TEMPLATE. Run install.sh to substitute placeholders and register with hermes.",
+    "Schedules are staggered intentionally — do not align jobs on :00 boundaries.",
+    "All four skills must be installed first (install.sh handles this).",
+    "Hermes resolves --skill <name> by directory name. Do not rename the skill dirs."
+  ]
+}

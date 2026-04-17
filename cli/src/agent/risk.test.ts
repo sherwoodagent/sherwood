@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { RiskManager, DEFAULT_RISK_CONFIG, RECOMMENDED_TRAILING_CONFIG, type Position, type RiskConfig } from "./risk.js";
+import { RiskManager, DEFAULT_RISK_CONFIG, RECOMMENDED_TRAILING_CONFIG, MAX_PYRAMID_ADDS, PYRAMID_MIN_SPACING_MS, type Position, type RiskConfig } from "./risk.js";
 
 // Helper to create a minimal Position for tests
 function makePosition(overrides: Partial<Position> = {}): Position {
@@ -69,16 +69,76 @@ describe("RiskManager", () => {
       expect(result.reason).toMatch(/Insufficient cash/);
     });
 
-    it("rejects when duplicate token already held", () => {
-      const existingPos = makePosition({ tokenId: "bitcoin", symbol: "BTC" });
+    it("rejects pyramid add when spacing not met (within 4h of prior fill)", () => {
+      // Existing long opened just now — should be inside the spacing window
+      const existingPos = makePosition({
+        tokenId: "bitcoin",
+        symbol: "BTC",
+        side: "long",
+        addCount: 0,
+        lastAddTimestamp: Date.now(),
+      });
       rm.updatePortfolio({
         totalValue: 50000,
         cash: 40000,
         positions: [existingPos],
       });
-      const result = rm.canOpenPosition("bitcoin", 500);
+      const result = rm.canOpenPosition("bitcoin", 500, "long");
       expect(result.allowed).toBe(false);
-      expect(result.reason).toMatch(/Already have an open position/);
+      expect(result.reason).toMatch(/Pyramid spacing/);
+    });
+
+    it("rejects pyramid when MAX_PYRAMID_ADDS already reached", () => {
+      const existingPos = makePosition({
+        tokenId: "bitcoin",
+        symbol: "BTC",
+        side: "long",
+        addCount: MAX_PYRAMID_ADDS,
+        lastAddTimestamp: Date.now() - PYRAMID_MIN_SPACING_MS - 1000, // spacing OK
+      });
+      rm.updatePortfolio({
+        totalValue: 50000,
+        cash: 40000,
+        positions: [existingPos],
+      });
+      const result = rm.canOpenPosition("bitcoin", 500, "long");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(/Pyramid cap reached/);
+    });
+
+    it("allows pyramid add when below cap and past spacing window", () => {
+      const existingPos = makePosition({
+        tokenId: "bitcoin",
+        symbol: "BTC",
+        side: "long",
+        addCount: 0,
+        lastAddTimestamp: Date.now() - PYRAMID_MIN_SPACING_MS - 1000,
+      });
+      rm.updatePortfolio({
+        totalValue: 50000,
+        cash: 40000,
+        positions: [existingPos],
+      });
+      const result = rm.canOpenPosition("bitcoin", 500, "long");
+      expect(result.allowed).toBe(true);
+    });
+
+    it("rejects opposite-direction add (no flip via pyramid)", () => {
+      const existingPos = makePosition({
+        tokenId: "bitcoin",
+        symbol: "BTC",
+        side: "long",
+        addCount: 0,
+        lastAddTimestamp: Date.now() - PYRAMID_MIN_SPACING_MS - 1000,
+      });
+      rm.updatePortfolio({
+        totalValue: 50000,
+        cash: 40000,
+        positions: [existingPos],
+      });
+      const result = rm.canOpenPosition("bitcoin", 500, "short");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(/Conflicting position/);
     });
 
     it("rejects when drawdown limit is hit", () => {
@@ -244,10 +304,10 @@ describe("RiskManager", () => {
       const pos = makePosition({
         tokenId: "bitcoin",
         entryPrice: 50000,
-        stopLoss: 47000,
-        takeProfit: 55000,
+        stopLoss: 49000, // 2% stop — within the 5% hard stop
+        takeProfit: 53000,
       });
-      const result = rm.checkExits([pos], { bitcoin: 46500 });
+      const result = rm.checkExits([pos], { bitcoin: 48900 }); // below 49000 stop
       expect(result.toClose).toHaveLength(1);
       expect(result.toClose[0]!.tokenId).toBe("bitcoin");
       expect(result.reasons["bitcoin"]).toMatch(/Stop loss hit/);
@@ -279,17 +339,17 @@ describe("RiskManager", () => {
       expect(result.reasons["bitcoin"]).toMatch(/Hard stop hit/);
     });
 
-    it("triggers time-based exit after 7 days with low PnL", () => {
-      const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    it("triggers time-based exit after 48h with low PnL", () => {
+      const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
       const pos = makePosition({
         tokenId: "bitcoin",
         entryPrice: 50000,
-        stopLoss: 45000,
-        takeProfit: 60000,
-        entryTimestamp: eightDaysAgo,
+        stopLoss: 48500,
+        takeProfit: 53000,
+        entryTimestamp: threeDaysAgo,
       });
-      // Price at 50500 => pnl = +1%, which is < 2% threshold
-      const result = rm.checkExits([pos], { bitcoin: 50500 });
+      // Price at 50200 => pnl = +0.4%, which is < 1% threshold
+      const result = rm.checkExits([pos], { bitcoin: 50200 });
       expect(result.toClose).toHaveLength(1);
       expect(result.reasons["bitcoin"]).toMatch(/Time stop/);
     });
@@ -405,48 +465,48 @@ describe("RiskManager", () => {
       expect(updated!.stopLoss).toBe(90);
     });
 
-    it("moves stop to breakeven after +2% gain", () => {
+    it("moves stop to breakeven after +1.5% gain", () => {
       const pos = makePosition({
         entryPrice: 100,
-        currentPrice: 102.5, // +2.5% triggers breakeven
-        stopLoss: 90,
+        currentPrice: 101.6, // +1.6% triggers breakeven (1.5% threshold) but not profit-lock (2%)
+        stopLoss: 97,
       });
       const [updated] = trailingRm.updateTrailingStops([pos]);
-      // breakeven → 100; percent-trail 5% → 97.375; max = 100
+      // breakeven → 100; percent-trail 2.5% → 99.06; max = 100
       expect(updated!.stopLoss).toBe(100);
     });
 
-    it("locks in +2% gain after +5% move (profit-lock step)", () => {
+    it("locks in +0.5% gain after +2% move (profit-lock step)", () => {
       const pos = makePosition({
         entryPrice: 100,
-        currentPrice: 106,   // +6% triggers [0.05, 0.02]
-        stopLoss: 90,
+        currentPrice: 103,   // +3% triggers [0.02, 0.005]
+        stopLoss: 97,
       });
       const [updated] = trailingRm.updateTrailingStops([pos]);
-      // lock → 102; trail 106*0.95=100.7; max = 102
-      expect(updated!.stopLoss).toBe(102);
+      // lock → 100.5; trail 103*0.975=100.425; max = 100.5
+      expect(updated!.stopLoss).toBeCloseTo(100.5, 2);
     });
 
-    it("locks in +5% gain after +10% move", () => {
+    it("locks in +2% gain after +4% move", () => {
       const pos = makePosition({
         entryPrice: 100,
-        currentPrice: 111,   // +11% triggers [0.10, 0.05]
-        stopLoss: 90,
+        currentPrice: 105,   // +5% triggers [0.04, 0.02]
+        stopLoss: 97,
       });
       const [updated] = trailingRm.updateTrailingStops([pos]);
-      // lock → 105; trail 111*0.95=105.45; max = 105.45
-      expect(updated!.stopLoss).toBeCloseTo(105.45, 2);
+      // lock → 102; trail 105*0.975=102.375; max = 102.375
+      expect(updated!.stopLoss).toBeCloseTo(102.375, 2);
     });
 
     it("percent-trail beats profit-lock at large gains", () => {
       const pos = makePosition({
         entryPrice: 100,
-        currentPrice: 130,   // +30%
-        stopLoss: 90,
+        currentPrice: 115,   // +15%
+        stopLoss: 97,
       });
       const [updated] = trailingRm.updateTrailingStops([pos]);
-      // lock at +20% → 110; trail = 130*0.95 = 123.5; trail wins
-      expect(updated!.stopLoss).toBeCloseTo(123.5, 2);
+      // lock at +6% → 104; trail = 115*0.975 = 112.125; trail wins
+      expect(updated!.stopLoss).toBeCloseTo(112.125, 2);
     });
 
     it("never moves stop down", () => {

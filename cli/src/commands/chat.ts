@@ -144,6 +144,16 @@ async function handleStream(name: string): Promise<void> {
   }
 }
 
+/** Drain stdin into a single string. Used by `chat send --stdin` to bypass
+ *  shell expansion on dynamic messages (e.g. amounts containing `$`). */
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
 async function handleSend(name: string, message: string, markdown: boolean): Promise<void> {
   const spinner = ora("Sending...").start();
   try {
@@ -414,15 +424,30 @@ export function registerChatCommands(program: Command): void {
     .command("chat <name> [action] [actionArgs...]")
     .description("Syndicate chat — stream, send, log, members, add, remove, init, public")
     .option("--markdown", "Send as rich markdown (for send)", false)
+    .option("--stdin", "Read send message from stdin instead of CLI arg (avoids shell quoting issues with $ chars and quotes)", false)
     .option("--limit <n>", "Number of messages to show (for log)", "20")
     .option("--force", "Recreate group even if one exists (for init)", false)
     .option("--public", "Enable public chat — adds dashboard spectator (for init)", false)
-    .action(async (name: string, action: string | undefined, actionArgs: string[], opts: { markdown: boolean; limit: string; force: boolean; public: boolean }) => {
+    .action(async (name: string, action: string | undefined, actionArgs: string[], opts: { markdown: boolean; stdin: boolean; limit: string; force: boolean; public: boolean }) => {
       switch (action) {
         case "send": {
-          const message = actionArgs[0];
+          let message = actionArgs[0];
+          if (opts.stdin) {
+            // If stdin is a terminal, the user forgot to pipe — readStdin
+            // would block forever waiting for EOF (Ctrl+D). Warn explicitly.
+            if (process.stdin.isTTY) {
+              console.error(chalk.yellow("--stdin specified but stdin is a terminal. Either pipe the message in or omit --stdin and pass it as an argument. Press Ctrl+D to send what you've typed, Ctrl+C to abort."));
+            }
+            // Read entire stdin into the message — sidesteps bash $-expansion
+            // when callers (cron jobs, scripts) construct dynamic message text.
+            message = await readStdin();
+            if (!message.trim()) {
+              console.error(chalk.red("--stdin given but stdin was empty"));
+              process.exit(1);
+            }
+          }
           if (!message) {
-            console.error(chalk.red("Usage: sherwood chat <name> send <message> [--markdown]"));
+            console.error(chalk.red("Usage: sherwood chat <name> send <message> [--markdown]\n       echo \"$msg\" | sherwood chat <name> send --stdin"));
             process.exit(1);
           }
           await handleSend(name, message, opts.markdown);

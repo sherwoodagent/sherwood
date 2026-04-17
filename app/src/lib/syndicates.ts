@@ -17,7 +17,11 @@ import {
   ERC20_ABI,
   formatAsset,
 } from "./contracts";
-import { fetchMetadata, resolveAgentIdentities } from "./syndicate-data";
+import {
+  fetchMetadata,
+  resolveAgentIdentities,
+  fetchEquityCurve,
+} from "./syndicate-data";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -62,6 +66,8 @@ export interface SyndicateDisplay {
   flowTrend?: -1 | 0 | 1;
   /** Days since the syndicate was created. Used for the "NEW" badge. */
   ageDays?: number;
+  /** 7-day TVL series for the leaderboard sparkline (see fetchEquityCurve). */
+  equityCurve?: number[];
 }
 
 /**
@@ -410,14 +416,31 @@ async function fetchViaSubgraph(
 
   return Promise.all(
     data.syndicates.map(async (s, i) => {
-      const metadata = await fetchMetadata(s.metadataURI);
-
       const rawTotalAssets = (vaultResults[i * 2]?.result as bigint) ?? 0n;
       const assetAddr = (vaultResults[i * 2 + 1]?.result as Address) ?? "";
       const info = assetInfo[assetAddr.toLowerCase()] ?? {
         decimals: 18,
         symbol: "ETH",
       };
+
+      // TVL / equity-curve snapshot uses the same bias as above (prefer
+      // the proposal's capitalSnapshot when the vault is mid-strategy).
+      const snapshotPeek = capitalSnapshots.get(s.vault.toLowerCase());
+      const totalAssetsForCurve =
+        snapshotPeek && snapshotPeek > rawTotalAssets
+          ? snapshotPeek
+          : rawTotalAssets;
+
+      const [metadata, equityCurve] = await Promise.all([
+        fetchMetadata(s.metadataURI),
+        fetchEquityCurve(
+          subgraphUrl,
+          s.id,
+          info.decimals,
+          totalAssetsForCurve,
+        ),
+      ]);
+
       const agentCount = s.agents?.length || 0;
 
       const strategy =
@@ -433,9 +456,7 @@ async function fetchViaSubgraph(
       // During an active strategy the vault's totalAssets is drained (capital
       // sits in the strategy contract). Fall back to the proposal's
       // capitalSnapshot so the leaderboard TVL reflects full AUM.
-      const snapshot = capitalSnapshots.get(s.vault.toLowerCase());
-      const totalAssets =
-        snapshot && snapshot > rawTotalAssets ? snapshot : rawTotalAssets;
+      const totalAssets = totalAssetsForCurve;
 
       const tvlFormatted = formatAsset(
         totalAssets,
@@ -468,6 +489,7 @@ async function fetchViaSubgraph(
         proposalCount: (s.proposals || []).length,
         flowTrend: computeFlowTrend(s.totalDeposits, s.totalWithdrawals),
         ageDays: computeAgeDays(s.createdAt),
+        equityCurve,
         agents: (s.agents || []).map((a) => {
           const stats = agentPnl[a.agentAddress.toLowerCase()] ?? { count: 0, pnl: 0n };
           const pnlAbs = stats.pnl < 0n ? -stats.pnl : stats.pnl;
@@ -701,6 +723,11 @@ async function fetchViaOnChain(
         assetSymbol: info.symbol,
         agentCount,
         proposalCount: 0, // not available without extra calls in onchain fallback
+        // equityCurve intentionally omitted: it's reconstructed from
+        // subgraph event history in fetchViaSubgraph, and this code path
+        // runs only when that subgraph is unreachable. Rows coming from
+        // this fallback render "—" in the Trend (7D) column, which is
+        // the correct graceful degradation.
         agents: agentsByVault[s.vault.toLowerCase()] ?? [],
         status,
         chainId,

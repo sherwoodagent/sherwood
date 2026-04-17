@@ -314,3 +314,92 @@ describe("PortfolioTracker.load", () => {
     expect(state.dailyPnl).toBe(0);
   });
 });
+
+describe("PortfolioTracker.addToPosition", () => {
+  // Tests use a stateful in-memory mock filesystem so subsequent load()
+  // calls within a single test see the writes from the prior operation.
+  // Each test creates its own tracker + backing state — the existing
+  // module-level mock for `node:fs/promises` is shared across all
+  // describe blocks in this file, so we use mockResolvedValueOnce /
+  // explicit chaining rather than long-lived implementations.
+  function setupBacking() {
+    const backing = { state: null as string | null };
+    mockReadFile.mockImplementation(async () => {
+      if (backing.state === null) throw new Error("ENOENT: no such file");
+      return backing.state;
+    });
+    return backing;
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { writeFile, rename, mkdir } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(rename).mockResolvedValue(undefined);
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+  });
+
+  it("computes a quantity-weighted average entry price", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (_p: any, data: any) => {
+      backing.state = typeof data === "string" ? data : data.toString();
+    });
+    const tracker = new PortfolioTracker();
+
+    // Open base long: 10 BTC at $100.
+    await tracker.openPosition({
+      tokenId: "bitcoin", symbol: "BTC", side: "long",
+      entryPrice: 100, currentPrice: 100, quantity: 10,
+      entryTimestamp: Date.now() - 5 * 60 * 60 * 1000,
+      stopLoss: 97, takeProfit: 106, strategy: "test",
+    });
+
+    // Pyramid: add 5 BTC at $110.
+    // Weighted average = (100*10 + 110*5) / 15 = 1550/15 = 103.333...
+    const updated = await tracker.addToPosition("bitcoin", 110, 5, "long");
+    expect(updated.quantity).toBe(15);
+    expect(updated.entryPrice).toBeCloseTo(103.333, 3);
+    expect(updated.addCount).toBe(1);
+    expect(updated.lastAddTimestamp).toBeGreaterThan(updated.entryTimestamp);
+    // Stops/TPs preserved from base position
+    expect(updated.stopLoss).toBe(97);
+    expect(updated.takeProfit).toBe(106);
+  });
+
+  it("rejects opposite-direction add", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (_p: any, data: any) => {
+      backing.state = typeof data === "string" ? data : data.toString();
+    });
+    const tracker = new PortfolioTracker();
+    await tracker.openPosition({
+      tokenId: "bitcoin", symbol: "BTC", side: "long",
+      entryPrice: 100, currentPrice: 100, quantity: 10,
+      entryTimestamp: Date.now(),
+      stopLoss: 97, takeProfit: 106, strategy: "test",
+    });
+    await expect(tracker.addToPosition("bitcoin", 100, 1, "short")).rejects.toThrow(/Cannot pyramid/);
+  });
+
+  it("rejects add when no existing position", async () => {
+    // Force load() to see an empty portfolio (no positions array entries).
+    // Use mockResolvedValueOnce so this test's response is consumed
+    // immediately and doesn't interact with neighboring tests' impls.
+    mockReadFile.mockResolvedValueOnce(JSON.stringify({
+      totalValue: 10000, cash: 10000, positions: [],
+      dailyPnl: 0, weeklyPnl: 0, monthlyPnl: 0,
+    }));
+    const tracker = new PortfolioTracker();
+    await expect(tracker.addToPosition("bitcoin", 100, 1, "long")).rejects.toThrow(/No open position/);
+  });
+
+  it("rejects add with non-positive quantity or price (pre-load checks)", async () => {
+    setupBacking();
+    const tracker = new PortfolioTracker();
+    await expect(tracker.addToPosition("bitcoin", 100, 0, "long")).rejects.toThrow(/Invalid add quantity/);
+    await expect(tracker.addToPosition("bitcoin", 100, -1, "long")).rejects.toThrow(/Invalid add quantity/);
+    await expect(tracker.addToPosition("bitcoin", 0, 1, "long")).rejects.toThrow(/Invalid add price/);
+  });
+});

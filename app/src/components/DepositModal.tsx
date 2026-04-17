@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
   useReadContract,
@@ -39,6 +41,27 @@ interface DepositModalProps {
 
 type Step = "input" | "approving" | "depositing" | "success" | "error";
 
+/** Inline spinner for the action button — a 12px version of .loading-spinner. */
+function ButtonSpinner({ label }: { label: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "0.5rem",
+      }}
+    >
+      <span
+        aria-hidden
+        className="loading-spinner"
+        style={{ width: 12, height: 12, borderWidth: 1.5 }}
+      />
+      {label}
+    </span>
+  );
+}
+
 export default function DepositModal({
   vault,
   vaultName,
@@ -55,6 +78,8 @@ export default function DepositModal({
   // basescan / hyperevmscan / etc correctly on multichain syndicates.
   const addresses = getAddresses(chainId);
   const toast = useToast();
+  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [amount, setAmount] = useState("");
   const [step, setStep] = useState<Step>("input");
@@ -139,11 +164,21 @@ export default function DepositModal({
     parsedAmount > 0n &&
     parsedAmount <= (assetBalance ?? 0n);
 
-  // Handle approval confirmation
+  // Handle approval confirmation. Await the allowance refetch before
+  // exiting the "approving" step — otherwise the button rerenders with
+  // the stale allowance as "Approve" for one frame before the refetch
+  // lands and flips it to "Deposit". Staying in "approving" until
+  // refetch resolves keeps the CTA stable and honest.
   useEffect(() => {
     if (isApproveConfirmed && step === "approving") {
-      refetchAllowance();
-      setStep("input");
+      let cancelled = false;
+      (async () => {
+        await refetchAllowance();
+        if (!cancelled) setStep("input");
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
   }, [isApproveConfirmed, step, refetchAllowance]);
 
@@ -158,8 +193,18 @@ export default function DepositModal({
           ? `Received ~${parseFloat(formatUnits(expectedShares, shareDecimals(assetDecimals))).toLocaleString(undefined, { maximumFractionDigits: 2 })} shares`
           : "Your position is live onchain.",
       );
+      // Pull fresh onchain data so the syndicate page picks up the new
+      // TVL, totalSupply, and the user's share balance without a manual
+      // page reload. router.refresh() re-runs server components (TVL,
+      // stats bar, vault overview); invalidating the wagmi readContract
+      // queries refetches any useReadContract-backed views (share
+      // balance on the header, active-strategy panel, etc.) without
+      // clobbering unrelated caches app-wide.
+      router.refresh();
+      queryClient.invalidateQueries({ queryKey: ["readContract"] });
+      queryClient.invalidateQueries({ queryKey: ["balance"] });
     }
-  }, [isDepositConfirmed, step, toast, amount, assetSymbol, expectedShares, assetDecimals, depositHash, vault]);
+  }, [isDepositConfirmed, step, toast, amount, assetSymbol, expectedShares, assetDecimals, depositHash, vault, router, queryClient]);
 
   function handleApprove() {
     if (!address) return;
@@ -427,9 +472,11 @@ export default function DepositModal({
                   onClick={handleApprove}
                   disabled={!canDeposit || isApprovePending || step === "approving"}
                 >
-                  {step === "approving"
-                    ? "Approving..."
-                    : `Approve ${amount || "0"} ${assetSymbol}`}
+                  {step === "approving" || isApprovePending ? (
+                    <ButtonSpinner label={isApprovePending ? "Confirm in wallet…" : "Approving…"} />
+                  ) : (
+                    `Approve ${amount || "0"} ${assetSymbol}`
+                  )}
                 </button>
               ) : (
                 <button
@@ -438,9 +485,11 @@ export default function DepositModal({
                   onClick={handleDeposit}
                   disabled={!canDeposit || isDepositPending || step === "depositing"}
                 >
-                  {step === "depositing"
-                    ? "Depositing..."
-                    : `Deposit ${amount || "0"} ${assetSymbol}`}
+                  {step === "depositing" || isDepositPending ? (
+                    <ButtonSpinner label={isDepositPending ? "Confirm in wallet…" : "Depositing…"} />
+                  ) : (
+                    `Deposit ${amount || "0"} ${assetSymbol}`
+                  )}
                 </button>
               )}
 

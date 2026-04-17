@@ -753,6 +753,31 @@ export const SYNDICATE_GOVERNOR_ABI = [
   },
 ] as const;
 
+// Minimal IStrategy surface — covers every clonable template (Moonwell,
+// Aerodrome, Venice, wstETH, Mamo, Portfolio). `positionValue()` was added
+// in PR #218 and shipped on every template in the #221 redeploy; strategies
+// cloned before that PR will revert on the call, which is why every reader
+// of it wraps in try/catch or ignores `valid === false`.
+export const ISTRATEGY_ABI = [
+  {
+    name: "positionValue",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "value", type: "uint256" },
+      { name: "valid", type: "bool" },
+    ],
+  },
+  {
+    name: "name",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+] as const;
+
 export const PORTFOLIO_STRATEGY_ABI = [
   {
     name: "name",

@@ -23,20 +23,20 @@ export { DexFlowStrategy, MeanReversionStrategy, TwitterSentimentStrategy, Hyper
 export { MultiTimeframeStrategy };
 
 export const DEFAULT_STRATEGIES: Strategy[] = [
-  new SmartMoneyStrategy(),
-  new TokenUnlockStrategy(),
-  new SentimentContrarianStrategy(),
-  new BreakoutOnChainStrategy(),
-  new TvlMomentumStrategy(),
-  new FundingRateStrategy(),
-  new DexFlowStrategy(),
-  new MeanReversionStrategy(),
-  // TwitterSentimentStrategy disabled — Twitter API returns 402 (paid tier
-  // required) for most token queries. Re-enable when we have an API path
-  // that doesn't break. The class is still exported so it can be reinstated
-  // by appending `new TwitterSentimentStrategy()` here.
-  new HyperliquidFlowStrategy(),
-  new MultiTimeframeStrategy(),
+  // ── Active signals (fire rate >25% in production) ──
+  new SentimentContrarianStrategy(),  // 100% fire rate — F&G based
+  new BreakoutOnChainStrategy(),      // 95% fire rate
+  new FundingRateStrategy(),          // 52% fire rate — HL native
+  new DexFlowStrategy(),              // 18% fire rate
+  new HyperliquidFlowStrategy(),      // 57% fire rate
+  new MultiTimeframeStrategy(),       // 78% fire rate
+
+  // ── Disabled: zero or near-zero fire rate in production ──
+  // SmartMoneyStrategy — replaced by Nansen HL perp-trades in index.ts
+  // TwitterSentimentStrategy — Twitter API returns 402
+  // TokenUnlockStrategy — 0% fire rate, no data source
+  // TvlMomentumStrategy — 0% fire rate for majors (no TVL on BTC/SOL)
+  // MeanReversionStrategy — 0% fire rate, BB conditions never met
 ];
 
 /**

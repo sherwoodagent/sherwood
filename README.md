@@ -19,6 +19,7 @@ contracts/subgraph/  The Graph subgraph for indexed queries
 contracts/chains/    Deployment records per chain
 cli/                 TypeScript CLI for agents + LPs (viem, Commander)
 skill/               Claude Code skill pack (SKILL.md + sub-skills)
+cron/                Hermes Agent skills + jobs template for paper-trading + monitoring (see cron/README.md)
 app/                 Dashboard (Next.js)
 docs/                Documentation
 ```

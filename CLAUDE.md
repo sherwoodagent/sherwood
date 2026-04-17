@@ -29,8 +29,13 @@
 contracts/      Foundry — Solidity smart contracts
 cli/            TypeScript CLI (viem, Commander)
 app/            Next.js dashboard
+cron/           Hermes Agent skills + jobs template for paper-trading + monitoring
 mintlify-docs/  Mintlify documentation site (git submodule → docs.sherwood.sh)
 ```
+
+For background paper-trading + vault/proposal/chat monitoring via cron, see
+`cron/README.md`. The four shipped skills are agent-runtime-agnostic
+(SKILL.md format) and `cron/install.sh` registers them with Hermes.
 
 ## Documentation
 
@@ -93,6 +98,26 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - `npm run typecheck` before every PR
 - **Distribution**: Published to npm as `@sherwoodagent/cli` (`npm i -g @sherwoodagent/cli`). Standalone binary via GitHub releases as secondary (no chat/XMTP support).
 - **Version bumps are mandatory for every PR that touches `cli/` code.** Bump the `version` field in `cli/package.json` before creating the PR. Stay on `0.x` until mainnet — use **minor** bumps (`0.3.0` → `0.4.0`) for new features or breaking changes, **patch** bumps (`0.3.5` → `0.3.6`) for bug fixes and small improvements. First mainnet release will be `1.0.0`. A merge to main with a new version triggers an npm publish automatically.
+
+### CLI Operational Notes
+
+- `which sherwood` → `~/.linuxbrew/bin/sherwood` → symlinks into the **local `cli/dist/index.js`**. `npm run build` is enough to deploy changes — no `npm install -g` needed. Cron picks up rebuilds immediately.
+- `sherwood agent start --auto --cycle 1` — runs ONE dry-run cycle, then exits. Used by the hermes trade-scanner cron. For continuous runs use `--cycle 15m`.
+- `sherwood chat <name> send --stdin` — pipe via stdin to avoid bash `$`-expansion (`$10,000` → `0,000`). Required for any dynamic message containing `$`. Added in 0.40.2.
+
+### Calibrator
+
+- **Candle path** (`sherwood agent calibrate`) — re-fetches OHLC from CoinGecko and recomputes signals from candles only. **Cannot replay HL flow / fundingRate / smartMoney** (those need live data). Output is a lower bound on production performance; many configs show 0 trades because the candle-only signal stack rarely fires.
+- **Replay path** (`sherwood agent calibrate --from-history`) — replays captured production signals from `signal-history.jsonl`. Far truer to live behavior. Add `--last <days>` after a scoring change to ignore stale rows captured under the prior code.
+- Backtester is direction-aware: `Position.side` + SHORT entries on SELL signals; exit math (stop/TP/trail) flips for shorts. Ranging-regime BUY threshold currently `0.25`, SELL `-0.25`.
+
+### Agent State Files (`~/.sherwood/agent/`)
+
+- `cycles.jsonl` — per-cycle summary: `{cycleNumber, timestamp, signals: [{token, score, action, regime}], tradesExecuted, exitsProcessed, portfolioValue, dailyPnl, errors}`. Append-only.
+- `signal-history.jsonl` — per-token full signal stack including HL/funding/dexFlow values + regime + weights used. The richer log; what `sherwood agent calibrate --from-history` replays.
+- `portfolio.json` — positions, cash, PnL counters. Atomic write via `.tmp` rename.
+- `trades.json` — closed-trade history (entry/exit/PnL/reason).
+- `calibration-results.json` / `replay-calibration-results.json` — last calibrator run output.
 
 ## Chat (XMTP)
 
@@ -167,6 +192,7 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 - Contracts: Foundry tests in `contracts/test/`, fork tests for protocol integrations
 - CLI: vitest (when wired up)
 - Always include test results in PR description
+- `cli/src/lib/network.test.ts` has 4 pre-existing failures from `BASE_RPC_URL` env-var leak (Moonwell RPC override). Always verify with `git stash && npm test` before assuming new test failures are from your changes.
 
 ## Key Addresses (Base)
 

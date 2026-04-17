@@ -31,13 +31,25 @@ import type { RiskConfig } from "../agent/risk.js";
 import { Reporter } from "../agent/reporter.js";
 import { Backtester } from "../agent/backtest.js";
 import type { BacktestConfig, WalkForwardConfig } from "../agent/backtest.js";
+import { runCalibration, formatCalibrationTable, DEFAULT_CALIBRATION_TOKENS } from "../agent/calibrator.js";
+import { runHistoryReplay } from "../agent/replay-calibrator.js";
 import { AlertFormatter } from "../agent/alert-formatter.js";
 import { ExecutionPipeline, DEFAULT_SCALED_SIZING } from "../agent/execution-pipeline.js";
 import { auditSignalHistory, suggestRenormalizedWeights, diffAudits } from "../agent/signal-audit.js";
 import type { AuditResult } from "../agent/signal-audit.js";
 import { DEFAULT_WEIGHTS } from "../agent/scoring.js";
 
-const DEFAULT_TOKENS = ["ethereum", "bitcoin", "solana", "aave", "uniswap"];
+// Expanded default universe — covers majors, L1/L2s, DeFi blue-chips, top
+// memes, and HL-listed alts so the scanner has more shots on goal each cycle.
+// Every token here has Hyperliquid perp coverage (executor.ts TOKEN_TO_ASSET_INDEX)
+// and CoinGecko OHLC. Use --auto for fully dynamic selection from HL volume.
+const DEFAULT_TOKENS = [
+  "bitcoin", "ethereum", "solana",                               // majors
+  "ripple", "dogecoin", "avalanche-2", "polkadot", "near",       // L1s
+  "arbitrum",                                                    // L2
+  "aave", "uniswap", "chainlink",                                // DeFi
+  "hyperliquid", "bittensor", "fartcoin",                        // HL natives / themes
+];
 
 function makeConfig(overrides?: Partial<AgentConfig>): AgentConfig {
   return {
@@ -47,6 +59,8 @@ function makeConfig(overrides?: Partial<AgentConfig>): AgentConfig {
     maxPositionPct: 5,
     maxRiskPct: 20,
     useX402: true, // Paid signals (Nansen + Messari) on by default — opt out with --no-x402
+    x402TopN: 3,   // Only run x402 on top 3 tokens by free-signal score — saves ~$1.12/run
+    smoothFastSignals: true, // Rolling-window smoothing for noisy signals — prevents single-scan flicker
     ...overrides,
   };
 }
@@ -662,6 +676,89 @@ export function registerAgentCommands(program: Command): void {
           spinner.fail(`Backtest failed: ${(err as Error).message}`);
           process.exitCode = 1;
         }
+      }
+    });
+
+  // ── calibrate ──
+  agent
+    .command("calibrate")
+    .description("Sweep weight profiles × BUY/SELL thresholds against historical data; ranks by Sharpe")
+    .option("--tokens <list>", "Comma-separated CoinGecko IDs (default: bitcoin,ethereum,solana,aave,uniswap,chainlink,arbitrum)")
+    .option("--days <n>", "Lookback window in days", "60")
+    .option("--capital <amount>", "Initial capital per token in USD", "10000")
+    .option("--top <n>", "Show top N configs in the ranked table", "20")
+    .option("--from-history [path]", "Replay against signal-history.jsonl (true production signal stack including HL/funding/dexFlow). Path defaults to ~/.sherwood/agent/signal-history.jsonl")
+    .option("--last <days>", "Replay only rows captured within the last N days (use after a scoring change to ignore stale captures). Replay path only.")
+    .option("--no-regime", "When using --from-history, ignore the regime field on each row (use DEFAULT_THRESHOLDS instead)")
+    .action(async (options: { tokens?: string; days: string; capital: string; top: string; fromHistory?: string | boolean; last?: string; regime: boolean }) => {
+      const topN = parseInt(options.top, 10);
+
+      // ── Replay path: signal-history.jsonl ──
+      if (options.fromHistory) {
+        const historyPath = typeof options.fromHistory === 'string' ? options.fromHistory : undefined;
+        const tokens = options.tokens
+          ? options.tokens.split(",").map((t) => t.trim()).filter(Boolean)
+          : undefined; // default = all tokens in dataset
+
+        let lastDays: number | undefined;
+        if (options.last !== undefined) {
+          lastDays = parseFloat(options.last);
+          if (!Number.isFinite(lastDays) || lastDays <= 0) {
+            console.error(chalk.red(`Invalid --last: ${options.last} (expected positive number of days)`));
+            process.exitCode = 1;
+            return;
+          }
+        }
+
+        console.log(chalk.bold(`\n  Replaying calibration against signal-history.jsonl${lastDays ? ` (last ${lastDays}d)` : ''}...\n`));
+        try {
+          const results = await runHistoryReplay({
+            historyPath,
+            tokens,
+            lastDays,
+            useRegime: options.regime,
+            onProgress: (msg) => console.log(chalk.dim(`  ${msg}`)),
+          });
+          console.log(formatCalibrationTable(results, topN));
+          console.log(chalk.dim(`  Source: signal-history replay (production signal stack)`));
+          console.log(chalk.dim(`  Saved: ~/.sherwood/agent/replay-calibration-results.json\n`));
+        } catch (err) {
+          console.error(chalk.red(`\n  Replay calibration failed: ${(err as Error).message}\n`));
+          process.exitCode = 1;
+        }
+        return;
+      }
+
+      // ── Candle path: re-fetch from CoinGecko, recompute signals ──
+      const tokens = options.tokens
+        ? options.tokens.split(",").map((t) => t.trim()).filter(Boolean)
+        : DEFAULT_CALIBRATION_TOKENS;
+      const days = parseInt(options.days, 10);
+      const capital = parseFloat(options.capital);
+
+      if (!Number.isFinite(days) || days <= 0) {
+        console.error(chalk.red(`Invalid --days: ${options.days}`));
+        process.exitCode = 1;
+        return;
+      }
+      if (!Number.isFinite(capital) || capital <= 0) {
+        console.error(chalk.red(`Invalid --capital: ${options.capital}`));
+        process.exitCode = 1;
+        return;
+      }
+
+      console.log(chalk.bold(`\n  Calibrating ${tokens.length} tokens over ${days}d (candle-based, 200 configs per token)...\n`));
+      try {
+        const results = await runCalibration({
+          tokens,
+          days,
+          capital,
+          onProgress: (msg) => console.log(chalk.dim(`  ${msg}`)),
+        });
+        console.log(formatCalibrationTable(results, topN));
+      } catch (err) {
+        console.error(chalk.red(`\n  Calibration failed: ${(err as Error).message}\n`));
+        process.exitCode = 1;
       }
     });
 

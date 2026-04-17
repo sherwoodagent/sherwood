@@ -4,8 +4,9 @@ import {
   ProposalState,
   formatDuration,
 } from "@/lib/governor-data";
-import { truncateAddress, formatAsset, formatBps } from "@/lib/contracts";
+import { truncateAddress, formatAsset } from "@/lib/contracts";
 import ExecutionCallPreview from "./ExecutionCallPreview";
+import ActivePositionValue from "./ActivePositionValue";
 import { ProposalStepper } from "@/components/ui/ProposalStepper";
 import { Countdown } from "@/components/ui/Countdown";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -71,9 +72,12 @@ interface ActiveProposalProps {
   addressNames?: Record<string, string>;
   assetDecimals: number;
   assetSymbol: string;
+  /** Deposit asset address — used to skip the `approve` target when
+   * resolving the strategy clone for the live positionValue read. */
+  assetAddress?: Address;
   portfolioAllocations?: PortfolioAllocProps | null;
   enrichedPortfolio?: EnrichedPortfolioProps | null;
-  /** Optional — if provided, renders ExecutionCallPreview. */
+  /** Optional — if provided, renders ExecutionCallPreview + live positionValue. */
   governorAddress?: Address;
   chainId?: number;
   explorerUrl?: string;
@@ -85,6 +89,7 @@ export default function ActiveProposal({
   addressNames,
   assetDecimals,
   assetSymbol,
+  assetAddress,
   portfolioAllocations,
   enrichedPortfolio,
   governorAddress,
@@ -179,19 +184,35 @@ export default function ActiveProposal({
       </div>
 
       <div className="metrics-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Agent</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {addressNames?.[proposal.proposer.toLowerCase()] || truncateAddress(proposal.proposer)}
           </div>
         </div>
-        <div className="metric-card">
+        <div className="sh-card--metric">
           <div className="metric-label">Capital Deployed</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {formatAsset(proposal.deployedCapital, assetDecimals)} {assetSymbol}
           </div>
         </div>
-        <div className="metric-card">
+        {governorAddress && chainId && assetAddress ? (
+          <ActivePositionValue
+            governorAddress={governorAddress}
+            proposalId={proposal.id}
+            chainId={chainId}
+            assetAddress={assetAddress}
+            assetDecimals={assetDecimals}
+            assetSymbol={assetSymbol}
+            deployedCapital={proposal.deployedCapital}
+          />
+        ) : (
+          <div className="sh-card--metric">
+            <div className="metric-label">Position Value</div>
+            <div className="metric-val" style={{ fontSize: "1rem" }}>—</div>
+          </div>
+        )}
+        <div className="sh-card--metric">
           <div className="metric-label">Settles In</div>
           <div className="metric-val" style={{ fontSize: "1rem" }}>
             {timeLeft > 0n ? (
@@ -199,12 +220,6 @@ export default function ActiveProposal({
             ) : (
               <span style={{ color: "var(--color-accent)" }}>Ready to settle</span>
             )}
-          </div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label">Performance Fee</div>
-          <div className="metric-val" style={{ fontSize: "1rem" }}>
-            {formatBps(proposal.performanceFeeBps)}
           </div>
         </div>
       </div>

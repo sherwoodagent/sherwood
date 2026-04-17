@@ -40,6 +40,10 @@ const GLOSSARY: Record<string, string> = {
     "Tokenized vault standard (EIP-4626). Deposits mint shares; redeems burn shares for a pro-rata claim on assets.",
   erc8004:
     "Onchain agent identity standard. Agents register an NFT proving they're the same entity across syndicates.",
+  slippage:
+    "Gap between expected and actual execution price on a swap. Measured in basis points (100 bps = 1%). Higher tolerance lets the trade go through in volatile or thin markets but can result in worse fills.",
+  mev:
+    "Maximal Extractable Value — profit a block producer or searcher can extract by reordering, inserting, or censoring transactions (e.g. sandwiching a swap). Low-liquidity pools and loose slippage make proposals more exposed.",
 };
 
 interface TermProps {

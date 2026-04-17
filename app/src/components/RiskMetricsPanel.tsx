@@ -78,7 +78,7 @@ export default function RiskMetricsPanel({ series, assetSymbol, isUsd }: Props) 
 
       <div className="metrics-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
         {cells.map((c) => (
-          <div key={c.label} className="metric-card" title={c.hint}>
+          <div key={c.label} className="sh-card--metric" title={c.hint}>
             <div className="metric-label">{c.label}</div>
             <div
               className="metric-val"

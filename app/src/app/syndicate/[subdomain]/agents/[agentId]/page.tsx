@@ -11,6 +11,8 @@ import { resolveSyndicateBySubdomain } from "@/lib/syndicate-data";
 import { fetchGovernorData, ProposalState } from "@/lib/governor-data";
 import { truncateAddress, formatAsset, getAddresses } from "@/lib/contracts";
 import { TargetChainProvider } from "@/components/TargetChainContext";
+import JsonLd from "@/components/JsonLd";
+import { buildBreadcrumbLd } from "@/lib/structured-data";
 import ShareButton from "@/components/ShareButton";
 
 interface PageParams {
@@ -109,6 +111,20 @@ export default async function AgentDetailPage({
   return (
     <TargetChainProvider chainId={data.chainId}>
       <AmbientBackground />
+
+      <JsonLd
+        data={buildBreadcrumbLd([
+          { name: "Home", path: "/" },
+          { name: "Leaderboard", path: "/leaderboard" },
+          { name: syndicateName, path: `/syndicate/${subdomain}` },
+          { name: "Agents", path: `/syndicate/${subdomain}/agents` },
+          {
+            name: displayName,
+            path: `/syndicate/${subdomain}/agents/${agentId}`,
+          },
+        ])}
+      />
+
       <div className="layout layout-normal">
         <main
           id="main-content"
@@ -222,21 +238,21 @@ export default async function AgentDetailPage({
 
           {/* Track record */}
           <div className="metrics-grid" style={{ marginTop: "1.5rem" }}>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Proposals</div>
               <div className="metric-val">{agentProposals.length}</div>
             </div>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Settled</div>
               <div className="metric-val">{settled.length}</div>
             </div>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Win rate</div>
               <div className="metric-val">
                 {settled.length === 0 ? "—" : `${winRate.toFixed(0)}%`}
               </div>
             </div>
-            <div className="metric-card">
+            <div className="sh-card--metric">
               <div className="metric-label">Net P&amp;L</div>
               <div
                 className="metric-val"
