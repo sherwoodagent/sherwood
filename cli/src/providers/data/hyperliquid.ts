@@ -5,11 +5,32 @@
  * Rate limit: reasonable usage, cached for 2 minutes.
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 const HYPERLIQUID_BASE = 'https://api.hyperliquid.xyz/info';
+
+/**
+ * Parse a numeric value from the Hyperliquid API safely.
+ * Returns `null` if the input is undefined, empty, or would parse to a non-finite
+ * value (NaN / Infinity). This prevents silent NaN propagation into scoring,
+ * which would otherwise corrupt `NaN * weight = NaN` across the decision stack.
+ */
+export function safeNumber(x: string | number | undefined | null): number | null {
+  if (x === undefined || x === null) return null;
+  const n = typeof x === 'number' ? x : parseFloat(x);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Key: coin symbol (e.g. "BTC"). Value: last-seen OI + when we saw it. */
+interface OiCacheEntry {
+  openInterest: number;
+  timestamp: number;
+}
+
+/** Stale OI entries (> this many ms old) are treated as absent. */
+const OI_STALE_MS = 30 * 60 * 1000; // 30 minutes
 
 // Map CoinGecko token IDs to Hyperliquid coin names
 const TOKEN_TO_COIN: Record<string, string> = {
@@ -90,10 +111,67 @@ interface RecentTrade {
 export class HyperliquidProvider {
   private cacheDir: string;
   private cacheTTL = 2 * 60 * 1000; // 2 minutes
-  private oiCache = new Map<string, number>(); // For tracking OI changes
+  private oiCache = new Map<string, OiCacheEntry>(); // persisted; see loadOiCache
+  private oiCacheFile: string;
+  private oiCacheLoaded = false;
+  private oiCacheLoadPromise: Promise<void> | null = null;
 
   constructor() {
     this.cacheDir = join(homedir(), '.sherwood', 'agent', 'cache');
+    this.oiCacheFile = join(this.cacheDir, 'hl-oi.json');
+    // Kick off the load eagerly so the first getHyperliquidData call finds it
+    // populated. Consumers can also await ensureOiCacheLoaded() directly.
+    this.oiCacheLoadPromise = this.loadOiCache();
+  }
+
+  /** Load the OI cache from disk. Called once at construction. Never throws. */
+  private async loadOiCache(): Promise<void> {
+    try {
+      const raw = await readFile(this.oiCacheFile, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, OiCacheEntry>;
+      if (parsed && typeof parsed === 'object') {
+        for (const [coin, entry] of Object.entries(parsed)) {
+          if (
+            entry
+            && Number.isFinite(entry.openInterest)
+            && Number.isFinite(entry.timestamp)
+          ) {
+            this.oiCache.set(coin, entry);
+          }
+        }
+      }
+    } catch {
+      // No file, corrupt JSON, or permission error — start with an empty cache.
+    } finally {
+      this.oiCacheLoaded = true;
+    }
+  }
+
+  private async ensureOiCacheLoaded(): Promise<void> {
+    if (this.oiCacheLoaded) return;
+    if (this.oiCacheLoadPromise) await this.oiCacheLoadPromise;
+  }
+
+  /**
+   * Persist the OI cache to disk using an atomic tmp-rename write.
+   * Fire-and-forget: callers do NOT await this. Errors are logged as warnings
+   * so a slow or full disk never blocks the signal hot path.
+   */
+  private persistOiCache(): void {
+    const snapshot: Record<string, OiCacheEntry> = {};
+    for (const [coin, entry] of this.oiCache.entries()) {
+      snapshot[coin] = entry;
+    }
+    void (async () => {
+      try {
+        await mkdir(this.cacheDir, { recursive: true });
+        const tmp = this.oiCacheFile + '.tmp';
+        await writeFile(tmp, JSON.stringify(snapshot), 'utf-8');
+        await rename(tmp, this.oiCacheFile);
+      } catch (err) {
+        console.warn(`[hyperliquid] oi-cache persist failed: ${(err as Error).message}`);
+      }
+    })();
   }
 
   /** Get comprehensive Hyperliquid data for a token. Returns null if token not supported or API failure. */
@@ -104,6 +182,9 @@ export class HyperliquidProvider {
     // Check cache first
     const cached = await this.readCache(tokenId);
     if (cached) return cached;
+
+    // Make sure the persisted OI cache is available before we compute oiChangePct
+    await this.ensureOiCacheLoaded();
 
     try {
       // Fetch all data in parallel
@@ -125,18 +206,35 @@ export class HyperliquidProvider {
       }
 
       const assetData = assetCtxs[assetIdx]!;
-      const fundingRate = parseFloat(assetData.funding);
-      const openInterest = parseFloat(assetData.openInterest);
-      const volume24h = parseFloat(assetData.dayNtlVlm);
-      const markPrice = parseFloat(assetData.markPx);
-      const oraclePrice = parseFloat(assetData.oraclePx);
-      const prevDayPrice = parseFloat(assetData.prevDayPx);
+      const fundingRate = safeNumber(assetData.funding);
+      const openInterest = safeNumber(assetData.openInterest);
+      const volume24h = safeNumber(assetData.dayNtlVlm);
+      const markPrice = safeNumber(assetData.markPx);
+      const oraclePrice = safeNumber(assetData.oraclePx);
+      const prevDayPrice = safeNumber(assetData.prevDayPx);
 
-      // OI change since last fetch (NOT 24h — in-memory cache resets on restart).
-      // For true 24h change, would need historical snapshots on disk.
-      const prevOI = this.oiCache.get(coin) ?? openInterest;
+      // If ANY core field failed to parse, the whole response is tainted —
+      // return null rather than let NaN / placeholder zeros reach scoring.
+      if (
+        fundingRate === null
+        || openInterest === null
+        || volume24h === null
+        || markPrice === null
+        || oraclePrice === null
+        || prevDayPrice === null
+      ) {
+        return null;
+      }
+
+      // OI change since last fetch. Cache is persisted to disk; entries older
+      // than OI_STALE_MS are treated as absent (no false signal from hour-old OI).
+      const prior = this.oiCache.get(coin);
+      const now = Date.now();
+      const priorIsFresh = prior !== undefined && now - prior.timestamp < OI_STALE_MS;
+      const prevOI = priorIsFresh ? prior!.openInterest : openInterest;
       const oiChangePct = prevOI > 0 ? ((openInterest - prevOI) / prevOI) * 100 : 0;
-      this.oiCache.set(coin, openInterest);
+      this.oiCache.set(coin, { openInterest, timestamp: now });
+      this.persistOiCache(); // fire-and-forget — never awaits disk
 
       // Process order book imbalance
       let orderBookImbalance = 0;
@@ -213,9 +311,16 @@ export class HyperliquidProvider {
   private calculateOrderBookImbalance(book: L2Book): number {
     const [bids, asks] = book.levels;
 
-    // Sum top 10 levels for both sides
-    const bidDepth = bids.slice(0, 10).reduce((sum, level) => sum + parseFloat(level.sz), 0);
-    const askDepth = asks.slice(0, 10).reduce((sum, level) => sum + parseFloat(level.sz), 0);
+    // Sum top 10 levels for both sides. Skip any level whose size fails to parse
+    // rather than letting NaN infect the depth total.
+    const sumDepth = (levels: L2BookLevel[]): number =>
+      levels.slice(0, 10).reduce((sum, level) => {
+        const sz = safeNumber(level.sz);
+        return sz === null ? sum : sum + sz;
+      }, 0);
+
+    const bidDepth = sumDepth(bids);
+    const askDepth = sumDepth(asks);
 
     const totalDepth = bidDepth + askDepth;
     if (totalDepth === 0) return 0;
@@ -232,8 +337,9 @@ export class HyperliquidProvider {
     let sellVolume = 0;
 
     for (const trade of recentTrades) {
-      const size = parseFloat(trade.sz);
-      const price = parseFloat(trade.px);
+      const size = safeNumber(trade.sz);
+      const price = safeNumber(trade.px);
+      if (size === null || price === null) continue; // drop unparseable trades
       const notional = size * price;
 
       // Only count trades >$50K
