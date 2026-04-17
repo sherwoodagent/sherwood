@@ -305,7 +305,15 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
     }
 
     /// @inheritdoc ISyndicateGovernor
-    /// @notice Vault owner settles. Tries pre-committed calls first, falls back to custom. After duration.
+    /// @notice Owner-only settlement backstop. Tries pre-committed calls via try/catch, then falls
+    ///         back to owner-provided custom calls. Callable only after `strategyDuration` elapses.
+    /// @dev **Vault-owner availability is a protocol-level security assumption.** If pre-committed
+    ///      settlement reverts and the vault owner is unavailable (lost keys, unresponsive, compromised),
+    ///      capital remains deployed in the strategy clone until the owner acts. There is no
+    ///      permissionless late-rescue by design — a permissionless path would either reintroduce
+    ///      NAV-dilution risk (depositors redeeming against a depressed vault balance) or require an
+    ///      allowlist of settlement targets that is itself a maintenance burden. Syndicates MUST
+    ///      operate the vault owner as a timelocked multisig with redundant signers.
     function emergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
