@@ -114,8 +114,9 @@ export class CorrelationGuard {
 
   private async analyzeBtcStructure(): Promise<BtcStructure> {
     try {
-      // Fetch BTC candles (30 days for EMAs)
-      const ohlcData = await this.coingecko.getOHLC("bitcoin", 30);
+      // Fetch BTC candles (90 days for EMAs — CoinGecko returns daily candles at days>=90,
+      // giving us ~90 bars, enough for the 50-bar floor required by EMA/RSI/MACD history).
+      const ohlcData = await this.coingecko.getOHLC("bitcoin", 90);
 
       if (!ohlcData || ohlcData.length < 50) {
         throw new Error("Insufficient BTC data");
