@@ -31,6 +31,8 @@ import type { JudgeLogData } from "./signal-logger.js";
 import { judge, selectJudgeCandidates, DEFAULT_JUDGE_CONFIG } from "./judge.js";
 import type { JudgeConfig, JudgeVerdict, JudgeContext } from "./judge.js";
 import { SignalSmoother, FileSmootherStorage, DEFAULT_SMOOTHER_CONFIG } from "./signal-smoother.js";
+import { applyVelocityGate, resolveVelocity, DEFAULT_ENTRY_GATE_CONFIG } from "./entry-gates.js";
+import type { EntryGateConfig } from "./entry-gates.js";
 import { join as joinPath } from "node:path";
 import { homedir as getHomedir } from "node:os";
 import { HyperliquidProvider } from "../providers/data/hyperliquid.js";
@@ -72,6 +74,11 @@ export interface AgentConfig {
   strategyConfigs?: Record<string, StrategyConfig>;
   /** LLM judge configuration — confirms or vetoes borderline trade decisions. */
   judge?: Partial<JudgeConfig>;
+  /** Entry-gate configuration — velocity/freshness checks applied post-scoring. */
+  entryGates?: Partial<EntryGateConfig>;
+  /** Backwards-compat opt-out: skip the velocity gate entirely. Equivalent to
+   *  `entryGates: { velocityGateEnabled: false }`. Default false (gate active). */
+  disableVelocityGate?: boolean;
 }
 
 export interface TokenAnalysis {
@@ -89,6 +96,8 @@ export interface TokenAnalysis {
   judgeResult?: { verdict: JudgeVerdict; cached: boolean; latencyMs: number };
   /** Original action/score before judge veto (present only when judge vetoed). */
   preJudge?: { action: string; score: number };
+  /** Original action/score before velocity gate downgraded to HOLD. */
+  preVelocity?: { action: string; score: number };
 }
 
 export class TradingAgent {
@@ -576,11 +585,31 @@ export class TradingAgent {
       correlation: correlationCheck,
     };
 
+    // ── Velocity freshness gate (Orca-inspired) ──
+    // Refuse BUY/SELL if the most recent short-term price move is flat or
+    // opposed to the signal direction — prevents "buying local tops" and
+    // "shorting local bottoms" when the composite score fires late.
+    const gateConfig: EntryGateConfig = {
+      ...DEFAULT_ENTRY_GATE_CONFIG,
+      ...this.config.entryGates,
+      // Legacy opt-out flag wins if set explicitly.
+      ...(this.config.disableVelocityGate ? { velocityGateEnabled: false } : {}),
+    };
+    // Hyperliquid does not currently expose a `priceChg1h` field; resolveVelocity
+    // is written to accept one in case the provider adds it later. For now we
+    // always fall through to the candle-based derivation (4h cadence with
+    // days=30 OHLC — tightest proxy available).
+    const priceChg1h = (hyperliquidData as { priceChg1h?: number } | undefined)?.priceChg1h;
+    const velocity = resolveVelocity(priceChg1h, candles);
+    const gatedResult = applyVelocityGate(result, velocity, gateConfig, (msg) =>
+      console.error(chalk.yellow(msg)),
+    );
+
     // Note: logSignal() is intentionally NOT called here. It runs in
     // analyzeAll() AFTER the judge pass, so judge verdicts can be included
     // in signal-history.jsonl. See analyzeAll() below.
 
-    return result;
+    return gatedResult;
   }
 
   /** Update the token watchlist without recreating the agent (preserves caches). */
