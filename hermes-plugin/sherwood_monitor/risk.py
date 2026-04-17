@@ -28,6 +28,22 @@ def check_portfolio_exposure(
     current_exposure_usd: float,
     vault_aum_usd: float,
 ) -> RiskVerdict:
+    """Block if total exposure (existing + proposed) exceeds MAX_TOTAL_EXPOSURE_PCT of AUM.
+
+    Contract (safety-critical):
+    - `current_exposure_usd` is **pre-proposal**: the sum of capital already
+      deployed across existing strategies at the moment of this check. The
+      state fetcher reads this from `sherwood vault info --json`, which
+      reflects on-chain balances, so it naturally excludes the proposal
+      being evaluated.
+    - `proposed_size_usd` is the additional capital the new proposal would
+      deploy. Total exposure becomes `proposed_size_usd + current_exposure_usd`
+      IF the proposal is allowed and later executed.
+    - `vault_aum_usd` is total assets under management including idle cash.
+
+    The verdict is denial-biased: if AUM is zero or unknown we return False
+    with a reason, because we cannot prove the proposal is safe.
+    """
     if vault_aum_usd <= 0:
         return RiskVerdict(False, "portfolio exposure: vault AUM is zero")
     total = proposed_size_usd + current_exposure_usd

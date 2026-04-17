@@ -200,12 +200,23 @@ def make_post_tool_call_hook(memory_writer: MemoryWriter, buffer: EventBuffer):
         )
         try:
             memory_writer(record)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.warning(
+                "settlement memory write failed for %s #%s: %s",
+                subdomain,
+                record.get("proposal_id"),
+                exc,
+            )
         try:
             buffer.push(_format_settlement_block(record))
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.warning(
+                "settlement buffer push failed for %s #%s: %s — "
+                "agent will not see the REMEMBER THIS marker on next turn",
+                subdomain,
+                record.get("proposal_id"),
+                exc,
+            )
         return None
 
     return hook

@@ -210,7 +210,7 @@ async def test_post_tool_call_skips_other_commands():
 
 
 @pytest.mark.asyncio
-async def test_post_tool_call_swallows_writer_error():
+async def test_post_tool_call_swallows_writer_error(caplog):
     writer = MagicMock(side_effect=RuntimeError("oom"))
     buffer = MagicMock(spec=EventBuffer)
     hook = make_post_tool_call_hook(memory_writer=writer, buffer=buffer)
@@ -220,6 +220,28 @@ async def test_post_tool_call_swallows_writer_error():
         params={"command": "sherwood proposal execute alpha 42"},
         result='{"tx": "0xabc"}',
     )
+    # Regression: writer failures must surface via logs, not be silently dropped
+    assert any(
+        "settlement memory write failed" in r.message for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_tool_call_logs_buffer_push_error(caplog):
+    writer = MagicMock()
+    buffer = MagicMock(spec=EventBuffer)
+    buffer.push.side_effect = RuntimeError("buffer gone")
+    hook = make_post_tool_call_hook(memory_writer=writer, buffer=buffer)
+    await hook(
+        tool_name="bash",
+        params={"command": "sherwood proposal settle alpha 42"},
+        result='{"tx": "0xabc", "proposalId": 42}',
+    )
+    assert any(
+        "settlement buffer push failed" in r.message for r in caplog.records
+    )
+    # Memory writer still got called despite buffer failure
+    writer.assert_called_once()
 
 
 @pytest.mark.asyncio

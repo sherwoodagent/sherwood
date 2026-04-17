@@ -53,11 +53,33 @@ async def _run_session_check(sherwood_bin: str, subdomain: str) -> dict | None:
 def _filter_interesting(
     payload: dict, block_cursor: int, ts_cursor: float
 ) -> tuple[list[dict], int, float]:
-    new_events = []
+    """Filter a session-check payload for interesting events past the cursor.
+
+    Cursor-advance rules (safety-critical):
+    - Events are sorted ascending by block before iteration. The Sherwood CLI
+      already returns them sorted (see `events.sort((a, b) => a.block - b.block)`
+      in cli/src/commands/session.ts), but we sort defensively in case of
+      future RPC pagination / reorg quirks that could deliver them out of order.
+    - We advance the block cursor to the max block OBSERVED (interesting or
+      not), which prevents re-scanning the same window every tick. The
+      ordering guarantee above ensures an interesting event at block N+1 is
+      processed before any uninteresting event at block N+2 causes the cursor
+      to skip past it.
+    - Same-block ordering within a transaction is not disambiguated here. If
+      multiple events share the same block and one is interesting, the CLI
+      must return them in stable order; the cursor advance is strict greater
+      than comparison, so repeats at block N are processed only if block_cursor
+      is < N.
+    - Messages use `sentAt` ISO timestamps sorted ascending for the same reason.
+    """
+    new_events: list[dict] = []
     max_block = block_cursor
     max_ts = ts_cursor
 
-    for ev in payload.get("events", []):
+    events_sorted = sorted(
+        payload.get("events", []), key=lambda e: int(e.get("block", 0))
+    )
+    for ev in events_sorted:
         block = int(ev.get("block", 0))
         if block <= block_cursor:
             continue
@@ -66,13 +88,19 @@ def _filter_interesting(
         if block > max_block:
             max_block = block
 
+    import datetime as _dt
+
+    msgs_with_ts: list[tuple[float, dict]] = []
     for msg in payload.get("messages", []):
         sent = msg.get("sentAt", "")
         try:
-            import datetime as _dt
             ts = _dt.datetime.fromisoformat(sent.replace("Z", "+00:00")).timestamp()
         except ValueError:
             continue
+        msgs_with_ts.append((ts, msg))
+    msgs_with_ts.sort(key=lambda t: t[0])
+
+    for ts, msg in msgs_with_ts:
         if ts <= ts_cursor:
             continue
         if msg.get("type") in INTERESTING_XMTP:

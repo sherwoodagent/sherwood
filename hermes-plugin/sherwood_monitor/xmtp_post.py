@@ -11,7 +11,10 @@ async def post_summary(sherwood_bin: str, subdomain: str, markdown: str) -> None
     """Post a markdown summary to the syndicate's XMTP group.
 
     Runs `sherwood chat <subdomain> send --markdown "<markdown>"`.
-    All failures are logged and swallowed; never raises.
+    Uses `communicate()` (not `wait()`) to drain both stdout and stderr,
+    preventing a pipe-buffer deadlock if the child writes more than the
+    OS pipe capacity (~64KB on Linux). All failures are logged and
+    swallowed; never raises.
     """
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -24,12 +27,13 @@ async def post_summary(sherwood_bin: str, subdomain: str, markdown: str) -> None
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        rc = await proc.wait()
+        _stdout, stderr = await proc.communicate()
+        rc = proc.returncode
         if rc != 0:
-            try:
-                _, stderr = await proc.communicate()
-                _log.warning("xmtp post failed (rc=%s): %s", rc, stderr.decode("utf-8", "replace")[:500])
-            except Exception:
-                _log.warning("xmtp post failed (rc=%s)", rc)
+            _log.warning(
+                "xmtp post failed (rc=%s): %s",
+                rc,
+                stderr.decode("utf-8", "replace")[:500],
+            )
     except Exception as exc:
         _log.warning("xmtp post failed: %s", exc)

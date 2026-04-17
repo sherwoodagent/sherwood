@@ -170,3 +170,40 @@ async def test_cursor_file_persisted(monkeypatch, tmp_path):
     assert "alpha-fund" in data
     assert "block" in data["alpha-fund"]
     assert "last_tick_at" in data["alpha-fund"]
+
+
+def test_filter_sorts_out_of_order_events():
+    """Regression: if the CLI ever returns events out of block order, the
+    cursor-advance logic must still process every interesting event past
+    the cursor rather than skipping one hidden behind a higher-block
+    uninteresting event."""
+    payload = {
+        "events": [
+            # Intentional out-of-order: uninteresting high block first,
+            # then interesting at a lower block.
+            {"type": "VoteCast", "block": 105, "voter": "0xabc"},
+            {"type": "ProposalCreated", "block": 103, "proposalId": "99"},
+            {"type": "VoteCast", "block": 104, "voter": "0xdef"},
+        ],
+        "messages": [],
+    }
+    new, max_block, max_ts = _filter_interesting(payload, block_cursor=100, ts_cursor=0)
+    assert len(new) == 1
+    assert new[0]["proposalId"] == "99"
+    # Cursor advances to the highest observed block so we don't re-scan
+    assert max_block == 105
+
+
+def test_filter_sorts_out_of_order_messages():
+    """Same invariant for XMTP messages sorted by sentAt timestamp."""
+    payload = {
+        "events": [],
+        "messages": [
+            {"type": "MESSAGE", "sentAt": "2024-01-15T12:05:00Z", "content": "hi"},
+            {"type": "RISK_ALERT", "sentAt": "2024-01-15T12:03:00Z", "content": "risk"},
+            {"type": "MESSAGE", "sentAt": "2024-01-15T12:04:00Z", "content": "there"},
+        ],
+    }
+    new, _max_block, max_ts = _filter_interesting(payload, block_cursor=0, ts_cursor=0)
+    assert len(new) == 1
+    assert new[0]["type"] == "RISK_ALERT"
