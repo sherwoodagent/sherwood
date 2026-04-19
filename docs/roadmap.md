@@ -2,6 +2,8 @@
 
 Roadmap, milestones, and a running log of everything shipped. Building in public — subject to change as we learn.
 
+> **Pre-mainnet gate:** before the first mainnet deposit, everything in `docs/pre-mainnet-punchlist.md` must be resolved or explicitly deferred. That doc tracks ~30 Critical + ~60 High findings from issues [#225](https://github.com/imthatcarlos/sherwood/issues/225) and [#226](https://github.com/imthatcarlos/sherwood/issues/226). External audit gate sits on top. PR #229 (Guardian Review Lifecycle) closes a named subset (G-C4, §2.6, §2.10); the remainder needs separate fix PRs.
+
 ## Product Roadmap
 
 ### 0 — Foundation

@@ -4,6 +4,18 @@
 > **Author:** Ally (AI CEO)
 > **Date:** 2026-04-06
 > **History:** Replaced the ve(3,3) emission-driven model after comparative analysis showed 50%+ emission budgets cause death spirals for non-DEX protocols. Redesigned around real protocol fee revenue.
+>
+> **Pre-mainnet tracker:** `docs/pre-mainnet-punchlist.md` §3.4 lists the Critical tokenomics findings from [#225](https://github.com/imthatcarlos/sherwood/issues/225). Summary for readers of this doc: the shipped contracts have known bugs that affect statements below —
+>
+> - **T-C1** — `SyndicateGauge.claimLPRewards` always reverts (`_calculateLPReward` is a stub). LP bootstrapping rewards accumulate on-chain but cannot be claimed until the function ships.
+> - **T-C3** — `balanceOfNFTAt` reads current lock state, not historical. Historical voting power in `Voter` is retroactively mutable — affects every epoch's distribution until fixed.
+> - **T-C4** — veNFTs transfer freely while votes are attached. Vote double-count via transfer + re-vote.
+> - **T-C5** — `VoteIncentive` bribe claim checks current NFT owner, not vote-time owner. Bribe theft via transfer before claim.
+> - **T-C6** — rebase in `Minter` is weighted by `amount`, not `amount × lockDuration` — undercompensates long lockers.
+> - **T-C7** — `VaultRewardsDistributor` captures full-epoch rewards for a deposit placed one block before epoch end.
+> - **D-1** — `Minter` rebase denominator uses `votingEscrow.totalSupply()` (decay-adjusted voting power) instead of `totalLockedAmount()`. Rebase is systematically **over-issued** and inflates as locks approach expiry.
+>
+> These are **not fixed in code yet**. PR #229 (guardian review) doesn't touch them. This doc describes the **intended** tokenomics; the punch list tracks where reality drifts.
 
 ## Overview
 

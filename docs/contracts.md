@@ -2,6 +2,8 @@
 
 Solidity smart contracts for Sherwood, built with Foundry and OpenZeppelin (UUPS upgradeable). All contracts deploy on Base.
 
+> **Pre-mainnet tracker:** `docs/pre-mainnet-punchlist.md` consolidates the Critical/High findings from issues [#225](https://github.com/imthatcarlos/sherwood/issues/225) and [#226](https://github.com/imthatcarlos/sherwood/issues/226). Read it before making changes. Notable open items in this domain: V-C1 (donation-inflated PnL via `balanceOf` diff), V-C2 (`_executorImpl` codehash unchecked), V-C3 (owner `executeBatch` bypasses redemption lock), I-1 (`redemptionsLocked()` fails open on `gov == 0`). ERC-4626 `maxDeposit/maxMint/maxWithdraw/maxRedeem` currently don't honor `paused()` / `redemptionsLocked()` / whitelist — tracked in punch list §7.
+
 ## Architecture
 
 ```

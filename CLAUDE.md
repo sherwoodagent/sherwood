@@ -213,7 +213,7 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 - `cli/src/lib/network.test.ts` has 4 pre-existing failures from `BASE_RPC_URL` env-var leak (Moonwell RPC override). Always verify with `git stash && npm test` before assuming new test failures are from your changes.
 - `forge coverage` currently reverts with Yul stack-too-deep in `SyndicateGovernor.propose()` struct literal (L213) — refactor the literal (split field assignments) before running coverage
 - No invariant tests yet. New invariant harnesses go in `test/invariants/` using `StdInvariant` + a handler contract
-- Pre-mainnet punch list: issues **#225 (bugs)** and **#226 (process/design)**. Reference by anchor in PRs (e.g. `fixes V-C1`, `closes G-C4`)
+- Pre-mainnet punch list: issues **#225 (bugs)** and **#226 (process/design)**. Canonical consolidated tracker: **`docs/pre-mainnet-punchlist.md`** — every fix PR should reference the ref code (e.g. `fixes V-C1`, `closes G-C4`) and mark the punch list row closed. New findings go into the issues first, then propagate to the tracker.
 
 ## Key Addresses (Base)
 
@@ -237,13 +237,16 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 
 ## Aspirational / not-yet-implemented (read docs with caution)
 
-These appear in `mintlify-docs/` or earlier CLAUDE.md text but are **not live in code**:
-- `maxPerTx` / `maxDailyTotal` / `maxBorrowRatio` / per-agent caps / target allowlist on the vault
-- EAS `STRATEGY_PNL` attestation minted at settlement
-- `SyndicateGauge.claimLPRewards` — always reverts (`_calculateLPReward` stub)
-- WOOD/shares Uniswap V3 "early exit" pool
+These appear in `mintlify-docs/` or earlier CLAUDE.md text but are **not live in code**. See `docs/pre-mainnet-punchlist.md` §6 for the full doc↔code mismatch catalog.
+- `maxPerTx` / `maxDailyTotal` / `maxBorrowRatio` / per-agent caps / target allowlist on the vault _(punch list: A10, A35)_
+- EAS `STRATEGY_PNL` attestation minted at settlement _(punch list: A23)_
+- `SyndicateGauge.claimLPRewards` — always reverts (`_calculateLPReward` stub) _(punch list: T-C1)_
+- WOOD/shares Uniswap V3 "early exit" pool _(punch list: A41)_
 - Automated price/lock-ratio circuit-breaker triggers in `Minter` (manual-only today)
-- `expireCollaboration(proposalId)` function referenced in docs (doesn't exist; lazy resolution only)
+- `expireCollaboration(proposalId)` function referenced in docs (doesn't exist; lazy resolution only) _(punch list: A28)_
+- `_distributeFees` try/catch + blacklist-resilient settlement — claim in `economics.mdx`, not in code _(punch list: A22, W-1)_
+- Shareholder `vetoProposal` — claimed in `concepts.mdx`, only vault-owner can actually call it _(punch list: A18)_
+- Per-syndicate governance parameters — claim in `concepts.mdx`, actual model is global `GovernorParams` _(punch list: A19)_
 
 ## Designed, not yet implemented (PR #229)
 

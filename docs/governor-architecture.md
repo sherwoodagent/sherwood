@@ -1,6 +1,13 @@
 # SyndicateGovernor — Architecture
 
-> **Known drift:** parts of this doc (`capitalRequired`, `splitIndex`, single `calls[]` array, missing `GuardianReview` state) predate several shipped refactors. The authority order from `CLAUDE.md` applies: `contracts/src/` is canonical; treat anything that conflicts with the current Solidity or the spec at `docs/superpowers/specs/2026-04-19-guardian-review-lifecycle-design.md` (PR #229) as out-of-date. This doc will get a full pass once PR #229 lands.
+> **Known drift:** parts of this doc (`capitalRequired`, `splitIndex`, single `calls[]` array, missing `GuardianReview` state, `block.number` snapshots, "shareholders can veto") predate several shipped refactors. Full drift catalog in `docs/pre-mainnet-punchlist.md` §6 (items A18, A19, A24, A25, A26, A28, A29). Authority order from `CLAUDE.md` applies: `contracts/src/` is canonical; treat anything that conflicts with the current Solidity or the spec at `docs/superpowers/specs/2026-04-19-guardian-review-lifecycle-design.md` (PR #229) as out-of-date. This doc will get a full pass once PR #229 lands.
+>
+> Specific corrections to keep in mind while reading:
+> - `StrategyProposal` has **no `capitalRequired` field** (A24). The vault's full asset balance is available; strategies request via their `executeCalls`.
+> - `StrategyProposal` has **separate `executeCalls` and `settlementCalls` arrays** — there is **no `splitIndex`**.
+> - Snapshots are **timestamp-based** via ERC20Votes `clock()` returning `uint48(block.timestamp)` — not `block.number` (A25). Note: `snapshotTimestamp = block.timestamp` (not `block.timestamp - 1`) is a same-block flash-delegate window on 2s L2 blocks — tracked as G-C1 in the punch list.
+> - `vetoProposal` is **vault-owner only**, not callable by shareholders (A18). Any doc that implies otherwise is stale.
+> - The "three-way settlement" description below **will change** once PR #229 lands: `emergencySettle` splits into `unstick` / `emergencySettleWithCalls` / `cancelEmergencySettle` / `finalizeEmergencySettle` with owner-stake slashing on guardian block.
 
 ## Overview
 
