@@ -113,11 +113,17 @@ mapping(uint256 => mapping(address => bool)) private _emergencyBlockVotes;
 
 // Parameters (timelocked; pattern mirrors GovernorParameters)
 uint256 public minGuardianStake;  // default: 10_000 WOOD
-uint256 public minOwnerStake;     // default: 50_000 WOOD
+uint256 public minOwnerStake;     // default: 10_000 WOOD  (lowered from 50k — see §5)
 uint256 public coolDownPeriod;    // default: 7 days
-uint256 public reviewPeriod;      // default: 24 hours
+uint256 public defaultReviewPeriod; // default: 24 hours (used when proposer passes 0)
+uint256 public minReviewPeriod;   // default: 6 hours  (lower bound on per-proposal override)
+uint256 public maxReviewPeriod;   // default: 7 days   (upper bound on per-proposal override)
 uint256 public blockQuorumBps;    // default: 3000 (30% of total guardian stake)
-address public slashRecipient;    // treasury multisig
+uint256 public rewardPerBlockWood;// default: 500 WOOD — flat bounty split pro-rata among Block voters on a blocked proposal
+uint256 public rewardPool;        // WOOD held for guardian bounties; funded by treasury via fundRewardPool(amount)
+
+// Slashing: WOOD is burned (not sent to treasury) — see §5 rationale
+address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
 // Privileged addresses
 address public governor;
@@ -154,14 +160,20 @@ Emergency-settle vote:
 - `voteBlockEmergencySettle(uint256 proposalId)` — active guardians vote to block. Any single vote adds their stake weight to `blockStakeWeight`. When `blockStakeWeight >= blockQuorumBps * _totalGuardianStake / 10_000`, the review is flagged blocked (resolved at `resolveEmergencyReview` time).
 
 Slashing (internal, triggered by governor):
-- `_slashApprovers(uint256 proposalId)` — internal; called by governor via a privileged entrypoint when (a) guardian Block quorum resolves, or (b) owner calls `emergencyCancel` on a proposal that had recorded Approves. Iterates `_approvers[proposalId]`, zeroes each approver's stake, transfers total slashed WOOD to `slashRecipient`. Capped gas-wise by the MAX_GUARDIANS invariant (see §7).
-- `_slashOwner(address vault)` — internal; called by governor when `resolveEmergencyReview` returns blocked. Zeros `_ownerStakes[vault].stakedAmount`, transfers to `slashRecipient`. Vault transitions into "owner must re-stake" state.
+- `_slashApprovers(uint256 proposalId)` — internal; invoked from `resolveReview` when block quorum resolves, or from the governor when owner calls `emergencyCancel` on a proposal that had recorded Approves. Iterates `_approvers[proposalId]`, zeroes each approver's stake, and **burns** the total slashed WOOD by transferring to `BURN_ADDRESS`. Capped gas-wise by `MAX_APPROVERS_PER_PROPOSAL = 100` (see §6).
+- `_slashOwner(address vault)` — internal; invoked from `resolveEmergencyReview` when blocked. Zeros `_ownerStakes[vault].stakedAmount` and **burns** the slashed WOOD. Vault transitions into "owner must re-stake" state.
+- **Appeal path (off-chain → on-chain):** a slashed party can petition the protocol multisig for refund. Multisig executes `refundSlash(address recipient, uint256 amount)` — **onlyOwner** on the registry, capped per-epoch — which transfers WOOD from the treasury reserve to the refund recipient. Requires governance vote record; spec in §7 and §10. No on-chain slash reversal — the burn is final; refund is a new treasury-funded transfer.
+
+Reward distribution (Block-side, V1 minimal):
+- `fundRewardPool(uint256 amount)` — **onlyOwner**. Pulls WOOD into `rewardPool`. Protocol treasury tops up this pool.
+- `claimBlockReward(uint256 proposalId)` — active guardians who voted Block on a proposal that resolved `blocked = true` can claim their pro-rata share of `rewardPerBlockWood`, weighted by their stake at vote time over `blockStakeWeight`. Idempotent per (proposalId, guardian). Reverts if `rewardPool < payout` — treasury must top up.
+- Note: no reward for correct Approve in V1. Correct-Approve rewards (the full "good guardians rewarded weekly" loop from issue #227) are deferred to V1.5 with emissions + EAS. V1 only rewards the *active-defence* action (Block) because that is the one that materially prevented an LP loss.
 
 Parameter setters (timelocked — reuses `GovernorParameters` timelock pattern):
-- `setMinGuardianStake`, `setMinOwnerStake`, `setCoolDownPeriod`, `setReviewPeriod`, `setBlockQuorumBps`, `setSlashRecipient`.
+- `setMinGuardianStake`, `setMinOwnerStake`, `setCoolDownPeriod`, `setDefaultReviewPeriod`, `setMinReviewPeriod`, `setMaxReviewPeriod`, `setBlockQuorumBps`, `setRewardPerBlockWood`.
 
 Views:
-- `guardianStake(address)`, `ownerStake(address vault)`, `totalGuardianStake()`, `isActiveGuardian(address)`, `hasOwnerStake(address vault)`, `getReview(uint256)`, `getEmergencyReview(uint256)`, `preparedStakeOf(address owner)`, `canCreateVault(address owner)`.
+- `guardianStake(address)`, `ownerStake(address vault)`, `totalGuardianStake()`, `isActiveGuardian(address)`, `hasOwnerStake(address vault)`, `getReview(uint256)`, `getEmergencyReview(uint256)`, `preparedStakeOf(address owner)`, `canCreateVault(address owner)`, `pendingBlockReward(address guardian, uint256 proposalId)`.
 
 ### 3.2 Modified: `SyndicateGovernor.sol`
 
@@ -171,7 +183,8 @@ Minimal changes, scoped to what the governor has to know.
 - **Struct:** append `uint256 reviewEnd` at end of `StrategyProposal`. Storage-safe append (mapping entries are independent slots). Stamped at proposal creation alongside `voteEnd` and `executeBy`.
 - **Storage:** add `address private _guardianRegistry` and reduce `__gap` by one.
 - **Initializer:** accept `guardianRegistry` address.
-- **`propose()`:** after computing `voteEnd` (non-collaborative) or when collaborative consent completes in **`approveCollaboration()`**, stamp `reviewEnd = voteEnd + registry.reviewPeriod()` and shift `executeBy = reviewEnd + executionWindow` (execution window is measured from the *end of guardian review*, not the end of voting). This keeps the full lifecycle deterministic from creation — no mid-flight parameter drift and no registry call needed at Pending → GuardianReview transition.
+- **`propose()` signature change:** adds a trailing `uint256 reviewPeriodOverride` parameter. Proposer passes `0` to use `registry.defaultReviewPeriod()`, or a concrete value in `[registry.minReviewPeriod(), registry.maxReviewPeriod()]`. This gives time-sensitive strategies (funding-rate, oracle-reactive) a path to a shorter review at the cost of a higher perceived risk to guardians. Governor reverts with `InvalidReviewPeriod` if the override is outside the registry bounds at propose time.
+- **`propose()` body:** after computing `voteEnd` (non-collaborative) or when collaborative consent completes in **`approveCollaboration()`**, stamp `reviewEnd = voteEnd + resolvedReviewPeriod` and shift `executeBy = reviewEnd + executionWindow` (execution window is measured from the *end of guardian review*, not the end of voting). This keeps the full lifecycle deterministic from creation — no mid-flight parameter drift and no registry call needed at Pending → GuardianReview transition.
 - **`_resolveStateView` / `_resolveState`:** when `stored == Pending` and voting ended with no veto quorum:
   - If `block.timestamp <= proposal.reviewEnd`: return `GuardianReview` (lazy transition; no registry call).
   - Else: call `registry.resolveReview(proposalId)` → if `blocked == true`, transition to `Rejected` (registry auto-slashes approvers inside `resolveReview`). Else transition to `Approved`.
@@ -197,9 +210,9 @@ Minimal changes, scoped to what the governor has to know.
 
 New enum value, new struct field, new errors, new events, new function signatures:
 
-- Errors: `NotInGuardianReview`, `EmergencySettleBlocked`, `EmergencySettleNotReady`, `EmergencySettleMismatch`, `RegistryNotSet`.
-- Events: `GuardianReviewOpened(uint256 indexed proposalId, uint256 reviewEnd)`, `GuardianReviewResolved(uint256 indexed proposalId, bool blocked)`, `EmergencySettleProposed(uint256 indexed proposalId, address indexed owner, bytes32 callsHash, uint256 reviewEnd)`, `EmergencySettleFinalized(uint256 indexed proposalId, int256 pnl)`, `GuardianRegistryUpdated(address old, address new)`.
-- Function changes: drop `emergencySettle`; add `unstick`, `emergencySettleWithCalls`, `finalizeEmergencySettle`.
+- Errors: `NotInGuardianReview`, `EmergencySettleBlocked`, `EmergencySettleNotReady`, `EmergencySettleMismatch`, `RegistryNotSet`, `InvalidReviewPeriod`.
+- Events: `GuardianReviewResolved(uint256 indexed proposalId, bool blocked)`, `EmergencySettleProposed(uint256 indexed proposalId, address indexed owner, bytes32 callsHash, uint256 reviewEnd)`, `EmergencySettleFinalized(uint256 indexed proposalId, int256 pnl)`, `GuardianRegistryUpdated(address old, address new)`.
+- Function changes: drop `emergencySettle`; add `unstick`, `emergencySettleWithCalls`, `finalizeEmergencySettle`. `propose()` now takes a trailing `uint256 reviewPeriodOverride` argument.
 
 ## 4. Data flow — key scenarios
 
@@ -232,11 +245,14 @@ New enum value, new struct field, new errors, new events, new function signature
 | Parameter | Default | Bounds | Rationale |
 |---|---|---|---|
 | `minGuardianStake` | 10_000 WOOD | ≥ 1 WOOD | Low enough for early ecosystem, high enough that slashing is a real cost. |
-| `minOwnerStake` | 50_000 WOOD | ≥ 10_000 WOOD | 5× guardian — owner has per-vault unilateral power. |
+| `minOwnerStake` | 10_000 WOOD | ≥ 1_000 WOOD | Lowered from 50k per business review — onboarding friction for small creators. Can scale up via timelocked parameter change as TVL grows. |
 | `coolDownPeriod` | 7 days | 1–30 days | Matches issue #227; aligns with Sherwood's existing multi-day governance rhythms. |
-| `reviewPeriod` | 24 hours | 6h–7 days | Long enough for guardian agents (cron-driven) to run a fork simulation; short enough to not block legitimate strategies. |
+| `defaultReviewPeriod` | 24 hours | — | Used when proposer passes `reviewPeriodOverride = 0`. |
+| `minReviewPeriod` | 6 hours | 1h–defaultReviewPeriod | Floor on per-proposal override. 6h gives time-sensitive strategies (funding-rate, oracle-reactive) a fast path while still allowing guardian agents a single cron cycle to react. |
+| `maxReviewPeriod` | 7 days | defaultReviewPeriod–30 days | Ceiling on per-proposal override. |
 | `blockQuorumBps` | 3000 (30%) | 1000–10000 | Below 50% so a motivated guardian minority can stop clearly malicious proposals; high enough that random dissent doesn't grief. |
-| `slashRecipient` | Protocol treasury multisig | — | LP reimbursement happens off-chain from treasury in V1; on-chain redirect to vault-asset is V2. |
+| `rewardPerBlockWood` | 500 WOOD | — | Flat bounty, split pro-rata among Block voters on a resolved-as-blocked proposal. Small but non-zero — enough to cover gas and create a weak positive expectancy, without needing a full emissions schedule. |
+| **Slash destination** | **BURN** (`0x…dEaD`) | — | Chosen over treasury per business review: cleaner regulatory posture (slash is not protocol-controlled revenue), aligns with WOOD scarcity narrative, removes any treasury-capture incentive to over-slash. Wrongful slashes are made whole via the appeal path (see §7), funded from a separate treasury reserve, not from burned tokens. |
 
 All parameters are timelocked using the same queue/finalize pattern as `GovernorParameters.sol`, with `MIN_PARAM_CHANGE_DELAY = 6 hours` and `MAX_PARAM_CHANGE_DELAY = 7 days`.
 
@@ -252,7 +268,34 @@ All parameters are timelocked using the same queue/finalize pattern as `Governor
 - **Owner can't front-run guardian block:** owner's `emergencyCancel` is narrowed to `Draft`/`Pending`. Once in `GuardianReview`, the only cancel vector is guardian Block quorum.
 - **`unstick` abuse:** owner could spam `unstick` on a proposal that legitimately needs emergency settle. Mitigation: `unstick` is only callable after the proposal's strategy duration has elapsed (same precondition as current `emergencySettle`), and the call reverts if pre-committed settlement calls themselves revert. This matches current behavior.
 
-## 7. Testing plan
+## 7. Bootstrap policy & appeal path
+
+Two commitments published before mainnet — documented in `mintlify-docs/learn/guardians.mdx` (new page) and cross-referenced here so both technical reviewers and LPs can see the governance surface around slashing.
+
+### 7.1 Guardian-of-last-resort (bootstrap, weeks 1–12)
+
+During the first 12 weeks after mainnet launch, the Sherwood protocol multisig commits to:
+
+- Running a guardian agent that votes on **every** proposal across every registered vault.
+- Publishing weekly guardian-coverage reports in the Sherwood forum (proposals reviewed, Approves, Blocks, outcomes).
+- Staking ≥ `minGuardianStake` from protocol treasury.
+
+This closes the "what if no guardians show up" failure mode during bootstrap and gives external guardians a reference implementation to benchmark against. After week 12, the multisig's guardian participation becomes optional and cohort health is measured independently (see §11).
+
+### 7.2 Appeal path for wrongful slashes
+
+Slashing is on-chain and final (WOOD is burned). Appeals are handled as treasury-funded refunds, **not** on-chain slash reversals, which keeps the slashing contract simple and the economic signal unambiguous.
+
+Flow:
+1. Slashed party opens an appeal by posting an on-forum case with proposal simulation / calldata analysis / reasoning within 30 days of the slash event.
+2. Protocol governance (veWOOD voters) votes on the appeal; quorum and threshold set by tokenomics governance, not by this spec.
+3. If upheld, the protocol multisig calls `GuardianRegistry.refundSlash(recipient, amount)` — a permissioned, per-epoch-capped function that transfers WOOD from a dedicated **Slash Appeal Reserve** (funded via treasury allocation at deployment, topped up by governance vote).
+4. Refund cap per epoch prevents a compromised multisig from draining the reserve in a single transaction.
+5. All refunds emit `SlashRefunded(recipient, amount, appealId)` events for transparency.
+
+This intentionally makes appeals expensive (requires governance vote) but possible (prevents "one wrongful slash kills the guardian narrative" outcome). The cap and governance gate together limit the damage from a compromised multisig.
+
+## 8. Testing plan
 
 All tests live in `contracts/test/`. New files:
 
@@ -278,7 +321,7 @@ Fuzz targets:
 - Randomized vote sequences; assert `blockStakeWeight + approveStakeWeight <= totalGuardianStakeAtReviewOpen`.
 - Randomized stake/unstake sequences; assert total WOOD conservation.
 
-## 8. Deployment plan
+## 9. Deployment plan
 
 1. Deploy `GuardianRegistry` behind UUPS proxy. Owner = protocol multisig.
 2. Configure initial parameters (see §5).
@@ -290,9 +333,26 @@ Fuzz targets:
 
 Given this is on `feat/mainnet-redeployment-params`, option 7b (redeploy) is preferred — no migration code needed.
 
-## 9. Follow-up specs (explicitly out of scope)
+8. **Fund the Slash Appeal Reserve** with an initial WOOD allocation from treasury (amount proposed in the V1 deployment governance vote).
+9. **Publish bootstrap commitments** (§7.1 + §7.2) to `mintlify-docs/learn/guardians.mdx` and announce on the Sherwood forum.
 
-- **Guardian rewards + weekly cron** — Minter emissions allocated to guardians, distributed based on correct-Approve / correct-Block attestations. Requires EAS schema for attestations.
+## 10. Success metrics
+
+Tracked via the existing Sherwood subgraph (new `Guardian`, `ProposalReview`, and `SlashEvent` entities) and surfaced on the protocol dashboard. These gate "V1 is working" — below-threshold metrics at month 3 or 6 trigger a review of V1.5 priorities.
+
+| Metric | Month 3 | Month 6 | Month 12 | Failure signal |
+|---|---|---|---|---|
+| Independent guardian stakers (active) | ≥ 15 | ≥ 40 | ≥ 80 | Cohort stuck at protocol-team-only → trust assumption unchanged, pull rewards forward |
+| Stake distribution Gini | — | < 0.7 | < 0.6 | Concentrated stake → vulnerable to collusion, raise `minGuardianStake` or introduce per-guardian cap |
+| Proposals receiving ≥ 1 guardian vote | ≥ 80% | ≥ 95% | ≥ 98% | Guardians not watching → feature is theater, investigate skill/cron gaps |
+| Proposals correctly Blocked (true positives) | ≥ 1 **or** documented near-miss | ≥ 2 **or** near-misses | — | Zero activity → either no attacks (good but unprovable) or asleep guardians (bad) |
+| Wrongful slashes (refunded via appeal) / total slashes | < 30% | < 20% | < 10% | High wrongful-slash rate → guardians too trigger-happy, retune thresholds or block-quorum |
+| New-syndicate-creation rate (vs. 30-day pre-launch baseline) | ≥ 70% | ≥ 90% | ≥ 100% | Sustained >30% drop → owner-stake friction too high, lower `minOwnerStake` |
+| `emergencySettleWithCalls` events | — | — | — | Any single event here is a live fire-drill — track outcomes (blocked vs. executed) individually |
+
+## 11. Follow-up specs (explicitly out of scope)
+
+- **Correct-Approve rewards + weekly cron** — Minter emissions allocated to guardians whose Approve votes matched the subsequent execution outcome (proposal executed successfully without emergency actions). Requires EAS schema for attestations. (V1 already ships the **Block**-side reward via `rewardPerBlockWood` from treasury — see §3.1. What's deferred is the Minter-emissions funding source and the correct-Approve reward loop.)
 - **EAS attestation schema** — `GUARDIAN_REVIEW_VOTE` schema capturing (proposalId, guardian, support, reasoning hash). Feeds reward computation.
 - **LLM knowledge base** — compiled good/bad attestations + reasoning → off-chain dataset for Hermes guardian skill training.
 - **Shareholder challenge (Option C)** — post-settlement jury-style adjudication for malicious proposals that slipped past guardians.
@@ -300,9 +360,21 @@ Given this is on `feat/mainnet-redeployment-params`, option 7b (redeploy) is pre
 - **Guardian reputation decay** — aged-out stake, repeated-correct-vote multipliers.
 - **Hermes `guardian` skill** — off-chain agent runtime that scans proposals across all syndicates and calls `voteOnProposal`.
 
-## 10. Open questions (want your call before writing the plan)
+## 12. Changelog — scope changes from business review (2026-04-19)
 
-1. **Slash destination**: treasury (simple) or burn (deflationary signal, aligns with WOOD tokenomics)? Spec currently says treasury.
-2. **`unstick` access control**: owner-only, or permissionless after strategy duration + N hours? Today's `emergencySettle` is owner-only; unchanged here, but worth flagging.
-3. **Guardian cap per proposal**: is 100 the right ceiling? Too low risks legitimate large cohorts not all being able to Approve. Too high risks gas griefing on slash.
-4. **Factory `bindOwnerStake` atomicity**: spec has factory calling registry *after* vault deploy. If bind reverts, the whole `createSyndicate` reverts and vault deployment is rolled back — confirm this is the desired ordering vs. binding before deploy (which requires computing vault address via CREATE2).
+Applied wholesale from the business-analyst review of this spec:
+
+- **Slash destination:** burn (not treasury). Final. See §5 and §3.1.
+- **Owner stake default:** lowered 50k → 10k WOOD to protect onboarding. See §5.
+- **Per-proposal `reviewPeriod` override:** `min=6h`, `default=24h`, `max=7d`. See §3.2 and §5.
+- **Block-side rewards in V1:** `rewardPerBlockWood` flat bounty from treasury-funded `rewardPool`. Correct-Approve rewards still deferred. See §3.1 and §11.
+- **Bootstrap commitments:** multisig runs guardian weeks 1–12, appeal path via treasury reserve. See §7.
+- **Success metrics:** cohort size, coverage, correct-block ratio, wrongful-slash ratio, creator-onboarding drag. See §10.
+
+## 13. Open questions (want your call before writing the plan)
+
+1. **`unstick` access control**: owner-only, or permissionless after strategy duration + N hours? Today's `emergencySettle` is owner-only; unchanged here, but worth flagging.
+2. **Guardian cap per proposal**: is 100 the right ceiling for `MAX_APPROVERS_PER_PROPOSAL`? Too low risks legitimate large cohorts not all being able to Approve. Too high risks gas griefing on slash.
+3. **Factory `bindOwnerStake` atomicity**: spec has factory calling registry *after* vault deploy. If bind reverts, the whole `createSyndicate` reverts and vault deployment is rolled back — confirm this is the desired ordering vs. binding before deploy (which requires computing vault address via CREATE2).
+4. **Slash Appeal Reserve sizing**: opening allocation (e.g. 1% of total WOOD supply?) and per-epoch refund cap. Propose via tokenomics governance, not fixed here.
+5. **Owner dual-use optimization**: should vault owners be allowed to double-count their owner-stake as guardian-stake on *other* vaults (so their capital isn't fully idle)? Adds reward-eligibility and active participation incentive, at the cost of extra accounting. Flag for V1.5 unless there's pressure to ship in V1.
