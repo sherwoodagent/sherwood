@@ -85,16 +85,16 @@ struct PreparedOwnerStake {
 }
 mapping(address owner => PreparedOwnerStake) private _prepared;
 
-// Proposal review state (one entry per proposal)
+// Proposal review state (one entry per proposal; lazily created on first vote)
 struct Review {
-    uint64 reviewStart;
-    uint64 reviewEnd;
-    uint128 totalStakeAtOpen;   // snapshot of _totalGuardianStake; quorum denominator
+    uint128 totalStakeAtOpen;   // snapshot of _totalGuardianStake on first vote; quorum denominator
     uint128 approveStakeWeight;
     uint128 blockStakeWeight;
     bool resolved;
     bool blocked;
 }
+// reviewEnd is NOT stored here — it lives on StrategyProposal.reviewEnd (governor),
+// stamped alongside voteEnd at propose() / approveCollaboration() time.
 mapping(uint256 proposalId => Review) private _reviews;
 mapping(uint256 => mapping(address => VoteType)) private _votes;
 mapping(uint256 => address[]) private _approvers; // for batch-slashing at resolution
@@ -132,7 +132,7 @@ Guardian role:
 - `requestUnstakeGuardian()` — marks `unstakeRequestedAt = block.timestamp`. Guardian immediately loses voting power (removed from `_totalGuardianStake`). Cannot re-vote until unstake is either cancelled or claimed.
 - `cancelUnstakeGuardian()` — reverses an unstake request; stake becomes voting-eligible again.
 - `claimUnstakeGuardian()` — after `coolDownPeriod` elapses, releases WOOD to guardian. Zero-stake guardians are fully deregistered.
-- `voteOnProposal(uint256 proposalId, VoteType support)` — `Approve` or `Block`. Callable only while `Review.reviewStart <= now < Review.reviewEnd`. One vote per guardian per proposal.
+- `voteOnProposal(uint256 proposalId, VoteType support)` — `Approve` or `Block`. The registry reads `reviewEnd` from the governor via `ISyndicateGovernor.getProposal(proposalId)` and the proposal's `voteEnd`; vote is allowed only when `voteEnd <= now < reviewEnd`. On the first vote for a given proposalId, snapshots `_totalGuardianStake` into `Review.totalStakeAtOpen` — this fixes the quorum denominator and prevents dilution by late-joining stakers. One vote per guardian per proposal; subsequent calls revert.
 
 Owner role:
 - `prepareOwnerStake(uint256 amount)` — pull WOOD into the registry under `_prepared[msg.sender]`. Does **not** yet bind to a vault. Must be ≥ `minOwnerStake`. One prepared stake per owner at a time.
@@ -141,10 +141,11 @@ Owner role:
 - `claimUnstakeOwner(address vault)` — after cool-down, releases WOOD. Post-claim the vault is in a **grace-period** state (`ownerStaked == false`): new proposals cannot be created until owner re-binds a fresh stake.
 
 Governor hooks:
-- `openReview(uint256 proposalId)` — **onlyGovernor**. Called when proposal transitions Pending → GuardianReview. Sets `reviewStart = now`, `reviewEnd = now + reviewPeriod`. Reverts if already opened.
-- `openEmergencyReview(uint256 proposalId, bytes32 callsHash)` — **onlyGovernor**. Commits the calldata hash when owner calls `emergencySettleWithCalls`. Opens the window.
-- `resolveReview(uint256 proposalId) returns (bool blocked)` — **permissionless** and idempotent. Requires `block.timestamp >= reviewEnd`. On first successful call, computes `blocked = (blockStakeWeight * 10_000 >= blockQuorumBps * totalStakeAtOpen)`, sets `resolved = true`, and if `blocked`, invokes internal `_slashApprovers`. Returns cached `blocked` on subsequent calls. Governor calls this defensively from `_resolveState`; guardians/keepers can also call it to trigger slashing without waiting for someone to execute.
-- `resolveEmergencyReview(uint256 proposalId) returns (bool blocked)` — **permissionless** and idempotent. Same shape as `resolveReview` but resolves the emergency-settle window and invokes `_slashOwner` when blocked.
+- `openEmergencyReview(uint256 proposalId, bytes32 callsHash)` — **onlyGovernor**. Commits the calldata hash when owner calls `emergencySettleWithCalls`. Opens the window and snapshots `totalStakeAtOpen` immediately (unlike the proposal-review path, there's no earlier vote to piggyback on).
+- `resolveReview(uint256 proposalId) returns (bool blocked)` — **permissionless** and idempotent. Reads `reviewEnd` from the governor; requires `block.timestamp >= reviewEnd`. If no `Review` was ever created (no votes cast), returns `blocked = false` immediately. Otherwise computes `blocked = (blockStakeWeight * 10_000 >= blockQuorumBps * totalStakeAtOpen)`, sets `resolved = true`, and if `blocked`, invokes internal `_slashApprovers`. Returns cached `blocked` on subsequent calls. Governor calls this defensively from `_resolveState`; guardians/keepers can also call it to trigger slashing without waiting for someone to execute.
+- `resolveEmergencyReview(uint256 proposalId) returns (bool blocked)` — **permissionless** and idempotent. Same shape as `resolveReview` but resolves the emergency-settle window (using its own `reviewEnd` stored on the `EmergencyReview` struct) and invokes `_slashOwner` when blocked.
+
+**Note on lifecycle integration:** the Pending → GuardianReview transition happens implicitly via `_resolveStateView` once `block.timestamp > voteEnd`. No external registry call is required at transition time — the registry only learns about the proposal when a guardian casts the first vote (or when `resolveReview` is called after `reviewEnd`).
 
 Factory hook (onlyFactory):
 - `bindOwnerStake(address owner, address vault)` — consumes `_prepared[owner]`, binds it as `_ownerStakes[vault]`. Reverts if no prepared stake.
@@ -167,16 +168,15 @@ Views:
 Minimal changes, scoped to what the governor has to know.
 
 - **Enum:** append `GuardianReview` at end of `ProposalState`. New order: `{Draft, Pending, Approved, Rejected, Expired, Executed, Settled, Cancelled, GuardianReview}`. Appending (not inserting) preserves existing storage slots for in-flight proposals on test deployments; on mainnet this is a fresh redeploy under `feat/mainnet-redeployment-params`.
-- **Struct:** append `uint256 reviewEnd` at end of `StrategyProposal`. Storage-safe append (mapping entries are independent slots).
+- **Struct:** append `uint256 reviewEnd` at end of `StrategyProposal`. Storage-safe append (mapping entries are independent slots). Stamped at proposal creation alongside `voteEnd` and `executeBy`.
 - **Storage:** add `address private _guardianRegistry` and reduce `__gap` by one.
 - **Initializer:** accept `guardianRegistry` address.
+- **`propose()`:** after computing `voteEnd` (non-collaborative) or when collaborative consent completes in **`approveCollaboration()`**, stamp `reviewEnd = voteEnd + registry.reviewPeriod()` and shift `executeBy = reviewEnd + executionWindow` (execution window is measured from the *end of guardian review*, not the end of voting). This keeps the full lifecycle deterministic from creation — no mid-flight parameter drift and no registry call needed at Pending → GuardianReview transition.
 - **`_resolveStateView` / `_resolveState`:** when `stored == Pending` and voting ended with no veto quorum:
-  - Transition to `GuardianReview` (not directly to `Approved`).
-  - Mutator path (`_resolveState`) calls `registry.openReview(proposalId)` to stamp `reviewEnd`.
-  - When `stored == GuardianReview`:
-    - If `block.timestamp < reviewEnd`: remain in `GuardianReview`.
-    - Else: call `registry.resolveReview(proposalId)` → if `blocked == true`, transition to `Rejected` (and registry auto-slashes approvers during the resolve call). Else transition to `Approved`.
-  - `Approved` → `Expired` logic is unchanged.
+  - If `block.timestamp <= proposal.reviewEnd`: return `GuardianReview` (lazy transition; no registry call).
+  - Else: call `registry.resolveReview(proposalId)` → if `blocked == true`, transition to `Rejected` (registry auto-slashes approvers inside `resolveReview`). Else transition to `Approved`.
+  - When `stored == GuardianReview`: same logic as above after voteEnd.
+  - `Approved` → `Expired` logic is unchanged, just using the shifted `executeBy`.
 - **`executeProposal`:** unchanged preconditions — still requires `state == Approved`. (The new gate is earlier: `Approved` is now only reachable after successful guardian review.)
 - **`vetoProposal`:** narrow — allow only `Pending` state. Remove `Approved`/`GuardianReview` branch. (Rationale: once the proposal is in `GuardianReview`, owner unilateral veto is disempowering to guardians and bypasses the economic-security layer.)
 - **`emergencyCancel`:** narrow — allow only `Draft` and `Pending`. Remove `Approved`/`GuardianReview` branches. In those states, if owner wants to stop execution, they stake WOOD as a guardian and vote Block like everyone else.
@@ -197,22 +197,23 @@ Minimal changes, scoped to what the governor has to know.
 
 New enum value, new struct field, new errors, new events, new function signatures:
 
-- Errors: `NotInGuardianReview`, `EmergencySettleBlocked`, `EmergencySettleNotReady`, `EmergencySettleMismatch`, `ReviewAlreadyOpen`, `RegistryNotSet`.
+- Errors: `NotInGuardianReview`, `EmergencySettleBlocked`, `EmergencySettleNotReady`, `EmergencySettleMismatch`, `RegistryNotSet`.
 - Events: `GuardianReviewOpened(uint256 indexed proposalId, uint256 reviewEnd)`, `GuardianReviewResolved(uint256 indexed proposalId, bool blocked)`, `EmergencySettleProposed(uint256 indexed proposalId, address indexed owner, bytes32 callsHash, uint256 reviewEnd)`, `EmergencySettleFinalized(uint256 indexed proposalId, int256 pnl)`, `GuardianRegistryUpdated(address old, address new)`.
 - Function changes: drop `emergencySettle`; add `unstick`, `emergencySettleWithCalls`, `finalizeEmergencySettle`.
 
 ## 4. Data flow — key scenarios
 
 **Normal happy path:**
-1. Agent submits proposal → `Pending` → voting → `GuardianReview` (governor calls `registry.openReview`).
-2. Guardians vote Approve (majority) / Block (minority); neither hits block quorum.
-3. `reviewEnd` elapses. Anyone calls `executeProposal`; governor calls `registry.resolveReview` first → `resolved=true, blocked=false`. Transitions to `Approved` then immediately proceeds through execution logic.
-4. Strategy runs; proposer calls `settleProposal`. Proposal → `Settled`. No slashing.
+1. Agent submits proposal → `Pending` → voting. On `propose()` the governor already stamped `reviewEnd = voteEnd + reviewPeriod` and `executeBy = reviewEnd + executionWindow`.
+2. `voteEnd` elapses. State derivation in `_resolveStateView` returns `GuardianReview` (no transactions needed).
+3. Guardians vote Approve (majority) / Block (minority); first vote snapshots `totalStakeAtOpen` in the registry. Neither tally hits block quorum.
+4. `reviewEnd` elapses. Anyone calls `executeProposal`; governor calls `registry.resolveReview` defensively → `resolved=true, blocked=false`. Transitions to `Approved` then immediately proceeds through execution logic.
+5. Strategy runs; proposer calls `settleProposal`. Proposal → `Settled`. No slashing.
 
 **Malicious-calldata detection during review:**
-1. Proposal reaches `GuardianReview`.
-2. Guardian A, B, C vote Approve at hour 2. Guardian D, E, F, G vote Block starting at hour 10. Combined Block stake weight crosses `blockQuorumBps` threshold at hour 14.
-3. `reviewEnd` elapses at hour 24. Anyone calls `executeProposal` (or a permissionless `resolveReview`). Governor sees `blocked=true` → transitions to `Rejected`; registry slashes A, B, C stake → treasury.
+1. `voteEnd` elapses. Proposal implicitly enters `GuardianReview`.
+2. Guardian A, B, C vote Approve at hour 2. First vote stakes the quorum denominator. Guardian D, E, F, G vote Block starting at hour 10. Combined Block stake weight crosses `blockQuorumBps` threshold at hour 14.
+3. Anyone can call `registry.resolveReview` as soon as `reviewEnd` elapses at hour 24 (don't need to wait for the first execute attempt). Registry sees `blocked=true`, slashes A, B, C, and returns `true`. Next call to governor state resolution transitions the proposal to `Rejected`.
 
 **Owner abuses emergency settle:**
 1. Proposal executes cleanly. Strategy runs its duration.
