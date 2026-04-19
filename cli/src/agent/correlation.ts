@@ -94,7 +94,10 @@ export class CorrelationGuard {
       const cacheAge = Date.now() - cached.timestamp;
       const CACHE_DURATION = 60 * 60 * 1000; // 60 minutes — CG free-tier rate limits
       //                                        punish frequent 90-day OHLC calls.
-      if (cacheAge < CACHE_DURATION) {
+      // Also skip the cache if the stored structure is a fallback (price === 0).
+      // Legacy cache files written before the fallback-caching fix may hold the
+      // neutral sentinel; we want to re-attempt the fetch instead of serving it.
+      if (cacheAge < CACHE_DURATION && cached.btcStructure.price > 0) {
         return cached.btcStructure;
       }
     } catch {
