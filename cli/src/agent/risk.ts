@@ -3,6 +3,7 @@
  */
 
 import chalk from 'chalk';
+import type { UncertaintyMetrics } from './calibration-live.js';
 
 export interface PortfolioState {
   totalValue: number;
@@ -439,6 +440,48 @@ export class RiskManager {
     }
 
     return { quantity, sizeUsd, riskUsd };
+  }
+
+  /**
+   * Enhanced position sizing with uncertainty-aware scaling.
+   * Applies uncertainty multiplier to reduce position size in high-uncertainty conditions.
+   */
+  calculateUncertaintyAwarePositionSize(
+    entryPrice: number,
+    stopLossPrice: number,
+    portfolioValue: number,
+    uncertaintyMetrics: UncertaintyMetrics,
+    maxRiskPercent?: number,
+  ): {
+    quantity: number;
+    sizeUsd: number;
+    riskUsd: number;
+    baseSize: number; // Size before uncertainty adjustment
+    uncertaintyAdjustment: number; // Multiplier applied
+  } {
+    // Get base position size using existing logic
+    const basePosition = this.calculatePositionSize(
+      entryPrice,
+      stopLossPrice,
+      portfolioValue,
+      maxRiskPercent
+    );
+
+    // Apply uncertainty scaling to size (not risk - keep risk budget consistent)
+    const adjustedSizeUsd = basePosition.sizeUsd * uncertaintyMetrics.sizeMultiplier;
+    const adjustedQuantity = adjustedSizeUsd / entryPrice;
+
+    // Risk stays proportional to adjusted position
+    const riskPerUnit = Math.abs(entryPrice - stopLossPrice);
+    const adjustedRiskUsd = adjustedQuantity * riskPerUnit;
+
+    return {
+      quantity: adjustedQuantity,
+      sizeUsd: adjustedSizeUsd,
+      riskUsd: adjustedRiskUsd,
+      baseSize: basePosition.sizeUsd,
+      uncertaintyAdjustment: uncertaintyMetrics.sizeMultiplier,
+    };
   }
 
   /** Check drawdown limits — returns true if trading should be paused */

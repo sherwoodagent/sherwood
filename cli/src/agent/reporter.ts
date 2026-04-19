@@ -35,6 +35,19 @@ export class Reporter {
       lines.push('  │ No actionable signals this cycle.');
     }
 
+    // Actionable signals telemetry
+    if (result.actionableSignals && result.actionableSignals.length > 0) {
+      lines.push(chalk.dim('  │'));
+      lines.push(chalk.bold('  │ Decision Telemetry:'));
+      for (const actionable of result.actionableSignals) {
+        const cal = actionable.calibrationFactor.toFixed(2);
+        const unc = actionable.uncertaintyLevel.charAt(0).toUpperCase(); // L/M/H
+        const size = actionable.sizeMultiplier.toFixed(1);
+
+        lines.push(`  │   ${actionable.token.padEnd(14)} cal:${cal}x unc:${unc} size:${size}x`);
+      }
+    }
+
     lines.push(chalk.dim('  ├──────────────────────────────────────────────────┤'));
 
     // Portfolio — show total PnL% since inception + realized (drawdown-gate driver) + unrealized (mark-to-market).

@@ -27,7 +27,9 @@ import { FundingRateProvider } from "../providers/data/funding-rate.js";
 import { TokenUnlocksProvider } from "../providers/data/token-unlocks.js";
 import { TwitterSentimentProvider } from "../providers/data/twitter.js";
 import { logSignal } from "./signal-logger.js";
-import type { JudgeLogData } from "./signal-logger.js";
+import type { JudgeLogData, CalibrationLogData } from "./signal-logger.js";
+import { LiveCalibrator } from './calibration-live.js';
+import { computeCalibratedTradeDecision } from './scoring.js';
 import { judge, selectJudgeCandidates, DEFAULT_JUDGE_CONFIG } from "./judge.js";
 import type { JudgeConfig, JudgeVerdict, JudgeContext } from "./judge.js";
 import { SignalSmoother, FileSmootherStorage, DEFAULT_SMOOTHER_CONFIG } from "./signal-smoother.js";
@@ -114,6 +116,7 @@ export class TradingAgent {
   private correlationGuard: CorrelationGuard;
   private alertSystem: AlertSystem;
   private smoother: SignalSmoother | null = null;
+  private liveCalibrator: LiveCalibrator;
   /** Optional getter for current portfolio state. When set, judge receives
    *  real portfolio context (openCount, cashPct, etc.); otherwise judge falls
    *  back to neutral defaults and its portfolio-veto branch is effectively
@@ -135,6 +138,7 @@ export class TradingAgent {
     this.regimeDetector = new MarketRegimeDetector();
     this.correlationGuard = new CorrelationGuard();
     this.alertSystem = new AlertSystem();
+    this.liveCalibrator = new LiveCalibrator();
   }
 
   /** Analyze a single token — gather all data and score. */
@@ -770,7 +774,38 @@ export class TradingAgent {
             cached: result.judgeResult.cached,
           }
         : undefined;
-      logSignal(result, price, resolvedWeights, judgeData);
+
+      // Calculate calibration and uncertainty metrics
+      let calibrationData: CalibrationLogData | undefined;
+      try {
+        // Get action family for calibration
+        const actionFamily = result.decision.action.includes('BUY') ? 'BUY' :
+                            result.decision.action.includes('SELL') ? 'SELL' : 'HOLD';
+
+        // Get calibration factor
+        const calibrationFactor = this.liveCalibrator.getCalibrationFactor(
+          result.token,
+          result.regime?.regime ?? 'unknown',
+          actionFamily
+        );
+
+        // Calculate uncertainty metrics (using available signals, simple price array)
+        const recentPrices = price > 0 ? [price] : []; // Simplified - use current price only
+        const uncertaintyMetrics = this.liveCalibrator.calculateUncertainty(
+          result.decision.signals,
+          recentPrices,
+          result.token
+        );
+
+        calibrationData = {
+          calibrationFactor,
+          uncertaintyMetrics
+        };
+      } catch (error) {
+        console.warn(`[calibration] Warning: failed to calculate calibration for ${result.token}: ${(error as Error).message}`);
+      }
+
+      logSignal(result, price, resolvedWeights, judgeData, calibrationData);
     }
 
     return results;

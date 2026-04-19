@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import type { TokenAnalysis } from './index.js';
 import type { ScoringWeights } from './scoring.js';
 import type { JudgeVerdict } from './judge.js';
+import type { CalibrationFactor, UncertaintyMetrics } from './calibration-live.js';
 
 const SIGNAL_DIR = join(homedir(), '.sherwood', 'agent');
 const SIGNAL_FILE = join(SIGNAL_DIR, 'signal-history.jsonl');
@@ -34,6 +35,12 @@ export interface SignalLogEntry {
   preJudgeScore?: number;
   judgeLatencyMs?: number;
   judgeCached?: boolean;
+  // Calibration fields (v2 — regime-aware performance tracking)
+  calibrationFactor?: number;
+  calibrationReason?: string;
+  uncertaintyLevel?: 'low' | 'medium' | 'high';
+  uncertaintyScore?: number;
+  sizeMultiplier?: number;
 }
 
 export interface JudgeLogData {
@@ -42,6 +49,11 @@ export interface JudgeLogData {
   preJudgeScore: number;
   latencyMs: number;
   cached: boolean;
+}
+
+export interface CalibrationLogData {
+  calibrationFactor: CalibrationFactor;
+  uncertaintyMetrics: UncertaintyMetrics;
 }
 
 /**
@@ -53,9 +65,10 @@ export function logSignal(
   price: number,
   weights: ScoringWeights,
   judgeData?: JudgeLogData,
+  calibrationData?: CalibrationLogData,
 ): void {
   // Fire-and-forget — do not await
-  _writeSignal(analysis, price, weights, judgeData).catch((err) => {
+  _writeSignal(analysis, price, weights, judgeData, calibrationData).catch((err) => {
     console.error(`[signal-logger] Warning: failed to log signal: ${(err as Error).message}`);
   });
 }
@@ -65,6 +78,7 @@ async function _writeSignal(
   price: number,
   weights: ScoringWeights,
   judgeData?: JudgeLogData,
+  calibrationData?: CalibrationLogData,
 ): Promise<void> {
   await mkdir(SIGNAL_DIR, { recursive: true });
 
@@ -112,6 +126,15 @@ async function _writeSignal(
       preJudgeScore: judgeData.preJudgeScore,
       judgeLatencyMs: judgeData.latencyMs,
       judgeCached: judgeData.cached,
+    } : {}),
+    // Calibration fields (additive — omitted when calibration is off)
+    ...(calibrationData ? {
+      calibrationFactor: calibrationData.calibrationFactor.factor,
+      calibrationReason: calibrationData.calibrationFactor.reason,
+      uncertaintyLevel: calibrationData.uncertaintyMetrics.level,
+      uncertaintyScore: calibrationData.uncertaintyMetrics.scoreDispersion +
+                      calibrationData.uncertaintyMetrics.recentVolatility,
+      sizeMultiplier: calibrationData.uncertaintyMetrics.sizeMultiplier,
     } : {}),
   };
 

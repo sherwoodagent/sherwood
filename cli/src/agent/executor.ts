@@ -10,6 +10,7 @@ import type { TradeDecision } from './scoring.js';
 import type { Position } from './risk.js';
 import { RiskManager } from './risk.js';
 import { PortfolioTracker } from './portfolio.js';
+import type { UncertaintyMetrics } from './calibration-live.js';
 import { BASE_STRATEGY_ABI } from '../lib/abis.js';
 import { hyperevm, hyperevmTestnet } from '../lib/network.js';
 
@@ -96,6 +97,7 @@ export class TradeExecutor {
     tokenId: string,
     currentPrice: number,
     atr?: number,
+    uncertaintyMetrics?: UncertaintyMetrics,
   ): Promise<{
     success: boolean;
     position?: Position;
@@ -206,12 +208,22 @@ export class TradeExecutor {
     // sizing was clamped, then multiplied by conviction after, yielding 30%
     // sizes on score ≥ 0.35 and 40% on score ≥ 0.45 against a 20% cap).
     const conviction = convictionMultiplier(decision.score);
-    const sizing = this.riskManager.calculatePositionSize(
-      currentPrice,
-      stopLossPrice,
-      state.totalValue,
-      this.riskManager.getRiskPerTrade() * conviction,
-    );
+
+    // Use uncertainty-aware position sizing if metrics are available
+    const sizing = uncertaintyMetrics
+      ? this.riskManager.calculateUncertaintyAwarePositionSize(
+          currentPrice,
+          stopLossPrice,
+          state.totalValue,
+          uncertaintyMetrics,
+          this.riskManager.getRiskPerTrade() * conviction,
+        )
+      : this.riskManager.calculatePositionSize(
+          currentPrice,
+          stopLossPrice,
+          state.totalValue,
+          this.riskManager.getRiskPerTrade() * conviction,
+        );
 
     // Pyramid haircut shrinks size for each subsequent add (base 1.0x → 0.5x → 0.25x).
     const pyramidQuantity = sizing.quantity * sizeMultiplier;

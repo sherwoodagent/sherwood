@@ -17,6 +17,7 @@ import { CoinGeckoProvider } from '../providers/data/coingecko.js';
 import { Reporter } from './reporter.js';
 import { DynamicTokenSelector } from './token-selector.js';
 import { PriceValidator } from './price-validator.js';
+import { LiveCalibrator } from './calibration-live.js';
 
 export interface LoopConfig {
   agent: AgentConfig;
@@ -49,6 +50,14 @@ export interface CycleResult {
   /** Cumulative PnL as a fraction of initial value (e.g. +0.0162 = +1.62%). */
   totalPnlPct: number;
   errors: string[];
+  /** Calibration telemetry */
+  actionableSignals?: Array<{
+    token: string;
+    action: string;
+    calibrationFactor: number;
+    uncertaintyLevel: string;
+    sizeMultiplier: number;
+  }>;
 }
 
 export class AgentLoop {
@@ -61,6 +70,7 @@ export class AgentLoop {
   private riskManager: RiskManager;
   private coingecko: CoinGeckoProvider;
   private reporter: Reporter;
+  private liveCalibrator: LiveCalibrator;
   /** Rejects bad-price ticks (floor + 20% delta cap). Persisted to disk so
    *  anchors survive across cron invocations. */
   private priceValidator: PriceValidator;
@@ -76,6 +86,7 @@ export class AgentLoop {
     this.executor = new TradeExecutor(config.execution, this.riskManager, this.portfolio);
     this.coingecko = new CoinGeckoProvider();
     this.reporter = new Reporter();
+    this.liveCalibrator = new LiveCalibrator();
     this.priceValidator = new PriceValidator();
     // Wire real portfolio state into the judge (replaces hardcoded zeros).
     this.agent.setPortfolioStateGetter(() => this.lastPortfolioState);
@@ -275,6 +286,7 @@ export class AgentLoop {
 
     // 5. Collect signals and execute trades for actionable ones
     const signals: CycleResult['signals'] = [];
+    const actionableSignals: CycleResult['actionableSignals'] = [];
 
     for (const result of results) {
       const { action, score } = result.decision;
@@ -305,7 +317,53 @@ export class AgentLoop {
 
           const currentPrice = check.price;
           const atr = result.data?.technicalSignals?.atr;
-          const execResult = await this.executor.execute(result.decision, result.token, currentPrice, atr);
+
+          // Calculate calibration and uncertainty metrics for position sizing
+          let uncertaintyMetrics;
+          let calibrationFactor = 1.0;
+          let uncertaintyLevel = 'medium';
+          let sizeMultiplier = 0.8;
+
+          try {
+            const recentPrices = [currentPrice]; // Simplified - use current price only
+            uncertaintyMetrics = this.liveCalibrator.calculateUncertainty(
+              result.decision.signals,
+              recentPrices,
+              result.token
+            );
+
+            // Get calibration factor for telemetry
+            const actionFamily = action.includes('BUY') ? 'BUY' : 'SELL';
+            const calibrationData = this.liveCalibrator.getCalibrationFactor(
+              result.token,
+              result.regime?.regime ?? 'unknown',
+              actionFamily as 'BUY' | 'SELL'
+            );
+
+            calibrationFactor = calibrationData.factor;
+            uncertaintyLevel = uncertaintyMetrics.level;
+            sizeMultiplier = uncertaintyMetrics.sizeMultiplier;
+
+          } catch (error) {
+            console.warn(`[calibration] Warning: failed to calculate metrics for ${result.token}: ${(error as Error).message}`);
+          }
+
+          // Collect actionable signal telemetry
+          actionableSignals?.push({
+            token: result.token,
+            action,
+            calibrationFactor,
+            uncertaintyLevel,
+            sizeMultiplier
+          });
+
+          const execResult = await this.executor.execute(
+            result.decision,
+            result.token,
+            currentPrice,
+            atr,
+            uncertaintyMetrics
+          );
           if (execResult.success) {
             tradesExecuted++;
             console.log(this.executor.formatExecution(execResult));
@@ -340,6 +398,7 @@ export class AgentLoop {
       totalPnlUsd,
       totalPnlPct: totalPnlUsd / initVal,
       errors,
+      actionableSignals: actionableSignals?.length > 0 ? actionableSignals : undefined,
     };
 
     // 7. Log and report

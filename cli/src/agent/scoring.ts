@@ -6,6 +6,7 @@ import type { TechnicalSignals } from "./technical.js";
 import { clamp } from "./utils.js";
 import type { CorrelationCheck } from "./correlation.js";
 import type { MarketRegime } from "./regime.js";
+import { LiveCalibrator, type CalibrationFactor, type UncertaintyMetrics } from './calibration-live.js';
 
 export interface Signal {
   name: string;
@@ -97,6 +98,17 @@ export interface TradeDecision {
   timestamp: number;
   /** Thresholds actually used to decide action — for audit + backtest replay. */
   thresholds?: ActionThresholds;
+}
+
+export interface CalibratedTradeDecision extends TradeDecision {
+  /** Original score before calibration applied */
+  originalScore: number;
+  /** Original confidence before calibration applied */
+  originalConfidence: number;
+  /** Calibration factor applied to score and confidence */
+  calibrationFactor: CalibrationFactor;
+  /** Uncertainty metrics affecting position sizing */
+  uncertaintyMetrics: UncertaintyMetrics;
 }
 
 /** BUY/SELL action thresholds. All values are score cutoffs in [-1, 1]. */
@@ -678,5 +690,92 @@ export function computeTradeDecision(
     confidence,
     timestamp: Date.now(),
     thresholds,
+  };
+}
+
+/**
+ * Enhanced computeTradeDecision with regime-aware calibration and uncertainty sizing.
+ * Applies calibration factors based on historical performance and calculates uncertainty metrics.
+ */
+export function computeCalibratedTradeDecision(
+  tokenId: string,
+  signals: Signal[],
+  recentPrices: number[],
+  weights?: ScoringWeights,
+  regimeAdjustments?: Record<string, number>,
+  correlationCheck?: CorrelationCheck,
+  regime?: MarketRegime,
+  x402Available?: boolean,
+  calibrator?: LiveCalibrator,
+): CalibratedTradeDecision {
+  // Get base decision using existing logic
+  const baseDecision = computeTradeDecision(
+    signals,
+    weights,
+    regimeAdjustments,
+    correlationCheck,
+    regime,
+    x402Available
+  );
+
+  // Store original values
+  const originalScore = baseDecision.score;
+  const originalConfidence = baseDecision.confidence;
+
+  // Initialize calibrator if not provided
+  const liveCalibrator = calibrator ?? new LiveCalibrator();
+
+  // Get calibration factor based on regime and action
+  const actionFamily = baseDecision.action.includes('BUY') ? 'BUY' :
+                      baseDecision.action.includes('SELL') ? 'SELL' : 'HOLD';
+
+  const calibrationFactor = liveCalibrator.getCalibrationFactor(
+    tokenId,
+    regime ?? 'unknown',
+    actionFamily
+  );
+
+  // Calculate uncertainty metrics
+  const uncertaintyMetrics = liveCalibrator.calculateUncertainty(
+    signals,
+    recentPrices,
+    tokenId
+  );
+
+  // Apply calibration factor to score and confidence
+  let calibratedScore = originalScore * calibrationFactor.factor;
+  let calibratedConfidence = originalConfidence * calibrationFactor.factor;
+
+  // Clamp values to valid ranges
+  calibratedScore = Math.max(-1, Math.min(1, calibratedScore));
+  calibratedConfidence = Math.max(0, Math.min(1, calibratedConfidence));
+
+  // Re-determine action with calibrated score
+  const thresholds = baseDecision.thresholds!;
+  let action: TradeDecision["action"];
+  if (calibratedScore >= thresholds.strongBuy) action = "STRONG_BUY";
+  else if (calibratedScore >= thresholds.buy) action = "BUY";
+  else if (calibratedScore <= thresholds.strongSell) action = "STRONG_SELL";
+  else if (calibratedScore <= thresholds.sell) action = "SELL";
+  else action = "HOLD";
+
+  // Build enhanced reasoning
+  const calibrationNote = calibrationFactor.factor !== 1.0 ?
+    `\n[Calibration] Applied ${calibrationFactor.factor.toFixed(2)}x factor: ${calibrationFactor.reason}` : '';
+  const uncertaintyNote = uncertaintyMetrics.sizeMultiplier !== 1.0 ?
+    `\n[Uncertainty] ${uncertaintyMetrics.level} uncertainty → ${uncertaintyMetrics.sizeMultiplier}x position size` : '';
+
+  return {
+    action,
+    score: calibratedScore,
+    signals: baseDecision.signals,
+    reasoning: baseDecision.reasoning + calibrationNote + uncertaintyNote,
+    confidence: calibratedConfidence,
+    timestamp: baseDecision.timestamp,
+    thresholds: baseDecision.thresholds,
+    originalScore,
+    originalConfidence,
+    calibrationFactor,
+    uncertaintyMetrics,
   };
 }
