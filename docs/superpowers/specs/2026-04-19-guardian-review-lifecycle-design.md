@@ -126,9 +126,7 @@ uint256 public minGuardianStake;  // default: 10_000 WOOD
 uint256 public minOwnerStake;     // default: 10_000 WOOD  (floor — see §5 and requiredOwnerBond below)
 uint256 public ownerStakeTvlBps;  // default: 0 (disabled). bounds [0, 500] = 5% cap. Bond = max(floor, totalAssets*bps/10_000) at bind time
 uint256 public coolDownPeriod;    // default: 7 days
-uint256 public defaultReviewPeriod; // default: 24 hours (used when proposer passes 0)
-uint256 public minReviewPeriod;   // default: 6 hours  (lower bound on per-proposal override)
-uint256 public maxReviewPeriod;   // default: 7 days   (upper bound on per-proposal override)
+uint256 public reviewPeriod;      // default: 24 hours (single global value; no per-proposal override)
 uint256 public blockQuorumBps;    // default: 3000 (30% of total guardian stake)
 // Note: per-epoch reward *budget* is set by the protocol each epoch via fundEpoch() — no static rate
 //       parameter. See epochBudget mapping above and §11 (Follow-up: Minter emissions integration).
@@ -187,7 +185,7 @@ Reward distribution (Block-side, epoch-based):
 - Note: no reward for correct Approve in V1. Correct-Approve rewards (the full "good guardians rewarded weekly" loop from issue #227) are deferred to V1.5 with EAS. V1 only rewards the *active-defence* action (Block) because that is the one that materially prevented an LP loss.
 
 Parameter setters (timelocked — reuses `GovernorParameters` timelock pattern):
-- `setMinGuardianStake`, `setMinOwnerStake`, `setOwnerStakeTvlBps`, `setCoolDownPeriod`, `setDefaultReviewPeriod`, `setMinReviewPeriod`, `setMaxReviewPeriod`, `setBlockQuorumBps`.
+- `setMinGuardianStake`, `setMinOwnerStake`, `setOwnerStakeTvlBps`, `setCoolDownPeriod`, `setReviewPeriod`, `setBlockQuorumBps`.
 - `setMinter(address)` — owner-only, timelocked. Authorizes the Minter to call `fundEpoch` directly once emissions integration lands (V1.5).
 
 Views:
@@ -200,12 +198,12 @@ Views:
 
 Minimal changes, scoped to what the governor has to know.
 
-- **Enum:** append `GuardianReview` at end of `ProposalState`. New order: `{Draft, Pending, Approved, Rejected, Expired, Executed, Settled, Cancelled, GuardianReview}`. Appending (not inserting) preserves existing storage slots for in-flight proposals on test deployments; on mainnet this is a fresh redeploy under `feat/mainnet-redeployment-params`.
-- **Struct:** append `uint256 reviewEnd` at end of `StrategyProposal`. Storage-safe append (mapping entries are independent slots). Stamped at proposal creation alongside `voteEnd` and `executeBy`.
-- **Storage:** add `address private _guardianRegistry` and reduce `__gap` by one.
+- **Enum:** insert `GuardianReview` between `Pending` and `Approved` in `ProposalState`. Full ordering: `{Draft, Pending, GuardianReview, Approved, Rejected, Expired, Executed, Settled, Cancelled}`. All contracts are being redeployed on `feat/mainnet-redeployment-params` — no need to preserve existing enum slot values.
+- **Struct:** add `uint256 reviewEnd` to `StrategyProposal`. Stamped at proposal creation alongside `voteEnd` and `executeBy`.
+- **Storage:** add `address private _guardianRegistry`. Governor storage layout is fresh — no `__gap` gymnastics needed.
 - **Initializer:** accept `guardianRegistry` address.
-- **`propose()` signature change:** adds a trailing `uint256 reviewPeriodOverride` parameter. Proposer passes `0` to use `registry.defaultReviewPeriod()`, or a concrete value in `[registry.minReviewPeriod(), registry.maxReviewPeriod()]`. This gives time-sensitive strategies (funding-rate, oracle-reactive) a path to a shorter review at the cost of a higher perceived risk to guardians. Governor reverts with `InvalidReviewPeriod` if the override is outside the registry bounds at propose time.
-- **`propose()` body:** after computing `voteEnd` (non-collaborative) or when collaborative consent completes in **`approveCollaboration()`**, stamp `reviewEnd = voteEnd + resolvedReviewPeriod` and shift `executeBy = reviewEnd + executionWindow` (execution window is measured from the *end of guardian review*, not the end of voting). This keeps the full lifecycle deterministic from creation — no mid-flight parameter drift and no registry call needed at Pending → GuardianReview transition.
+- **`propose()` signature:** unchanged from today (no `reviewPeriodOverride`). Single global `reviewPeriod` from the registry applies to every proposal. If specific strategies later demand shorter windows, that belongs in V1.5 alongside stake-at-risk controls for the proposer — not as a free knob in V1.
+- **`propose()` body:** after computing `voteEnd` (non-collaborative) or when collaborative consent completes in **`approveCollaboration()`**, stamp `reviewEnd = voteEnd + registry.reviewPeriod()` and shift `executeBy = reviewEnd + executionWindow` (execution window is measured from the *end of guardian review*, not the end of voting). This keeps the full lifecycle deterministic from creation — no mid-flight parameter drift and no registry call needed at Pending → GuardianReview transition.
 - **`_resolveStateView` (view, non-mutating):** when `stored == Pending` and voting ended with no veto quorum:
   - If `block.timestamp <= proposal.reviewEnd`: return `GuardianReview`.
   - Else: **still return `GuardianReview`** until `_resolveState` (mutating path) runs `registry.resolveReview`. Read `registry.getReview(proposalId).resolved` — if `true`, return `Rejected` or `Approved` based on `blocked`. If `false`, return `GuardianReview` (resolution pending; the caller must run a mutating function to force resolution).
@@ -236,10 +234,10 @@ Minimal changes, scoped to what the governor has to know.
 
 New enum value, new struct field, new errors, new events, new function signatures:
 
-- Errors: `NotInGuardianReview`, `EmergencySettleBlocked`, `EmergencySettleNotReady`, `EmergencySettleMismatch`, `RegistryNotSet`, `InvalidReviewPeriod`.
-- Events (governor-side): `GuardianReviewResolved(uint256 indexed proposalId, bool blocked)`, `ReviewPeriodOverridden(uint256 indexed proposalId, address indexed proposer, uint256 requestedPeriod)` (emitted from `propose()` when `reviewPeriodOverride != 0` so guardian agents can prioritize compressed-window proposals), `EmergencySettleProposed(uint256 indexed proposalId, address indexed owner, bytes32 callsHash, uint256 reviewEnd)`, `EmergencySettleFinalized(uint256 indexed proposalId, int256 pnl)`, `GuardianRegistryUpdated(address old, address new)`.
-- Events (registry-side): `EpochFunded(uint256 indexed epochId, address indexed funder, uint256 amount)`, `EpochRewardClaimed(uint256 indexed epochId, address indexed guardian, uint256 amount)`, `EpochUnclaimedSwept(uint256 indexed fromEpoch, uint256 indexed toEpoch, uint256 amount)`, `ApproverCapReached(uint256 indexed proposalId)`, `BlockerCapReached(uint256 indexed proposalId)`.
-- Function changes: drop `emergencySettle`; add `unstick`, `emergencySettleWithCalls`, `finalizeEmergencySettle`. `propose()` now takes a trailing `uint256 reviewPeriodOverride` argument.
+- Errors: `NotInGuardianReview`, `EmergencySettleBlocked`, `EmergencySettleNotReady`, `EmergencySettleMismatch`, `RegistryNotSet`.
+- Events (governor-side): `GuardianReviewResolved(uint256 indexed proposalId, bool blocked)`, `EmergencySettleProposed(uint256 indexed proposalId, address indexed owner, bytes32 callsHash, uint256 reviewEnd)`, `EmergencySettleFinalized(uint256 indexed proposalId, int256 pnl)`, `GuardianRegistryUpdated(address old, address new)`.
+- Events (registry-side): `EpochFunded(uint256 indexed epochId, address indexed funder, uint256 amount)`, `EpochRewardClaimed(uint256 indexed epochId, address indexed guardian, uint256 amount)`, `EpochUnclaimedSwept(uint256 indexed fromEpoch, uint256 indexed toEpoch, uint256 amount)`, `ApproverCapReached(uint256 indexed proposalId)`.
+- Function changes: drop `emergencySettle`; add `unstick`, `emergencySettleWithCalls`, `finalizeEmergencySettle`. `propose()` signature unchanged (no `reviewPeriodOverride`).
 
 ## 4. Data flow — key scenarios
 
@@ -275,9 +273,7 @@ New enum value, new struct field, new errors, new events, new function signature
 | `minOwnerStake` | 10_000 WOOD | ≥ 1_000 WOOD | Lowered from 50k per business review — onboarding friction for small creators. Floor only; effective bond per vault = `requiredOwnerBond(vault)` (see below). |
 | `ownerStakeTvlBps` | 0 (disabled) | [0, 500] (5% cap) | TVL-scaling multiplier. Effective owner bond = `max(minOwnerStake, totalAssets * ownerStakeTvlBps / 10_000)`. V1 ships at 0 (flat floor). Multisig timelocked flip activates scaling without a code change. Bond is checked at bind / rotate time only — no periodic top-up in V1. |
 | `coolDownPeriod` | 7 days | 1–30 days | Matches issue #227; aligns with Sherwood's existing multi-day governance rhythms. |
-| `defaultReviewPeriod` | 24 hours | — | Used when proposer passes `reviewPeriodOverride = 0`. |
-| `minReviewPeriod` | 6 hours | 1h–defaultReviewPeriod | Floor on per-proposal override. 6h gives time-sensitive strategies (funding-rate, oracle-reactive) a fast path while still allowing guardian agents a single cron cycle to react. |
-| `maxReviewPeriod` | 7 days | defaultReviewPeriod–30 days | Ceiling on per-proposal override. |
+| `reviewPeriod` | 24 hours | 6h–7 days | Single global review window. No per-proposal override in V1 — if a strategy needs a shorter window, that's a V1.5 question tied to proposer stake-at-risk, not a V1 knob. |
 | `blockQuorumBps` | 3000 (30%) | 1000–10000 | Below 50% so a motivated guardian minority can stop clearly malicious proposals; high enough that random dissent doesn't grief. |
 | `EPOCH_DURATION` | 7 days | — (constant) | Matches the Minter emissions epoch so guardian rewards can be wired into the same weekly cycle once V1.5 lands. |
 | Per-epoch reward budget | **set per-epoch** | — | No static rate parameter. The protocol calls `fundEpoch(epochId, amount)` each epoch with whatever WOOD it chooses to allocate (initially via multisig; later via Minter emissions). Guardians split the epoch's pool pro-rata by their Block-vote stake weight on proposals that resolved blocked during that epoch. |
@@ -473,7 +469,7 @@ Applied from Carlos's review in response to blockers:
 ## 15. Changelog — Carlos follow-up review (2026-04-19 PR #229 second pass)
 
 - **Owner stake TVL scaling pipe wired (§15.3 resolved).** New `ownerStakeTvlBps` param (default 0, bounds [0, 500]). `requiredOwnerBond(vault)` view returns `max(minOwnerStake, totalAssets * ownerStakeTvlBps / 10_000)`. Enforced at `bindOwnerStake` and `transferOwnerStakeSlot` only — no periodic top-up. Parameter flip by multisig activates scaling without a code change.
-- **`ReviewPeriodOverridden` event added** (§3.4) — emitted from `propose()` when `reviewPeriodOverride != 0` so guardian agents can prioritize compressed-window proposals.
+- **`ReviewPeriodOverridden` event added** (§3.4) — emitted from `propose()` when `reviewPeriodOverride != 0` so guardian agents can prioritize compressed-window proposals. ~~_(later reverted in §17 — `reviewPeriodOverride` dropped as overkill)_~~
 - **`transferOwnerStakeSlot(vault, newOwner)` documented** as the registry-side onlyFactory hook called by `SyndicateFactory.rotateOwner` (§3.1). Fixes API-list omission noted in review.
 - **§15.1 (`unstick` owner-only) — resolved.** Confirmed; left as spec default.
 - **§15.2 (Slash Appeal Reserve sizing) — owned by tokenomics governance**, not this spec.
@@ -498,7 +494,31 @@ Why this shape:
 3. Self-regulating: epochs with many blocks → smaller per-block share (avoids over-rewarding during attack spikes). Epochs with no blocks → budget rolls forward to the next epoch via `sweepUnclaimed`.
 4. `fundEpoch(pastEpochId, amount)` is disallowed once any claim on that epoch has been processed — keeps accounting deterministic.
 
-## 17. Open questions (remaining)
+## 17. Changelog — simplification + ToB review feedback (2026-04-19)
+
+**Simplifications applied per user feedback:**
+
+- **Dropped `reviewPeriodOverride` entirely.** Removed the trailing `propose()` parameter, `minReviewPeriod` / `maxReviewPeriod` / `defaultReviewPeriod` split, `ReviewPeriodOverridden` event, and `InvalidReviewPeriod` error. Single global `reviewPeriod` (24h default) applies to every proposal. Per-proposal short windows return as a V1.5 question tied to proposer stake-at-risk. Side benefit: closes the time-compression attack vector flagged by the ToB `insecure-defaults` review (A1 #3).
+- **Dropped storage-layout preservation language.** All contracts are being redeployed on `feat/mainnet-redeployment-params` — enum values, struct field ordering, and `__gap` math are fresh. `GuardianReview` is inserted at its natural lifecycle position (between `Pending` and `Approved`) rather than appended at the end; `reviewEnd` is placed logically in the `StrategyProposal` struct.
+
+**ToB-style review findings still open (see §18 open questions):**
+
+Three parallel ToB skill reviews (`guidelines-advisor`, `insecure-defaults`, `entry-point-analyzer`) converged on a punch list that the next spec revision should address before implementation. Highest-impact items:
+
+- **Cold-start fail-open.** At cohort size 0–2, `totalStakeAtOpen = 0` and the review layer is effectively a no-op. Add `MIN_COHORT_STAKE_AT_OPEN` fallback to owner-veto semantics.
+- **Replace first-vote snapshot with permissionless `openReview(id)` keeper at `voteEnd`.** First-vote snapshot is manipulable (cartel votes dust, then unstakes honest supply elsewhere, leaving honest Block pushes against an inflated denominator).
+- **Pause mechanism + explicit `nonReentrant` on all WOOD-transfer exits.** Standard hardening for new economic contracts; currently implicit in the spec.
+- **Drop `MAX_BLOCKERS_PER_PROPOSAL`.** Only approvers need the cap (slashing iteration). Capping blockers creates a DoS against honest defence.
+- **Hardcode `MAX_REFUND_PER_EPOCH` in `refundSlash`.** "Capped per-epoch" must be enforced in code, not a doc promise.
+- **Registry address consistency.** Assert `governor.guardianRegistry() == factory.guardianRegistry()` on every lifecycle hook, or make immutable post-init.
+- **Vote-change stake gaming.** Forbid vote-change in the final 10% of the review window, or re-snapshot only on stake *increase*.
+- **Re-check `requiredOwnerBond` at `emergencySettleWithCalls`** — not just bind/rotate — so owners can't stake at TVL=0 and drain at TVL=$10M.
+- **Ship V1 with `ownerStakeTvlBps = 50`**, not 0. "Built the safety knob, left it off" is the classic fail-open pattern.
+- **Permissionless `sweepUnclaimed` after a longer delay** (12w not 4w) to prevent owner-key-abuse cycling unclaimed rewards.
+
+Full review output retained in the PR #229 comment thread.
+
+## 18. Open questions (remaining)
 
 1. **Slash Appeal Reserve sizing** — opening allocation and per-epoch refund cap. Owned by tokenomics governance (WOOD emissions + treasury allocation), not this spec. Will be resolved by a separate governance vote before mainnet launch.
 
