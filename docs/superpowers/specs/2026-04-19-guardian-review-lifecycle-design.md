@@ -113,7 +113,8 @@ mapping(uint256 => mapping(address => bool)) private _emergencyBlockVotes;
 
 // Parameters (timelocked; pattern mirrors GovernorParameters)
 uint256 public minGuardianStake;  // default: 10_000 WOOD
-uint256 public minOwnerStake;     // default: 10_000 WOOD  (lowered from 50k — see §5)
+uint256 public minOwnerStake;     // default: 10_000 WOOD  (floor — see §5 and requiredOwnerBond below)
+uint256 public ownerStakeTvlBps;  // default: 0 (disabled). bounds [0, 500] = 5% cap. Bond = max(floor, totalAssets*bps/10_000) at bind time
 uint256 public coolDownPeriod;    // default: 7 days
 uint256 public defaultReviewPeriod; // default: 24 hours (used when proposer passes 0)
 uint256 public minReviewPeriod;   // default: 6 hours  (lower bound on per-proposal override)
@@ -141,7 +142,7 @@ Guardian role:
 - `voteOnProposal(uint256 proposalId, VoteType support)` — `Approve` or `Block`. The registry reads `reviewEnd` from the governor via `ISyndicateGovernor.getProposal(proposalId)` and the proposal's `voteEnd`; vote is allowed only when `voteEnd <= now < reviewEnd`. On the first vote for a given proposalId, snapshots `_totalGuardianStake` into `Review.totalStakeAtOpen` — this fixes the quorum denominator and prevents dilution by late-joining stakers. **Guardians MAY change their vote up until `reviewEnd`.** Changing a vote subtracts the guardian's previously-recorded stake weight from the old side (Approve/Block), adds the same stake weight (snapshotted from first vote, not re-snapshotted) to the new side, and (for Approve → Block changes) removes the guardian from `_approvers[proposalId]`. Calling the function with the *same* support you already recorded reverts with `NoVoteChange`. Vote-change is essential because of the cartel attack: without it, an honest early Approver is strictly worse off than an abstainer, which kills the optimistic-Approve equilibrium the system needs.
 
 Owner role:
-- `prepareOwnerStake(uint256 amount)` — pull WOOD into the registry under `_prepared[msg.sender]`. Does **not** yet bind to a vault. Must be ≥ `minOwnerStake`. One prepared stake per owner at a time.
+- `prepareOwnerStake(uint256 amount)` — pull WOOD into the registry under `_prepared[msg.sender]`. Does **not** yet bind to a vault. Must be ≥ `minOwnerStake` (the floor) — at prepare time we don't know which vault the stake will bind to, so we can't check the TVL-scaled bond yet. If the chosen vault's TVL-scaled bond exceeds the prepared amount at `bindOwnerStake` time, the bind reverts and the owner must top up and re-bind. One prepared stake per owner at a time.
 - `cancelPreparedStake()` — only callable if not yet bound by the factory; refunds WOOD.
 - `requestUnstakeOwner(address vault)` — vault owner only. Signals intent to exit; begins cool-down. Unstaking is **blocked while the vault has an active proposal** (any state between `Pending` and `Executed`) to prevent rage-quit around malicious executions.
 - `claimUnstakeOwner(address vault)` — after cool-down, releases WOOD. Post-claim the vault is in a **grace-period** state (`ownerStaked == false`): new proposals cannot be created until owner re-binds a fresh stake.
@@ -153,8 +154,9 @@ Governor hooks:
 
 **Note on lifecycle integration:** the Pending → GuardianReview transition happens implicitly via `_resolveStateView` once `block.timestamp > voteEnd`. No external registry call is required at transition time — the registry only learns about the proposal when a guardian casts the first vote (or when `resolveReview` is called after `reviewEnd`).
 
-Factory hook (onlyFactory):
-- `bindOwnerStake(address owner, address vault)` — consumes `_prepared[owner]`, binds it as `_ownerStakes[vault]`. Reverts if no prepared stake.
+Factory hooks (onlyFactory):
+- `bindOwnerStake(address owner, address vault)` — consumes `_prepared[owner]`, binds it as `_ownerStakes[vault]`. Reverts if no prepared stake, or if prepared amount `< requiredOwnerBond(vault)`. For the factory-creation path `totalAssets()` is 0, so the TVL term is 0 and only the floor applies.
+- `transferOwnerStakeSlot(address vault, address newOwner)` — called from `SyndicateFactory.rotateOwner` after the previous owner's stake has been slashed or unstaked. Reassigns the vault's owner-stake slot to `newOwner`, who must have called `prepareOwnerStake` first with ≥ `requiredOwnerBond(vault)`. Reverts if the previous owner still has an active stake on this vault (guards against hostile takeover while a legitimate owner is staked).
 
 Emergency-settle vote:
 - `voteBlockEmergencySettle(uint256 proposalId)` — active guardians vote to block. Any single vote adds their stake weight to `blockStakeWeight`. When `blockStakeWeight >= blockQuorumBps * _totalGuardianStake / 10_000`, the review is flagged blocked (resolved at `resolveEmergencyReview` time).
@@ -170,10 +172,11 @@ Reward distribution (Block-side, V1 minimal):
 - Note: no reward for correct Approve in V1. Correct-Approve rewards (the full "good guardians rewarded weekly" loop from issue #227) are deferred to V1.5 with emissions + EAS. V1 only rewards the *active-defence* action (Block) because that is the one that materially prevented an LP loss.
 
 Parameter setters (timelocked — reuses `GovernorParameters` timelock pattern):
-- `setMinGuardianStake`, `setMinOwnerStake`, `setCoolDownPeriod`, `setDefaultReviewPeriod`, `setMinReviewPeriod`, `setMaxReviewPeriod`, `setBlockQuorumBps`, `setRewardPerBlockWood`.
+- `setMinGuardianStake`, `setMinOwnerStake`, `setOwnerStakeTvlBps`, `setCoolDownPeriod`, `setDefaultReviewPeriod`, `setMinReviewPeriod`, `setMaxReviewPeriod`, `setBlockQuorumBps`, `setRewardPerBlockWood`.
 
 Views:
 - `guardianStake(address)`, `ownerStake(address vault)`, `totalGuardianStake()`, `isActiveGuardian(address)`, `hasOwnerStake(address vault)`, `getReview(uint256)`, `getEmergencyReview(uint256)`, `preparedStakeOf(address owner)`, `canCreateVault(address owner)`, `pendingBlockReward(address guardian, uint256 proposalId)`.
+- `requiredOwnerBond(address vault) returns (uint256)` — returns `max(minOwnerStake, IERC4626(vault).totalAssets() * ownerStakeTvlBps / 10_000)`. Used by `bindOwnerStake` and `transferOwnerStakeSlot` to gate whether a prepared stake is sufficient. With `ownerStakeTvlBps = 0` (V1 default) this returns `minOwnerStake` unconditionally — the scaling pipe is wired but inert. A multisig parameter flip activates it without a code change, with the timelock giving owners advance notice to top up before any existing vault becomes undercollateralized on the next rotate.
 
 ### 3.2 Modified: `SyndicateGovernor.sol`
 
@@ -216,7 +219,7 @@ Minimal changes, scoped to what the governor has to know.
 New enum value, new struct field, new errors, new events, new function signatures:
 
 - Errors: `NotInGuardianReview`, `EmergencySettleBlocked`, `EmergencySettleNotReady`, `EmergencySettleMismatch`, `RegistryNotSet`, `InvalidReviewPeriod`.
-- Events: `GuardianReviewResolved(uint256 indexed proposalId, bool blocked)`, `EmergencySettleProposed(uint256 indexed proposalId, address indexed owner, bytes32 callsHash, uint256 reviewEnd)`, `EmergencySettleFinalized(uint256 indexed proposalId, int256 pnl)`, `GuardianRegistryUpdated(address old, address new)`.
+- Events: `GuardianReviewResolved(uint256 indexed proposalId, bool blocked)`, `ReviewPeriodOverridden(uint256 indexed proposalId, address indexed proposer, uint256 requestedPeriod)` (emitted from `propose()` when `reviewPeriodOverride != 0` so guardian agents can prioritize compressed-window proposals), `EmergencySettleProposed(uint256 indexed proposalId, address indexed owner, bytes32 callsHash, uint256 reviewEnd)`, `EmergencySettleFinalized(uint256 indexed proposalId, int256 pnl)`, `GuardianRegistryUpdated(address old, address new)`.
 - Function changes: drop `emergencySettle`; add `unstick`, `emergencySettleWithCalls`, `finalizeEmergencySettle`. `propose()` now takes a trailing `uint256 reviewPeriodOverride` argument.
 
 ## 4. Data flow — key scenarios
@@ -250,7 +253,8 @@ New enum value, new struct field, new errors, new events, new function signature
 | Parameter | Default | Bounds | Rationale |
 |---|---|---|---|
 | `minGuardianStake` | 10_000 WOOD | ≥ 1 WOOD | Low enough for early ecosystem, high enough that slashing is a real cost. |
-| `minOwnerStake` | 10_000 WOOD | ≥ 1_000 WOOD | Lowered from 50k per business review — onboarding friction for small creators. Can scale up via timelocked parameter change as TVL grows. |
+| `minOwnerStake` | 10_000 WOOD | ≥ 1_000 WOOD | Lowered from 50k per business review — onboarding friction for small creators. Floor only; effective bond per vault = `requiredOwnerBond(vault)` (see below). |
+| `ownerStakeTvlBps` | 0 (disabled) | [0, 500] (5% cap) | TVL-scaling multiplier. Effective owner bond = `max(minOwnerStake, totalAssets * ownerStakeTvlBps / 10_000)`. V1 ships at 0 (flat floor). Multisig timelocked flip activates scaling without a code change. Bond is checked at bind / rotate time only — no periodic top-up in V1. |
 | `coolDownPeriod` | 7 days | 1–30 days | Matches issue #227; aligns with Sherwood's existing multi-day governance rhythms. |
 | `defaultReviewPeriod` | 24 hours | — | Used when proposer passes `reviewPeriodOverride = 0`. |
 | `minReviewPeriod` | 6 hours | 1h–defaultReviewPeriod | Floor on per-proposal override. 6h gives time-sensitive strategies (funding-rate, oracle-reactive) a fast path while still allowing guardian agents a single cron cycle to react. |
@@ -445,9 +449,17 @@ Applied from Carlos's review in response to blockers:
 - **Open question 4 (factory bind ordering) resolved** as "bind-after-deploy, atomic via revert" per Carlos. Dropped.
 - **Open question 3 resolved** — 100-approver cap retained; `ApproverCapReached` event added.
 
-## 15. Open questions (remaining after #229 review)
+## 15. Changelog — Carlos follow-up review (2026-04-19 PR #229 second pass)
 
-1. **`unstick` access control**: Carlos leans owner-only for V1 (already spec default). Confirmed — treating as decided unless anyone pushes back.
-2. **Slash Appeal Reserve sizing**: opening allocation (e.g. 1% of total WOOD supply?) and per-epoch refund cap. Propose via tokenomics governance, not fixed here.
-3. **Owner stake TVL scaling**: add a `FLOOR + totalAssets * k / 10_000` formula in V1 (with `k = 0`, i.e. floor-only) so the scaling pipe is wired even if inactive, or leave scaling entirely for V2 and accept that flat 10k WOOD is under-collateralized for large vaults? Carlos flagged this explicitly.
-4. **Owner dual-use optimization**: should vault owners be allowed to double-count their owner-stake as guardian-stake on *other* vaults (so their capital isn't fully idle)? Adds reward-eligibility and active participation incentive, at the cost of extra accounting. Flag for V1.5 unless there's pressure to ship in V1.
+- **Owner stake TVL scaling pipe wired (§15.3 resolved).** New `ownerStakeTvlBps` param (default 0, bounds [0, 500]). `requiredOwnerBond(vault)` view returns `max(minOwnerStake, totalAssets * ownerStakeTvlBps / 10_000)`. Enforced at `bindOwnerStake` and `transferOwnerStakeSlot` only — no periodic top-up. Parameter flip by multisig activates scaling without a code change.
+- **`ReviewPeriodOverridden` event added** (§3.4) — emitted from `propose()` when `reviewPeriodOverride != 0` so guardian agents can prioritize compressed-window proposals.
+- **`transferOwnerStakeSlot(vault, newOwner)` documented** as the registry-side onlyFactory hook called by `SyndicateFactory.rotateOwner` (§3.1). Fixes API-list omission noted in review.
+- **§15.1 (`unstick` owner-only) — resolved.** Confirmed; left as spec default.
+- **§15.2 (Slash Appeal Reserve sizing) — owned by tokenomics governance**, not this spec.
+- **§15.4 (owner dual-use as guardian on other vaults) — deferred to V1.5.** Confirmed.
+
+## 16. Open questions (remaining)
+
+1. **Slash Appeal Reserve sizing** — opening allocation and per-epoch refund cap. Owned by tokenomics governance (WOOD emissions + treasury allocation), not this spec. Will be resolved by a separate governance vote before mainnet launch.
+
+All other open questions resolved. Spec is **ready for implementation plan** pending Option B prototype (§11) and `forge build --sizes` check.
