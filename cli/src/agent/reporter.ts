@@ -37,13 +37,18 @@ export class Reporter {
 
     lines.push(chalk.dim('  ├──────────────────────────────────────────────────┤'));
 
-    // Portfolio — show realized (closed trades, used by drawdown gate) + unrealized (mark-to-market).
+    // Portfolio — show total PnL% since inception + realized (drawdown-gate driver) + unrealized (mark-to-market).
     const realized = result.dailyRealizedPnl;
     const unrealized = result.unrealizedPnl;
+    const total = result.totalPnlUsd;
+    const totalPct = result.totalPnlPct;
     const fmt = (v: number) => (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2);
+    const fmtPct = (v: number) => (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%';
     const rColor = realized >= 0 ? chalk.green : chalk.red;
     const uColor = unrealized >= 0 ? chalk.green : chalk.red;
-    lines.push(`  │ Portfolio: $${result.portfolioValue.toFixed(2)}  Realized: ${rColor(fmt(realized))}  Unrealized: ${uColor(fmt(unrealized))}`);
+    const tColor = total >= 0 ? chalk.green : chalk.red;
+    lines.push(`  │ Portfolio: $${result.portfolioValue.toFixed(2)}  Total: ${tColor(fmt(total) + ' (' + fmtPct(totalPct) + ')')}`);
+    lines.push(`  │ Realized: ${rColor(fmt(realized))}  Unrealized: ${uColor(fmt(unrealized))}`);
 
     // Errors
     if (result.errors.length > 0) {

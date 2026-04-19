@@ -80,6 +80,7 @@ const DEFAULT_PORTFOLIO: PortfolioState = {
   weeklyPnl: 0,
   monthlyPnl: 0,
   dailyEntries: 0,
+  initialValue: 10000,
 };
 
 export class PortfolioTracker {
@@ -152,6 +153,7 @@ export class PortfolioTracker {
           ...DEFAULT_PORTFOLIO,
           totalValue: vaultValueUsd,
           cash: vaultValueUsd,
+          initialValue: vaultValueUsd, // anchor cumulative PnL% to the on-chain starting balance
         };
         await this.save(this.state);
         console.error(`[portfolio] Initialized from on-chain vault: $${vaultValueUsd.toFixed(2)} USDC`);
@@ -207,6 +209,13 @@ export class PortfolioTracker {
           this.state = { ...DEFAULT_PORTFOLIO };
           return this.state;
         }
+      }
+
+      // Legacy portfolios pre-dating the `initialValue` field get the default
+      // $10k anchor — safe because paper-trading always started there. Live
+      // syndicates that went through `initFromOnChain` already have this set.
+      if (!Number.isFinite(parsed.initialValue) || (parsed.initialValue ?? 0) <= 0) {
+        parsed.initialValue = DEFAULT_PORTFOLIO.initialValue;
       }
 
       this.state = parsed;

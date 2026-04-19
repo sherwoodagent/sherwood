@@ -26,6 +26,11 @@ export interface PortfolioState {
    *  from `lastDailyReset` so future boundary logic can diverge if needed
    *  (and so legacy portfolio.json files without this field reset cleanly). */
   lastDailyEntriesReset?: number;
+  /** Portfolio value at inception — used to compute cumulative PnL%.
+   *  Defaults to the DEFAULT_PORTFOLIO value ($10k) for legacy files, or
+   *  the on-chain vault balance for live syndicates initialized via
+   *  `initFromOnChain`. Never updated after the first load. */
+  initialValue?: number;
 }
 
 export interface Position {

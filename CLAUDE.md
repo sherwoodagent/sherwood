@@ -113,7 +113,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 
 ### Agent State Files (`~/.sherwood/agent/`)
 
-- `cycles.jsonl` — per-cycle summary: `{cycleNumber, timestamp, signals: [{token, score, action, regime}], tradesExecuted, exitsProcessed, portfolioValue, dailyRealizedPnl, unrealizedPnl, dailyPnl (deprecated alias of dailyRealizedPnl), errors}`. Append-only. `dailyRealizedPnl` moves only on closed trades (drives the drawdown gate); `unrealizedPnl` is mark-to-market across open positions.
+- `cycles.jsonl` — per-cycle summary: `{cycleNumber, timestamp, signals: [{token, score, action, regime}], tradesExecuted, exitsProcessed, portfolioValue, dailyRealizedPnl, unrealizedPnl, dailyPnl (deprecated alias of dailyRealizedPnl), totalPnlUsd, totalPnlPct, errors}`. Append-only. `dailyRealizedPnl` moves only on closed trades (drives the drawdown gate); `unrealizedPnl` is mark-to-market across open positions; `totalPnlUsd`/`totalPnlPct` are cumulative vs. `portfolio.initialValue` (10k default for paper, on-chain vault balance for live syndicates).
 - `signal-history.jsonl` — per-token full signal stack including HL/funding/dexFlow values + regime + weights used. The richer log; what `sherwood agent calibrate --from-history` replays.
 - `portfolio.json` — positions, cash, PnL counters. Atomic write via `.tmp` rename.
 - `trades.json` — closed-trade history (entry/exit/PnL/reason).

@@ -42,6 +42,12 @@ export interface CycleResult {
   unrealizedPnl: number;
   /** @deprecated Alias for dailyRealizedPnl — retained for downstream consumers of cycles.jsonl. */
   dailyPnl: number;
+  /** Cumulative PnL in USD since the portfolio was initialized
+   *  (`portfolioValue - portfolio.initialValue`). Includes both realized
+   *  closes and open-position mark-to-market. */
+  totalPnlUsd: number;
+  /** Cumulative PnL as a fraction of initial value (e.g. +0.0162 = +1.62%). */
+  totalPnlPct: number;
   errors: string[];
 }
 
@@ -155,6 +161,8 @@ export class AgentLoop {
     if (drawdown.paused) {
       console.log(chalk.red(`  ⚠ Trading paused: ${drawdown.message}`));
       const unrealizedPnlAtPause = state.positions.reduce((sum, p) => sum + p.pnlUsd, 0);
+      const initValPause = state.initialValue && state.initialValue > 0 ? state.initialValue : 10_000;
+      const totalPnlUsdPause = state.totalValue - initValPause;
       const result: CycleResult = {
         cycleNumber: this.cycleCount,
         timestamp: Date.now(),
@@ -167,6 +175,8 @@ export class AgentLoop {
         dailyRealizedPnl: state.dailyPnl,
         unrealizedPnl: unrealizedPnlAtPause,
         dailyPnl: state.dailyPnl,
+        totalPnlUsd: totalPnlUsdPause,
+        totalPnlPct: totalPnlUsdPause / initValPause,
         errors: [drawdown.message],
       };
       await this.logCycle(result);
@@ -313,6 +323,8 @@ export class AgentLoop {
 
     // 6. Build cycle result
     const unrealizedPnl = updatedState.positions.reduce((sum, p) => sum + p.pnlUsd, 0);
+    const initVal = updatedState.initialValue && updatedState.initialValue > 0 ? updatedState.initialValue : 10_000;
+    const totalPnlUsd = updatedState.totalValue - initVal;
     const cycleResult: CycleResult = {
       cycleNumber: this.cycleCount,
       timestamp: Date.now(),
@@ -325,6 +337,8 @@ export class AgentLoop {
       dailyRealizedPnl: updatedState.dailyPnl,
       unrealizedPnl,
       dailyPnl: updatedState.dailyPnl,
+      totalPnlUsd,
+      totalPnlPct: totalPnlUsd / initVal,
       errors,
     };
 

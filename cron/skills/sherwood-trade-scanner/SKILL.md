@@ -67,7 +67,19 @@ Include:
 - Top 3 scores with action
 - Lowest 1–2 scores
 - Trades triggered / exits fired counts
-- Portfolio value + daily PnL
+- **Portfolio value + total PnL (USD and %) + daily realized PnL**
+
+The PnL fields come from the latest `cycles.jsonl` row:
+- `portfolioValue` — current total value (mark-to-market)
+- `totalPnlUsd` — cumulative PnL vs. portfolio `initialValue` (includes open positions)
+- `totalPnlPct` — same as a fraction (e.g. `+0.0162` = `+1.62%`; `-0.0316` = `-3.16%`)
+- `dailyRealizedPnl` — realized PnL since UTC day start (drives the drawdown gate)
+- `unrealizedPnl` — open-position mark-to-market at cycle end
+
+Format the portfolio line so the running return is visible at a glance:
+`Portfolio $10,161.73 (+1.62%) | dPnL +$0.00`
+
+On negative PnL, the parens simply carry the signed percent (e.g. `(-1.62%)`).
 
 If a paper trade fired, prepend `🎯 ENTRY:` or `✅ EXIT:` and include token,
 direction, entry price, stop, take-profit, size.
