@@ -23,6 +23,10 @@
 
 5. Never force push, never delete branches, never rewrite history.
 
+## Code-review workflow
+
+For multi-domain audits/reviews, dispatch parallel subagents by domain (vault / governor / strategies / tokenomics / adapters) rather than sequential whole-codebase passes. Cross-cutting patterns surface better when each agent can go deep. For ToB-style maturity + process reviews, use the `building-secure-contracts`, `entry-point-analyzer`, `dimensional-analysis`, and `spec-to-code-compliance` skills.
+
 ## Project Structure
 
 ```
@@ -42,6 +46,8 @@ For background paper-trading + vault/proposal/chat monitoring via cron, see
 Full protocol and CLI documentation: **https://docs.sherwood.sh/**
 
 Source lives in `mintlify-docs/` (git submodule pointing to `imthatcarlos/mintlify-docs`).
+
+**Authority order when docs and code disagree:** `contracts/chains/{chainId}.json` (addresses) → `contracts/src/` (behavior) → this CLAUDE.md (intent) → `mintlify-docs/` last. Known drift areas: `reference/deployments.mdx` (stale Base addresses), `settlement.mdx` (references removed `lockRedemptions`, wrong `executeBatch` path), `concepts.mdx` (says shareholders can `vetoProposal` — they can't), `collaborative-proposals.mdx` (incorrect auth claims). See issue #226 §4.
 
 LLM-friendly versions:
 - `https://docs.sherwood.sh/llms.txt` — structured index
@@ -63,7 +69,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - Use SafeERC20 for all token transfers
 - Run `forge build` and `forge test` before every PR
 - Run `forge fmt` before committing
-- SyndicateGovernor is near the EIP-170 bytecode limit (~23.8k / 24.6k) — avoid adding large functions without deduplicating first
+- SyndicateGovernor runtime is **24,523 / 24,576 bytes (53-byte margin)** as of 2026-04. Run `forge build --sizes` before any governor edit; CI should fail above 24,500
 
 ### Address Management
 
@@ -78,7 +84,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - **SyndicateGovernor** — Proposal lifecycle, optimistic voting, execution, settlement, collaborative proposals. Inherits `GovernorParameters` (abstract) for all parameter setters, validation, and timelock logic.
 - **GovernorParameters** — Abstract contract with constants, bounds, 10 parameter setters (all timelock-gated: queue → delay → finalize), and validation helpers. Extracted to reduce governor bytecode.
 - **SyndicateFactory** — UUPS upgradeable factory. Deploys vault + registers it with the governor. Creation fee, vault upgrades, paginated queries. Owner-configurable: `setVaultImpl`, `setGovernor`, `setCreationFee`, `setManagementFeeBps`, `setUpgradesEnabled`.
-- **BatchExecutorLib** — Stateless library for `delegatecall`-based batch execution.
+- **BatchExecutorLib** — Stateless 63-line contract for `delegatecall`-based batch execution. Note: the "delegatecall to BatchExecutorLib only" invariant is **not enforced in code** — `_executorImpl` is set at init with no codehash check (issue #226 §2.4). Treat as a trust assumption until fixed.
 - **Strategy Templates** — `BaseStrategy` (abstract) + `MoonwellSupplyStrategy` + `AerodromeLPStrategy`. ERC-1167 clonable. Vault calls `execute()`/`settle()` via batch.
 
 ### Governor Key Concepts
@@ -193,6 +199,9 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 - CLI: vitest (when wired up)
 - Always include test results in PR description
 - `cli/src/lib/network.test.ts` has 4 pre-existing failures from `BASE_RPC_URL` env-var leak (Moonwell RPC override). Always verify with `git stash && npm test` before assuming new test failures are from your changes.
+- `forge coverage` currently reverts with Yul stack-too-deep in `SyndicateGovernor.propose()` struct literal (L213) — refactor the literal (split field assignments) before running coverage
+- No invariant tests yet. New invariant harnesses go in `test/invariants/` using `StdInvariant` + a handler contract
+- Pre-mainnet punch list: issues **#225 (bugs)** and **#226 (process/design)**. Reference by anchor in PRs (e.g. `fixes V-C1`, `closes G-C4`)
 
 ## Key Addresses (Base)
 
@@ -209,4 +218,17 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 - Syndicate-level caps are hard limits — no agent can bypass them
 - Governor parameter changes require timelock delay — prevents instant governance manipulation
 - ERC-4626 inflation protection via dynamic `_decimalsOffset()` — scales to any asset denomination
-- `delegatecall` to `BatchExecutorLib` only (stateless, 62-line library) — not arbitrary strategy contracts
+- `delegatecall` to `BatchExecutorLib` only (stateless, 63-line contract) — not arbitrary strategy contracts. **Note**: this invariant is not enforced in code; see Architecture note above.
+- **Exception to the timelock claim**: `setProtocolFeeRecipient` is owner-instant while `setProtocolFeeBps` is timelocked. Asymmetric; see issue #226 A7.
+- **Exception to the caps claim**: `maxPerTx` / `maxDailyTotal` / `maxBorrowRatio` / per-agent caps / target allowlist exist in `mintlify-docs/` but NOT in code (issue #226 §4 A10). Treat as aspirational until built.
+- `SyndicateFactory.setGovernor` is a global retroactive switch — one call rewires every existing vault's governor because `vault._getGovernor()` reads live. Rotate factory owner to multisig+timelock before mainnet.
+
+## Aspirational / not-yet-implemented (read docs with caution)
+
+These appear in `mintlify-docs/` or earlier CLAUDE.md text but are **not live in code**:
+- `maxPerTx` / `maxDailyTotal` / `maxBorrowRatio` / per-agent caps / target allowlist on the vault
+- EAS `STRATEGY_PNL` attestation minted at settlement
+- `SyndicateGauge.claimLPRewards` — always reverts (`_calculateLPReward` stub)
+- WOOD/shares Uniswap V3 "early exit" pool
+- Automated price/lock-ratio circuit-breaker triggers in `Minter` (manual-only today)
+- `expireCollaboration(proposalId)` function referenced in docs (doesn't exist; lazy resolution only)
