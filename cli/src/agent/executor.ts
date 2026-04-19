@@ -12,6 +12,8 @@ import { RiskManager } from './risk.js';
 import { PortfolioTracker } from './portfolio.js';
 import { BASE_STRATEGY_ABI } from '../lib/abis.js';
 import { hyperevm, hyperevmTestnet } from '../lib/network.js';
+import { RiskGate, DEFAULT_RISK_GATE_CONFIG } from './risk-gate.js';
+import type { RiskGateConfig, MarketData, RiskGateResult } from './risk-gate.js';
 
 export interface ExecutionConfig {
   dryRun: boolean;
@@ -26,6 +28,8 @@ export interface ExecutionConfig {
   proposerPrivateKey?: Hex;
   /** HyperCore perp asset index (default 3 = ETH) */
   assetIndex?: number;
+  /** Risk gate configuration */
+  riskGateConfig?: Partial<RiskGateConfig>;
 }
 
 export interface OrderParams {
@@ -49,12 +53,14 @@ export class TradeExecutor {
   private config: ExecutionConfig;
   private riskManager: RiskManager;
   private portfolio: PortfolioTracker;
+  private riskGate: RiskGate;
   private lastAtr?: number;
 
   constructor(config: ExecutionConfig, riskManager: RiskManager, portfolio: PortfolioTracker) {
     this.config = config;
     this.riskManager = riskManager;
     this.portfolio = portfolio;
+    this.riskGate = new RiskGate(config.riskGateConfig);
   }
 
   /** CoinGecko token ID → Hyperliquid perp asset index.
@@ -96,11 +102,14 @@ export class TradeExecutor {
     tokenId: string,
     currentPrice: number,
     atr?: number,
+    marketData?: MarketData,
+    sellThreshold?: number,
   ): Promise<{
     success: boolean;
     position?: Position;
     error?: string;
     dryRun: boolean;
+    riskGateResult?: RiskGateResult;
   }> {
     // Handle SELL/STRONG_SELL outside hyperliquid-perp mode.
     //   • If an existing LONG exists → close it (signal flip / take-profit-by-signal).
@@ -163,12 +172,44 @@ export class TradeExecutor {
     const state = await this.portfolio.load();
     this.riskManager.updatePortfolio(state);
 
+    // Apply risk gate before execution
+    const riskGateResult = this.riskGate.applyGate(
+      tokenId,
+      decision,
+      state,
+      marketData || {},
+      sellThreshold
+    );
+
+    // If risk gate vetoed or downgraded the action
+    if (riskGateResult.finalAction === 'HOLD') {
+      if (this.config.dryRun) {
+        console.error(chalk.yellow(`[RISK GATE] ${tokenId} vetoed: ${riskGateResult.reasons.join(', ')}`));
+      }
+      return {
+        success: false,
+        error: `Risk gate veto: ${riskGateResult.reasons.join(', ')}`,
+        dryRun: this.config.dryRun,
+        riskGateResult,
+      };
+    }
+
+    // Use the gated action for execution
+    const gatedDecision = riskGateResult.finalAction !== riskGateResult.originalAction
+      ? { ...decision, action: riskGateResult.finalAction }
+      : decision;
+
+    // Log if action was modified
+    if (riskGateResult.wasGated && this.config.dryRun) {
+      console.error(chalk.cyan(`[RISK GATE] ${tokenId} downgraded: ${riskGateResult.originalAction} → ${riskGateResult.finalAction} (${riskGateResult.reasons.join(', ')})`));
+    }
+
     // Calculate stop loss and take profit from current price.
     // Calibrated for SHORT-TERM trades (1-2 day hold):
     //   Stop: 3% — tight enough that a failed trade exits quickly
     //   Take profit: 6% (2:1 R:R) — achievable in 1-2 days on crypto vol
     //   Time stop: 48h (see risk.ts) — if it hasn't moved, it's dead money
-    const isShort = decision.action === 'SELL' || decision.action === 'STRONG_SELL';
+    const isShort = gatedDecision.action === 'SELL' || gatedDecision.action === 'STRONG_SELL';
     const direction: 'long' | 'short' = isShort ? 'short' : 'long';
     const RR_RATIO = 2.0;
     const ATR_STOP_MULTIPLIER = 1.5;
@@ -205,7 +246,7 @@ export class TradeExecutor {
     // high-conviction entry cannot blow past the hard cap (previous bug:
     // sizing was clamped, then multiplied by conviction after, yielding 30%
     // sizes on score ≥ 0.35 and 40% on score ≥ 0.45 against a 20% cap).
-    const conviction = convictionMultiplier(decision.score);
+    const conviction = convictionMultiplier(gatedDecision.score);
     const sizing = this.riskManager.calculatePositionSize(
       currentPrice,
       stopLossPrice,
@@ -261,12 +302,13 @@ export class TradeExecutor {
     if (this.config.dryRun) {
       try {
         const position = await this.executeDryRun(order, currentPrice, isPyramid);
-        return { success: true, position, dryRun: true };
+        return { success: true, position, dryRun: true, riskGateResult };
       } catch (err) {
         return {
           success: false,
           error: `Dry-run failed: ${(err as Error).message}`,
           dryRun: true,
+          riskGateResult,
         };
       }
     } else {
@@ -285,15 +327,16 @@ export class TradeExecutor {
               entryTimestamp: Date.now(),
               stopLoss: order.stopLoss,
               takeProfit: order.takeProfit,
-              strategy: decision.signals[0]?.source ?? 'agent',
+              strategy: gatedDecision.signals[0]?.source ?? 'agent',
               atrAtEntry: this.lastAtr,
             });
-        return { success: true, position, dryRun: false };
+        return { success: true, position, dryRun: false, riskGateResult };
       } catch (err) {
         return {
           success: false,
           error: `Live execution failed: ${(err as Error).message}`,
           dryRun: false,
+          riskGateResult,
         };
       }
     }
@@ -495,6 +538,36 @@ export class TradeExecutor {
     }
 
     return lines.join('\n');
+  }
+
+  /** Update risk gate cycle state */
+  updateRiskGateCycle(cycleNumber: number): void {
+    this.riskGate.updateCycle(cycleNumber);
+  }
+
+  /** Record a position being opened for turnover tracking */
+  recordPositionOpened(tokenId: string, side: 'long' | 'short', isReplacement: boolean = false): void {
+    this.riskGate.recordPositionOpened(tokenId, side, isReplacement);
+  }
+
+  /** Record a position being closed for turnover tracking */
+  recordPositionClosed(tokenId: string): void {
+    this.riskGate.recordPositionClosed(tokenId);
+  }
+
+  /** Get current cycle counters (longs/shorts opened) */
+  getRiskGateCycleCounters(): { longsOpened: number; shortsOpened: number } {
+    return this.riskGate.getCycleCounters();
+  }
+
+  /** Get risk gate configuration */
+  getRiskGateConfig(): RiskGateConfig {
+    return this.riskGate.getConfig();
+  }
+
+  /** Update risk gate configuration */
+  updateRiskGateConfig(updates: Partial<RiskGateConfig>): void {
+    this.riskGate.updateConfig(updates);
   }
 }
 

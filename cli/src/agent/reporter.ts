@@ -17,6 +17,9 @@ export class Reporter {
     lines.push(chalk.bold(`  ┌─ Cycle #${result.cycleNumber} ─ ${ts} ─────────────────────────────┐`));
     lines.push(`  │ Duration: ${result.duration}ms | Tokens analyzed: ${result.tokensAnalyzed}`);
     lines.push(`  │ Trades executed: ${result.tradesExecuted} | Exits processed: ${result.exitsProcessed}`);
+    if (result.longsOpened !== undefined || result.shortsOpened !== undefined) {
+      lines.push(`  │ Longs opened: ${result.longsOpened ?? 0} | Shorts opened: ${result.shortsOpened ?? 0}`);
+    }
     lines.push(chalk.dim('  ├──────────────────────────────────────────────────┤'));
 
     // Signals

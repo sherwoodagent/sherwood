@@ -17,11 +17,13 @@ import { CoinGeckoProvider } from '../providers/data/coingecko.js';
 import { Reporter } from './reporter.js';
 import { DynamicTokenSelector } from './token-selector.js';
 import { PriceValidator } from './price-validator.js';
+import type { RiskGateConfig } from './risk-gate.js';
 
 export interface LoopConfig {
   agent: AgentConfig;
   execution: ExecutionConfig;
   riskConfig?: Partial<RiskConfig>;
+  riskGateConfig?: Partial<RiskGateConfig>;
   reportToTelegram?: boolean;
   logPath?: string;
   autoDynamicSelection?: boolean;
@@ -48,6 +50,10 @@ export interface CycleResult {
   totalPnlUsd: number;
   /** Cumulative PnL as a fraction of initial value (e.g. +0.0162 = +1.62%). */
   totalPnlPct: number;
+  /** Number of long positions opened this cycle */
+  longsOpened?: number;
+  /** Number of short positions opened this cycle */
+  shortsOpened?: number;
   errors: string[];
 }
 
@@ -73,7 +79,14 @@ export class AgentLoop {
     this.agent = new TradingAgent(config.agent);
     this.portfolio = new PortfolioTracker();
     this.riskManager = new RiskManager(config.riskConfig);
-    this.executor = new TradeExecutor(config.execution, this.riskManager, this.portfolio);
+
+    // Pass risk gate config to execution config
+    const executionConfig = {
+      ...config.execution,
+      riskGateConfig: config.riskGateConfig,
+    };
+    this.executor = new TradeExecutor(executionConfig, this.riskManager, this.portfolio);
+
     this.coingecko = new CoinGeckoProvider();
     this.reporter = new Reporter();
     this.priceValidator = new PriceValidator();
@@ -144,6 +157,9 @@ export class AgentLoop {
     const errors: string[] = [];
     let tradesExecuted = 0;
     let exitsProcessed = 0;
+
+    // Update risk gate cycle state
+    this.executor.updateRiskGateCycle(this.cycleCount);
 
     // 1. Load portfolio and check drawdown limits
     const state = await this.portfolio.load();
@@ -243,6 +259,8 @@ export class AgentLoop {
             console.log(
               `  ${exit.reason}: ${exit.position.symbol} @ $${exit.exitPrice.toFixed(4)} ${pnlColor(`PnL: $${exit.pnl.toFixed(2)}`)}`,
             );
+            // Record position closed with risk gate
+            this.executor.recordPositionClosed(exit.position.tokenId);
           }
         }
       } catch (err) {
@@ -305,10 +323,36 @@ export class AgentLoop {
 
           const currentPrice = check.price;
           const atr = result.data?.technicalSignals?.atr;
-          const execResult = await this.executor.execute(result.decision, result.token, currentPrice, atr);
+
+          // Prepare market data for risk gate
+          const marketData = {
+            volume24hUsd: result.data?.volume24hUsd,
+            marketCapUsd: result.data?.marketCapUsd,
+            volatility: result.data?.technicalSignals?.atr ?
+              (result.data.technicalSignals.atr / currentPrice) : undefined,
+            // Add bid/ask if available in result.data
+            bid: result.data?.bid,
+            ask: result.data?.ask,
+          };
+
+          const execResult = await this.executor.execute(
+            result.decision,
+            result.token,
+            currentPrice,
+            atr,
+            marketData
+          );
+
           if (execResult.success) {
             tradesExecuted++;
             console.log(this.executor.formatExecution(execResult));
+
+            // Record position opened with risk gate
+            if (execResult.position) {
+              const side = execResult.position.side ?? 'long';
+              const isReplacement = false; // TODO: detect if this replaces an existing position
+              this.executor.recordPositionOpened(result.token, side, isReplacement);
+            }
           } else if (execResult.error && !execResult.error.includes('does not trigger')) {
             errors.push(`${result.token}: ${execResult.error}`);
           }
@@ -325,6 +369,7 @@ export class AgentLoop {
     const unrealizedPnl = updatedState.positions.reduce((sum, p) => sum + p.pnlUsd, 0);
     const initVal = updatedState.initialValue && updatedState.initialValue > 0 ? updatedState.initialValue : 10_000;
     const totalPnlUsd = updatedState.totalValue - initVal;
+    const riskGateCounters = this.executor.getRiskGateCycleCounters();
     const cycleResult: CycleResult = {
       cycleNumber: this.cycleCount,
       timestamp: Date.now(),
@@ -339,6 +384,8 @@ export class AgentLoop {
       dailyPnl: updatedState.dailyPnl,
       totalPnlUsd,
       totalPnlPct: totalPnlUsd / initVal,
+      longsOpened: riskGateCounters.longsOpened,
+      shortsOpened: riskGateCounters.shortsOpened,
       errors,
     };
 
