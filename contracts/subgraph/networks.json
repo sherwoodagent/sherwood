@@ -11,12 +11,12 @@
   },
   "base": {
     "SyndicateFactory": {
-      "address": "0xd5C4eE2E4c5B606b9401E69A3B3FeE169037C284",
-      "startBlock": 43678780
+      "address": "0x4a761D4C101a3aaDE53C7aA2b5c3278b217B6C29",
+      "startBlock": 44700877
     },
     "SyndicateGovernor": {
-      "address": "0x358AD8B492BcC710BE0D7c902D8702164c35DC34",
-      "startBlock": 43678780
+      "address": "0x2F7C27007AC5Bad8400EaDBcdaa767597cfE186a",
+      "startBlock": 44700877
     }
   }
 }

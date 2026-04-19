@@ -29,7 +29,7 @@ import {ScriptBase} from "./ScriptBase.sol";
  *     AGENT_REGISTRY    — ERC-8004 Identity Registry (default: 0x0 = no identity)
  *     MANAGEMENT_FEE    — Management fee in bps (default: 50 = 0.5%)
  *     PROTOCOL_FEE      — Protocol fee in bps (default: 200 = 2%)
- *     MAX_STRATEGY_DAYS — Max strategy duration in days (default: 30)
+ *     MAX_STRATEGY_DAYS — Max strategy duration in days (default: 14)
  *
  *   Usage:
  *     forge script script/Deploy.s.sol:DeploySherwood \
@@ -37,12 +37,12 @@ import {ScriptBase} from "./ScriptBase.sol";
  */
 contract DeploySherwood is ScriptBase {
     // ── CREATE3 salts ──
-    bytes32 constant SALT_EXECUTOR = keccak256("sherwood.deploy.executor.1");
-    bytes32 constant SALT_VAULT_IMPL = keccak256("sherwood.deploy.vault-impl.1");
-    bytes32 constant SALT_GOVERNOR_IMPL = keccak256("sherwood.deploy.governor-impl.1");
-    bytes32 constant SALT_GOVERNOR_PROXY = keccak256("sherwood.deploy.governor-proxy.1");
-    bytes32 constant SALT_FACTORY_IMPL = keccak256("sherwood.deploy.factory-impl.1");
-    bytes32 constant SALT_FACTORY_PROXY = keccak256("sherwood.deploy.factory-proxy.1");
+    bytes32 constant SALT_EXECUTOR = keccak256("sherwood.deploy.executor.2");
+    bytes32 constant SALT_VAULT_IMPL = keccak256("sherwood.deploy.vault-impl.2");
+    bytes32 constant SALT_GOVERNOR_IMPL = keccak256("sherwood.deploy.governor-impl.2");
+    bytes32 constant SALT_GOVERNOR_PROXY = keccak256("sherwood.deploy.governor-proxy.2");
+    bytes32 constant SALT_FACTORY_IMPL = keccak256("sherwood.deploy.factory-impl.2");
+    bytes32 constant SALT_FACTORY_PROXY = keccak256("sherwood.deploy.factory-proxy.2");
 
     struct Config {
         address ensRegistrar;
@@ -66,7 +66,7 @@ contract DeploySherwood is ScriptBase {
             agentRegistry: vm.envOr("AGENT_REGISTRY", address(0)),
             managementFeeBps: vm.envOr("MANAGEMENT_FEE", uint256(50)),
             protocolFeeBps: vm.envOr("PROTOCOL_FEE", uint256(200)),
-            maxStrategyDays: vm.envOr("MAX_STRATEGY_DAYS", uint256(30))
+            maxStrategyDays: vm.envOr("MAX_STRATEGY_DAYS", uint256(14))
         });
 
         vm.startBroadcast();
@@ -133,16 +133,16 @@ contract DeploySherwood is ScriptBase {
             SyndicateGovernor.initialize,
             (ISyndicateGovernor.InitParams({
                     owner: deployer,
-                    votingPeriod: 1 hours,
+                    votingPeriod: 1 days,
                     executionWindow: 1 days,
                     vetoThresholdBps: 4000,
                     maxPerformanceFeeBps: 3000,
-                    cooldownPeriod: 1 hours,
+                    cooldownPeriod: 1 days,
                     collaborationWindow: 48 hours,
                     maxCoProposers: 5,
                     minStrategyDuration: 1 hours,
                     maxStrategyDuration: cfg.maxStrategyDays * 1 days,
-                    parameterChangeDelay: 1 days,
+                    parameterChangeDelay: 3 days,
                     protocolFeeBps: cfg.protocolFeeBps,
                     protocolFeeRecipient: deployer
                 }))
@@ -182,11 +182,11 @@ contract DeploySherwood is ScriptBase {
         ISyndicateGovernor.GovernorParams memory p = governor.getGovernorParams();
 
         _checkAddr("gov.owner", Ownable(governorAddr).owner(), deployer);
-        _checkUint("gov.votingPeriod", p.votingPeriod, 1 hours);
+        _checkUint("gov.votingPeriod", p.votingPeriod, 1 days);
         _checkUint("gov.executionWindow", p.executionWindow, 1 days);
         _checkUint("gov.vetoThresholdBps", p.vetoThresholdBps, 4000);
         _checkUint("gov.maxPerformanceFeeBps", p.maxPerformanceFeeBps, 3000);
-        _checkUint("gov.cooldownPeriod", p.cooldownPeriod, 1 hours);
+        _checkUint("gov.cooldownPeriod", p.cooldownPeriod, 1 days);
         _checkUint("gov.collaborationWindow", p.collaborationWindow, 48 hours);
         _checkUint("gov.maxCoProposers", p.maxCoProposers, 5);
         _checkUint("gov.minStrategyDuration", p.minStrategyDuration, 1 hours);

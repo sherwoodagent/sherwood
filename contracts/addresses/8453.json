@@ -2,11 +2,10 @@
   "chainId": 8453,
   "name": "Base",
   "protocol": {
-    "SyndicateFactory": "0xd5C4eE2E4c5B606b9401E69A3B3FeE169037C284",
-    "SyndicateFactoryV2": "0x5C3F9F1498f86Ac148dF95bAA69C6c1EB1a5bF5F",
-    "SyndicateGovernor": "0x358AD8B492BcC710BE0D7c902D8702164c35DC34",
-    "SyndicateVaultImpl": "0x7Fc3CD3Cfd3c5042b5ceA08D7144E2Bd5f53824B",
-    "BatchExecutorLib": "0x1E831aB61Dc423bF678a2Ff8d9ce768E1e6D2338"
+    "SyndicateFactory": "0x4a761D4C101a3aaDE53C7aA2b5c3278b217B6C29",
+    "SyndicateGovernor": "0x2F7C27007AC5Bad8400EaDBcdaa767597cfE186a",
+    "SyndicateVaultImpl": "0x2523dc3063c6166593DC314B4C3e3C5e216decFE",
+    "BatchExecutorLib": "0x4DB19b6F8A0B299fD73c40A72B265cfBCF64664a"
   },
   "templates": {
     "MoonwellSupplyStrategy": "0x25E33fAeE061E752fDFe851911ccC4C6D9FBA346",
