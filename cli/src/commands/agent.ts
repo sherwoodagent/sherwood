@@ -38,6 +38,8 @@ import { ExecutionPipeline, DEFAULT_SCALED_SIZING } from "../agent/execution-pip
 import { auditSignalHistory, suggestRenormalizedWeights, diffAudits } from "../agent/signal-audit.js";
 import type { AuditResult } from "../agent/signal-audit.js";
 import { DEFAULT_WEIGHTS } from "../agent/scoring.js";
+import { validateBacktest, formatValidationResults } from "../agent/backtest-validator.js";
+import { DEFAULT_SLIPPAGE_CONFIG } from "../agent/slippage-model.js";
 
 // Expanded default universe — covers majors, L1/L2s, DeFi blue-chips, top
 // memes, and HL-listed alts so the scanner has more shots on goal each cycle.
@@ -621,7 +623,10 @@ export function registerAgentCommands(program: Command): void {
     .option("--scaled-sizing", "Score-weighted position sizing (smaller positions for marginal scores)")
     .option("--weight-profile <name>", "Named weight profile: default | majors | altcoin | sentHeavy | techHeavy")
     .option("--smooth", "Smooth fast signals (HL flow, smartMoney, dexFlow, fundingRate) with rolling 3-reading window")
-    .action(async (token: string, options: { from: string; to: string; strategies: string; capital: string; cycle: string; walkForward?: boolean; train: string; test: string; verbose?: boolean; regime?: boolean; trailingStop?: string; scaledSizing?: boolean; weightProfile?: string; smooth?: boolean }) => {
+    .option("--slippage-bps <n>", "Base slippage in basis points (default: 8)", "8")
+    .option("--slippage-vol-mult <n>", "Volatility multiplier for ATR-based penalty (default: 0.5)", "0.5")
+    .option("--slippage-size-mult <n>", "Size multiplier for position size penalty (default: 1.0)", "1.0")
+    .action(async (token: string, options: { from: string; to: string; strategies: string; capital: string; cycle: string; walkForward?: boolean; train: string; test: string; verbose?: boolean; regime?: boolean; trailingStop?: string; scaledSizing?: boolean; weightProfile?: string; smooth?: boolean; slippageBps: string; slippageVolMult: string; slippageSizeMult: string }) => {
       const capital = parseFloat(options.capital);
       const strategies = options.strategies ? options.strategies.split(",").map((s) => s.trim()) : [];
       const trailingStopPct = options.trailingStop ? parseFloat(options.trailingStop) : undefined;
@@ -630,6 +635,37 @@ export function registerAgentCommands(program: Command): void {
         process.exitCode = 1;
         return;
       }
+      // Parse slippage configuration
+      const slippageBps = parseFloat(options.slippageBps);
+      const slippageVolMult = parseFloat(options.slippageVolMult);
+      const slippageSizeMult = parseFloat(options.slippageSizeMult);
+
+      // Validate slippage parameters
+      if (!Number.isFinite(slippageBps) || slippageBps < 0 || slippageBps > 1000) {
+        console.error(chalk.red("--slippage-bps must be between 0 and 1000"));
+        process.exitCode = 1;
+        return;
+      }
+      if (!Number.isFinite(slippageVolMult) || slippageVolMult < 0 || slippageVolMult > 5) {
+        console.error(chalk.red("--slippage-vol-mult must be between 0 and 5"));
+        process.exitCode = 1;
+        return;
+      }
+      if (!Number.isFinite(slippageSizeMult) || slippageSizeMult < 0 || slippageSizeMult > 5) {
+        console.error(chalk.red("--slippage-size-mult must be between 0 and 5"));
+        process.exitCode = 1;
+        return;
+      }
+
+      // Enable slippage modeling if any parameter differs from defaults
+      const slippageConfig = (slippageBps !== DEFAULT_SLIPPAGE_CONFIG.slippageBps ||
+                             slippageVolMult !== DEFAULT_SLIPPAGE_CONFIG.slippageVolMult ||
+                             slippageSizeMult !== DEFAULT_SLIPPAGE_CONFIG.slippageSizeMult) ? {
+        slippageBps,
+        slippageVolMult,
+        slippageSizeMult
+      } : undefined;
+
       // NOTE: options.scaledSizing is currently a no-op in backtest because
       // the backtester doesn't generate TradeProposals — it simulates its own
       // BUY/SELL directly from decision.action. Flag is parsed but unused.
@@ -652,6 +688,7 @@ export function registerAgentCommands(program: Command): void {
           useRegime: options.regime,
           trailingStopPct,
           smoothFastSignals: options.smooth,
+          slippage: slippageConfig,
         };
 
         const spinner = ora(`Walk-forward testing ${token} (${trainWindow}d train, ${testWindow}d test)...`).start();
@@ -689,6 +726,7 @@ export function registerAgentCommands(program: Command): void {
           useRegime: options.regime,
           trailingStopPct,
           smoothFastSignals: options.smooth,
+          slippage: slippageConfig,
         };
 
         const spinner = ora(`Backtesting ${token} from ${config.startDate} to ${config.endDate}...`).start();
@@ -702,6 +740,42 @@ export function registerAgentCommands(program: Command): void {
           spinner.fail(`Backtest failed: ${(err as Error).message}`);
           process.exitCode = 1;
         }
+      }
+    });
+
+  // ── backtest-check ──
+  agent
+    .command("backtest-check")
+    .description("Validate backtest implementation for lookahead bias and recursive stability")
+    .argument("<token>", "Token ID (e.g., bitcoin, ethereum)")
+    .option("--days <n>", "Number of days to analyze for stability check", "60")
+    .action(async (token: string, options: { days?: string }) => {
+      const days = parseInt(options.days ?? "60", 10);
+
+      if (!Number.isFinite(days) || days < 30 || days > 365) {
+        console.error(chalk.red("--days must be between 30 and 365"));
+        process.exitCode = 1;
+        return;
+      }
+
+      console.log(chalk.bold(`\n  Validating backtest implementation for ${token.toUpperCase()}...\n`));
+
+      try {
+        const result = await validateBacktest(token, days, (msg) => {
+          console.log(chalk.dim(`  ${msg}`));
+        });
+
+        console.log(formatValidationResults(result));
+
+        // Set exit code based on validation results
+        if (result.overallStatus === 'FAIL') {
+          process.exitCode = 1;
+        } else if (result.overallStatus === 'WARN') {
+          process.exitCode = 0; // Warning doesn't fail the command
+        }
+      } catch (error) {
+        console.error(chalk.red(`\n  Validation failed: ${(error as Error).message}\n`));
+        process.exitCode = 1;
       }
     });
 

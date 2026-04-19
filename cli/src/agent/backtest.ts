@@ -14,6 +14,9 @@ import type { TradeDecision } from './scoring.js';
 import { MarketRegimeDetector } from './regime.js';
 import type { MarketRegime } from './regime.js';
 import { SignalSmoother, MemorySmootherStorage, DEFAULT_SMOOTHER_CONFIG } from './signal-smoother.js';
+import { calculateRealisticExecution, calculateAggregateSlippage, DEFAULT_SLIPPAGE_CONFIG } from './slippage-model.js';
+import type { SlippageConfig, ExecutionResult } from './slippage-model.js';
+import { validateLookaheadGuard } from './backtest-validator.js';
 
 export interface BacktestConfig {
   tokenId: string;
@@ -42,6 +45,8 @@ export interface BacktestConfig {
   buyThreshold?: number;
   /** Override SELL threshold (applied symmetrically to STRONG_SELL as sell-0.3). */
   sellThreshold?: number;
+  /** Slippage configuration for realistic execution modeling. */
+  slippage?: import('./slippage-model.js').SlippageConfig;
 }
 
 export interface BacktestTrade {
@@ -52,6 +57,13 @@ export interface BacktestTrade {
   pnlPercent: number;
   signal: string;
   strategies?: string[]; // Which strategies contributed to this trade
+  /** Execution details when slippage modeling is enabled */
+  execution?: {
+    entrySlippage: number;
+    exitSlippage: number;
+    entryMarketPrice: number;
+    exitMarketPrice: number;
+  };
 }
 
 export interface BacktestResult {
@@ -64,6 +76,18 @@ export interface BacktestResult {
   totalTrades: number;
   trades: BacktestTrade[];
   equityCurve: Array<{ date: string; value: number }>;
+  /** Slippage impact summary when realistic execution modeling is enabled */
+  slippageSummary?: {
+    totalSlippageCost: number;
+    avgSlippagePct: number;
+    maxSlippagePct: number;
+    slippageByComponent: {
+      base: number;
+      volatility: number;
+      size: number;
+      fees: number;
+    };
+  };
 }
 
 export interface WalkForwardConfig {
@@ -80,6 +104,8 @@ export interface WalkForwardConfig {
   trailingStopPct?: number;
   /** Forwarded to per-fold Backtester. Default false. */
   smoothFastSignals?: boolean;
+  /** Forwarded to per-fold Backtester. Default undefined (no slippage). */
+  slippage?: SlippageConfig;
 }
 
 export interface WalkForwardResult {
@@ -338,6 +364,7 @@ export class Backtester {
       signal: string;
       extremePrice: number;
       entryTimestamp: number;
+      entryExecution?: ExecutionResult;
     } | null = null;
     // Per-simulation in-memory smoother (no disk IO). Maintains rolling
     // buffers across candles so smoothing reflects the same window logic
@@ -364,6 +391,11 @@ export class Backtester {
       console.log();
     }
 
+    // Track slippage executions for summary
+    const executionResults: ExecutionResult[] = [];
+    const slippageConfig = this.config.slippage || DEFAULT_SLIPPAGE_CONFIG;
+    const enableSlippage = !!this.config.slippage;
+
     for (let i = windowSize; i < allCandles.length; i += step) {
       // Use historical data only (excluding current candle to avoid look-ahead bias)
       const windowCandles = allCandles.slice(Math.max(0, i - 200), i);
@@ -373,6 +405,15 @@ export class Backtester {
 
       // Skip if insufficient data for indicators
       if (windowCandles.length < windowSize) continue;
+
+      // Lookahead bias validation (runtime guard)
+      if (this.config.verbose) {
+        const lookaheadCheck = validateLookaheadGuard(i, allCandles, windowCandles);
+        if (lookaheadCheck.status === 'FAIL') {
+          console.log(chalk.red(`  LOOKAHEAD VIOLATION: ${lookaheadCheck.message}`));
+          continue;
+        }
+      }
 
       // Track equity (direction-aware: shorts profit when price falls)
       const equity = position
@@ -544,22 +585,58 @@ export class Backtester {
       // Open a long on BUY/STRONG_BUY or a short on SELL/STRONG_SELL
       // (only when flat — pyramid logic lives in the live executor).
       if (!position && (decision.action === 'BUY' || decision.action === 'STRONG_BUY')) {
+        let entryPrice = currentPrice;
+        let entryExecution: ExecutionResult | undefined;
+
+        // Apply slippage modeling if enabled
+        if (enableSlippage) {
+          const positionSizeUsd = capital * 0.05; // Assume 5% position size for slippage calc
+          entryExecution = calculateRealisticExecution(
+            currentPrice,
+            'BUY',
+            positionSizeUsd,
+            windowCandles,
+            slippageConfig
+          );
+          entryPrice = entryExecution.executionPrice;
+          executionResults.push(entryExecution);
+        }
+
         position = {
           side: 'long',
-          entryPrice: currentPrice,
+          entryPrice,
           entryDate: currentDate,
           signal: decision.action,
-          extremePrice: currentPrice,
+          extremePrice: entryPrice,
           entryTimestamp: currentCandle.timestamp,
+          entryExecution, // Store for trade record
         };
       } else if (!position && (decision.action === 'SELL' || decision.action === 'STRONG_SELL')) {
+        let entryPrice = currentPrice;
+        let entryExecution: ExecutionResult | undefined;
+
+        // Apply slippage modeling if enabled
+        if (enableSlippage) {
+          const positionSizeUsd = capital * 0.05; // Assume 5% position size for slippage calc
+          entryExecution = calculateRealisticExecution(
+            currentPrice,
+            'SELL',
+            positionSizeUsd,
+            windowCandles,
+            slippageConfig
+          );
+          entryPrice = entryExecution.executionPrice;
+          executionResults.push(entryExecution);
+        }
+
         position = {
           side: 'short',
-          entryPrice: currentPrice,
+          entryPrice,
           entryDate: currentDate,
           signal: decision.action,
-          extremePrice: currentPrice, // for shorts this becomes a low-water mark
+          extremePrice: entryPrice, // for shorts this becomes a low-water mark
           entryTimestamp: currentCandle.timestamp,
+          entryExecution, // Store for trade record
         };
       } else if (position) {
         const isShort = position.side === 'short';
@@ -606,16 +683,54 @@ export class Backtester {
         }
 
         if (exitReason) {
-          capital *= (1 + pnlPercent);
-          returns.push(pnlPercent);
-          trades.push({
+          let exitPrice = currentPrice;
+          let exitExecution: ExecutionResult | undefined;
+          let finalPnlPercent = pnlPercent;
+
+          // Apply slippage modeling on exit if enabled
+          if (enableSlippage && position.entryExecution) {
+            const positionSizeUsd = capital * 0.05; // Assume same position size
+            const exitSide = isShort ? 'BUY' : 'SELL'; // Opposite side to close
+
+            exitExecution = calculateRealisticExecution(
+              currentPrice,
+              exitSide,
+              positionSizeUsd,
+              windowCandles,
+              slippageConfig
+            );
+            exitPrice = exitExecution.executionPrice;
+            executionResults.push(exitExecution);
+
+            // Recalculate PnL with realistic execution prices
+            finalPnlPercent = isShort
+              ? (position.entryPrice - exitPrice) / position.entryPrice
+              : (exitPrice - position.entryPrice) / position.entryPrice;
+          }
+
+          capital *= (1 + finalPnlPercent);
+          returns.push(finalPnlPercent);
+
+          const trade: BacktestTrade = {
             entryDate: position.entryDate,
             exitDate: currentDate,
             entryPrice: position.entryPrice,
-            exitPrice: currentPrice,
-            pnlPercent,
+            exitPrice,
+            pnlPercent: finalPnlPercent,
             signal: `${position.signal}${isShort ? ' [SHORT]' : ''} → ${exitReason}`,
-          });
+          };
+
+          // Add execution details if slippage modeling was used
+          if (enableSlippage && position.entryExecution && exitExecution) {
+            trade.execution = {
+              entrySlippage: position.entryExecution.totalSlippage,
+              exitSlippage: exitExecution.totalSlippage,
+              entryMarketPrice: position.entryExecution.marketPrice,
+              exitMarketPrice: exitExecution.marketPrice
+            };
+          }
+
+          trades.push(trade);
           position = null;
         }
       }
@@ -626,20 +741,58 @@ export class Backtester {
       const lastCandle = allCandles[allCandles.length - 1]!;
       const lastPrice = lastCandle.close;
       const lastDate = new Date(lastCandle.timestamp).toISOString().split('T')[0]!;
-      const pnlPercent = position.side === 'short'
+
+      let exitPrice = lastPrice;
+      let exitExecution: ExecutionResult | undefined;
+      let pnlPercent = position.side === 'short'
         ? (position.entryPrice - lastPrice) / position.entryPrice
         : (lastPrice - position.entryPrice) / position.entryPrice;
+
+      // Apply slippage modeling on final close if enabled
+      if (enableSlippage && position.entryExecution) {
+        const positionSizeUsd = capital * 0.05;
+        const exitSide = position.side === 'short' ? 'BUY' : 'SELL';
+        const windowCandles = allCandles.slice(Math.max(0, allCandles.length - 30), allCandles.length - 1);
+
+        exitExecution = calculateRealisticExecution(
+          lastPrice,
+          exitSide,
+          positionSizeUsd,
+          windowCandles,
+          slippageConfig
+        );
+        exitPrice = exitExecution.executionPrice;
+        executionResults.push(exitExecution);
+
+        // Recalculate final PnL with slippage
+        pnlPercent = position.side === 'short'
+          ? (position.entryPrice - exitPrice) / position.entryPrice
+          : (exitPrice - position.entryPrice) / position.entryPrice;
+      }
+
       capital *= (1 + pnlPercent);
       returns.push(pnlPercent);
 
-      trades.push({
+      const trade: BacktestTrade = {
         entryDate: position.entryDate,
         exitDate: lastDate,
         entryPrice: position.entryPrice,
-        exitPrice: lastPrice,
+        exitPrice,
         pnlPercent,
         signal: `${position.signal}${position.side === 'short' ? ' [SHORT]' : ''} → CLOSE`,
-      });
+      };
+
+      // Add execution details if slippage modeling was used
+      if (enableSlippage && position.entryExecution && exitExecution) {
+        trade.execution = {
+          entrySlippage: position.entryExecution.totalSlippage,
+          exitSlippage: exitExecution.totalSlippage,
+          entryMarketPrice: position.entryExecution.marketPrice,
+          exitMarketPrice: exitExecution.marketPrice
+        };
+      }
+
+      trades.push(trade);
     }
 
     // 4. Compute metrics
@@ -676,6 +829,12 @@ export class Backtester {
       if (drawdown > maxDrawdown) maxDrawdown = drawdown;
     }
 
+    // Calculate slippage summary if modeling was enabled
+    let slippageSummary;
+    if (enableSlippage && executionResults.length > 0) {
+      slippageSummary = calculateAggregateSlippage(executionResults);
+    }
+
     return {
       config: this.config,
       totalReturn,
@@ -686,6 +845,7 @@ export class Backtester {
       totalTrades: trades.length,
       trades,
       equityCurve,
+      slippageSummary,
     };
   }
 
@@ -727,6 +887,7 @@ export class Backtester {
           useRegime: config.useRegime,
           trailingStopPct: config.trailingStopPct,
           smoothFastSignals: config.smoothFastSignals,
+          slippage: config.slippage,
         });
         const trainResult = await trainBacktester.run();
 
@@ -742,6 +903,7 @@ export class Backtester {
           useRegime: config.useRegime,
           trailingStopPct: config.trailingStopPct,
           smoothFastSignals: config.smoothFastSignals,
+          slippage: config.slippage,
         });
         const testResult = await testBacktester.run();
 
@@ -819,13 +981,28 @@ export class Backtester {
     lines.push(`  Win Rate:       ${(result.winRate * 100).toFixed(1)}%`);
     lines.push(`  Total Trades:   ${result.totalTrades}`);
 
+    // Slippage impact summary
+    if (result.slippageSummary) {
+      lines.push('');
+      lines.push(chalk.bold('  Slippage & Execution Impact:'));
+      lines.push(`  Total Slippage Cost: $${result.slippageSummary.totalSlippageCost.toFixed(2)}`);
+      lines.push(`  Average Slippage:    ${(result.slippageSummary.avgSlippagePct * 100).toFixed(3)}%`);
+      lines.push(`  Maximum Slippage:    ${(result.slippageSummary.maxSlippagePct * 100).toFixed(3)}%`);
+      lines.push('');
+      lines.push('  Breakdown by Component:');
+      lines.push(`    Base Slippage:       ${(result.slippageSummary.slippageByComponent.base * 100).toFixed(3)}%`);
+      lines.push(`    Volatility Penalty:  ${(result.slippageSummary.slippageByComponent.volatility * 100).toFixed(3)}%`);
+      lines.push(`    Size Penalty:        ${(result.slippageSummary.slippageByComponent.size * 100).toFixed(3)}%`);
+      lines.push(`    Fees Impact:         ${(result.slippageSummary.slippageByComponent.fees * 100).toFixed(3)}%`);
+    }
+
     // Volume quality warning
     const zeroVolumeTrades = result.trades.filter(t => {
       // Check if trades occurred during periods with potentially missing volume data
       return true; // For now, we'll always show this warning since CoinGecko OHLC had volume issues
     }).length;
     const volumeWarning = result.equityCurve.length > 0; // We have equity data, so we can check volume quality
-    if (volumeWarning) {
+    if (volumeWarning && !result.slippageSummary) { // Only show if slippage not already addressed
       lines.push('');
       lines.push(chalk.yellow('  ⚠️  Volume Data Quality:'));
       lines.push(chalk.dim('     Volume data sourced from market_chart endpoint and aggregated daily.'));
