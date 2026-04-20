@@ -733,3 +733,155 @@ contract GuardianRegistryOpenReviewTest is Test {
         assertEq(logs.length, 0);
     }
 }
+
+contract GuardianRegistryVoteTest is Test {
+    GuardianRegistry registry;
+    ERC20Mock wood;
+    MockGovernorMinimal governor;
+    address owner = address(0xA11CE);
+    address factory = address(0xFAC10);
+
+    uint256 constant REVIEW_PERIOD = 24 hours;
+    uint256 constant PROPOSAL_ID = 1;
+    uint256 voteEnd;
+    uint256 reviewEnd;
+
+    function setUp() public {
+        wood = new ERC20Mock("WOOD", "WOOD", 18);
+        governor = new MockGovernorMinimal();
+
+        GuardianRegistry impl = new GuardianRegistry();
+        bytes memory initData = abi.encodeCall(
+            GuardianRegistry.initialize,
+            (owner, address(governor), factory, address(wood), 10_000e18, 10_000e18, 0, 7 days, REVIEW_PERIOD, 3000)
+        );
+        registry = GuardianRegistry(address(new ERC1967Proxy(address(impl), initData)));
+
+        // Stake 5 guardians × 10_000e18 = 50_000e18 to exactly meet MIN_COHORT_STAKE_AT_OPEN.
+        for (uint256 i = 0; i < 5; i++) {
+            address g = _guardian(i);
+            wood.mint(g, 100_000e18);
+            vm.prank(g);
+            wood.approve(address(registry), type(uint256).max);
+            vm.prank(g);
+            registry.stakeAsGuardian(10_000e18, 1 + i);
+        }
+
+        voteEnd = block.timestamp;
+        reviewEnd = voteEnd + REVIEW_PERIOD;
+        governor.setProposal(PROPOSAL_ID, voteEnd, reviewEnd);
+    }
+
+    function _guardian(uint256 i) internal pure returns (address) {
+        return address(uint160(0xAA00 + i + 1));
+    }
+
+    function _openReview() internal {
+        registry.openReview(PROPOSAL_ID);
+    }
+
+    function test_voteOnProposal_approve_updatesApprovers_andWeight() public {
+        _openReview();
+        address g = _guardian(0);
+
+        vm.expectEmit(true, true, false, true);
+        emit IGuardianRegistry.GuardianVoteCast(PROPOSAL_ID, g, IGuardianRegistry.GuardianVoteType.Approve, 10_000e18);
+        vm.prank(g);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+    }
+
+    function test_voteOnProposal_block_updatesBlockers_andWeight() public {
+        _openReview();
+        address g = _guardian(1);
+
+        vm.expectEmit(true, true, false, true);
+        emit IGuardianRegistry.GuardianVoteCast(PROPOSAL_ID, g, IGuardianRegistry.GuardianVoteType.Block, 10_000e18);
+        vm.prank(g);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+    }
+
+    function test_voteOnProposal_revertsIfReviewNotOpen() public {
+        // openReview NOT called yet
+        address g = _guardian(0);
+        vm.prank(g);
+        vm.expectRevert(IGuardianRegistry.ReviewNotOpen.selector);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+    }
+
+    function test_voteOnProposal_revertsAfterReviewEnd() public {
+        _openReview();
+        vm.warp(reviewEnd);
+        address g = _guardian(0);
+        vm.prank(g);
+        vm.expectRevert(IGuardianRegistry.ReviewNotOpen.selector);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+    }
+
+    function test_voteOnProposal_revertsIfNotActiveGuardian() public {
+        _openReview();
+        address stranger = address(0xDEADBEEF);
+        vm.prank(stranger);
+        vm.expectRevert(IGuardianRegistry.NotActiveGuardian.selector);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+    }
+
+    function test_voteOnProposal_snapshotsStake() public {
+        _openReview();
+        address g = _guardian(0);
+
+        // Top up *after* openReview: snapshot must reflect stake at vote time
+        // (guardianStake at the moment of voteOnProposal), not at openReview.
+        vm.prank(g);
+        registry.stakeAsGuardian(5_000e18, 42); // agentId arg ignored on top-up
+        assertEq(registry.guardianStake(g), 15_000e18);
+
+        // First vote should snapshot the current 15_000e18.
+        vm.expectEmit(true, true, false, true);
+        emit IGuardianRegistry.GuardianVoteCast(PROPOSAL_ID, g, IGuardianRegistry.GuardianVoteType.Block, 15_000e18);
+        vm.prank(g);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+    }
+
+    function test_voteOnProposal_revertsIfSupportIsNone() public {
+        _openReview();
+        address g = _guardian(0);
+        vm.prank(g);
+        vm.expectRevert();
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.None);
+    }
+
+    function test_voteOnProposal_capHitEmitsEventAndReverts() public {
+        _openReview();
+
+        // Fill 100 Approves (mint+stake 100 fresh guardians).
+        uint256 cap = registry.MAX_APPROVERS_PER_PROPOSAL();
+        for (uint256 i = 0; i < cap; i++) {
+            address g = address(uint160(0x100000 + i));
+            wood.mint(g, 100_000e18);
+            vm.prank(g);
+            wood.approve(address(registry), type(uint256).max);
+            vm.prank(g);
+            registry.stakeAsGuardian(10_000e18, 1 + i);
+            vm.prank(g);
+            registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+        }
+
+        // 101st Approve: revert + ApproverCapReached event.
+        address last = address(uint160(0x100000 + cap));
+        wood.mint(last, 100_000e18);
+        vm.prank(last);
+        wood.approve(address(registry), type(uint256).max);
+        vm.prank(last);
+        registry.stakeAsGuardian(10_000e18, 999);
+
+        vm.expectEmit(true, false, false, false);
+        emit IGuardianRegistry.ApproverCapReached(PROPOSAL_ID);
+        vm.prank(last);
+        vm.expectRevert(IGuardianRegistry.NewSideFull.selector);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+
+        // 101st Block succeeds — blockers uncapped.
+        vm.prank(last);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+    }
+}

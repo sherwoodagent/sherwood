@@ -263,8 +263,62 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         emit GuardianUnstakeClaimed(msg.sender, amount);
     }
 
-    function voteOnProposal(uint256, GuardianVoteType) external {
-        revert();
+    /// @inheritdoc IGuardianRegistry
+    /// @dev First-vote path. Requires `openReview` to have been called and
+    ///      `voteEnd <= now < reviewEnd`. Snapshots the caller's current
+    ///      `guardianStake` into `_voteStake[proposalId][caller]` and adds it
+    ///      to the chosen side's tally. Approvers are capped at
+    ///      `MAX_APPROVERS_PER_PROPOSAL`; Blockers are uncapped. Vote-change
+    ///      semantics are added in a later task — any existing vote currently
+    ///      reverts.
+    function voteOnProposal(uint256 proposalId, GuardianVoteType support) external {
+        if (paused) revert ProtocolPaused();
+        if (support == GuardianVoteType.None) revert();
+
+        Review storage r = _reviews[proposalId];
+        if (!r.opened) revert ReviewNotOpen();
+
+        IGovernorMinimal.ProposalView memory p = IGovernorMinimal(governor).getProposal(proposalId);
+        if (block.timestamp < p.voteEnd || block.timestamp >= p.reviewEnd) revert ReviewNotOpen();
+
+        if (!_isActiveGuardian(msg.sender)) revert NotActiveGuardian();
+
+        GuardianVoteType existing = _votes[proposalId][msg.sender];
+        if (existing == support) revert NoVoteChange();
+        if (existing != GuardianVoteType.None) revert AlreadyVoted();
+
+        uint128 weight = _guardians[msg.sender].stakedAmount;
+        _voteStake[proposalId][msg.sender] = weight;
+
+        if (support == GuardianVoteType.Approve) {
+            _pushApprover(proposalId, msg.sender);
+            r.approveStakeWeight += weight;
+        } else {
+            _pushBlocker(proposalId, msg.sender);
+            r.blockStakeWeight += weight;
+        }
+        _votes[proposalId][msg.sender] = support;
+        emit GuardianVoteCast(proposalId, msg.sender, support, weight);
+    }
+
+    // ── Internal vote helpers ──
+    function _pushApprover(uint256 proposalId, address g) private {
+        if (_approvers[proposalId].length >= MAX_APPROVERS_PER_PROPOSAL) {
+            emit ApproverCapReached(proposalId);
+            revert NewSideFull();
+        }
+        _approvers[proposalId].push(g);
+        _approverIndex[proposalId][g] = _approvers[proposalId].length; // 1-indexed
+    }
+
+    function _pushBlocker(uint256 proposalId, address g) private {
+        _blockers[proposalId].push(g);
+        _blockerIndex[proposalId][g] = _blockers[proposalId].length; // 1-indexed
+    }
+
+    function _isActiveGuardian(address g) private view returns (bool) {
+        Guardian storage gs = _guardians[g];
+        return gs.stakedAmount > 0 && gs.unstakeRequestedAt == 0;
     }
 
     // ── Owner fns ──
