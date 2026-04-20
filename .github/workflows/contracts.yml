@@ -29,6 +29,19 @@ jobs:
       - name: Build
         run: forge build --sizes
 
+      - name: Enforce bytecode size budget
+        run: |
+          SIZE=$(forge build --sizes --json | jq -r '.SyndicateGovernor.runtime_size // empty')
+          echo "SyndicateGovernor runtime size: $SIZE bytes"
+          if [ -z "$SIZE" ]; then
+            echo "::error::could not read SyndicateGovernor runtime size"
+            exit 1
+          fi
+          if [ "$SIZE" -gt 24400 ]; then
+            echo "::error::SyndicateGovernor $SIZE > 24400 byte budget"
+            exit 1
+          fi
+
       - name: Unit tests
         run: forge test -vvv --no-match-path "test/integration/*"
 
