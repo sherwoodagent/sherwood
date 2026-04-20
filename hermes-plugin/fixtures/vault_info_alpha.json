@@ -1,9 +1,0 @@
-{
-  "aumUsd": "100000",
-  "currentExposureUsd": "60000",
-  "allowedProtocols": ["moonwell", "aerodrome"],
-  "positions": [
-    {"protocol": "moonwell", "usd": 40000},
-    {"protocol": "aerodrome", "usd": 20000}
-  ]
-}
