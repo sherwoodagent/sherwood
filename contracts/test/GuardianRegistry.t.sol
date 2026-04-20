@@ -1023,3 +1023,203 @@ contract GuardianRegistryVoteChangeTest is Test {
         registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
     }
 }
+
+contract GuardianRegistryResolveTest is Test {
+    GuardianRegistry registry;
+    ERC20Mock wood;
+    MockGovernorMinimal governor;
+    address owner = address(0xA11CE);
+    address factory = address(0xFAC10);
+
+    uint256 constant REVIEW_PERIOD = 24 hours;
+    uint256 constant PROPOSAL_ID = 1;
+    uint256 constant BLOCK_QUORUM_BPS = 3000; // 30%
+    uint256 voteEnd;
+    uint256 reviewEnd;
+
+    address internal constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+
+    function setUp() public {
+        wood = new ERC20Mock("WOOD", "WOOD", 18);
+        governor = new MockGovernorMinimal();
+
+        GuardianRegistry impl = new GuardianRegistry();
+        bytes memory initData = abi.encodeCall(
+            GuardianRegistry.initialize,
+            (
+                owner,
+                address(governor),
+                factory,
+                address(wood),
+                10_000e18,
+                10_000e18,
+                0,
+                7 days,
+                REVIEW_PERIOD,
+                BLOCK_QUORUM_BPS
+            )
+        );
+        registry = GuardianRegistry(address(new ERC1967Proxy(address(impl), initData)));
+
+        // Stake 5 guardians × 10_000e18 = 50_000e18 — matches MIN_COHORT_STAKE_AT_OPEN.
+        for (uint256 i = 0; i < 5; i++) {
+            address g = _guardian(i);
+            wood.mint(g, 100_000e18);
+            vm.prank(g);
+            wood.approve(address(registry), type(uint256).max);
+            vm.prank(g);
+            registry.stakeAsGuardian(10_000e18, 1 + i);
+        }
+
+        voteEnd = block.timestamp;
+        reviewEnd = voteEnd + REVIEW_PERIOD;
+        governor.setProposal(PROPOSAL_ID, voteEnd, reviewEnd);
+    }
+
+    function _guardian(uint256 i) internal pure returns (address) {
+        return address(uint160(0xAA00 + i + 1));
+    }
+
+    function _openAndVote(IGuardianRegistry.GuardianVoteType[5] memory sides) internal {
+        registry.openReview(PROPOSAL_ID);
+        for (uint256 i = 0; i < 5; i++) {
+            if (sides[i] == IGuardianRegistry.GuardianVoteType.None) continue;
+            vm.prank(_guardian(i));
+            registry.voteOnProposal(PROPOSAL_ID, sides[i]);
+        }
+    }
+
+    function test_resolveReview_revertsBeforeReviewEnd() public {
+        registry.openReview(PROPOSAL_ID);
+        // Warp to reviewEnd - 1 (still inside the window).
+        vm.warp(reviewEnd - 1);
+        vm.expectRevert(IGuardianRegistry.ReviewNotReadyForResolve.selector);
+        registry.resolveReview(PROPOSAL_ID);
+    }
+
+    function test_resolveReview_noReviewOpened_returnsFalse() public {
+        // openReview never called, but reviewEnd stamped on the governor.
+        vm.warp(reviewEnd);
+        vm.expectEmit(true, false, false, true);
+        emit IGuardianRegistry.ReviewResolved(PROPOSAL_ID, false, 0);
+        bool blocked = registry.resolveReview(PROPOSAL_ID);
+        assertFalse(blocked);
+        // No slashing — burn address still empty, total stake intact.
+        assertEq(wood.balanceOf(BURN_ADDRESS), 0);
+        assertEq(registry.totalGuardianStake(), 50_000e18);
+    }
+
+    function test_resolveReview_belowQuorum_returnsFalse_noSlash() public {
+        // 2 Approves, 1 Block → block weight = 10_000 = 20% of 50_000 < 30%.
+        IGuardianRegistry.GuardianVoteType[5] memory sides = [
+            IGuardianRegistry.GuardianVoteType.Approve,
+            IGuardianRegistry.GuardianVoteType.Approve,
+            IGuardianRegistry.GuardianVoteType.Block,
+            IGuardianRegistry.GuardianVoteType.None,
+            IGuardianRegistry.GuardianVoteType.None
+        ];
+        _openAndVote(sides);
+
+        vm.warp(reviewEnd);
+        vm.expectEmit(true, false, false, true);
+        emit IGuardianRegistry.ReviewResolved(PROPOSAL_ID, false, 0);
+        bool blocked = registry.resolveReview(PROPOSAL_ID);
+
+        assertFalse(blocked);
+        assertEq(wood.balanceOf(BURN_ADDRESS), 0);
+        // Approvers keep their stake.
+        assertEq(registry.guardianStake(_guardian(0)), 10_000e18);
+        assertEq(registry.guardianStake(_guardian(1)), 10_000e18);
+        assertEq(registry.totalGuardianStake(), 50_000e18);
+    }
+
+    function test_resolveReview_quorumReached_slashesApprovers_burnsWood() public {
+        // 2 Approves, 2 Blocks → block weight = 20_000 = 40% of 50_000 >= 30%.
+        IGuardianRegistry.GuardianVoteType[5] memory sides = [
+            IGuardianRegistry.GuardianVoteType.Approve,
+            IGuardianRegistry.GuardianVoteType.Approve,
+            IGuardianRegistry.GuardianVoteType.Block,
+            IGuardianRegistry.GuardianVoteType.Block,
+            IGuardianRegistry.GuardianVoteType.None
+        ];
+        _openAndVote(sides);
+
+        uint256 totalStakeBefore = registry.totalGuardianStake();
+        uint256 slashTotal = 20_000e18; // 2 approvers × 10_000e18
+
+        vm.warp(reviewEnd);
+        vm.expectEmit(true, false, false, true);
+        emit IGuardianRegistry.ReviewResolved(PROPOSAL_ID, true, slashTotal);
+        bool blocked = registry.resolveReview(PROPOSAL_ID);
+
+        assertTrue(blocked);
+        // WOOD moved to burn address.
+        assertEq(wood.balanceOf(BURN_ADDRESS), slashTotal);
+        // Each approver's stake zeroed.
+        assertEq(registry.guardianStake(_guardian(0)), 0);
+        assertEq(registry.guardianStake(_guardian(1)), 0);
+        // Block voters keep their stake.
+        assertEq(registry.guardianStake(_guardian(2)), 10_000e18);
+        assertEq(registry.guardianStake(_guardian(3)), 10_000e18);
+        // Aggregate totals decremented.
+        assertEq(registry.totalGuardianStake(), totalStakeBefore - slashTotal);
+        assertEq(registry.activeGuardianCount(), 3);
+        // Epoch block-weight credits.
+        uint256 epochId = registry.currentEpoch();
+        assertEq(registry.epochGuardianBlockWeight(epochId, _guardian(2)), 10_000e18);
+        assertEq(registry.epochGuardianBlockWeight(epochId, _guardian(3)), 10_000e18);
+        assertEq(registry.epochTotalBlockWeight(epochId), 20_000e18);
+    }
+
+    function test_resolveReview_cohortTooSmall_returnsFalseEvenWithBlockVotes() public {
+        // Start a fresh registry with only 3 guardians staked to fall below the
+        // 50_000e18 MIN_COHORT_STAKE_AT_OPEN threshold. Reset all 5 by
+        // requesting unstake on 2 of them; they leave totalGuardianStake
+        // immediately, taking the cohort down to 30_000e18.
+        vm.prank(_guardian(3));
+        registry.requestUnstakeGuardian();
+        vm.prank(_guardian(4));
+        registry.requestUnstakeGuardian();
+        assertEq(registry.totalGuardianStake(), 30_000e18);
+
+        // Open review with the smaller cohort → cohortTooSmall flag set.
+        registry.openReview(PROPOSAL_ID);
+        // Remaining 3 active guardians all vote Block — would be 100% block
+        // weight, but cohort flag short-circuits to false.
+        for (uint256 i = 0; i < 3; i++) {
+            vm.prank(_guardian(i));
+            registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+        }
+
+        vm.warp(reviewEnd);
+        vm.expectEmit(true, false, false, true);
+        emit IGuardianRegistry.ReviewResolved(PROPOSAL_ID, false, 0);
+        bool blocked = registry.resolveReview(PROPOSAL_ID);
+        assertFalse(blocked);
+        assertEq(wood.balanceOf(BURN_ADDRESS), 0);
+    }
+
+    function test_resolveReview_idempotent() public {
+        IGuardianRegistry.GuardianVoteType[5] memory sides = [
+            IGuardianRegistry.GuardianVoteType.Approve,
+            IGuardianRegistry.GuardianVoteType.Block,
+            IGuardianRegistry.GuardianVoteType.Block,
+            IGuardianRegistry.GuardianVoteType.None,
+            IGuardianRegistry.GuardianVoteType.None
+        ];
+        _openAndVote(sides);
+
+        vm.warp(reviewEnd);
+        bool first = registry.resolveReview(PROPOSAL_ID);
+        assertTrue(first);
+        uint256 burnedBalance = wood.balanceOf(BURN_ADDRESS);
+
+        // Second call must return cached result, no extra slashing, no extra event.
+        vm.recordLogs();
+        bool second = registry.resolveReview(PROPOSAL_ID);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 0);
+        assertEq(second, first);
+        assertEq(wood.balanceOf(BURN_ADDRESS), burnedBalance);
+    }
+}

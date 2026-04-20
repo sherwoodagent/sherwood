@@ -526,8 +526,109 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         }
     }
 
-    function resolveReview(uint256) external returns (bool) {
-        revert();
+    /// @inheritdoc IGuardianRegistry
+    /// @dev Permissionless. Idempotent — once resolved, returns the cached
+    ///      `blocked` flag without re-slashing. Requires
+    ///      `block.timestamp >= reviewEnd`. Short-circuits to `false` when
+    ///      `!opened` (no activity) or `cohortTooSmall` (cold-start fallback).
+    ///      Otherwise: `blocked = (blockStakeWeight * 10_000 >= blockQuorumBps * totalStakeAtOpen)`.
+    ///      CEI: sets `resolved`/`blocked` flags BEFORE any token transfer.
+    ///      When blocked, slashes all approvers' stake to BURN_ADDRESS and
+    ///      credits blockers' weights to the current epoch's block-weight
+    ///      tallies (spec §3.1, epoch attribution uses resolve-time
+    ///      `block.timestamp`).
+    function resolveReview(uint256 proposalId) external nonReentrant returns (bool) {
+        IGovernorMinimal.ProposalView memory p = IGovernorMinimal(governor).getProposal(proposalId);
+        if (p.reviewEnd == 0 || block.timestamp < p.reviewEnd) revert ReviewNotReadyForResolve();
+
+        Review storage r = _reviews[proposalId];
+        if (r.resolved) return r.blocked; // idempotent
+        if (!r.opened) {
+            r.resolved = true;
+            emit ReviewResolved(proposalId, false, 0);
+            return false;
+        }
+        if (r.cohortTooSmall) {
+            r.resolved = true;
+            emit ReviewResolved(proposalId, false, 0);
+            return false;
+        }
+
+        bool blocked_ = (uint256(r.blockStakeWeight) * 10_000 >= blockQuorumBps * uint256(r.totalStakeAtOpen));
+
+        // CEI: commit state BEFORE any external transfer.
+        r.resolved = true;
+        r.blocked = blocked_;
+
+        uint256 slashed;
+        if (blocked_) {
+            slashed = _slashApprovers(proposalId);
+            _attributeBlockWeightToEpoch(proposalId);
+        }
+
+        emit ReviewResolved(proposalId, blocked_, slashed);
+        return blocked_;
+    }
+
+    /// @dev Zero each approver's stake, accumulate total, decrement aggregate
+    ///      counters, then attempt one `wood.transfer(BURN, total)`. If the
+    ///      transfer reverts or returns false, the amount is queued in
+    ///      `_pendingBurn[address(this)]` for retry via `flushBurn`.
+    function _slashApprovers(uint256 proposalId) private returns (uint256 total) {
+        address[] storage approvers = _approvers[proposalId];
+        uint256 n = approvers.length;
+        for (uint256 i = 0; i < n; i++) {
+            address a = approvers[i];
+            Guardian storage gs = _guardians[a];
+            uint256 amt = gs.stakedAmount;
+            if (amt == 0) continue;
+            total += amt;
+            gs.stakedAmount = 0;
+            // If the approver was still active (hadn't requested unstake), the
+            // aggregate counters include their stake → remove from both. If
+            // they'd already requested unstake, `totalGuardianStake` and
+            // `activeGuardianCount` were already decremented at request time.
+            if (gs.unstakeRequestedAt == 0) {
+                totalGuardianStake -= amt;
+                activeGuardianCount -= 1;
+            }
+        }
+
+        if (total == 0) return 0;
+
+        // Single burn transfer wrapped in try/catch. A malicious / broken WOOD
+        // that reverts or returns false on transfer to BURN_ADDRESS falls
+        // through to the pull-based `flushBurn` fallback.
+        try IERC20(wood).transfer(BURN_ADDRESS, total) returns (bool ok) {
+            if (!ok) {
+                _pendingBurn[address(this)] += total;
+                emit PendingBurnRecorded(total);
+            }
+        } catch {
+            _pendingBurn[address(this)] += total;
+            emit PendingBurnRecorded(total);
+        }
+    }
+
+    /// @dev Credits each blocker's snapshot weight to
+    ///      `epochGuardianBlockWeight[currentEpoch][g]` and bumps
+    ///      `epochTotalBlockWeight[currentEpoch]`. Epoch is resolved at the
+    ///      resolve-time `block.timestamp` (not reviewEnd), matching the spec.
+    function _attributeBlockWeightToEpoch(uint256 proposalId) private {
+        uint256 epochId = (block.timestamp - epochGenesis) / EPOCH_DURATION;
+        address[] storage blockers = _blockers[proposalId];
+        uint256 n = blockers.length;
+        uint256 epochTotalDelta;
+        for (uint256 i = 0; i < n; i++) {
+            address b = blockers[i];
+            uint256 w = _voteStake[proposalId][b];
+            if (w == 0) continue;
+            epochGuardianBlockWeight[epochId][b] += w;
+            epochTotalDelta += w;
+        }
+        if (epochTotalDelta != 0) {
+            epochTotalBlockWeight[epochId] += epochTotalDelta;
+        }
     }
 
     function resolveEmergencyReview(uint256) external returns (bool) {
