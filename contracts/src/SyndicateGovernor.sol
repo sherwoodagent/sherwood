@@ -200,22 +200,20 @@ contract SyndicateGovernor is GovernorParameters, UUPSUpgradeable {
 
         bool isCollaborative = coProposers.length > 0;
 
-        _proposals[proposalId] = StrategyProposal({
-            id: proposalId,
-            proposer: msg.sender,
-            vault: vault,
-            metadataURI: metadataURI,
-            performanceFeeBps: performanceFeeBps,
-            strategyDuration: strategyDuration,
-            votesFor: 0,
-            votesAgainst: 0,
-            votesAbstain: 0,
-            snapshotTimestamp: isCollaborative ? 0 : block.timestamp,
-            voteEnd: isCollaborative ? 0 : block.timestamp + _params.votingPeriod,
-            executeBy: isCollaborative ? 0 : block.timestamp + _params.votingPeriod + _params.executionWindow,
-            executedAt: 0,
-            state: isCollaborative ? ProposalState.Draft : ProposalState.Pending
-        });
+        // Sequential storage writes instead of struct literal to avoid Yul
+        // stack-too-deep under the coverage config (optimizer/viaIR off).
+        // votesFor / votesAgainst / votesAbstain / executedAt default to 0.
+        StrategyProposal storage p = _proposals[proposalId];
+        p.id = proposalId;
+        p.proposer = msg.sender;
+        p.vault = vault;
+        p.metadataURI = metadataURI;
+        p.performanceFeeBps = performanceFeeBps;
+        p.strategyDuration = strategyDuration;
+        p.snapshotTimestamp = isCollaborative ? 0 : block.timestamp;
+        p.voteEnd = isCollaborative ? 0 : block.timestamp + _params.votingPeriod;
+        p.executeBy = isCollaborative ? 0 : block.timestamp + _params.votingPeriod + _params.executionWindow;
+        p.state = isCollaborative ? ProposalState.Draft : ProposalState.Pending;
 
         // Store calls separately
         _storeCalls(_executeCalls, proposalId, executeCalls);
