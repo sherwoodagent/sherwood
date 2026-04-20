@@ -146,7 +146,8 @@ contract VotingEscrowSimpleTest is Test {
     }
 
     function testGetLockAmountAt() public {
-        uint256 t0 = block.timestamp;
+        // via_ir-safe: use getBlockTimestamp cheatcode so compiler can't reorder against vm.warp
+        uint256 t0 = vm.getBlockTimestamp();
 
         vm.prank(user1);
         uint256 tokenId = votingEscrow.createLock(LOCK_AMOUNT, block.timestamp + MAX_LOCK, false);

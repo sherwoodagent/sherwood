@@ -132,12 +132,14 @@ contract SyndicateGovernorIntegrationTest is Test {
         proposalId = governor.propose(
             address(vault), "ipfs://test", feeBps, duration, executeCalls, settlementCalls, _emptyCoProposers()
         );
-        vm.warp(block.timestamp + 1);
+        // via_ir-safe: use vm.getBlockTimestamp() so the IR optimizer can't reorder
+        // block.timestamp reads across vm.warp cheatcodes
+        vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(lp1);
         governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
         vm.prank(lp2);
         governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
-        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+        vm.warp(vm.getBlockTimestamp() + VOTING_PERIOD + 1);
     }
 
     // ==================== FULL LIFECYCLE: PROPOSE -> VOTE -> EXECUTE -> SETTLE ====================

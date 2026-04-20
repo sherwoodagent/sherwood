@@ -401,7 +401,8 @@ contract SyndicateVaultTest is Test {
     // ==================== ERC20VOTES ====================
 
     function test_getPastVotes_afterDeposit() public {
-        uint256 depositTime = block.timestamp;
+        // via_ir-safe: use getBlockTimestamp cheatcode so compiler can't reorder
+        uint256 depositTime = vm.getBlockTimestamp();
 
         vm.startPrank(lp1);
         usdc.approve(address(vault), 10_000e6);
@@ -409,7 +410,7 @@ contract SyndicateVaultTest is Test {
         vm.stopPrank();
 
         // Advance time so getPastVotes works (timestamp-based clock)
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
 
         uint256 pastVotes = vault.getPastVotes(lp1, depositTime);
         // With _decimalsOffset() = 6, shares have 12 decimals for USDC
@@ -417,14 +418,14 @@ contract SyndicateVaultTest is Test {
     }
 
     function test_getPastTotalSupply_afterDeposit() public {
-        uint256 depositTime = block.timestamp;
+        uint256 depositTime = vm.getBlockTimestamp();
 
         vm.startPrank(lp1);
         usdc.approve(address(vault), 10_000e6);
         vault.deposit(10_000e6, lp1);
         vm.stopPrank();
 
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
 
         uint256 pastSupply = vault.getPastTotalSupply(depositTime);
         // With _decimalsOffset() = 6, shares have 12 decimals for USDC
