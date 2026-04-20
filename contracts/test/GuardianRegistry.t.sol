@@ -1870,3 +1870,146 @@ contract GuardianRegistryClaimEpochTest is Test {
         registry.claimEpochReward(epoch0);
     }
 }
+
+contract GuardianRegistrySweepTest is Test {
+    GuardianRegistry registry;
+    ERC20Mock wood;
+    MockGovernorMinimal governor;
+    address owner = address(0xA11CE);
+    address factory = address(0xFAC10);
+    address stranger = address(0xBAD);
+
+    uint256 constant REVIEW_PERIOD = 24 hours;
+    uint256 constant PROPOSAL_ID = 1;
+    uint256 constant BLOCK_QUORUM_BPS = 3000;
+
+    function setUp() public {
+        wood = new ERC20Mock("WOOD", "WOOD", 18);
+        governor = new MockGovernorMinimal();
+
+        GuardianRegistry impl = new GuardianRegistry();
+        bytes memory initData = abi.encodeCall(
+            GuardianRegistry.initialize,
+            (
+                owner,
+                address(governor),
+                factory,
+                address(wood),
+                10_000e18,
+                10_000e18,
+                0,
+                7 days,
+                REVIEW_PERIOD,
+                BLOCK_QUORUM_BPS
+            )
+        );
+        registry = GuardianRegistry(address(new ERC1967Proxy(address(impl), initData)));
+
+        // Stake 5 guardians so we can trigger a blocked review with enough weight.
+        for (uint256 i = 0; i < 5; i++) {
+            address g = _guardian(i);
+            wood.mint(g, 100_000e18);
+            vm.prank(g);
+            wood.approve(address(registry), type(uint256).max);
+            vm.prank(g);
+            registry.stakeAsGuardian(10_000e18, 1 + i);
+        }
+
+        wood.mint(owner, 1_000_000e18);
+        vm.prank(owner);
+        wood.approve(address(registry), type(uint256).max);
+    }
+
+    function _guardian(uint256 i) internal pure returns (address) {
+        return address(uint160(0xAA00 + i + 1));
+    }
+
+    /// @dev Blocks in epoch 0 with 2 blockers (g0, g1) and 2 approvers (g2, g3).
+    function _resolveBlockedReview() internal {
+        uint256 voteEnd = block.timestamp;
+        uint256 reviewEnd = voteEnd + REVIEW_PERIOD;
+        governor.setProposal(PROPOSAL_ID, voteEnd, reviewEnd);
+        registry.openReview(PROPOSAL_ID);
+
+        vm.prank(_guardian(0));
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+        vm.prank(_guardian(1));
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+        vm.prank(_guardian(2));
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+        vm.prank(_guardian(3));
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+
+        vm.warp(reviewEnd);
+        registry.resolveReview(PROPOSAL_ID);
+    }
+
+    function test_sweepUnclaimed_revertsBeforeDelay() public {
+        uint256 epoch0 = registry.currentEpoch();
+        vm.prank(owner);
+        registry.fundEpoch(epoch0, 10_000e18);
+
+        uint256 epochEnd = registry.epochGenesis() + (epoch0 + 1) * registry.EPOCH_DURATION();
+        vm.warp(epochEnd + registry.SWEEP_DELAY() - 1);
+
+        vm.expectRevert(IGuardianRegistry.SweepTooEarly.selector);
+        registry.sweepUnclaimed(epoch0);
+    }
+
+    function test_sweepUnclaimed_permissionless() public {
+        uint256 epoch0 = registry.currentEpoch();
+        vm.prank(owner);
+        registry.fundEpoch(epoch0, 10_000e18);
+
+        uint256 epochEnd = registry.epochGenesis() + (epoch0 + 1) * registry.EPOCH_DURATION();
+        vm.warp(epochEnd + registry.SWEEP_DELAY());
+
+        // Stranger can call — no auth.
+        vm.prank(stranger);
+        registry.sweepUnclaimed(epoch0);
+        assertEq(registry.epochBudget(epoch0), 0);
+    }
+
+    function test_sweepUnclaimed_movesResidualToCurrentEpoch() public {
+        uint256 epoch0 = registry.currentEpoch();
+        vm.prank(owner);
+        registry.fundEpoch(epoch0, 10_000e18);
+
+        // Resolve blocked review: block weight g0 10k + g1 10k = 20k total.
+        _resolveBlockedReview();
+
+        // Warp into epoch 1 so g0 can claim 5k.
+        vm.warp(registry.epochGenesis() + registry.EPOCH_DURATION());
+        vm.prank(_guardian(0));
+        registry.claimEpochReward(epoch0);
+        // 5000 paid, 5000 residual.
+        assertEq(registry.epochBudget(epoch0), 5_000e18);
+
+        // Warp far enough that we are well past SWEEP_DELAY after epoch 0 end.
+        uint256 epochEnd = registry.epochGenesis() + (epoch0 + 1) * registry.EPOCH_DURATION();
+        vm.warp(epochEnd + registry.SWEEP_DELAY() + 1);
+
+        uint256 toEpoch = registry.currentEpoch();
+        uint256 toBefore = registry.epochBudget(toEpoch);
+
+        vm.expectEmit(true, true, false, true);
+        emit IGuardianRegistry.EpochUnclaimedSwept(epoch0, toEpoch, 5_000e18);
+        registry.sweepUnclaimed(epoch0);
+
+        assertEq(registry.epochBudget(epoch0), 0);
+        assertEq(registry.epochBudget(toEpoch), toBefore + 5_000e18);
+    }
+
+    function test_sweepUnclaimed_noopIfZero() public {
+        uint256 epoch0 = registry.currentEpoch();
+        uint256 epochEnd = registry.epochGenesis() + (epoch0 + 1) * registry.EPOCH_DURATION();
+        vm.warp(epochEnd + registry.SWEEP_DELAY());
+
+        // Never funded — budget is 0. Must not revert, must not emit.
+        vm.recordLogs();
+        registry.sweepUnclaimed(epoch0);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 0);
+        assertEq(registry.epochBudget(epoch0), 0);
+    }
+}

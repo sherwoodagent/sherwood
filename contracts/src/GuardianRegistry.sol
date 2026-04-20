@@ -746,8 +746,23 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         emit BurnFlushed(amt);
     }
 
-    function sweepUnclaimed(uint256) external {
-        revert();
+    /// @inheritdoc IGuardianRegistry
+    /// @dev Permissionless. After `SWEEP_DELAY` (12 weeks) beyond
+    ///      `epochEnd`, moves any residual `epochBudget[epochId]` into the
+    ///      current epoch so late-arriving guardians can still claim against
+    ///      a pool. No-op (no revert) when residual is zero, so the
+    ///      entrypoint remains callable without gating even if a keeper
+    ///      races a manual sweep.
+    function sweepUnclaimed(uint256 epochId) external nonReentrant whenNotPaused {
+        uint256 epochEnd = epochGenesis + (epochId + 1) * EPOCH_DURATION;
+        if (block.timestamp < epochEnd + SWEEP_DELAY) revert SweepTooEarly();
+        uint256 residual = epochBudget[epochId];
+        if (residual == 0) return;
+
+        uint256 to = currentEpoch();
+        epochBudget[epochId] = 0;
+        epochBudget[to] += residual;
+        emit EpochUnclaimedSwept(epochId, to, residual);
     }
 
     // ── Epoch rewards ──
