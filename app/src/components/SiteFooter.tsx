@@ -14,7 +14,7 @@ const FOOTER_LINKS: Record<string, FooterLink[]> = {
   ],
   Developers: [
     { label: "Documentation", href: "https://docs.sherwood.sh", external: true },
-    { label: "GitHub", href: "https://github.com/imthatcarlos/sherwood", external: true },
+    { label: "GitHub", href: "https://github.com/sherwoodagent/sherwood", external: true },
   ],
   Community: [
     { label: "Twitter / X", href: "https://x.com/sherwoodagent", external: true },
@@ -84,7 +84,7 @@ export default function SiteFooter() {
                 <XIcon />
               </a>
               <a
-                href="https://github.com/imthatcarlos/sherwood"
+                href="https://github.com/sherwoodagent/sherwood"
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="GitHub"

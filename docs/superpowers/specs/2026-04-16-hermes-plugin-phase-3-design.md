@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-16
 **Status:** Design draft, pending review
-**Related:** [sherwood#151](https://github.com/imthatcarlos/sherwood/issues/151), [sherwood#224](https://github.com/imthatcarlos/sherwood/pull/224), prior spec [docs/superpowers/specs/2026-04-15-hermes-plugin-design.md](2026-04-15-hermes-plugin-design.md)
+**Related:** [sherwood#151](https://github.com/sherwoodagent/sherwood/issues/151), [sherwood#224](https://github.com/sherwoodagent/sherwood/pull/224), prior spec [docs/superpowers/specs/2026-04-15-hermes-plugin-design.md](2026-04-15-hermes-plugin-design.md)
 
 ## Goal
 

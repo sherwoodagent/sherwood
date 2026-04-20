@@ -1,8 +1,0 @@
-{
-  "source": "xmtp",
-  "id": "msg-appr-1",
-  "from": "0xAgent0000000000000000000000000000000001",
-  "type": "APPROVAL_REQUEST",
-  "text": "Requesting approval for trade exceeding $10k threshold",
-  "sentAt": "2026-04-15T10:32:00.000Z"
-}

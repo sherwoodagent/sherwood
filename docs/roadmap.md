@@ -133,22 +133,22 @@ Roadmap, milestones, and a running log of everything shipped. Building in public
 ### 2026-04-06 — tokenomics
 #### Tokenomics v4 — Revenue-Driven Model
 Revised WOOD tokenomics based on comparative analysis of 10+ ve(3,3) implementations. Replaced Aerodrome-style emission model (50% of supply to emissions) with revenue-driven design: 60% of protocol fees to veWOOD holders in USDC, fee-funded buyback-and-lock, non-transferable bootstrapping incentives. Reduced contracts from 9 to 5. Removed gauge voting, bribe layer, rebase mechanism. Added off-chain fee conversion via CoW Protocol to prevent MEV.
-[PR #169](https://github.com/imthatcarlos/sherwood/pull/169)
+[PR #169](https://github.com/sherwoodagent/sherwood/pull/169)
 
 ### 2026-04-05 — infrastructure
 #### WOOD/WETH Market Maker Bot
 Built concentrated liquidity market maker for WOOD/WETH pool. TypeScript/viem with dynamic pricing, inventory skew, real-time dashboard with candlestick charts. Deployed on Base with cloudflared tunnel.
-[PR #168](https://github.com/imthatcarlos/sherwood/pull/168)
+[PR #168](https://github.com/sherwoodagent/sherwood/pull/168)
 
 ### 2026-04-03 — product
 #### Mamo CLI & Landing Page
 Shipped Mamo yield strategy CLI integration and protocol landing page.
-[PR #160](https://github.com/imthatcarlos/sherwood/pull/160) | [PR #161](https://github.com/imthatcarlos/sherwood/pull/161)
+[PR #160](https://github.com/sherwoodagent/sherwood/pull/160) | [PR #161](https://github.com/sherwoodagent/sherwood/pull/161)
 
 ### 2026-04-01 — contracts
 #### ve(3,3) Contracts — Full Implementation
 8 contracts + 7 interfaces on feat/ve33-contracts. 308 tests (72 ve33-specific). 18 audit findings remediated. Includes VotingEscrow, Voter, Minter, SyndicateGauge, VoteIncentive, VaultRewardsDistributor, RewardsDistributor, FeeCollector.
-[PR #154](https://github.com/imthatcarlos/sherwood/pull/154)
+[PR #154](https://github.com/sherwoodagent/sherwood/pull/154)
 
 ### 2026-03-26 — docs
 #### Tokenomics v3 — ve(3,3) Design Spec

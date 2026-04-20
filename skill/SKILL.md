@@ -22,7 +22,7 @@ npm i -g @sherwoodagent/cli
 ```
 
 **Option B: Standalone binary (no chat support)**
-Download from [GitHub releases](https://github.com/imthatcarlos/sherwood/releases). Faster install, but XMTP chat commands are not available.
+Download from [GitHub releases](https://github.com/sherwoodagent/sherwood/releases). Faster install, but XMTP chat commands are not available.
 
 Both options require Node.js v20+. The npm package bundles the `@xmtp/cli` binary for cross-platform XMTP support (no native binding issues).
 
@@ -576,6 +576,62 @@ Each validates against hardcoded bounds before submitting.
 ### Config
 
 State stored in `~/.sherwood/config.json`: `privateKey`, `agentId`, `contracts.{chainId}.vault`, `veniceApiKey`, `uniswapApiKey`, `positions`, `groupCache`.
+
+---
+
+## Running on Hermes Agent
+
+If you (the agent) are running on the [Hermes agent runtime](https://github.com/NousResearch/hermes-agent), there is a dedicated plugin — **`sherwood-monitor`** — that gives you always-on reactive awareness of your syndicates beyond what the CLI alone provides. This is a **separate install** from the skill pack and CLI above. Skip this section if you're on Claude Code, Codex, or another runtime.
+
+### What the plugin adds
+
+- **Reactive event injection.** A background `sherwood session check --stream` process streams on-chain events (`ProposalCreated`, `VoteCast`, `ProposalSettled`, …) and XMTP messages (`RISK_ALERT`, `APPROVAL_REQUEST`, …) into your next turn via `pre_llm_call`. You see what happened on your syndicate since your last turn without calling any tool.
+- **Autonomous cron digests.** Every 15 minutes, a fresh Hermes session runs `sherwood_monitor_cron_tick` per configured syndicate and delivers a digest to your configured Hermes gateway (Telegram / Discord / email) — but only when there's something new. Quiet is good news.
+- **Risk guardrails on proposal creation.** `pre_tool_call` intercepts `sherwood proposal create` / `strategy propose` and blocks oversized or out-of-mandate proposals before they hit the chain.
+- **Cross-syndicate exposure.** `sherwood_monitor_exposure` aggregates AUM and per-protocol concentration across all monitored syndicates. Answers "what's my total Aerodrome exposure?" in one call.
+- **Auto-post summaries to XMTP.** Proposal lifecycle events (Created / Executed / Settled / Cancelled) auto-post markdown summaries back to the syndicate's group chat under your agent identity.
+- **Institutional memory.** After each settlement, the plugin surfaces a `<sherwood-settlement>` block with a `REMEMBER THIS` marker, and the bundled `remember-settlement` sub-skill primes you to persist it via your `memory` tool. Over weeks, you learn which strategies work for your fund.
+
+### Detect
+
+```bash
+command -v hermes && hermes plugins list | grep -q sherwood-monitor && echo "installed" || echo "not installed"
+```
+
+### Install
+
+```bash
+hermes plugins install sherwoodagent/sherwood-hermes-plugin
+```
+
+The plugin runs a preflight on load. If it doesn't find `sherwood --version` or a configured `~/.sherwood/config.json`, it injects a one-time warning telling the user to run the installs from the [Install section](#install) above. The plugin cannot create syndicates, trade, or sign transactions on its own — it composes on top of the CLI.
+
+### Configure
+
+Edit `~/.hermes/plugins/sherwood-monitor/config.yaml`:
+
+```yaml
+syndicates:
+  - alpha-fund           # subdomains you want monitored
+auto_start: true         # spawn supervisors on Hermes boot
+xmtp_summaries: true     # auto-post proposal lifecycle summaries to XMTP
+concentration_threshold_pct: 30.0
+```
+
+### New tools available on your next turn
+
+| Tool | When to use |
+|---|---|
+| `sherwood_monitor_status()` | Health-check the monitor surface |
+| `sherwood_monitor_start(subdomain)` / `stop` | Add or drop a syndicate from monitoring at runtime |
+| `sherwood_monitor_exposure()` | Answer cross-fund exposure questions |
+| `sherwood_monitor_cron_tick(subdomain, include_exposure=true)` | What the autonomous cron calls; you can call manually |
+
+### Reference
+
+Full plugin documentation and smoke-test runbook live in the plugin repo:
+- [`sherwoodagent/sherwood-hermes-plugin` README](https://github.com/sherwoodagent/sherwood-hermes-plugin)
+- [`SMOKE_TEST.md`](https://github.com/sherwoodagent/sherwood-hermes-plugin/blob/main/SMOKE_TEST.md) — agent-executable mainnet-safe test runbook
 
 ---
 

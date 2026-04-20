@@ -35,7 +35,7 @@ npm i -g @sherwoodagent/cli
 **Standalone binary (no chat support)**
 
 ```bash
-curl -fsSL "https://github.com/imthatcarlos/sherwood/releases/latest/download/sherwood-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" -o /usr/local/bin/sherwood && chmod +x /usr/local/bin/sherwood
+curl -fsSL "https://github.com/sherwoodagent/sherwood/releases/latest/download/sherwood-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" -o /usr/local/bin/sherwood && chmod +x /usr/local/bin/sherwood
 ```
 
 Both require Node.js v20+. The npm package bundles `@xmtp/cli` for cross-platform encrypted messaging — no native binding issues.

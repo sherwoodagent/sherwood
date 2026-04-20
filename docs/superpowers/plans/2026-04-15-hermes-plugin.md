@@ -14,7 +14,7 @@
 
 ## Repository and file layout
 
-The plugin is developed inside the sherwood repo at `hermes-plugin/` (plain directory during implementation). The final task migrates it to a standalone GitHub repo (`imthatcarlos/sherwood-hermes-plugin`) added back as a git submodule. All file paths below are relative to `hermes-plugin/`.
+The plugin is developed inside the sherwood repo at `hermes-plugin/` (plain directory during implementation). The final task migrates it to a standalone GitHub repo (`sherwoodagent/sherwood-hermes-plugin`) added back as a git submodule. All file paths below are relative to `hermes-plugin/`.
 
 ```
 hermes-plugin/
@@ -3793,7 +3793,7 @@ humans via Hermes' existing delivery channels.
 ## Install
 
 ```bash
-hermes plugins install imthatcarlos/sherwood-hermes-plugin
+hermes plugins install sherwoodagent/sherwood-hermes-plugin
 ```
 
 ## Configure
@@ -3923,13 +3923,13 @@ Expected: no errors
 
 ## Task 27: Migrate to standalone repo + submodule
 
-**Goal:** move `hermes-plugin/` out of the Sherwood repo into a new GitHub repo `imthatcarlos/sherwood-hermes-plugin`, then add it back as a git submodule.
+**Goal:** move `hermes-plugin/` out of the Sherwood repo into a new GitHub repo `sherwoodagent/sherwood-hermes-plugin`, then add it back as a git submodule.
 
 - [ ] **Step 1: Create the new repo on GitHub**
 
 ```bash
 cd hermes-plugin
-gh repo create imthatcarlos/sherwood-hermes-plugin \
+gh repo create sherwoodagent/sherwood-hermes-plugin \
   --public \
   --description "Hermes plugin for Sherwood syndicate monitoring" \
   --source=. \
@@ -3939,7 +3939,7 @@ gh repo create imthatcarlos/sherwood-hermes-plugin \
 
 If the CLI is missing or auth fails, create the repo manually via github.com and set remote:
 ```bash
-git remote add origin git@github.com:imthatcarlos/sherwood-hermes-plugin.git
+git remote add origin git@github.com:sherwoodagent/sherwood-hermes-plugin.git
 ```
 
 - [ ] **Step 2: Initialize the new repo's history from the plugin directory**
@@ -3961,7 +3961,7 @@ From the Sherwood repo root:
 cd ..
 git rm -r hermes-plugin
 git commit -m "chore: remove hermes-plugin in-place directory (moving to submodule)"
-git submodule add git@github.com:imthatcarlos/sherwood-hermes-plugin.git hermes-plugin
+git submodule add git@github.com:sherwoodagent/sherwood-hermes-plugin.git hermes-plugin
 git commit -m "chore: add hermes-plugin as submodule"
 ```
 
@@ -3981,7 +3981,7 @@ Confirm `.gitmodules` contains:
 ```
 [submodule "hermes-plugin"]
 	path = hermes-plugin
-	url = git@github.com:imthatcarlos/sherwood-hermes-plugin.git
+	url = git@github.com:sherwoodagent/sherwood-hermes-plugin.git
 ```
 
 No Sherwood CI changes needed — submodules are not recursively checked out in Sherwood's CI by default. Plugin repo gets its own CI in the next task (deferred; initial setup is a minimal GitHub Actions workflow and is out of scope for day 1).

@@ -67,7 +67,7 @@ export async function GET() {
   lines.push(
     "## Resources",
     "",
-    "- [GitHub](https://github.com/imthatcarlos/sherwood): Open-source contracts, CLI, and app.",
+    "- [GitHub](https://github.com/sherwoodagent/sherwood): Open-source contracts, CLI, and app.",
     "- [Twitter / X](https://twitter.com/sherwoodagent): Announcements and release notes.",
     "",
   );

@@ -43,7 +43,7 @@ export function buildOrgLd() {
       "Sherwood lets AI agents pool capital into onchain vaults, propose DeFi strategies through governance, and build verifiable track records.",
     sameAs: [
       "https://twitter.com/sherwoodagent",
-      "https://github.com/imthatcarlos/sherwood",
+      "https://github.com/sherwoodagent/sherwood",
       "https://docs.sherwood.sh",
     ],
   } as const;
