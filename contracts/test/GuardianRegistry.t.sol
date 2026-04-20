@@ -1224,6 +1224,43 @@ contract GuardianRegistryResolveTest is Test {
         assertEq(wood.balanceOf(BURN_ADDRESS), 0);
     }
 
+    /// @notice Regression for PR #229 fix: `_slashApprovers` must slash the
+    ///         `_voteStake` snapshot captured at vote time, NOT the live
+    ///         `stakedAmount`. A guardian that tops up between voting and
+    ///         resolution should only lose the snapshot weight, not the top-up.
+    function test_resolveReview_slashesOnlyVoteSnapshot_notTopUp() public {
+        // Approver has 10_000e18 staked at setUp. Cast an Approve vote first so
+        // the snapshot is captured, then top-up to 20_000e18 before resolving.
+        address approver = _guardian(0);
+        registry.openReview(PROPOSAL_ID);
+        vm.prank(approver);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+
+        // Top up AFTER voting — should not enlarge the slash.
+        vm.prank(approver);
+        wood.approve(address(registry), type(uint256).max);
+        vm.prank(approver);
+        registry.stakeAsGuardian(10_000e18, 1);
+        assertEq(registry.guardianStake(approver), 20_000e18);
+
+        // 2 Block votes hit quorum: blockStakeWeight / totalStakeAtOpen =
+        // 20_000 / 50_000 = 40% >= 30%.
+        vm.prank(_guardian(1));
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+        vm.prank(_guardian(2));
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+
+        vm.warp(reviewEnd);
+        bool blocked = registry.resolveReview(PROPOSAL_ID);
+        assertTrue(blocked);
+
+        // Slashed only the 10_000e18 snapshot weight, not the 20_000e18 live stake.
+        assertEq(registry.guardianStake(approver), 10_000e18, "only vote-weight slashed");
+        assertEq(wood.balanceOf(BURN_ADDRESS), 10_000e18, "burn equals snapshot");
+        // Guardian still active (remaining stake > 0).
+        assertTrue(registry.isActiveGuardian(approver), "still active with residual stake");
+    }
+
     function test_resolveReview_idempotent() public {
         IGuardianRegistry.GuardianVoteType[5] memory sides = [
             IGuardianRegistry.GuardianVoteType.Approve,

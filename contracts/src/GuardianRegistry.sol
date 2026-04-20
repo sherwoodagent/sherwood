@@ -625,33 +625,47 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         return blocked_;
     }
 
-    /// @dev Zero each approver's stake, accumulate total, decrement aggregate
-    ///      counters, then attempt one `wood.transfer(BURN, total)`. If the
-    ///      transfer reverts or returns false, the amount is queued in
-    ///      `_pendingBurn[address(this)]` for retry via `flushBurn`.
+    /// @dev Slash each approver by the snapshotted `_voteStake` weight (NOT their
+    ///      live `stakedAmount`) so guardians who topped up after voting don't
+    ///      lose the top-up. The snapshot is captured at vote time so
+    ///      `stakedAmount >= snapshot` always holds when the approver is still
+    ///      active; for slashed/unstaked approvers we clamp to the current live
+    ///      amount. Accumulate total, decrement aggregate counters, then attempt
+    ///      one `wood.transfer(BURN, total)`. If the transfer reverts or returns
+    ///      false, the amount is queued in `_pendingBurn[address(this)]` for
+    ///      retry via `flushBurn`.
     function _slashApprovers(uint256 proposalId) private returns (uint256 total) {
         address[] storage approvers = _approvers[proposalId];
         uint256 n = approvers.length;
         for (uint256 i = 0; i < n; i++) {
             address a = approvers[i];
             Guardian storage gs = _guardians[a];
-            uint256 amt = gs.stakedAmount;
+            uint256 live = gs.stakedAmount;
+            if (live == 0) continue;
+            uint256 snapshot = uint256(_voteStake[proposalId][a]);
+            // Clamp: snapshot should never exceed live stake, but if it does
+            // (e.g. guardian partially slashed by a concurrent proposal that
+            // resolved first), take only what's there.
+            uint256 amt = snapshot <= live ? snapshot : live;
             if (amt == 0) continue;
             total += amt;
-            gs.stakedAmount = 0;
+            // forge-lint: disable-next-line(unchecked-cast)
+            gs.stakedAmount = uint128(live - amt);
             // If the approver was still active (hadn't requested unstake), the
-            // aggregate counters include their stake → remove from both. If
-            // they'd already requested unstake, `totalGuardianStake` and
-            // `activeGuardianCount` were already decremented at request time.
+            // aggregate counters include their stake → remove the slashed
+            // amount from totalGuardianStake. Only decrement activeGuardianCount
+            // when the approver's stake is fully wiped out. If they'd already
+            // requested unstake, `totalGuardianStake` and `activeGuardianCount`
+            // were already decremented at request time.
             if (gs.unstakeRequestedAt == 0) {
                 totalGuardianStake -= amt;
-                activeGuardianCount -= 1;
-            } else {
-                // Defense in depth for Bug B: a slashed guardian keeps no
+                if (gs.stakedAmount == 0) {
+                    activeGuardianCount -= 1;
+                }
+            } else if (gs.stakedAmount == 0) {
+                // Defense in depth for Bug B: a fully-slashed guardian keeps no
                 // stake — there's nothing for cancelUnstake to restore, so
-                // clear the timestamp too. `cancelUnstakeGuardian` now also
-                // checks `stakedAmount != 0`, but clearing here keeps the
-                // struct in a fully-consistent state for future views.
+                // clear the timestamp too.
                 gs.unstakeRequestedAt = 0;
             }
         }
