@@ -341,6 +341,73 @@ contract GovernorEmergencyTest is Test {
         governor.finalizeEmergencySettle(pid, _customCalls());
     }
 
+    /// @notice Regression for PR #229 critical fix: cancelling an emergency
+    ///         settle must also invalidate the registry-side review so a
+    ///         keeper can't call `resolveEmergencyReview` past `reviewEnd` and
+    ///         trigger `_slashOwner` based on stale round-1 block votes.
+    function test_cancelEmergencySettle_preventsResolveSlashingStaleVotes() public {
+        uint256 pid = _createExecutedProposal(7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+
+        // Owner opens emergency settle.
+        vm.prank(owner);
+        governor.emergencySettleWithCalls(pid, _customCalls());
+
+        // Both guardians hit block quorum (60k/60k = 100% ≥ 30%).
+        vm.prank(guardianA);
+        registry.voteBlockEmergencySettle(pid);
+        vm.prank(guardianB);
+        registry.voteBlockEmergencySettle(pid);
+
+        // Owner cancels before reviewEnd.
+        vm.prank(owner);
+        governor.cancelEmergencySettle(pid);
+
+        uint256 stakeBefore = registry.ownerStake(address(vault));
+        assertEq(stakeBefore, MIN_OWNER_STAKE);
+
+        // Warp past the original reviewEnd and attempt permissionless resolve.
+        // Must revert — cancelled review zeroes `reviewEnd` so resolve can't fire
+        // and slash the owner on stale round-1 block votes.
+        vm.warp(vm.getBlockTimestamp() + REVIEW_PERIOD + 1);
+        vm.expectRevert(IGuardianRegistry.ReviewNotReadyForResolve.selector);
+        registry.resolveEmergencyReview(pid);
+
+        // Owner stake untouched.
+        assertEq(registry.ownerStake(address(vault)), stakeBefore, "owner stake NOT slashed");
+    }
+
+    /// @notice Regression for PR #229 critical fix: after cancel, re-opening
+    ///         an emergency review must start fresh — prior-round block votes
+    ///         must not leak into the new round, and guardians can vote again
+    ///         without an `AlreadyVoted` revert.
+    function test_reopenAfterCancel_startsFresh() public {
+        uint256 pid = _createExecutedProposal(7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+
+        // Round 1: owner opens, guardianA blocks, owner cancels.
+        vm.prank(owner);
+        governor.emergencySettleWithCalls(pid, _customCalls());
+        vm.prank(guardianA);
+        registry.voteBlockEmergencySettle(pid);
+
+        vm.prank(owner);
+        governor.cancelEmergencySettle(pid);
+
+        // Round 2: owner re-opens. guardianA must be able to vote again
+        // (nonce bumped so the prior vote is invisible).
+        vm.prank(owner);
+        governor.emergencySettleWithCalls(pid, _customCalls());
+        vm.prank(guardianA);
+        registry.voteBlockEmergencySettle(pid); // must NOT revert AlreadyVoted
+
+        // Only guardianA has voted this round → 30k/60k = 50% ≥ 30% block quorum.
+        // No stale weight from round 1 should be double-counted.
+        vm.warp(vm.getBlockTimestamp() + REVIEW_PERIOD + 1);
+        bool blocked = registry.resolveEmergencyReview(pid);
+        assertTrue(blocked, "fresh round resolves on its own votes");
+    }
+
     // ──────────────────────────────────────────────────────────────
     // finalizeEmergencySettle
     // ──────────────────────────────────────────────────────────────

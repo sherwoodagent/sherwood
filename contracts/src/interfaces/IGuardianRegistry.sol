@@ -69,6 +69,7 @@ interface IGuardianRegistry {
     event ApproverCapReached(uint256 indexed proposalId);
     event ReviewResolved(uint256 indexed proposalId, bool blocked, uint256 slashedAmount);
     event EmergencyReviewOpened(uint256 indexed proposalId, bytes32 callsHash, uint64 reviewEnd);
+    event EmergencyReviewCancelled(uint256 indexed proposalId);
     event EmergencyBlockVoteCast(uint256 indexed proposalId, address indexed guardian, uint128 weight);
     event EmergencyReviewResolved(uint256 indexed proposalId, bool blocked, uint256 slashedAmount);
     event EpochFunded(uint256 indexed epochId, address indexed funder, uint256 amount);
@@ -104,6 +105,7 @@ interface IGuardianRegistry {
 
     // ── Governor-only ──
     function openEmergencyReview(uint256 proposalId, bytes32 callsHash) external;
+    function cancelEmergencyReview(uint256 proposalId) external;
 
     // ── Permissionless ──
     function openReview(uint256 proposalId) external;

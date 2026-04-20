@@ -99,11 +99,15 @@ abstract contract GovernorEmergency is ISyndicateGovernor {
 
     /// @notice Vault owner withdraws their open emergency review before resolution.
     /// @dev Clears the stored calls hash and call array so a fresh review can be
-    ///      opened later. The registry-side review state is resolved lazily (its
-    ///      `resolveEmergencyReview` handles a cancelled/absent hash gracefully).
+    ///      opened later, and calls into the registry to fully invalidate the
+    ///      in-progress review (zeroes `blockStakeWeight`, bumps the round nonce,
+    ///      marks it resolved/not-blocked). Without the registry call a keeper
+    ///      could still drive `resolveEmergencyReview` past `reviewEnd` and
+    ///      `_slashOwner` on stale block votes.
     function cancelEmergencySettle(uint256 proposalId) external emergencyNonReentrant {
         StrategyProposal storage p = _getProposal(proposalId);
         if (msg.sender != OwnableUpgradeable(p.vault).owner()) revert NotVaultOwner();
+        _getRegistry().cancelEmergencyReview(proposalId);
         _clearEmergencyCalls(proposalId);
         emit EmergencySettleCancelled(proposalId, msg.sender);
     }

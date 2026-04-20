@@ -112,10 +112,13 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         uint128 blockStakeWeight;
         bool resolved;
         bool blocked;
+        uint8 nonce; // bumped on open/cancel so prior block votes go stale
     }
 
     mapping(uint256 => EmergencyReview) internal _emergencyReviews;
-    mapping(uint256 => mapping(address => bool)) internal _emergencyBlockVotes;
+    // keyed by (proposalId, nonce, guardian) so cancelling + re-opening starts a
+    // fresh round; prior-round votes are invisible to the new nonce.
+    mapping(uint256 => mapping(uint8 => mapping(address => bool))) internal _emergencyBlockVotes;
 
     // Epoch rewards
     uint256 public epochGenesis;
@@ -543,14 +546,42 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      review path there is no separate keeper — `totalStakeAtOpen` is
     ///      snapshotted at open time from the live `totalGuardianStake`.
     ///      Called by the governor when an emergency settle is staged
-    ///      (spec §3.1).
+    ///      (spec §3.1). Bumps `nonce` and resets per-review state so a
+    ///      prior cancelled round cannot leak block-vote weight into this one.
     function openEmergencyReview(uint256 proposalId, bytes32 callsHash) external onlyGovernor {
         EmergencyReview storage er = _emergencyReviews[proposalId];
         uint64 newReviewEnd = uint64(block.timestamp + reviewPeriod);
         er.callsHash = callsHash;
         er.reviewEnd = newReviewEnd;
         er.totalStakeAtOpen = uint128(totalGuardianStake);
+        er.blockStakeWeight = 0;
+        er.resolved = false;
+        er.blocked = false;
+        unchecked {
+            er.nonce++;
+        }
         emit EmergencyReviewOpened(proposalId, callsHash, newReviewEnd);
+    }
+
+    /// @inheritdoc IGuardianRegistry
+    /// @dev Governor-only. Invalidates the current emergency review round so a
+    ///      keeper can't call `resolveEmergencyReview` and trigger `_slashOwner`
+    ///      against stale round-1 block votes after the governor withdraws the
+    ///      review. Marks the review resolved (not blocked), zeros the block
+    ///      weight, clears `reviewEnd`, and bumps `nonce` so any guardian votes
+    ///      recorded under the prior nonce become invisible. `openEmergencyReview`
+    ///      can start a fresh round afterward.
+    function cancelEmergencyReview(uint256 proposalId) external onlyGovernor {
+        EmergencyReview storage er = _emergencyReviews[proposalId];
+        er.resolved = true;
+        er.blocked = false;
+        er.blockStakeWeight = 0;
+        er.reviewEnd = 0;
+        er.callsHash = bytes32(0);
+        unchecked {
+            er.nonce++;
+        }
+        emit EmergencyReviewCancelled(proposalId);
     }
 
     // ── Permissionless ──
@@ -747,10 +778,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         EmergencyReview storage er = _emergencyReviews[proposalId];
         if (er.reviewEnd == 0 || block.timestamp >= er.reviewEnd) revert ReviewNotOpen();
         if (!_isActiveGuardian(msg.sender)) revert NotActiveGuardian();
-        if (_emergencyBlockVotes[proposalId][msg.sender]) revert AlreadyVoted();
+        uint8 nonce = er.nonce;
+        if (_emergencyBlockVotes[proposalId][nonce][msg.sender]) revert AlreadyVoted();
 
         uint128 weight = _guardians[msg.sender].stakedAmount;
-        _emergencyBlockVotes[proposalId][msg.sender] = true;
+        _emergencyBlockVotes[proposalId][nonce][msg.sender] = true;
         er.blockStakeWeight += weight;
 
         emit EmergencyBlockVoteCast(proposalId, msg.sender, weight);
