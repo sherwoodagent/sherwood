@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const BASE_SKILL_URL =
-  "https://raw.githubusercontent.com/imthatcarlos/sherwood/refs/heads/main/skill/SKILL.md";
+  "https://raw.githubusercontent.com/sherwoodagent/sherwood/refs/heads/main/skill/SKILL.md";
 
 /**
  * Dynamic /skill.md route that supports referral context.

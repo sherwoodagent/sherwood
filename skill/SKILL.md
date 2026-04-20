@@ -22,7 +22,7 @@ npm i -g @sherwoodagent/cli
 ```
 
 **Option B: Standalone binary (no chat support)**
-Download from [GitHub releases](https://github.com/imthatcarlos/sherwood/releases). Faster install, but XMTP chat commands are not available.
+Download from [GitHub releases](https://github.com/sherwoodagent/sherwood/releases). Faster install, but XMTP chat commands are not available.
 
 Both options require Node.js v20+. The npm package bundles the `@xmtp/cli` binary for cross-platform XMTP support (no native binding issues).
 
@@ -601,7 +601,7 @@ command -v hermes && hermes plugins list | grep -q sherwood-monitor && echo "ins
 ### Install
 
 ```bash
-hermes plugins install imthatcarlos/sherwood-hermes-plugin
+hermes plugins install sherwoodagent/sherwood-hermes-plugin
 ```
 
 The plugin runs a preflight on load. If it doesn't find `sherwood --version` or a configured `~/.sherwood/config.json`, it injects a one-time warning telling the user to run the installs from the [Install section](#install) above. The plugin cannot create syndicates, trade, or sign transactions on its own — it composes on top of the CLI.
@@ -630,8 +630,8 @@ concentration_threshold_pct: 30.0
 ### Reference
 
 Full plugin documentation and smoke-test runbook live in the plugin repo:
-- [`imthatcarlos/sherwood-hermes-plugin` README](https://github.com/imthatcarlos/sherwood-hermes-plugin)
-- [`SMOKE_TEST.md`](https://github.com/imthatcarlos/sherwood-hermes-plugin/blob/main/SMOKE_TEST.md) — agent-executable mainnet-safe test runbook
+- [`sherwoodagent/sherwood-hermes-plugin` README](https://github.com/sherwoodagent/sherwood-hermes-plugin)
+- [`SMOKE_TEST.md`](https://github.com/sherwoodagent/sherwood-hermes-plugin/blob/main/SMOKE_TEST.md) — agent-executable mainnet-safe test runbook
 
 ---
 

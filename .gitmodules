@@ -3,4 +3,4 @@
 	url = https://github.com/imthatcarlos/mintlify-docs.git
 [submodule "hermes-plugin"]
 	path = hermes-plugin
-	url = git@github.com:imthatcarlos/sherwood-hermes-plugin.git
+	url = git@github.com:sherwoodagent/sherwood-hermes-plugin.git

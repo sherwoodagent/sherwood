@@ -23,7 +23,7 @@ const nextConfig: NextConfig = {
       // that injects referral context when ?subdomain=X&ref=Y query params are present
       {
         source: '/skill-guardian.md',
-        destination: 'https://raw.githubusercontent.com/imthatcarlos/sherwood/refs/heads/main/skill/skills/syndicate-owner/SKILL.md',
+        destination: 'https://raw.githubusercontent.com/sherwoodagent/sherwood/refs/heads/main/skill/skills/syndicate-owner/SKILL.md',
       },
       // Proxy spectator sidecar to avoid CORS
       {

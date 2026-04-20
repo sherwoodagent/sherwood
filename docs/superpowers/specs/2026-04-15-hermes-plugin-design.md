@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-15
 **Status:** Design approved, ready for implementation plan
-**Related:** [sherwood#151](https://github.com/imthatcarlos/sherwood/issues/151)
+**Related:** [sherwood#151](https://github.com/sherwoodagent/sherwood/issues/151)
 
 ## Goal
 
@@ -20,7 +20,7 @@ Scope covers Phases 1 and 2 of the original issue (streaming subprocess + tools 
 
 ## Repository layout
 
-The plugin lives in a new standalone repo (`imthatcarlos/sherwood-hermes-plugin`) added as a git submodule to the Sherwood monorepo at `hermes-plugin/`, mirroring the existing `mintlify-docs/` submodule pattern. This keeps the plugin developable in-context while allowing independent versioning and distribution via `hermes plugins install imthatcarlos/sherwood-hermes-plugin`.
+The plugin lives in a new standalone repo (`sherwoodagent/sherwood-hermes-plugin`) added as a git submodule to the Sherwood monorepo at `hermes-plugin/`, mirroring the existing `mintlify-docs/` submodule pattern. This keeps the plugin developable in-context while allowing independent versioning and distribution via `hermes plugins install sherwoodagent/sherwood-hermes-plugin`.
 
 Plugin directory structure:
 
@@ -278,7 +278,7 @@ Preflight (`preflight.py`) runs on `register()`:
 User flow:
 
 ```
-$ hermes plugins install imthatcarlos/sherwood-hermes-plugin
+$ hermes plugins install sherwoodagent/sherwood-hermes-plugin
 ✓ Installed sherwood-monitor v0.1.0
 
 $ hermes

@@ -7,7 +7,7 @@ TypeScript CLI for syndicate management, LP operations, strategy execution, and 
 Download the latest binary from GitHub releases:
 
 ```bash
-curl -fsSL "https://github.com/imthatcarlos/sherwood/releases/latest/download/sherwood-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" -o /usr/local/bin/sherwood && chmod +x /usr/local/bin/sherwood
+curl -fsSL "https://github.com/sherwoodagent/sherwood/releases/latest/download/sherwood-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" -o /usr/local/bin/sherwood && chmod +x /usr/local/bin/sherwood
 ```
 
 Or build from source:
