@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import type { Candle } from "./technical.js";
 import { calculateEMA, calculateRSI, calculateMACD } from "./technical.js";
 import { CoinGeckoProvider } from "../providers/data/coingecko.js";
+import { HyperliquidProvider } from "../providers/data/hyperliquid.js";
 
 export interface CorrelationCheck {
   btcBias: "bullish" | "bearish" | "neutral";
@@ -36,11 +37,13 @@ export class CorrelationGuard {
   private cacheDir: string;
   private cacheFile: string;
   private coingecko: CoinGeckoProvider;
+  private hyperliquid: HyperliquidProvider;
 
   constructor() {
     this.cacheDir = join(homedir(), '.sherwood', 'agent', 'cache');
     this.cacheFile = join(this.cacheDir, 'btc-correlation.json');
     this.coingecko = new CoinGeckoProvider();
+    this.hyperliquid = new HyperliquidProvider();
   }
 
   /**
@@ -85,52 +88,109 @@ export class CorrelationGuard {
   }
 
   private async getBtcStructure(): Promise<BtcStructure> {
-    // Check cache first. Cache holds successful fetches ONLY — fallback structures
-    // (price === 0, returned when CoinGecko throws / 429s) are never persisted, so a
-    // rate-limited minute doesn't poison the cache for the next hour.
+    // Check cache first (5-min TTL — HL data is free and fast, no rate-limit concern).
     let cached: CorrelationCache | undefined;
     try {
       cached = await this.loadCache();
       const cacheAge = Date.now() - cached.timestamp;
-      const CACHE_DURATION = 60 * 60 * 1000; // 60 minutes — CG free-tier rate limits
-      //                                        punish frequent 90-day OHLC calls.
-      // Also skip the cache if the stored structure is a fallback (price === 0).
-      // Legacy cache files written before the fallback-caching fix may hold the
-      // neutral sentinel; we want to re-attempt the fetch instead of serving it.
+      const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes — HL data is real-time and free
       if (cacheAge < CACHE_DURATION && cached.btcStructure.price > 0) {
         return cached.btcStructure;
       }
     } catch {
-      // Cache miss or invalid — continue to fresh analysis.
+      // Cache miss — continue to fresh analysis.
     }
 
-    // Fetch fresh BTC data
-    const btcStructure = await this.analyzeBtcStructure();
-
-    // Only cache successful analyses. price === 0 is the fallback sentinel from the
-    // catch branch in analyzeBtcStructure — caching it would mean a single CoinGecko
-    // 429 sticks the correlation score at neutral for the full TTL window.
-    if (btcStructure.price > 0) {
-      try {
-        await this.saveCache(btcStructure);
-      } catch {
-        // Non-critical — continue without caching.
-      }
-      return btcStructure;
+    // PRIMARY: Hyperliquid native data (free, no rate limits, real-time)
+    const hlStructure = await this.analyzeBtcFromHL();
+    if (hlStructure && hlStructure.price > 0) {
+      try { await this.saveCache(hlStructure); } catch { /* non-critical */ }
+      return hlStructure;
     }
 
-    // Fetch failed and the neutral fallback was returned. If we have a stale-but-real
-    // cached structure, prefer it over the fallback — the market doesn't regime-shift
-    // in a single CG retry window, and a valid-but-stale btcBias is strictly more
-    // informative than `price: 0, score: 0`.
+    // FALLBACK: CoinGecko OHLC (rate-limited on free tier, often 429s)
+    const cgStructure = await this.analyzeBtcFromCG();
+    if (cgStructure.price > 0) {
+      try { await this.saveCache(cgStructure); } catch { /* non-critical */ }
+      return cgStructure;
+    }
+
+    // Both failed — prefer stale-but-real cache over neutral fallback.
     if (cached && cached.btcStructure.price > 0) {
       return cached.btcStructure;
     }
 
-    return btcStructure;
+    return cgStructure; // neutral fallback
   }
 
-  private async analyzeBtcStructure(): Promise<BtcStructure> {
+  /**
+   * PRIMARY path: derive BTC structure from Hyperliquid exchange data.
+   *
+   * Uses mark price, 24h price change, funding rate, OI change, order-book
+   * imbalance, and large-trades bias — all fetched in a single free API call
+   * with no rate-limit risk. Replaces the CG OHLC path that was permanently
+   * 429-ing on the free tier and poisoning the correlation cache.
+   *
+   * Scoring weights mirror the CG path's 40/30/30 split:
+   *  - 24h momentum (40%) — replaces EMA alignment
+   *  - Funding direction (30%) — replaces MACD histogram
+   *  - Flow bias (30%) — replaces RSI, derived from OB imbalance + large trades
+   */
+  private async analyzeBtcFromHL(): Promise<BtcStructure | null> {
+    try {
+      const data = await this.hyperliquid.getHyperliquidData("bitcoin");
+      if (!data || data.markPrice <= 0) return null;
+
+      let score = 0;
+
+      // 24h momentum (40% weight) — replaces EMA alignment
+      const pctChange24h = data.prevDayPrice > 0
+        ? (data.markPrice - data.prevDayPrice) / data.prevDayPrice
+        : 0;
+      if (pctChange24h > 0.01) score += 0.4;       // >+1% day → bullish
+      else if (pctChange24h < -0.01) score -= 0.4;  // <-1% day → bearish
+      else score += pctChange24h * 40;               // linear between ±1%
+
+      // Funding direction (30% weight) — replaces MACD
+      // Positive funding = longs overleveraged = potentially bearish
+      // Negative = shorts overleveraged = potentially bullish
+      const fr = data.fundingRate;
+      if (fr > 0.0001) score -= 0.3;       // strong positive funding → bearish signal
+      else if (fr < -0.0001) score += 0.3;  // strong negative funding → bullish signal
+      else score -= fr * 3000;               // linear in between (inverted — high funding is bearish)
+
+      // Flow bias (30% weight) — replaces RSI
+      // Combine order-book imbalance + large-trades net direction
+      const flowBias = (data.orderBookImbalance + data.largeTradesBias) / 2;
+      if (flowBias > 0.2) score += 0.3;
+      else if (flowBias < -0.2) score -= 0.3;
+      else score += flowBias * 1.5;  // linear scale
+
+      score = Math.max(-1, Math.min(1, score));
+
+      // Map to BtcStructure — ema50/ema200/rsi aren't computed from HL data,
+      // but score + price + macdDirection are the only fields consumed by
+      // assessBtcBias / calculateSuppression downstream. Set the rest to
+      // sentinel values that won't confuse debuggers.
+      const macdDirection: BtcStructure["macdDirection"] =
+        fr > 0.0001 ? "bearish" : fr < -0.0001 ? "bullish" : "neutral";
+
+      return {
+        price: data.markPrice,
+        ema50: 0,    // not available from HL — unused in scoring
+        ema200: 0,   // not available from HL — unused in scoring
+        rsi: 50,     // not available from HL — unused in scoring
+        macdDirection,
+        score,
+      };
+    } catch (err) {
+      console.warn(`BTC structure from Hyperliquid failed: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /** FALLBACK: CoinGecko OHLC-based BTC analysis. Rate-limited on free tier. */
+  private async analyzeBtcFromCG(): Promise<BtcStructure> {
     try {
       // Fetch BTC candles (90 days for EMAs — CoinGecko returns daily candles at days>=90,
       // giving us ~90 bars, enough for the 50-bar floor required by EMA/RSI/MACD history).
