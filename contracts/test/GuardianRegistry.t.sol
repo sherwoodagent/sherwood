@@ -885,3 +885,141 @@ contract GuardianRegistryVoteTest is Test {
         registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
     }
 }
+
+contract GuardianRegistryVoteChangeTest is Test {
+    GuardianRegistry registry;
+    ERC20Mock wood;
+    MockGovernorMinimal governor;
+    address owner = address(0xA11CE);
+    address factory = address(0xFAC10);
+
+    uint256 constant REVIEW_PERIOD = 24 hours;
+    uint256 constant PROPOSAL_ID = 1;
+    uint256 voteEnd;
+    uint256 reviewEnd;
+
+    function setUp() public {
+        wood = new ERC20Mock("WOOD", "WOOD", 18);
+        governor = new MockGovernorMinimal();
+
+        GuardianRegistry impl = new GuardianRegistry();
+        bytes memory initData = abi.encodeCall(
+            GuardianRegistry.initialize,
+            (owner, address(governor), factory, address(wood), 10_000e18, 10_000e18, 0, 7 days, REVIEW_PERIOD, 3000)
+        );
+        registry = GuardianRegistry(address(new ERC1967Proxy(address(impl), initData)));
+
+        for (uint256 i = 0; i < 5; i++) {
+            address g = _guardian(i);
+            wood.mint(g, 100_000e18);
+            vm.prank(g);
+            wood.approve(address(registry), type(uint256).max);
+            vm.prank(g);
+            registry.stakeAsGuardian(10_000e18, 1 + i);
+        }
+
+        voteEnd = block.timestamp;
+        reviewEnd = voteEnd + REVIEW_PERIOD;
+        governor.setProposal(PROPOSAL_ID, voteEnd, reviewEnd);
+        registry.openReview(PROPOSAL_ID);
+    }
+
+    function _guardian(uint256 i) internal pure returns (address) {
+        return address(uint160(0xAA00 + i + 1));
+    }
+
+    function test_voteChange_approveToBlock_updatesArraysAndTallies() public {
+        address g = _guardian(0);
+        vm.prank(g);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+
+        // Top up stake AFTER first vote: should NOT be reflected on swap
+        // (vote-change preserves the original snapshot).
+        vm.prank(g);
+        registry.stakeAsGuardian(5_000e18, 42);
+
+        vm.expectEmit(true, true, false, true);
+        emit IGuardianRegistry.GuardianVoteChanged(
+            PROPOSAL_ID, g, IGuardianRegistry.GuardianVoteType.Approve, IGuardianRegistry.GuardianVoteType.Block
+        );
+        vm.prank(g);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+
+        // Now switch back to Approve → still original 10_000e18 weight
+        // (stake snapshot is first-vote only).
+        vm.expectEmit(true, true, false, true);
+        emit IGuardianRegistry.GuardianVoteChanged(
+            PROPOSAL_ID, g, IGuardianRegistry.GuardianVoteType.Block, IGuardianRegistry.GuardianVoteType.Approve
+        );
+        vm.prank(g);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+    }
+
+    function test_voteChange_sameSide_revertsNoVoteChange() public {
+        address g = _guardian(0);
+        vm.prank(g);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+
+        vm.prank(g);
+        vm.expectRevert(IGuardianRegistry.NoVoteChange.selector);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+    }
+
+    function test_voteChange_inLockoutWindow_reverts() public {
+        address g = _guardian(0);
+        vm.prank(g);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+
+        // Lockout = final 10% of reviewPeriod. For 24h window → final 2.4h.
+        // Warp to exactly lockoutStart (reviewEnd - reviewPeriod*1000/10000).
+        uint256 lockoutStart = reviewEnd - (REVIEW_PERIOD * 1000) / 10_000;
+        vm.warp(lockoutStart);
+
+        vm.prank(g);
+        vm.expectRevert(IGuardianRegistry.VoteChangeLockedOut.selector);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+    }
+
+    function test_voteChange_justBeforeLockout_succeeds() public {
+        address g = _guardian(0);
+        vm.prank(g);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+
+        // One second before lockout starts — still allowed.
+        uint256 lockoutStart = reviewEnd - (REVIEW_PERIOD * 1000) / 10_000;
+        vm.warp(lockoutStart - 1);
+
+        vm.prank(g);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+    }
+
+    function test_voteChange_blockToApprove_revertsIfApproverCapFull() public {
+        // Existing 5 guardians will vote Block first; then saturate Approve with 100 fresh guardians.
+        address blockVoter = _guardian(0);
+        vm.prank(blockVoter);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+
+        uint256 cap = registry.MAX_APPROVERS_PER_PROPOSAL();
+        for (uint256 i = 0; i < cap; i++) {
+            address g = address(uint160(0x200000 + i));
+            wood.mint(g, 100_000e18);
+            vm.prank(g);
+            wood.approve(address(registry), type(uint256).max);
+            vm.prank(g);
+            registry.stakeAsGuardian(10_000e18, 1 + i);
+            vm.prank(g);
+            registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+        }
+
+        // Block voter tries to switch → must revert NewSideFull WITHOUT mutating
+        // the old side (check-first-then-apply).
+        vm.prank(blockVoter);
+        vm.expectRevert(IGuardianRegistry.NewSideFull.selector);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+
+        // Verify blockVoter still holds their Block vote (old side intact).
+        vm.prank(blockVoter);
+        vm.expectRevert(IGuardianRegistry.NoVoteChange.selector);
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+    }
+}

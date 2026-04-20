@@ -285,20 +285,49 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
 
         GuardianVoteType existing = _votes[proposalId][msg.sender];
         if (existing == support) revert NoVoteChange();
-        if (existing != GuardianVoteType.None) revert AlreadyVoted();
 
-        uint128 weight = _guardians[msg.sender].stakedAmount;
-        _voteStake[proposalId][msg.sender] = weight;
+        if (existing == GuardianVoteType.None) {
+            // First vote — snapshot stake and push onto chosen side.
+            uint128 weight = _guardians[msg.sender].stakedAmount;
+            _voteStake[proposalId][msg.sender] = weight;
 
-        if (support == GuardianVoteType.Approve) {
-            _pushApprover(proposalId, msg.sender);
-            r.approveStakeWeight += weight;
+            if (support == GuardianVoteType.Approve) {
+                _pushApprover(proposalId, msg.sender);
+                r.approveStakeWeight += weight;
+            } else {
+                _pushBlocker(proposalId, msg.sender);
+                r.blockStakeWeight += weight;
+            }
+            _votes[proposalId][msg.sender] = support;
+            emit GuardianVoteCast(proposalId, msg.sender, support, weight);
         } else {
-            _pushBlocker(proposalId, msg.sender);
-            r.blockStakeWeight += weight;
+            // Vote-change: must be before the late lockout window. The final
+            // `LATE_VOTE_LOCKOUT_BPS` of `reviewPeriod` is locked to prevent
+            // last-minute flips that would make honest early Approvers
+            // strictly worse off than abstainers.
+            uint256 lockoutStart = p.reviewEnd - (reviewPeriod * LATE_VOTE_LOCKOUT_BPS) / 10_000;
+            if (block.timestamp >= lockoutStart) revert VoteChangeLockedOut();
+
+            uint128 weight = _voteStake[proposalId][msg.sender]; // preserved snapshot
+            if (existing == GuardianVoteType.Approve) {
+                // Approve → Block: blocks uncapped, always succeeds.
+                _removeApprover(proposalId, msg.sender);
+                r.approveStakeWeight -= weight;
+                _pushBlocker(proposalId, msg.sender);
+                r.blockStakeWeight += weight;
+            } else {
+                // Block → Approve: check Approve cap FIRST without mutating
+                // the old side (check-first-then-apply). If full, revert
+                // NewSideFull; caller retains their Block vote.
+                if (_approvers[proposalId].length >= MAX_APPROVERS_PER_PROPOSAL) revert NewSideFull();
+                _removeBlocker(proposalId, msg.sender);
+                r.blockStakeWeight -= weight;
+                _pushApprover(proposalId, msg.sender); // guaranteed to fit (cap checked above)
+                r.approveStakeWeight += weight;
+            }
+            _votes[proposalId][msg.sender] = support;
+            emit GuardianVoteChanged(proposalId, msg.sender, existing, support);
         }
-        _votes[proposalId][msg.sender] = support;
-        emit GuardianVoteCast(proposalId, msg.sender, support, weight);
     }
 
     // ── Internal vote helpers ──
@@ -314,6 +343,35 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     function _pushBlocker(uint256 proposalId, address g) private {
         _blockers[proposalId].push(g);
         _blockerIndex[proposalId][g] = _blockers[proposalId].length; // 1-indexed
+    }
+
+    /// @dev Swap-and-pop removal of `g` from `_approvers[proposalId]`, keeping
+    ///      `_approverIndex` consistent. Expects `g` to be present (idx1 > 0).
+    function _removeApprover(uint256 proposalId, address g) private {
+        uint256 idx1 = _approverIndex[proposalId][g];
+        uint256 idx = idx1 - 1;
+        address[] storage arr = _approvers[proposalId];
+        address last = arr[arr.length - 1];
+        if (last != g) {
+            arr[idx] = last;
+            _approverIndex[proposalId][last] = idx1;
+        }
+        arr.pop();
+        delete _approverIndex[proposalId][g];
+    }
+
+    /// @dev Mirror of `_removeApprover` for blockers.
+    function _removeBlocker(uint256 proposalId, address g) private {
+        uint256 idx1 = _blockerIndex[proposalId][g];
+        uint256 idx = idx1 - 1;
+        address[] storage arr = _blockers[proposalId];
+        address last = arr[arr.length - 1];
+        if (last != g) {
+            arr[idx] = last;
+            _blockerIndex[proposalId][last] = idx1;
+        }
+        arr.pop();
+        delete _blockerIndex[proposalId][g];
     }
 
     function _isActiveGuardian(address g) private view returns (bool) {
