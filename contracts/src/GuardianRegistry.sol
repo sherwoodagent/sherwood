@@ -190,16 +190,52 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         emit GuardianStaked(msg.sender, amount, agentId);
     }
 
+    /// @inheritdoc IGuardianRegistry
+    /// @dev Immediately revokes voting power by zeroing the guardian's contribution to
+    ///      `totalGuardianStake` and decrementing `activeGuardianCount`. WOOD stays in
+    ///      the registry until `claimUnstakeGuardian` after `coolDownPeriod`.
     function requestUnstakeGuardian() external {
-        revert();
+        Guardian storage g = _guardians[msg.sender];
+        if (g.stakedAmount == 0) revert NoActiveStake();
+        if (g.unstakeRequestedAt != 0) revert UnstakeAlreadyRequested();
+
+        g.unstakeRequestedAt = uint64(block.timestamp);
+        totalGuardianStake -= g.stakedAmount;
+        activeGuardianCount -= 1;
+
+        emit GuardianUnstakeRequested(msg.sender, block.timestamp);
     }
 
+    /// @inheritdoc IGuardianRegistry
+    /// @dev Reverses `requestUnstakeGuardian`: restores voting power and active count.
     function cancelUnstakeGuardian() external {
-        revert();
+        Guardian storage g = _guardians[msg.sender];
+        if (g.unstakeRequestedAt == 0) revert UnstakeNotRequested();
+
+        g.unstakeRequestedAt = 0;
+        totalGuardianStake += g.stakedAmount;
+        activeGuardianCount += 1;
+
+        emit GuardianUnstakeCancelled(msg.sender);
     }
 
-    function claimUnstakeGuardian() external {
-        revert();
+    /// @inheritdoc IGuardianRegistry
+    /// @dev After `coolDownPeriod` from `unstakeRequestedAt`, releases WOOD and
+    ///      deregisters the guardian entirely (struct deleted — agentId can differ on
+    ///      a subsequent re-stake).
+    function claimUnstakeGuardian() external nonReentrant {
+        Guardian storage g = _guardians[msg.sender];
+        if (g.unstakeRequestedAt == 0) revert UnstakeNotRequested();
+        if (block.timestamp < uint256(g.unstakeRequestedAt) + coolDownPeriod) {
+            revert CooldownNotElapsed();
+        }
+
+        uint256 amount = g.stakedAmount;
+        delete _guardians[msg.sender];
+
+        wood.safeTransfer(msg.sender, amount);
+
+        emit GuardianUnstakeClaimed(msg.sender, amount);
     }
 
     function voteOnProposal(uint256, GuardianVoteType) external {
