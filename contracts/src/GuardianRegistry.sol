@@ -159,6 +159,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     address public minter;
     IERC20 public wood;
 
+    /// @dev Reserved storage for future upgrades. Shrink by 1 when adding a
+    ///      new storage slot. Matches the pattern on SyndicateGovernor /
+    ///      SyndicateFactory / SyndicateVault.
+    uint256[50] private __gap;
+
     // ── Initializer ──
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
