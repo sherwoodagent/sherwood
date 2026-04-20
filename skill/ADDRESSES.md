@@ -57,7 +57,7 @@ These are also available in `cli/src/lib/addresses.ts` (resolved at runtime base
 | BatchExecutorLib | `0xdE317B80E66c5E8872C63B0620E2CbB73b5Bcd49` |
 | SyndicateVaultImpl | `0x09005FEF3EF1879Af207C79416ae9d5059437bd4` |
 | USDC | `0xb88339CB7199b77E23DB6E890353E22632Ba630f` (6 decimals) |
-| HyperliquidPerpStrategy | `0x1E831aB61Dc423bF678a2Ff8d9ce768E1e6D2338` |
+| HyperliquidPerpStrategy | `0x2E97621f49D5b8263E244daB25f177DF739e58a9` |
 
 HyperEVM has no Moonwell, Uniswap, Venice, Aerodrome, ENS, or ERC-8004 — the factory accepts `address(0)` for `ensRegistrar` and `agentRegistry`.
 
