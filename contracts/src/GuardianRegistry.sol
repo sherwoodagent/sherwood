@@ -201,6 +201,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         _;
     }
 
+    modifier whenNotPaused() {
+        if (paused) revert ProtocolPaused();
+        _;
+    }
+
     // ── Guardian fns ──
     /// @inheritdoc IGuardianRegistry
     /// @dev Idempotent top-up: on first stake records `agentId` and activates
@@ -761,8 +766,33 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         emit EpochFunded(epochId, msg.sender, amount);
     }
 
-    function claimEpochReward(uint256) external {
-        revert();
+    /// @inheritdoc IGuardianRegistry
+    /// @dev Payout = `epochBudget * weight / totalWeight` evaluated against
+    ///      the *remaining* budget and remaining total weight at claim time.
+    ///      Decrementing both preserves pro-rata fairness regardless of
+    ///      claim order (first claimer gets their full share even if other
+    ///      guardians never claim). Reverts `NothingToClaim` on zero payout
+    ///      (unfunded epoch, zero guardian weight, or rounding to zero) — so
+    ///      guardians can come back and claim after a late `fundEpoch` for
+    ///      the same past epoch. CEI: marks claimed and decrements budget +
+    ///      total weight BEFORE transfer; the epoch's residual remains
+    ///      accurate for `sweepUnclaimed`.
+    function claimEpochReward(uint256 epochId) external nonReentrant whenNotPaused {
+        if (epochId >= currentEpoch()) revert EpochNotEnded();
+        if (epochRewardClaimed[epochId][msg.sender]) revert NothingToClaim();
+
+        uint256 weight = epochGuardianBlockWeight[epochId][msg.sender];
+        uint256 total = epochTotalBlockWeight[epochId];
+        uint256 budget = epochBudget[epochId];
+        uint256 payout = (weight == 0 || total == 0) ? 0 : (budget * weight) / total;
+        if (payout == 0) revert NothingToClaim();
+
+        epochRewardClaimed[epochId][msg.sender] = true;
+        epochBudget[epochId] = budget - payout;
+        epochTotalBlockWeight[epochId] = total - weight;
+
+        wood.safeTransfer(msg.sender, payout);
+        emit EpochRewardClaimed(epochId, msg.sender, payout);
     }
 
     // ── Slash appeal ──
@@ -860,7 +890,17 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         return (block.timestamp - epochGenesis) / EPOCH_DURATION;
     }
 
-    function pendingEpochReward(address, uint256) external view returns (uint256) {
-        return 0; // Task 20
+    /// @notice Mirrors `claimEpochReward` payout computation. Returns 0 when
+    ///         already claimed, epoch not yet ended, or the computed payout
+    ///         rounds to zero — matching what `claimEpochReward` would
+    ///         revert on.
+    function pendingEpochReward(address guardian, uint256 epochId) external view returns (uint256) {
+        if (epochId >= currentEpoch()) return 0;
+        if (epochRewardClaimed[epochId][guardian]) return 0;
+
+        uint256 weight = epochGuardianBlockWeight[epochId][guardian];
+        uint256 total = epochTotalBlockWeight[epochId];
+        if (weight == 0 || total == 0) return 0;
+        return (epochBudget[epochId] * weight) / total;
     }
 }

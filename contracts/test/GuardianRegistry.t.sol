@@ -1666,3 +1666,207 @@ contract GuardianRegistryFundEpochTest is Test {
         assertEq(registry.epochBudget(epochId), 2_500e18);
     }
 }
+
+contract GuardianRegistryClaimEpochTest is Test {
+    GuardianRegistry registry;
+    ERC20Mock wood;
+    MockGovernorMinimal governor;
+    address owner = address(0xA11CE);
+    address factory = address(0xFAC10);
+
+    uint256 constant REVIEW_PERIOD = 24 hours;
+    uint256 constant PROPOSAL_ID = 1;
+    uint256 constant BLOCK_QUORUM_BPS = 3000;
+
+    address internal constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+
+    function setUp() public {
+        wood = new ERC20Mock("WOOD", "WOOD", 18);
+        governor = new MockGovernorMinimal();
+
+        GuardianRegistry impl = new GuardianRegistry();
+        bytes memory initData = abi.encodeCall(
+            GuardianRegistry.initialize,
+            (
+                owner,
+                address(governor),
+                factory,
+                address(wood),
+                10_000e18,
+                10_000e18,
+                0,
+                7 days,
+                REVIEW_PERIOD,
+                BLOCK_QUORUM_BPS
+            )
+        );
+        registry = GuardianRegistry(address(new ERC1967Proxy(address(impl), initData)));
+
+        // Stake 5 guardians × varied amounts to exercise pro-rata splits.
+        // _guardian(0) and _guardian(1) will block with 60k / 40k stake.
+        // _guardian(2..4) needed to hit MIN_COHORT_STAKE_AT_OPEN = 50_000e18 —
+        // they'll approve and be slashed.
+        address g0 = _guardian(0);
+        address g1 = _guardian(1);
+        address g2 = _guardian(2);
+        address g3 = _guardian(3);
+        address g4 = _guardian(4);
+
+        _mintAndApprove(g0, 100_000e18);
+        _mintAndApprove(g1, 100_000e18);
+        _mintAndApprove(g2, 100_000e18);
+        _mintAndApprove(g3, 100_000e18);
+        _mintAndApprove(g4, 100_000e18);
+
+        vm.prank(g0);
+        registry.stakeAsGuardian(60_000e18, 1);
+        vm.prank(g1);
+        registry.stakeAsGuardian(40_000e18, 2);
+        vm.prank(g2);
+        registry.stakeAsGuardian(10_000e18, 3);
+        vm.prank(g3);
+        registry.stakeAsGuardian(10_000e18, 4);
+        vm.prank(g4);
+        registry.stakeAsGuardian(10_000e18, 5);
+
+        // Mint WOOD to owner for funding the epoch.
+        wood.mint(owner, 1_000_000e18);
+        vm.prank(owner);
+        wood.approve(address(registry), type(uint256).max);
+    }
+
+    function _guardian(uint256 i) internal pure returns (address) {
+        return address(uint160(0xAA00 + i + 1));
+    }
+
+    function _mintAndApprove(address who, uint256 amt) internal {
+        wood.mint(who, amt);
+        vm.prank(who);
+        wood.approve(address(registry), type(uint256).max);
+    }
+
+    /// @dev Resolves a blocked review in current epoch with g0 (60k) + g1 (40k)
+    ///      blocking, g2+g3 (10k + 10k = 20k) approving. Total cohort = 130k,
+    ///      block weight = 100k (77% ≥ 30% quorum). Approvers get slashed.
+    function _resolveBlockedReview() internal {
+        uint256 voteEnd = block.timestamp;
+        uint256 reviewEnd = voteEnd + REVIEW_PERIOD;
+        governor.setProposal(PROPOSAL_ID, voteEnd, reviewEnd);
+        registry.openReview(PROPOSAL_ID);
+
+        vm.prank(_guardian(0));
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+        vm.prank(_guardian(1));
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Block);
+        vm.prank(_guardian(2));
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+        vm.prank(_guardian(3));
+        registry.voteOnProposal(PROPOSAL_ID, IGuardianRegistry.GuardianVoteType.Approve);
+
+        vm.warp(reviewEnd);
+        bool blocked = registry.resolveReview(PROPOSAL_ID);
+        assertTrue(blocked);
+    }
+
+    function test_claimEpochReward_happy_paysProRata() public {
+        uint256 epoch0 = registry.currentEpoch();
+        // Fund epoch 0 with 10_000 WOOD.
+        vm.prank(owner);
+        registry.fundEpoch(epoch0, 10_000e18);
+
+        _resolveBlockedReview();
+        // Block weights: g0=60k, g1=40k, total=100k.
+        assertEq(registry.epochGuardianBlockWeight(epoch0, _guardian(0)), 60_000e18);
+        assertEq(registry.epochGuardianBlockWeight(epoch0, _guardian(1)), 40_000e18);
+        assertEq(registry.epochTotalBlockWeight(epoch0), 100_000e18);
+
+        // Warp past epoch 0.
+        vm.warp(registry.epochGenesis() + registry.EPOCH_DURATION());
+        assertEq(registry.currentEpoch(), epoch0 + 1);
+
+        // pendingEpochReward should match.
+        assertEq(registry.pendingEpochReward(_guardian(0), epoch0), 6_000e18);
+        assertEq(registry.pendingEpochReward(_guardian(1), epoch0), 4_000e18);
+
+        uint256 bal0Before = wood.balanceOf(_guardian(0));
+        vm.expectEmit(true, true, false, true);
+        emit IGuardianRegistry.EpochRewardClaimed(epoch0, _guardian(0), 6_000e18);
+        vm.prank(_guardian(0));
+        registry.claimEpochReward(epoch0);
+        assertEq(wood.balanceOf(_guardian(0)), bal0Before + 6_000e18);
+
+        uint256 bal1Before = wood.balanceOf(_guardian(1));
+        vm.prank(_guardian(1));
+        registry.claimEpochReward(epoch0);
+        assertEq(wood.balanceOf(_guardian(1)), bal1Before + 4_000e18);
+
+        // Budget fully drained.
+        assertEq(registry.epochBudget(epoch0), 0);
+    }
+
+    function test_claimEpochReward_doubleClaim_reverts() public {
+        uint256 epoch0 = registry.currentEpoch();
+        vm.prank(owner);
+        registry.fundEpoch(epoch0, 10_000e18);
+        _resolveBlockedReview();
+
+        vm.warp(registry.epochGenesis() + registry.EPOCH_DURATION());
+
+        vm.prank(_guardian(0));
+        registry.claimEpochReward(epoch0);
+
+        vm.prank(_guardian(0));
+        vm.expectRevert(IGuardianRegistry.NothingToClaim.selector);
+        registry.claimEpochReward(epoch0);
+    }
+
+    function test_claimEpochReward_beforeEpochEnds_reverts() public {
+        uint256 epoch0 = registry.currentEpoch();
+        vm.prank(owner);
+        registry.fundEpoch(epoch0, 10_000e18);
+        _resolveBlockedReview();
+
+        // Still inside epoch 0.
+        vm.prank(_guardian(0));
+        vm.expectRevert(IGuardianRegistry.EpochNotEnded.selector);
+        registry.claimEpochReward(epoch0);
+    }
+
+    function test_claimEpochReward_revertsIfUnfunded() public {
+        uint256 epoch0 = registry.currentEpoch();
+        // Do not fund epoch 0 — just resolve a blocked review crediting weights.
+        _resolveBlockedReview();
+
+        vm.warp(registry.epochGenesis() + registry.EPOCH_DURATION());
+
+        // No budget → payout == 0 → revert.
+        vm.prank(_guardian(0));
+        vm.expectRevert(IGuardianRegistry.NothingToClaim.selector);
+        registry.claimEpochReward(epoch0);
+
+        // Late-fund the same past epoch (allowed since budget == 0).
+        vm.prank(owner);
+        registry.fundEpoch(epoch0, 10_000e18);
+
+        // Now g0 can claim.
+        uint256 bal0Before = wood.balanceOf(_guardian(0));
+        vm.prank(_guardian(0));
+        registry.claimEpochReward(epoch0);
+        assertEq(wood.balanceOf(_guardian(0)), bal0Before + 6_000e18);
+    }
+
+    function test_claimEpochReward_revertsIfNoWeight() public {
+        uint256 epoch0 = registry.currentEpoch();
+        vm.prank(owner);
+        registry.fundEpoch(epoch0, 10_000e18);
+        _resolveBlockedReview();
+
+        vm.warp(registry.epochGenesis() + registry.EPOCH_DURATION());
+
+        // g4 never voted Block — no weight in epoch 0.
+        assertEq(registry.epochGuardianBlockWeight(epoch0, _guardian(4)), 0);
+        vm.prank(_guardian(4));
+        vm.expectRevert(IGuardianRegistry.NothingToClaim.selector);
+        registry.claimEpochReward(epoch0);
+    }
+}
