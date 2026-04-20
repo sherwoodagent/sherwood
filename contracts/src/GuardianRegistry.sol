@@ -243,12 +243,39 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     // ── Owner fns ──
-    function prepareOwnerStake(uint256) external {
-        revert();
+    /// @inheritdoc IGuardianRegistry
+    /// @dev Pulls WOOD into the registry under `_prepared[msg.sender]`. At prepare time
+    ///      we don't yet know the target vault's TVL-scaled bond, so only the floor
+    ///      (`minOwnerStake`) is enforced here. The factory checks `requiredOwnerBond`
+    ///      at `bindOwnerStake` time.
+    function prepareOwnerStake(uint256 amount) external nonReentrant {
+        if (amount < minOwnerStake) revert InsufficientStake();
+
+        PreparedOwnerStake storage p = _prepared[msg.sender];
+        // Allow re-prepare only after a previous prepared stake was bound (slot consumed).
+        if (p.amount != 0 && !p.bound) revert PreparedStakeAlreadyExists();
+
+        wood.safeTransferFrom(msg.sender, address(this), amount);
+
+        _prepared[msg.sender] =
+            PreparedOwnerStake({amount: uint128(amount), preparedAt: uint64(block.timestamp), bound: false});
+
+        emit OwnerStakePrepared(msg.sender, amount);
     }
 
-    function cancelPreparedStake() external {
-        revert();
+    /// @inheritdoc IGuardianRegistry
+    /// @dev Refunds an unbound prepared stake. Reverts if the slot has already been
+    ///      bound to a vault (use the owner-unstake flow in that case).
+    function cancelPreparedStake() external nonReentrant {
+        PreparedOwnerStake storage p = _prepared[msg.sender];
+        if (p.amount == 0 || p.bound) revert PreparedStakeNotFound();
+
+        uint256 amount = p.amount;
+        delete _prepared[msg.sender];
+
+        wood.safeTransfer(msg.sender, amount);
+
+        emit PreparedStakeCancelled(msg.sender, amount);
     }
 
     function requestUnstakeOwner(address) external {

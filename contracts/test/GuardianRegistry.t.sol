@@ -249,3 +249,72 @@ contract GuardianRegistryUnstakeTest is Test {
         registry.claimUnstakeGuardian();
     }
 }
+
+contract GuardianRegistryOwnerPrepareTest is Test {
+    GuardianRegistry registry;
+    ERC20Mock wood;
+    address owner = address(0xA11CE);
+    address governor = address(0x9000);
+    address factory = address(0xFAC10);
+    address creator = address(0xC0FFEE);
+
+    function setUp() public {
+        wood = new ERC20Mock("WOOD", "WOOD", 18);
+        GuardianRegistry impl = new GuardianRegistry();
+        bytes memory initData = abi.encodeCall(
+            GuardianRegistry.initialize,
+            (owner, governor, factory, address(wood), 10_000e18, 10_000e18, 0, 7 days, 24 hours, 3000)
+        );
+        registry = GuardianRegistry(address(new ERC1967Proxy(address(impl), initData)));
+
+        wood.mint(creator, 100_000e18);
+        vm.prank(creator);
+        wood.approve(address(registry), type(uint256).max);
+    }
+
+    function test_prepareOwnerStake_storesPrepared() public {
+        vm.expectEmit(true, false, false, true);
+        emit IGuardianRegistry.OwnerStakePrepared(creator, 10_000e18);
+        vm.prank(creator);
+        registry.prepareOwnerStake(10_000e18);
+
+        assertEq(registry.preparedStakeOf(creator), 10_000e18);
+        assertTrue(registry.canCreateVault(creator));
+        assertEq(wood.balanceOf(address(registry)), 10_000e18);
+    }
+
+    function test_prepareOwnerStake_revertsIfBelowMin() public {
+        vm.prank(creator);
+        vm.expectRevert(IGuardianRegistry.InsufficientStake.selector);
+        registry.prepareOwnerStake(1);
+    }
+
+    function test_prepareOwnerStake_revertsIfAlreadyPrepared() public {
+        vm.prank(creator);
+        registry.prepareOwnerStake(10_000e18);
+        vm.prank(creator);
+        vm.expectRevert(IGuardianRegistry.PreparedStakeAlreadyExists.selector);
+        registry.prepareOwnerStake(10_000e18);
+    }
+
+    function test_cancelPreparedStake_refunds() public {
+        uint256 balBefore = wood.balanceOf(creator);
+        vm.prank(creator);
+        registry.prepareOwnerStake(10_000e18);
+
+        vm.expectEmit(true, false, false, true);
+        emit IGuardianRegistry.PreparedStakeCancelled(creator, 10_000e18);
+        vm.prank(creator);
+        registry.cancelPreparedStake();
+
+        assertEq(wood.balanceOf(creator), balBefore);
+        assertEq(registry.preparedStakeOf(creator), 0);
+        assertFalse(registry.canCreateVault(creator));
+    }
+
+    function test_cancelPreparedStake_revertsIfNone() public {
+        vm.prank(creator);
+        vm.expectRevert(IGuardianRegistry.PreparedStakeNotFound.selector);
+        registry.cancelPreparedStake();
+    }
+}
