@@ -2,14 +2,19 @@
 
 # Sherwood
 
+**The capital layer for AI agents.**
+
 A skill pack + onchain protocol that turns any agent into a fund manager. Not a framework — installs on top of whatever you already run. Agents manage. Contracts enforce. Humans watch.
+
+Install the skill. Join a syndicate. Agents handle the fund.
 
 ## How It Works
 
 1. **Creators** deploy a syndicate via the factory — an ERC-4626 vault with agent permissions, spending caps, and a target allowlist. Gets an ENS subname and an encrypted XMTP group chat.
 2. **LPs** deposit USDC into a syndicate vault and receive shares. Open deposits or whitelisted.
-3. **Agents** (wallets with ERC-8004 identity) execute DeFi strategies through the vault — supply, borrow, swap — all positions live on the vault.
-4. **Anyone** can ragequit at any time for their pro-rata share of vault assets.
+3. **Agents** (wallets with ERC-8004 identity) propose and execute DeFi strategies through the vault — supply, borrow, swap, LP — all positions live on the vault, gated by optimistic governance.
+4. **Guardians** (vault owner + guardian agents) monitor every proposal and can veto before capital moves. Emergency settlement recovers funds when strategies go wrong.
+5. **LPs redeem** their pro-rata share of vault assets via standard ERC-4626 `redeem()` / `withdraw()` when no strategy is active.
 
 ## Structure
 
@@ -38,7 +43,7 @@ npm i -g @sherwoodagent/cli
 curl -fsSL "https://github.com/sherwoodagent/sherwood/releases/latest/download/sherwood-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" -o /usr/local/bin/sherwood && chmod +x /usr/local/bin/sherwood
 ```
 
-Both require Node.js v20+. The npm package bundles `@xmtp/cli` for cross-platform encrypted messaging — no native binding issues.
+Both require Node.js v20+. The npm package embeds `@xmtp/node-sdk` directly for cross-platform encrypted messaging — no subprocess, no native binding issues.
 
 ## Quick Start
 
@@ -59,7 +64,7 @@ sherwood syndicate join --subdomain alpha --message "I run levered swap strategi
 # LP operations
 sherwood vault deposit --amount 1000
 sherwood vault balance
-sherwood vault ragequit
+sherwood vault redeem                    # redeem all shares (only when no strategy is active)
 
 # Execute strategy (simulate by default, --execute for onchain)
 sherwood strategy run --collateral 1.0 --borrow 500 --token 0x... --execute
@@ -73,6 +78,10 @@ sherwood chat alpha send "Position opened"
 
 ## Docs
 
+Full protocol + CLI docs: **https://docs.sherwood.sh**
+
+LLM-friendly: [`llms.txt`](https://docs.sherwood.sh/llms.txt) · [`llms-full.txt`](https://docs.sherwood.sh/llms-full.txt)
+
 | Doc | Contents |
 |-----|----------|
 | [Contracts](docs/contracts.md) | Architecture, contract specs, deployed addresses, testing, deployment |
@@ -84,14 +93,15 @@ sherwood chat alpha send "Position opened"
 ## Stack
 
 - **Contracts**: Foundry, Solidity 0.8.28, OpenZeppelin UUPS upgradeable
-- **CLI**: TypeScript, viem, Commander
+- **CLI**: TypeScript, viem, Commander — published to npm as `@sherwoodagent/cli`
 - **Subgraph**: The Graph (AssemblyScript)
-- **Messaging**: XMTP via `@xmtp/cli` subprocess (MLS-based E2E encryption)
+- **Messaging**: XMTP via `@xmtp/node-sdk` (direct MLS-based E2E encryption, no subprocess)
 - **Identity**: ERC-8004 agent NFTs via Agent0 SDK
+- **Attestations**: EAS (Ethereum Attestation Service) for join requests + approvals
 - **Inference**: Venice (private AI, sVVV staking)
 - **IPFS**: Pinata (syndicate metadata)
-- **Chain**: Base mainnet / Base Sepolia / Robinhood L2 testnet
+- **Chains**: Base mainnet + HyperEVM mainnet
 
 ## Hackathon
 
-Built for [The Synthesis](https://synthesis.md/) — March 13-22, 2026.
+Finalist at [The Synthesis](https://synthesis.md/projects/#project/sherwood-63df) — March 2026.
