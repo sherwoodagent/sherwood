@@ -116,6 +116,15 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _disableInitializers();
     }
 
+    /// @notice One-time setter for the guardian registry (Task 25).
+    /// @dev Kept as a second-stage initializer to avoid breaking the existing
+    ///      `initialize(InitParams)` ABI on testnets. Callable once by owner.
+    function initializeGuardianRegistry(address guardianRegistry_) external onlyOwner {
+        if (guardianRegistry_ == address(0)) revert ZeroAddress();
+        if (_guardianRegistry != address(0)) revert RegistryMismatch();
+        _guardianRegistry = guardianRegistry_;
+    }
+
     function initialize(InitParams memory p) external initializer {
         if (p.owner == address(0)) revert ZeroAddress();
         if (
@@ -258,6 +267,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
 
         bool isCollaborative = coProposers.length > 0;
 
+        // Review period defaults to zero when registry isn't wired; state machine
+        // still works (voteEnd == reviewEnd → immediate transition to Approved).
+        uint256 reviewPeriod_ =
+            _guardianRegistry != address(0) ? IGuardianRegistry(_guardianRegistry).reviewPeriod() : 0;
+
         // Sequential storage writes instead of struct literal to avoid Yul
         // stack-too-deep under the coverage config (optimizer/viaIR off).
         // votesFor / votesAgainst / votesAbstain / executedAt default to 0.
@@ -270,7 +284,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         p.strategyDuration = strategyDuration;
         p.snapshotTimestamp = isCollaborative ? 0 : block.timestamp;
         p.voteEnd = isCollaborative ? 0 : block.timestamp + _params.votingPeriod;
-        p.executeBy = isCollaborative ? 0 : block.timestamp + _params.votingPeriod + _params.executionWindow;
+        p.reviewEnd = isCollaborative ? 0 : block.timestamp + _params.votingPeriod + reviewPeriod_;
+        p.executeBy = isCollaborative ? 0 : p.reviewEnd + _params.executionWindow;
         p.state = isCollaborative ? ProposalState.Draft : ProposalState.Pending;
 
         // Store calls separately
@@ -384,15 +399,14 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     }
 
     /// @inheritdoc ISyndicateGovernor
+    /// @dev Narrowed to Draft/Pending only (Task 25) — once a proposal reaches
+    ///      GuardianReview or later, the guardian cohort and execution window
+    ///      drive resolution and the owner loses unilateral cancel authority.
     function emergencyCancel(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
         ProposalState currentState = _resolveState(proposal);
-        // Can cancel anything that isn't already settled, cancelled, or executed
-        if (
-            currentState == ProposalState.Settled || currentState == ProposalState.Cancelled
-                || currentState == ProposalState.Executed
-        ) {
+        if (currentState != ProposalState.Draft && currentState != ProposalState.Pending) {
             revert ProposalNotCancellable();
         }
 
@@ -402,12 +416,14 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     }
 
     /// @inheritdoc ISyndicateGovernor
+    /// @dev Narrowed to Pending only (Task 25) — post-vote veto flows through
+    ///      the guardian-review path rather than unilateral owner action.
     function vetoProposal(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
 
         ProposalState currentState = _resolveState(proposal);
-        if (currentState != ProposalState.Pending && currentState != ProposalState.Approved) {
+        if (currentState != ProposalState.Pending) {
             revert ProposalNotCancellable();
         }
 
@@ -450,10 +466,13 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
 
         if (allApproved) {
             // Transition to Pending -- voting begins
+            uint256 reviewPeriod_ =
+                _guardianRegistry != address(0) ? IGuardianRegistry(_guardianRegistry).reviewPeriod() : 0;
             proposal.state = ProposalState.Pending;
             proposal.snapshotTimestamp = block.timestamp;
             proposal.voteEnd = block.timestamp + _params.votingPeriod;
-            proposal.executeBy = block.timestamp + _params.votingPeriod + _params.executionWindow;
+            proposal.reviewEnd = proposal.voteEnd + reviewPeriod_;
+            proposal.executeBy = proposal.reviewEnd + _params.executionWindow;
             emit CollaborationTransitionedToPending(proposalId);
         }
     }
@@ -597,6 +616,29 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         return _protocolFeeRecipient;
     }
 
+    /// @inheritdoc ISyndicateGovernor
+    function guardianRegistry() external view returns (address) {
+        return _guardianRegistry;
+    }
+
+    /// @notice Narrow proposal view consumed by the guardian registry.
+    /// @dev Returns a tuple (`voteEnd`, `reviewEnd`, `vault`) encoded to match
+    ///      `GuardianRegistry.IGovernorMinimal.ProposalView`. Keeps the registry
+    ///      decoupled from the full `StrategyProposal` ABI.
+    function getProposalView(uint256 proposalId) external view returns (ProposalViewLite memory v) {
+        StrategyProposal storage p = _proposals[proposalId];
+        v.voteEnd = p.voteEnd;
+        v.reviewEnd = p.reviewEnd;
+        v.vault = p.vault;
+    }
+
+    /// @dev Mirrors `GuardianRegistry.IGovernorMinimal.ProposalView` for ABI parity.
+    struct ProposalViewLite {
+        uint256 voteEnd;
+        uint256 reviewEnd;
+        address vault;
+    }
+
     function _applyProtocolFeeBpsChange(uint256 newValue) internal override returns (uint256 old) {
         old = _protocolFeeBps;
         _protocolFeeBps = newValue;
@@ -700,9 +742,27 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     }
 
     /// @dev Compute the resolved state and persist any transitions to storage.
+    ///      Drives registry-side review resolution when the review window has
+    ///      elapsed and no cached resolution exists yet (mutating path).
     function _resolveState(StrategyProposal storage proposal) internal returns (ProposalState) {
         ProposalState stored = proposal.state;
         ProposalState resolved = _resolveStateView(proposal);
+
+        // If the review window ended and the registry hasn't cached a resolution
+        // yet, call `resolveReview` once to finalize it. Mirrors the view-path
+        // logic but commits the registry-side state.
+        if (
+            resolved == ProposalState.GuardianReview && block.timestamp > proposal.reviewEnd
+                && _guardianRegistry != address(0)
+        ) {
+            bool blocked = IGuardianRegistry(_guardianRegistry).resolveReview(proposal.id);
+            if (blocked) {
+                resolved = ProposalState.Rejected;
+            } else {
+                resolved = block.timestamp > proposal.executeBy ? ProposalState.Expired : ProposalState.Approved;
+            }
+            emit GuardianReviewResolved(proposal.id, blocked);
+        }
 
         if (resolved != stored) {
             proposal.state = resolved;
@@ -714,7 +774,10 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     }
 
     /// @dev Pure state resolution logic (view-only, no storage writes).
-    ///      Optimistic governance: proposals pass unless AGAINST votes reach veto threshold.
+    ///      Optimistic governance: proposals pass the vote unless AGAINST votes
+    ///      reach veto threshold, then transition to GuardianReview until the
+    ///      review window ends. After review, they map to Approved or Rejected
+    ///      based on the registry's cached resolution.
     function _resolveStateView(StrategyProposal storage proposal) internal view returns (ProposalState) {
         ProposalState stored = proposal.state;
 
@@ -733,7 +796,12 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
                 return ProposalState.Rejected;
             }
 
-            return block.timestamp > proposal.executeBy ? ProposalState.Expired : ProposalState.Approved;
+            // Voting passed — fall through to guardian-review handling below.
+            return _resolveAfterVote(proposal);
+        }
+
+        if (stored == ProposalState.GuardianReview) {
+            return _resolveAfterVote(proposal);
         }
 
         if (stored == ProposalState.Approved) {
@@ -741,6 +809,28 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         }
 
         return stored;
+    }
+
+    /// @dev Maps a vote-passed proposal to GuardianReview / Approved / Rejected / Expired
+    ///      based on `reviewEnd` and the registry's cached review state.
+    function _resolveAfterVote(StrategyProposal storage proposal) internal view returns (ProposalState) {
+        if (block.timestamp <= proposal.reviewEnd) return ProposalState.GuardianReview;
+
+        if (_guardianRegistry != address(0)) {
+            (, bool resolved, bool blocked, bool cohortTooSmall) =
+                IGuardianRegistry(_guardianRegistry).getReviewState(proposal.id);
+            if (resolved) {
+                if (blocked && !cohortTooSmall) return ProposalState.Rejected;
+                return block.timestamp > proposal.executeBy ? ProposalState.Expired : ProposalState.Approved;
+            }
+            // Review window ended but registry hasn't resolved yet — remain in
+            // GuardianReview. Mutating callers (`_resolveState`) will trigger
+            // `resolveReview` which maps to Approved / Rejected.
+            return ProposalState.GuardianReview;
+        }
+
+        // No registry wired: review window collapses to zero — treat as Approved.
+        return block.timestamp > proposal.executeBy ? ProposalState.Expired : ProposalState.Approved;
     }
 
     function _finishSettlement(uint256 proposalId, StrategyProposal storage proposal)

@@ -9,8 +9,9 @@ interface ISyndicateGovernor {
     enum ProposalState {
         Draft, // collaborative proposal awaiting co-proposer consent
         Pending, // voting active
-        Approved, // voting ended, not vetoed (optimistic governance)
-        Rejected, // voting ended, veto threshold reached
+        GuardianReview, // voting passed, guardian review window active (Task 25)
+        Approved, // review ended without block quorum
+        Rejected, // voting ended, veto threshold reached OR guardians blocked
         Expired, // execution window passed without execution
         Executed, // strategy is live
         Settled, // P&L calculated, fee distributed
@@ -65,6 +66,7 @@ interface ISyndicateGovernor {
         uint256 votesAbstain;
         uint256 snapshotTimestamp;
         uint256 voteEnd;
+        uint256 reviewEnd; // guardian review window end (Task 25); zero for collaborative drafts
         uint256 executeBy;
         uint256 executedAt;
         ProposalState state;
@@ -119,6 +121,12 @@ interface ISyndicateGovernor {
     error OwnerBondInsufficient();
     error EmergencySettleBlocked();
     error EmergencySettleMismatch();
+
+    // ── Guardian-review lifecycle errors (Task 25) ──
+    error NotInGuardianReview();
+    error EmergencySettleNotReady();
+    error RegistryNotSet();
+    error RegistryMismatch();
 
     // ── Collaborative proposal errors ──
     error NotCoProposer();
@@ -175,6 +183,9 @@ interface ISyndicateGovernor {
     );
     event EmergencySettleCancelled(uint256 indexed proposalId, address indexed owner);
     event EmergencySettleFinalized(uint256 indexed proposalId, int256 pnl);
+
+    // ── Guardian-review lifecycle events (Task 25) ──
+    event GuardianReviewResolved(uint256 indexed proposalId, bool blocked);
 
     event FactoryUpdated(address indexed factory);
     event VaultAdded(address indexed vault);
@@ -286,4 +297,7 @@ interface ISyndicateGovernor {
     function getPendingChange(bytes32 paramKey) external view returns (PendingChange memory);
     function protocolFeeBps() external view returns (uint256);
     function protocolFeeRecipient() external view returns (address);
+
+    /// @notice Address of the guardian registry (zero if not yet wired).
+    function guardianRegistry() external view returns (address);
 }

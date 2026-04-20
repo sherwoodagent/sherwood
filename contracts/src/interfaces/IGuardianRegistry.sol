@@ -135,6 +135,16 @@ interface IGuardianRegistry {
     function setMinter(address) external;
 
     // ── Views ──
+    /// @notice Returns the cached review state for a proposal (Task 25).
+    /// @return opened Whether `openReview` was called
+    /// @return resolved Whether `resolveReview` has finalized the review
+    /// @return blocked Whether guardians reached the block quorum (requires resolved)
+    /// @return cohortTooSmall Whether the cohort at open was below MIN_COHORT_STAKE_AT_OPEN
+    function getReviewState(uint256 proposalId)
+        external
+        view
+        returns (bool opened, bool resolved, bool blocked, bool cohortTooSmall);
+
     function reviewPeriod() external view returns (uint256);
     function guardianStake(address guardian) external view returns (uint256);
     function ownerStake(address vault) external view returns (uint256);

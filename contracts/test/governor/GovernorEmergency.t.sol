@@ -20,9 +20,9 @@ import {MockAgentRegistry} from "../mocks/MockAgentRegistry.sol";
 /// @notice Tests for the Task 24 guardian-review emergency settle lifecycle.
 ///         Covers `unstick`, `emergencySettleWithCalls`, `cancelEmergencySettle`,
 ///         `finalizeEmergencySettle` against a real `GuardianRegistry` proxy.
-///
-/// @dev TODO(task-25): replace stdstore hack that writes `_guardianRegistry` into
-///      the governor directly. Task 25 wires this via an init/setter path.
+///         As of Task 25 the registry is wired via `initializeGuardianRegistry`
+///         and `_createExecutedProposal` drives the full vote → review → approve
+///         flow so `executeProposal` runs from the Approved state.
 contract GovernorEmergencyTest is Test {
     using stdStorage for StdStorage;
 
@@ -140,17 +140,9 @@ contract GovernorEmergencyTest is Test {
         );
         registry = GuardianRegistry(address(new ERC1967Proxy(address(regImpl), regInit)));
 
-        // TODO(task-25): replace stdstore hack with init wiring.
-        // Write `_guardianRegistry` slot on the governor so `_getRegistry()` returns
-        // our registry. This matches `address internal _guardianRegistry` declared
-        // in SyndicateGovernor — stdstore finds it via its `governor()` getter? it
-        // has none, so pin the slot explicitly: the declaration sits immediately
-        // after `_protocolFeeRecipient` (see storage layout in SyndicateGovernor.sol).
-        stdstore.target(address(governor)).sig("protocolFeeRecipient()").checked_write(address(0));
-        // _guardianRegistry is the slot right after _protocolFeeRecipient.
-        bytes32 recipientSlot = bytes32(stdstore.target(address(governor)).sig("protocolFeeRecipient()").find());
-        bytes32 registrySlot = bytes32(uint256(recipientSlot) + 1);
-        vm.store(address(governor), registrySlot, bytes32(uint256(uint160(address(registry)))));
+        // Task 25: wire `_guardianRegistry` via the one-time initializer.
+        vm.prank(owner);
+        governor.initializeGuardianRegistry(address(registry));
 
         // LPs
         usdc.mint(lp1, 100_000e6);
@@ -235,7 +227,12 @@ contract GovernorEmergencyTest is Test {
         governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
         vm.prank(lp2);
         governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        // Voting ends → proposal enters GuardianReview. Open the review so guardians
+        // could vote if they wanted; skip the review window and resolve with no
+        // blocks → Approved. Then execute.
         vm.warp(vm.getBlockTimestamp() + VOTING_PERIOD + 1);
+        registry.openReview(proposalId);
+        vm.warp(vm.getBlockTimestamp() + REVIEW_PERIOD + 1);
         governor.executeProposal(proposalId);
     }
 

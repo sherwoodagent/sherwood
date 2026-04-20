@@ -40,4 +40,11 @@ contract MockGovernorMinimal {
     function getProposal(uint256 proposalId) external view returns (ProposalView memory) {
         return _proposals[proposalId];
     }
+
+    /// @dev Mirrors `GuardianRegistry.IGovernorMinimal.getProposalView` (Task 25).
+    ///      Registry calls this via the `IGovernorMinimal` interface to read the
+    ///      narrow review-window struct without pulling in the full governor ABI.
+    function getProposalView(uint256 proposalId) external view returns (ProposalView memory) {
+        return _proposals[proposalId];
+    }
 }

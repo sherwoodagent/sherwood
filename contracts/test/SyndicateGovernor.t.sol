@@ -505,20 +505,31 @@ contract SyndicateGovernorTest is Test {
     }
 
     function test_emergencyCancel() public {
-        uint256 proposalId = _createApprovedProposal(1500, 7 days);
+        // Task 25: emergencyCancel is narrowed to Draft/Pending only.
+        uint256 proposalId = _createSimpleProposal(1500, 7 days);
         vm.prank(owner);
         governor.emergencyCancel(proposalId);
         assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Cancelled));
     }
 
     function test_emergencyCancel_clearsActiveProposal() public {
-        uint256 proposalId = _createApprovedProposal(1500, 7 days);
+        // Task 25: emergencyCancel is narrowed to Draft/Pending only.
+        uint256 proposalId = _createSimpleProposal(1500, 7 days);
         vm.prank(owner);
         governor.emergencyCancel(proposalId);
         assertEq(
             governor.getActiveProposal(address(vault)), 0, "activeProposal should be cleared after emergencyCancel"
         );
         assertFalse(vault.redemptionsLocked(), "vault should not be locked after emergencyCancel");
+    }
+
+    function test_emergencyCancel_approved_reverts() public {
+        // Task 25: once the vote passes the proposal enters GuardianReview (or Approved
+        // when no registry is wired); owner can no longer unilaterally cancel.
+        uint256 proposalId = _createApprovedProposal(1500, 7 days);
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotCancellable.selector);
+        governor.emergencyCancel(proposalId);
     }
 
     function test_emergencyCancel_executedProposal_reverts() public {
@@ -545,11 +556,13 @@ contract SyndicateGovernorTest is Test {
         assertFalse(vault.redemptionsLocked(), "vault should not be locked after veto");
     }
 
-    function test_vetoProposal_approved() public {
+    function test_vetoProposal_approved_reverts() public {
+        // Task 25: vetoProposal is narrowed to Pending only; approved/GuardianReview
+        // proposals flow through the guardian-review path instead.
         uint256 proposalId = _createApprovedProposal(1500, 7 days);
         vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotCancellable.selector);
         governor.vetoProposal(proposalId);
-        assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Rejected));
     }
 
     function test_vetoProposal_notVaultOwner_reverts() public {

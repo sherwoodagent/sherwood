@@ -14,9 +14,11 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 ///      ISyndicateGovernor ABI (which would pull in the entire StrategyProposal
 ///      struct along with the rest of the governor's types).
 ///
-///      `ProposalView` carries only the review-window timestamps; the governor
-///      stamps both at proposal creation time (see Task 25) and the registry
-///      reads them to gate `openReview` / `voteOnProposal` / `resolveReview`.
+///      `ProposalView` carries only the review-window timestamps and vault; the
+///      governor exposes a dedicated `getProposalView(uint256)` that returns a
+///      matching-shape struct. Using a dedicated view (rather than decoding the
+///      full `StrategyProposal`) keeps ABI compatibility explicit — the positions
+///      of `voteEnd`/`reviewEnd` inside `StrategyProposal` differ from this shape.
 interface IGovernorMinimal {
     struct ProposalView {
         uint256 voteEnd;
@@ -25,7 +27,7 @@ interface IGovernorMinimal {
     }
 
     function getActiveProposal(address vault) external view returns (uint256);
-    function getProposal(uint256 proposalId) external view returns (ProposalView memory);
+    function getProposalView(uint256 proposalId) external view returns (ProposalView memory);
 }
 
 /// @title GuardianRegistry
@@ -304,7 +306,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         Review storage r = _reviews[proposalId];
         if (!r.opened) revert ReviewNotOpen();
 
-        IGovernorMinimal.ProposalView memory p = IGovernorMinimal(governor).getProposal(proposalId);
+        IGovernorMinimal.ProposalView memory p = IGovernorMinimal(governor).getProposalView(proposalId);
         if (block.timestamp < p.voteEnd || block.timestamp >= p.reviewEnd) revert ReviewNotOpen();
 
         if (!_isActiveGuardian(msg.sender)) revert NotActiveGuardian();
@@ -548,7 +550,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         Review storage r = _reviews[proposalId];
         if (r.opened) return; // idempotent
 
-        uint256 ve = IGovernorMinimal(governor).getProposal(proposalId).voteEnd;
+        uint256 ve = IGovernorMinimal(governor).getProposalView(proposalId).voteEnd;
         if (ve == 0 || block.timestamp < ve) revert ReviewNotOpen();
 
         uint128 totalAtOpen = uint128(totalGuardianStake);
@@ -574,7 +576,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      tallies (spec §3.1, epoch attribution uses resolve-time
     ///      `block.timestamp`).
     function resolveReview(uint256 proposalId) external nonReentrant whenNotPaused returns (bool) {
-        IGovernorMinimal.ProposalView memory p = IGovernorMinimal(governor).getProposal(proposalId);
+        IGovernorMinimal.ProposalView memory p = IGovernorMinimal(governor).getProposalView(proposalId);
         if (p.reviewEnd == 0 || block.timestamp < p.reviewEnd) revert ReviewNotReadyForResolve();
 
         Review storage r = _reviews[proposalId];
@@ -722,7 +724,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      `wood.transfer(BURN, amt)` with the same try/catch fallback as
     ///      the approver-slash path.
     function _slashOwner(uint256 proposalId) private returns (uint256 amt) {
-        address vault = IGovernorMinimal(governor).getProposal(proposalId).vault;
+        address vault = IGovernorMinimal(governor).getProposalView(proposalId).vault;
         OwnerStake storage s = _ownerStakes[vault];
         amt = s.stakedAmount;
         if (amt == 0) return 0;
@@ -984,6 +986,17 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     // ── Views (minimal now; full impl in later tasks) ──
+
+    /// @inheritdoc IGuardianRegistry
+    function getReviewState(uint256 proposalId)
+        external
+        view
+        returns (bool opened, bool resolved, bool blocked, bool cohortTooSmall)
+    {
+        Review storage r = _reviews[proposalId];
+        return (r.opened, r.resolved, r.blocked, r.cohortTooSmall);
+    }
+
     function guardianStake(address g) external view returns (uint256) {
         return _guardians[g].stakedAmount;
     }
