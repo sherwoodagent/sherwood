@@ -1567,3 +1567,102 @@ contract GuardianRegistryEmergencyTest is Test {
         assertEq(wood.balanceOf(BURN_ADDRESS), burnedBalance);
     }
 }
+
+contract GuardianRegistryFundEpochTest is Test {
+    using stdStorage for StdStorage;
+
+    GuardianRegistry registry;
+    ERC20Mock wood;
+    address owner = address(0xA11CE);
+    address governor = address(0x9000);
+    address factory = address(0xFAC10);
+    address minter = address(0xAA71E);
+    address funder = address(0xFADE4);
+    address stranger = address(0xBAD);
+
+    function setUp() public {
+        wood = new ERC20Mock("WOOD", "WOOD", 18);
+        GuardianRegistry impl = new GuardianRegistry();
+        bytes memory initData = abi.encodeCall(
+            GuardianRegistry.initialize,
+            (owner, governor, factory, address(wood), 10_000e18, 10_000e18, 0, 7 days, 24 hours, 3000)
+        );
+        registry = GuardianRegistry(address(new ERC1967Proxy(address(impl), initData)));
+
+        wood.mint(funder, 1_000_000e18);
+        vm.prank(funder);
+        wood.approve(address(registry), type(uint256).max);
+
+        wood.mint(minter, 1_000_000e18);
+        vm.prank(minter);
+        wood.approve(address(registry), type(uint256).max);
+
+        wood.mint(owner, 1_000_000e18);
+        vm.prank(owner);
+        wood.approve(address(registry), type(uint256).max);
+    }
+
+    function test_fundEpoch_currentEpoch_pullsWood() public {
+        uint256 epochId = registry.currentEpoch();
+        uint256 registryBalBefore = wood.balanceOf(address(registry));
+
+        vm.expectEmit(true, true, false, true);
+        emit IGuardianRegistry.EpochFunded(epochId, owner, 5_000e18);
+        vm.prank(owner);
+        registry.fundEpoch(epochId, 5_000e18);
+
+        assertEq(registry.epochBudget(epochId), 5_000e18);
+        assertEq(wood.balanceOf(address(registry)), registryBalBefore + 5_000e18);
+    }
+
+    function test_fundEpoch_futureEpoch_succeeds() public {
+        // Current epoch is 0; fund epoch 5 — future is allowed.
+        vm.prank(owner);
+        registry.fundEpoch(5, 7_500e18);
+        assertEq(registry.epochBudget(5), 7_500e18);
+    }
+
+    function test_fundEpoch_pastEpoch_allowedIfBudgetZero() public {
+        // Warp forward to epoch 2; fund epoch 0 which has not been funded yet.
+        vm.warp(registry.epochGenesis() + 2 * registry.EPOCH_DURATION());
+        assertEq(registry.currentEpoch(), 2);
+        assertEq(registry.epochBudget(0), 0);
+
+        vm.prank(owner);
+        registry.fundEpoch(0, 4_000e18);
+        assertEq(registry.epochBudget(0), 4_000e18);
+    }
+
+    function test_fundEpoch_pastEpoch_revertsIfAlreadyFunded() public {
+        // Fund epoch 0 now (current), then warp to epoch 1 and try to re-fund — reverts.
+        vm.prank(owner);
+        registry.fundEpoch(0, 1_000e18);
+
+        vm.warp(registry.epochGenesis() + registry.EPOCH_DURATION());
+        assertEq(registry.currentEpoch(), 1);
+
+        vm.prank(owner);
+        vm.expectRevert(IGuardianRegistry.FundEpochLocked.selector);
+        registry.fundEpoch(0, 500e18);
+    }
+
+    function test_fundEpoch_onlyOwnerOrMinter() public {
+        vm.prank(stranger);
+        vm.expectRevert(IGuardianRegistry.NotMinterOrOwner.selector);
+        registry.fundEpoch(0, 1_000e18);
+    }
+
+    function test_fundEpoch_minterCanFund() public {
+        // Wire minter into storage directly — the timelocked setter arrives in Task 23.
+        stdstore.target(address(registry)).sig("minter()").checked_write(minter);
+        assertEq(registry.minter(), minter);
+
+        uint256 epochId = registry.currentEpoch();
+        vm.expectEmit(true, true, false, true);
+        emit IGuardianRegistry.EpochFunded(epochId, minter, 2_500e18);
+        vm.prank(minter);
+        registry.fundEpoch(epochId, 2_500e18);
+
+        assertEq(registry.epochBudget(epochId), 2_500e18);
+    }
+}

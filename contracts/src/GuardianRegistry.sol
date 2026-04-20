@@ -196,6 +196,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         _;
     }
 
+    modifier onlyMinterOrOwner() {
+        if (msg.sender != minter && msg.sender != owner()) revert NotMinterOrOwner();
+        _;
+    }
+
     // ── Guardian fns ──
     /// @inheritdoc IGuardianRegistry
     /// @dev Idempotent top-up: on first stake records `agentId` and activates
@@ -741,8 +746,19 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     // ── Epoch rewards ──
-    function fundEpoch(uint256, uint256) external {
-        revert();
+    /// @inheritdoc IGuardianRegistry
+    /// @dev Callable by owner or minter. Allowed for current and future
+    ///      epochs. Past epochs can only be funded if
+    ///      `epochBudget[epochId] == 0` — once any funding exists, the epoch
+    ///      is effectively locked so already-claimed pro-rata splits cannot
+    ///      be retroactively diluted.
+    function fundEpoch(uint256 epochId, uint256 amount) external nonReentrant onlyMinterOrOwner {
+        if (epochId < currentEpoch() && epochBudget[epochId] != 0) revert FundEpochLocked();
+
+        wood.safeTransferFrom(msg.sender, address(this), amount);
+        epochBudget[epochId] += amount;
+
+        emit EpochFunded(epochId, msg.sender, amount);
     }
 
     function claimEpochReward(uint256) external {
@@ -840,7 +856,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         return scaled > floor ? scaled : floor;
     }
 
-    function currentEpoch() external view returns (uint256) {
+    function currentEpoch() public view returns (uint256) {
         return (block.timestamp - epochGenesis) / EPOCH_DURATION;
     }
 
