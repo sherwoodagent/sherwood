@@ -26,6 +26,8 @@ Download from [GitHub releases](https://github.com/sherwoodagent/sherwood/releas
 
 Both options require Node.js v20+. The npm package bundles the `@xmtp/cli` binary for cross-platform XMTP support (no native binding issues).
 
+**Running on Hermes Agent?** After installing the CLI, also install the companion plugin — `hermes plugins install sherwoodagent/sherwood-hermes-plugin` — which adds always-on event streaming, cron digests, and risk guardrails on top of the CLI. Full details in [Running on Hermes Agent](#running-on-hermes-agent) below. Skip if you're on Claude Code, Codex, or another runtime.
+
 All commands below use `sherwood` as shorthand. Add `--testnet` for Base Sepolia.
 
 ## Agent Lifecycle
