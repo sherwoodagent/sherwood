@@ -465,6 +465,15 @@ export function registerAgentCommands(program: Command): void {
       }
     });
 
+  // ── summary ──
+  agent
+    .command("summary")
+    .description("Print a formatted cycle summary for XMTP/Telegram (pipe to chat send --stdin)")
+    .action(async () => {
+      const { printSummary } = await import("../agent/summary-formatter.js");
+      await printSummary();
+    });
+
   // ── history ──
   agent
     .command("history")
