@@ -630,3 +630,106 @@ contract GuardianRegistryBondTest is Test {
         assertEq(registry.requiredOwnerBond(address(vault)), 10_000.01e18);
     }
 }
+
+contract GuardianRegistryOpenReviewTest is Test {
+    GuardianRegistry registry;
+    ERC20Mock wood;
+    MockGovernorMinimal governor;
+    address owner = address(0xA11CE);
+    address factory = address(0xFAC10);
+
+    uint256 constant REVIEW_PERIOD = 24 hours;
+    uint256 constant PROPOSAL_ID = 1;
+
+    // Guardians pre-staked in setUp. `small` cohort (3 × 10_000e18 = 30_000e18)
+    // is below MIN_COHORT_STAKE_AT_OPEN (50_000e18); `full` cohort (5 × 10_000e18
+    // = 50_000e18) exactly meets the threshold.
+    address[5] guardians = [address(0xAA01), address(0xAA02), address(0xAA03), address(0xAA04), address(0xAA05)];
+
+    function setUp() public {
+        wood = new ERC20Mock("WOOD", "WOOD", 18);
+        governor = new MockGovernorMinimal();
+
+        GuardianRegistry impl = new GuardianRegistry();
+        bytes memory initData = abi.encodeCall(
+            GuardianRegistry.initialize,
+            (owner, address(governor), factory, address(wood), 10_000e18, 10_000e18, 0, 7 days, REVIEW_PERIOD, 3000)
+        );
+        registry = GuardianRegistry(address(new ERC1967Proxy(address(impl), initData)));
+
+        for (uint256 i = 0; i < guardians.length; i++) {
+            wood.mint(guardians[i], 100_000e18);
+            vm.prank(guardians[i]);
+            wood.approve(address(registry), type(uint256).max);
+        }
+    }
+
+    function _stakeN(uint256 n) internal {
+        for (uint256 i = 0; i < n; i++) {
+            vm.prank(guardians[i]);
+            registry.stakeAsGuardian(10_000e18, 1 + i);
+        }
+    }
+
+    function test_openReview_revertsBeforeVoteEnd() public {
+        _stakeN(5);
+        // voteEnd in future
+        governor.setProposal(PROPOSAL_ID, block.timestamp + 1 hours, block.timestamp + 1 hours + REVIEW_PERIOD);
+        vm.expectRevert(IGuardianRegistry.ReviewNotOpen.selector);
+        registry.openReview(PROPOSAL_ID);
+    }
+
+    function test_openReview_revertsIfProposalMissing() public {
+        // Unknown proposal → voteEnd == 0 → reverts
+        vm.expectRevert(IGuardianRegistry.ReviewNotOpen.selector);
+        registry.openReview(PROPOSAL_ID);
+    }
+
+    function test_openReview_snapshotsTotalStakeAtOpen() public {
+        _stakeN(5); // 50_000e18 total
+        uint256 ve = block.timestamp;
+        governor.setProposal(PROPOSAL_ID, ve, ve + REVIEW_PERIOD);
+
+        vm.expectEmit(true, false, false, true);
+        emit IGuardianRegistry.ReviewOpened(PROPOSAL_ID, 50_000e18);
+        registry.openReview(PROPOSAL_ID);
+
+        // Internal state surfaced through a couple of sanity paths:
+        // second call must be a no-op (see idempotent test).
+        assertEq(registry.totalGuardianStake(), 50_000e18);
+    }
+
+    function test_openReview_flagsCohortTooSmall() public {
+        _stakeN(3); // 30_000e18 < 50_000e18 threshold
+        uint256 ve = block.timestamp;
+        governor.setProposal(PROPOSAL_ID, ve, ve + REVIEW_PERIOD);
+
+        vm.expectEmit(true, false, false, true);
+        emit IGuardianRegistry.CohortTooSmallToReview(PROPOSAL_ID, 30_000e18);
+        registry.openReview(PROPOSAL_ID);
+    }
+
+    function test_openReview_idempotent() public {
+        _stakeN(5);
+        uint256 ve = block.timestamp;
+        governor.setProposal(PROPOSAL_ID, ve, ve + REVIEW_PERIOD);
+        registry.openReview(PROPOSAL_ID);
+
+        // Bump totalGuardianStake by staking a 6th guardian post-open.
+        address g6 = address(0xA6);
+        wood.mint(g6, 100_000e18);
+        vm.prank(g6);
+        wood.approve(address(registry), type(uint256).max);
+        vm.prank(g6);
+        registry.stakeAsGuardian(10_000e18, 42);
+        assertEq(registry.totalGuardianStake(), 60_000e18);
+
+        // Second call is no-op — must NOT re-snapshot (would emit ReviewOpened again).
+        // We ensure it doesn't revert and doesn't emit an event that would indicate
+        // re-snapshotting by recording logs.
+        vm.recordLogs();
+        registry.openReview(PROPOSAL_ID);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 0);
+    }
+}

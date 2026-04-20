@@ -10,10 +10,21 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 /// @dev Minimal governor surface consumed by the registry. Intentionally a
-///      three-function stub so that GuardianRegistry does not depend on the
-///      full ISyndicateGovernor ABI (which would pull in proposal structs).
+///      narrow stub so that GuardianRegistry does not depend on the full
+///      ISyndicateGovernor ABI (which would pull in the entire StrategyProposal
+///      struct along with the rest of the governor's types).
+///
+///      `ProposalView` carries only the review-window timestamps; the governor
+///      stamps both at proposal creation time (see Task 25) and the registry
+///      reads them to gate `openReview` / `voteOnProposal` / `resolveReview`.
 interface IGovernorMinimal {
+    struct ProposalView {
+        uint256 voteEnd;
+        uint256 reviewEnd;
+    }
+
     function getActiveProposal(address vault) external view returns (uint256);
+    function getProposal(uint256 proposalId) external view returns (ProposalView memory);
 }
 
 /// @title GuardianRegistry
@@ -375,8 +386,32 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     // ── Permissionless ──
-    function openReview(uint256) external {
-        revert();
+    /// @inheritdoc IGuardianRegistry
+    /// @dev Permissionless keeper entrypoint. Callable once
+    ///      `block.timestamp >= proposal.voteEnd`. Snapshots
+    ///      `totalGuardianStake` into `_reviews[id].totalStakeAtOpen` and
+    ///      marks the review opened. If the snapshot is below
+    ///      `MIN_COHORT_STAKE_AT_OPEN`, flags the review as
+    ///      `cohortTooSmall`; `resolveReview` will then short-circuit to
+    ///      `blocked = false` regardless of any votes (cold-start fallback).
+    ///      Idempotent: subsequent calls are no-ops.
+    function openReview(uint256 proposalId) external {
+        if (paused) revert ProtocolPaused();
+        Review storage r = _reviews[proposalId];
+        if (r.opened) return; // idempotent
+
+        uint256 ve = IGovernorMinimal(governor).getProposal(proposalId).voteEnd;
+        if (ve == 0 || block.timestamp < ve) revert ReviewNotOpen();
+
+        uint128 totalAtOpen = uint128(totalGuardianStake);
+        r.opened = true;
+        r.totalStakeAtOpen = totalAtOpen;
+        if (totalAtOpen < MIN_COHORT_STAKE_AT_OPEN) {
+            r.cohortTooSmall = true;
+            emit CohortTooSmallToReview(proposalId, totalAtOpen);
+        } else {
+            emit ReviewOpened(proposalId, totalAtOpen);
+        }
     }
 
     function resolveReview(uint256) external returns (bool) {
