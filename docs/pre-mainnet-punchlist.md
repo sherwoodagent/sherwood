@@ -9,7 +9,8 @@ Cross-reference catalog of everything that must land (or be explicitly deferred)
 Every row is tagged with status so reviewers can see at a glance what this branch closes vs. what's still outstanding.
 
 Status key:
-- ✅ **fixed-by-229** — resolved in the Guardian Review Lifecycle spec (PR #229).
+- ✅ **fixed-in-229** — shipped on `feat/guardian-review-lifecycle` (PR #229).
+- 🟡 **partial-in-229** — partially addressed; remaining work needs a separate PR.
 - 🔨 **separate-PR** — needs its own fix PR; PR #229 does not touch it.
 - 📝 **doc-drift** — code is right, docs are wrong. Fix by updating the doc.
 - 🧪 **test-only** — code is right, PoC / regression test missing.
@@ -23,7 +24,7 @@ Status key:
 |---|---|---|---|
 | 1 | **V-C1** — Settlement PnL via `balanceOf` diff is inflatable by donation. Fees paid on donations. | 🔨 separate-PR | Fix: `IStrategy.settle() returns (int256 realized)`, or snapshot immediate pre/post around settlement batch. Independent of guardian design. |
 | 2 | **V-C3** — Owner `executeBatch` bypasses `redemptionsLocked()`. Compromised owner drains mid-strategy. | 🔨 separate-PR | Simple fix: add `!redemptionsLocked()` check. |
-| 3 | **G-C4** — `emergencySettle` fallback accepts arbitrary owner calls → vault drain. | ✅ fixed-by-229 | Split into `unstick` (no calldata) + `emergencySettleWithCalls` (guardian-reviewed) + `finalizeEmergencySettle` + `cancelEmergencySettle`. Owner posts slashable bond; guardian block-quorum slashes owner. |
+| 3 | **G-C4** — `emergencySettle` fallback accepts arbitrary owner calls → vault drain. | ✅ fixed-in-229 | Split into `unstick` (no calldata) + `emergencySettleWithCalls` (guardian-reviewed) + `finalizeEmergencySettle` + `cancelEmergencySettle`. Owner posts slashable bond; guardian block-quorum slashes owner. See `5ba7939` (GovernorEmergency impl) + `f2e8224` (registry emergency review). |
 | 4 | **G-C2/C3** — `cancelProposal` / `vetoProposal` / `emergencyCancel` blindly `delete _activeProposal[vault]`. | 🔨 separate-PR | Fix: guard each with `if (_activeProposal[vault] == proposalId)`. Independent of guardian. |
 | 5 | **G-C1** — `snapshotTimestamp = block.timestamp` enables same-block flash-delegate on 2s L2 blocks. | 🔨 separate-PR | Fix: `snapshotTimestamp = block.timestamp - 1`. Independent. |
 | 6 | **T-C3/T-C4/T-C5** — veNFT transferable while vote/bribe state is attached. | 🔨 separate-PR | Fix: block transfers while `_lastVotedEpoch == currentEpoch`, OR snapshot owner into vote/bribe state. |
@@ -38,18 +39,23 @@ Status key:
 
 PR #229 directly addresses a specific subset. All other items remain open.
 
-### Closed by #229 design
+### Closed by #229 implementation
 
-| Ref | Original finding | How #229 addresses it |
-|---|---|---|
-| #225 G-C4 | `emergencySettle` arbitrary-fallback drain path | Split into three functions; `emergencySettleWithCalls` commits hash + opens guardian review; owner stake slashed on guardian block. |
-| #226 §2.6 | "Three overlapping 'no' buttons" (optimistic / `vetoProposal` / `emergencyCancel` / `emergencySettle`) | `vetoProposal` narrowed to `Pending`; `emergencyCancel` narrowed to `Draft`/`Pending`; emergency settle replaced by guardian-gated three-function split. Single coherent escape surface. |
-| #226 §2.10 | `emergencySettle` fallback = owner-signed "execute arbitrary batch" | Arbitrary calldata now goes through 24h guardian review with slashable owner bond. Cold-start fallback preserves owner veto during bootstrap. |
-| #226 §2.1 (partial) | Single-EOA owner controls every privileged surface | Owners now post slashable WOOD bond; their `emergencySettleWithCalls` is guardian-gated; `rotateOwner` provides multisig+timelocked recovery. Does NOT eliminate owner power — that's §2.1 proper (multisig/timelock rotation). |
+| Ref | Original finding | How #229 addresses it | Commit(s) |
+|---|---|---|---|
+| #225 G-C4 | `emergencySettle` arbitrary-fallback drain path | Split into `unstick` / `emergencySettleWithCalls` / `finalizeEmergencySettle` / `cancelEmergencySettle`. `emergencySettleWithCalls` commits hash + opens guardian review; owner stake slashed on guardian block. | `5ba7939`, `f2e8224` |
+| #226 §2.6 | "Three overlapping 'no' buttons" (optimistic / `vetoProposal` / `emergencyCancel` / `emergencySettle`) | `vetoProposal` narrowed to `Pending`; `emergencyCancel` narrowed to `Draft`/`Pending`; emergency settle replaced by guardian-gated four-function split. Single coherent escape surface. | `ef5cf55` |
+| #226 §2.10 | `emergencySettle` fallback = owner-signed "execute arbitrary batch" | Arbitrary calldata now goes through 24h guardian review with slashable owner bond. Cold-start fallback preserves owner veto during bootstrap. | `5ba7939`, `f2e8224` |
+| #226 §2.1 (partial) | Single-EOA owner controls every privileged surface | Owners now post slashable WOOD bond; `emergencySettleWithCalls` is guardian-gated; `rotateOwner` provides slot-transfer recovery against a burned-key owner. Does NOT eliminate owner power — §2.1 proper (multisig/timelock rotation) is still separate. | `cf796b7`, `a83fac4` |
+| #226 §4 A12 | `SyndicateGovernor` at 24,523 / 24,576 bytes (53-byte margin) | Extracted `GovernorEmergency` abstract (Option B) + enabled `via_ir`. Governor now at 24,327 / 24,576 (73-byte margin). CI size gate enforces `≤ 24,400`. | `32c26b9`, `2d0ae99`, `607386e` |
+| #226 §3.1 | `forge coverage` fails on `SyndicateGovernor.propose()` struct literal | Split struct literal into sequential field assignments. `forge coverage` now runs. | `78257c3` |
 
-### #229 also flags (via §11 bytecode plan)
+### Partially closed by #229
 
-- **#226 §4 A12** — `SyndicateGovernor` at 24,523 / 24,576 bytes. Blocker for any further governor work. #229 §11 proposes `GovernorEmergency.sol` abstract extraction (Option B) with `forge build --sizes` CI gate.
+| Ref | Original finding | What #229 did | What's still open |
+|---|---|---|---|
+| #225 G-C6 | `nonReentrant` missing from `vote` / `vetoProposal` / `emergencyCancel` | All new registry state-mutating externals use `nonReentrant` (e.g. `stakeAsGuardian`, `resolveReview`, `claimEpochReward`). New governor emergency path is reentrancy-safe via CEI + registry's own guard. | Legacy governor `vote`, `vetoProposal`, `cancelProposal` are untouched by #229. Still need modifiers in a separate PR. |
+| #226 §3.5 | Zero invariant tests, 48 listed, priority INV-2/-3/-11/-15/-23 | Shipped guardian-specific invariant harness: WOOD conservation, totalGuardianStake accounting, activeGuardianCount monotonicity. 3 priority invariants (adjacent to INV-23 strategy asset conservation, INV-2 fee sum, INV-11 co-prop split). | INV-2 (fee sum), INV-3 (single-active-proposal), INV-11 (co-prop splits), INV-15 (veWOOD conservation) still need harnesses. |
 
 ### Not addressed by #229
 
@@ -187,13 +193,13 @@ Each row is a **doc update** (not a code change). `mintlify-docs/` changes route
 
 ## 7. Process / test gaps (from #226 §3)
 
-| Ref | Gap | Fix |
-|---|---|---|
-| 3.1 | `forge coverage` fails on `SyndicateGovernor.propose()` struct literal (Yul stack-too-deep) | **1-hour fix** — split struct literal into sequential field assignments. Prerequisite for every other coverage run. Also flagged in CLAUDE.md. |
-| 3.2 | Every Critical in #225 lacks a PoC test | 26 items; red → fix → green per item |
-| 3.3 | Missing fork tests: Synthra (none), Hyperliquid (mock only), Mamo (no real factory), Chainlink Data Streams, wstETH/ETH on Base, Create3 squat | Add integration suites |
-| 3.4 | No test file at all for: `Create3Factory`, `SynthraSwapAdapter`, `SynthraDirectAdapter`, `L1Write`, `L1Read`, `WoodToken` (LZ cross-chain), `VaultRewardsDistributor` flash-deposit, `MockSwapAdapter` | Create suites |
-| 3.5 | Zero invariant / property tests (`grep invariant_ test/` returns 0) | 48 invariants listed in #226 §8; ship handler + echidna config. Priority: INV-2 (fee sum), INV-3 (one active proposal), INV-11 (co-proposer split math), INV-15 (veWOOD conservation), INV-23 (strategy asset conservation) |
+| Ref | Gap | Status | Fix |
+|---|---|---|---|
+| 3.1 | `forge coverage` fails on `SyndicateGovernor.propose()` struct literal (Yul stack-too-deep) | ✅ fixed-in-229 (`78257c3`) | Split struct literal into sequential field assignments. |
+| 3.2 | Every Critical in #225 lacks a PoC test | 🧪 test-only | 26 items; red → fix → green per item |
+| 3.3 | Missing fork tests: Synthra (none), Hyperliquid (mock only), Mamo (no real factory), Chainlink Data Streams, wstETH/ETH on Base, Create3 squat | 🧪 test-only | Add integration suites |
+| 3.4 | No test file at all for: `Create3Factory`, `SynthraSwapAdapter`, `SynthraDirectAdapter`, `L1Write`, `L1Read`, `WoodToken` (LZ cross-chain), `VaultRewardsDistributor` flash-deposit, `MockSwapAdapter` | 🧪 test-only | Create suites |
+| 3.5 | Zero invariant / property tests (`grep invariant_ test/` returns 0) | 🟡 partial-in-229 (`963e565`) | First 3 priority invariants shipped (WOOD conservation + stake accounting), touching INV-23 territory. INV-2 / -3 / -11 / -15 still open — 48 invariants total in #226 §8; ship handler + echidna config. |
 
 ---
 
@@ -214,7 +220,7 @@ T4 dependencies (experimental / single-maintainer / foreign VM) that need mitiga
 
 Ranked by effort-to-impact. PR #229 doesn't touch items 1–5, 7, 8, 9; it lands on top of them.
 
-1. Refactor `SyndicateGovernor.propose()` struct literal — unblocks `forge coverage`. **1 hour.**
+1. ~~Refactor `SyndicateGovernor.propose()` struct literal — unblocks `forge coverage`.~~ ✅ **done in #229** (`78257c3`).
 2. PoC tests for every Critical in #225 (26 items).
 3. Delete dead code (14 items in #226 §10.1).
 4. Move `MockSwapAdapter.sol` + `CoreWriter.sol` from `src/` to `test/mocks/`.
@@ -222,18 +228,18 @@ Ranked by effort-to-impact. PR #229 doesn't touch items 1–5, 7, 8, 9; it lands
 6. Fix doc↔code mismatches (§6 above).
 7. Wire `maxSlippageBps` → `amountOutMin` in `PortfolioStrategy`.
 8. Rotate all owners to `TimelockController` + Gnosis Safe.
-9. Echidna harness for the 48 invariants (priority: INV-2, -3, -11, -15, -23).
-10. CI size gate: `forge build --sizes` must fail if `SyndicateGovernor > 24,500` bytes.
+9. Echidna harness for the 48 invariants (priority: INV-2, -3, -11, -15, -23). 🟡 **partial in #229** (`963e565` — 3 guardian-scope invariants).
+10. ~~CI size gate: `forge build --sizes` must fail if `SyndicateGovernor > 24,500` bytes.~~ ✅ **done in #229** (`607386e` — gate at 24,400).
 11. Document invariants at call sites (#226 §10.3).
-12. Add `Pausable` across tokenomics contracts.
-13. Add `nonReentrant` on every state-mutating governor fn (G-C6).
+12. Add `Pausable` across tokenomics contracts. (Registry now has pause + 7d deadman — tokenomics still outstanding.)
+13. Add `nonReentrant` on every state-mutating governor fn (G-C6). 🟡 **partial in #229** — registry externals covered; governor legacy fns still open.
 14. Wrap fee transfers in try/catch (A22) + regression test.
 15. Fix `maxDeposit` / `maxMint` / `maxWithdraw` / `maxRedeem` to return 0 when blocked.
 16. Extract `BPS_DENOMINATOR = 10_000` to one shared library.
 17. NatSpec on every non-`@inheritdoc` public fn.
 18. Publish `executorImplCodehash()` view.
 
-**External audit gate:** items 1–10 land, then external audit, then mainnet.
+**External audit gate:** items 2–9 land (1 and 10 now closed), then external audit, then mainnet.
 
 ---
 

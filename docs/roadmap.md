@@ -105,20 +105,22 @@ Roadmap, milestones, and a running log of everything shipped. Building in public
 - ⬜️ Target: >15% of supply locked as veWOOD, fee distribution working for 4+ epochs
 
 ### 7.5 — Guardian Review Lifecycle (PR #229)
-**Design Complete · Implementation Not Started**
+**Design Complete · Implementation Complete · Audit Pending**
 
 - ✅ Design spec for staked guardian review layer between proposal approval and execution ([`docs/superpowers/specs/2026-04-19-guardian-review-lifecycle-design.md`](../docs/superpowers/specs/2026-04-19-guardian-review-lifecycle-design.md))
 - ✅ Business review applied (slash-to-burn, owner-stake floor lowered, bootstrap commitments)
 - ✅ Peer review applied (bytecode mitigation plan, vote-change, owner rotation, view/mutation split)
 - ✅ ToB-style review applied (`openReview` keeper, cold-start fallback, CEI + pull-burn, pause deadman, MAX_REFUND cap, registry-immutable, late-vote lockout, requiredOwnerBond at emergency settle, 12-week sweep delay, `cancelEmergencySettle`, explicit trust assumptions)
-- ⬜️ Prototype `GovernorEmergency.sol` extraction in scratch branch — `forge build --sizes` gate under 24,400 bytes
-- ⬜️ Implement `GuardianRegistry.sol` (UUPS, pausable, ~800 lines estimated)
-- ⬜️ Modify `SyndicateGovernor`: new `GuardianReview` state, `reviewEnd` struct field, `unstick` / `emergencySettleWithCalls` / `cancelEmergencySettle` / `finalizeEmergencySettle`
-- ⬜️ Modify `SyndicateFactory`: `prepareOwnerStake` + `bindOwnerStake` in `createSyndicate`, `rotateOwner` dead-vault recovery
-- ⬜️ Tests: 20 must-pass scenarios + invariant harness
+- ✅ `GovernorEmergency.sol` extracted + `via_ir` enabled — governor runtime at 24,327 / 24,576 bytes (73-byte margin). CI size gate enforces ≤ 24,400.
+- ✅ `GuardianRegistry.sol` shipped — UUPS, pausable (7-day deadman), 17,403 bytes. Staking, review votes, slashing, epoch rewards, appeal reserve, timelocked parameter setters.
+- ✅ `SyndicateGovernor`: `GuardianReview` state, `reviewEnd` stamped at `Pending→Review`, four-way emergency-settle split (`unstick` / `emergencySettleWithCalls` / `cancelEmergencySettle` / `finalizeEmergencySettle`), `vetoProposal` narrowed.
+- ✅ `SyndicateFactory`: `guardianRegistry` immutable set-once, `createSyndicate` binds owner stake atomically, `rotateOwner` slot-transfer recovery.
+- ✅ Tests: 124 unit tests, 3 integration-flow tests, 3-invariant fuzz harness @ 256 runs (WOOD conservation + stake accounting). Two accounting bugs found by the fuzzer (top-up-after-unstake, cancel-after-slash) fixed with regression tests.
+- ✅ Deploy script — CREATE3 address prediction resolves circular factory↔registry dep without nonce math.
 - ⬜️ Audit — new primitive with economic slashing warrants a dedicated pass
 - ⬜️ Publish `mintlify-docs/learn/guardians.mdx` (bootstrap commitment + appeal policy)
 - ⬜️ Bootstrap cohort — protocol multisig runs guardian-of-last-resort weeks 1-12 (see spec §7.1 for mechanical details + `epochBudget` funding commitment)
+- ⬜️ Legacy governor `vote` / `vetoProposal` / `cancelProposal` `nonReentrant` (partial close of G-C6; separate PR)
 
 ### 8 — Growth & TVL
 **Not Started**
@@ -147,6 +149,11 @@ Roadmap, milestones, and a running log of everything shipped. Building in public
 ---
 
 ## Change Log
+
+### 2026-04-20 — governance
+#### Guardian Review Lifecycle — V1 Implementation
+Shipped on-chain primitives for a staked-guardian review layer between proposal approval and execution. `GuardianRegistry` (stake, vote, slash, epoch rewards, appeal reserve, pause), `GovernorEmergency` abstract extracted from `SyndicateGovernor` for bytecode headroom (`via_ir` enabled), `SyndicateFactory` gains owner-stake binding + `rotateOwner` recovery. Two accounting bugs found by the invariant fuzzer during the same PR (top-up-after-unstake, cancel-after-slash) fixed with regression tests. Closes issue #227. Addresses several findings from #225 / #226 punch list (G-C4, #226 §2.1 partial, §2.6, §2.10, §3.1, §3.5 partial, §4 A12).
+[PR #229](https://github.com/imthatcarlos/sherwood/pull/229)
 
 ### 2026-04-19 — governance design
 #### Guardian Review Lifecycle — Design Spec

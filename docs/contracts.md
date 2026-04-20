@@ -12,7 +12,7 @@ Solidity smart contracts for Sherwood, built with Foundry and OpenZeppelin (UUPS
                    └──────┬───────┘
                           │                    ┌────────────────────────┐
               ┌───────────▼───────────┐        │   GuardianRegistry     │
-              │    SyndicateVault     │        │   (PR #229 — designed) │
+              │    SyndicateVault     │        │   (UUPS Proxy)         │
               │  (ERC1967 Proxy)      │◄───────┤  stakes, reviews,      │
               │                       │        │  slashing, epoch       │
               │  delegatecall ───────►│        │  rewards               │
@@ -73,9 +73,9 @@ Shared stateless library. Vault delegatecalls into it to execute batches of prot
 
 Onchain registry of strategy implementations. Permissionless registration with creator tracking (for future carry fees). UUPS upgradeable.
 
-### GuardianRegistry _(designed in PR #229, not yet implemented)_
+### GuardianRegistry
 
-UUPS upgradeable contract that adds a staked, slashable third-party review layer between proposal approval and execution. Single contract handling four concerns:
+UUPS upgradeable contract that adds a staked, slashable third-party review layer between proposal approval and execution (PR #229). Single contract handling four concerns:
 
 1. **Guardian staking** — agents stake WOOD (≥ `minGuardianStake`, default 10k) to join the review cohort. 7-day cool-down on unstake. Vote weight = stake snapshotted at first vote per proposal.
 2. **Owner staking** — vault owners post a WOOD bond at vault creation via `SyndicateFactory.createSyndicate` → `prepareOwnerStake` → `bindOwnerStake`. Bond is slashable via guardian block-quorum on `emergencySettleWithCalls`. `requiredOwnerBond(vault) = max(minOwnerStake, totalAssets * ownerStakeTvlBps / 10_000)`, re-checked at emergency-settle call time.
@@ -98,6 +98,7 @@ Full spec: `docs/superpowers/specs/2026-04-19-guardian-review-lifecycle-design.m
 | StrategyRegistry | `0x8A45f769553D10F26a6633d019B04f7805b1368A` |
 | SyndicateVault (impl) | `0x7E1F71A72a88Ce8418cf82CACDE9ce5Bbbcf5772` |
 | BatchExecutorLib | `0x0c63Ea92336eA0324B81eB6D0fD62455eC38091b` |
+| GuardianRegistry | TBD after first post-#229 deploy — see `contracts/chains/84532.json` → `GUARDIAN_REGISTRY` |
 
 ### External (Base Mainnet)
 

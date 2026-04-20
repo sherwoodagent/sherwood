@@ -8,6 +8,7 @@ import {SyndicateVault} from "../../src/SyndicateVault.sol";
 import {BatchExecutorLib} from "../../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../../src/SyndicateFactory.sol";
 import {SyndicateGovernor} from "../../src/SyndicateGovernor.sol";
+import {GuardianRegistry} from "../../src/GuardianRegistry.sol";
 import {ISyndicateGovernor} from "../../src/interfaces/ISyndicateGovernor.sol";
 import {ScriptBase} from "../ScriptBase.sol";
 
@@ -67,10 +68,23 @@ contract DeployRobinhoodTestnet is ScriptBase {
         address governorProxy = address(new ERC1967Proxy(address(govImpl), govInitData));
         console.log("SyndicateGovernor:", governorProxy);
 
-        // 4. Deploy SyndicateFactory (UUPS proxy, no ENS registrar, no agent registry)
+        // 4. Deploy GuardianRegistry with predicted factory address (nonce+3
+        //    accounts for registry impl, registry proxy, factory impl before
+        //    factory proxy). Same CREATE-address prediction pattern as the
+        //    main Deploy.s.sol, minus the Create3Factory since this chain
+        //    doesn't have one pre-deployed.
+        address predictedFactoryProxy = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 3);
+        GuardianRegistry registryImpl = new GuardianRegistry();
+        address woodToken = vm.envOr("WOOD_TOKEN", address(0x1));
+        bytes memory regInitData = abi.encodeCall(
+            GuardianRegistry.initialize,
+            (deployer, governorProxy, predictedFactoryProxy, woodToken, 10_000e18, 10_000e18, 0, 7 days, 24 hours, 3000)
+        );
+        address registryProxy = address(new ERC1967Proxy(address(registryImpl), regInitData));
+        console.log("GuardianRegistry:", registryProxy);
+
+        // 5. Deploy SyndicateFactory (UUPS proxy, no ENS registrar, no agent registry)
         SyndicateFactory factoryImpl = new SyndicateFactory();
-        // TODO(guardian-registry): deploy GuardianRegistry and wire it here.
-        address guardianRegistryPlaceholder = deployer;
         bytes memory factoryInitData = abi.encodeCall(
             SyndicateFactory.initialize,
             (SyndicateFactory.InitParams({
@@ -81,13 +95,17 @@ contract DeployRobinhoodTestnet is ScriptBase {
                     agentRegistry: AGENT_REGISTRY,
                     governor: governorProxy,
                     managementFeeBps: 50,
-                    guardianRegistry: guardianRegistryPlaceholder
+                    guardianRegistry: registryProxy
                 }))
         );
         SyndicateFactory factory = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInitData)));
+        require(address(factory) == predictedFactoryProxy, "factory addr mismatch");
         console.log("SyndicateFactory:", address(factory));
 
-        // 5. Register factory on governor so addVault() works during createSyndicate
+        // 6. Wire registry into governor (one-shot).
+        SyndicateGovernor(governorProxy).initializeGuardianRegistry(registryProxy);
+
+        // 7. Register factory on governor so addVault() works during createSyndicate
         SyndicateGovernor(governorProxy).setFactory(address(factory));
         console.log("Governor.setFactory:", address(factory));
 
@@ -100,6 +118,7 @@ contract DeployRobinhoodTestnet is ScriptBase {
         _writeAddresses(
             "Robinhood L2 Testnet", deployer, address(factory), governorProxy, address(executorLib), address(vaultImpl)
         );
+        _patchAddress("GUARDIAN_REGISTRY", registryProxy);
 
         console.log("\nNote: No ENS or ERC-8004 on this chain.");
         console.log("Identity and attestations remain on Base.");

@@ -1,13 +1,12 @@
 # SyndicateGovernor — Architecture
 
-> **Known drift:** parts of this doc (`capitalRequired`, `splitIndex`, single `calls[]` array, missing `GuardianReview` state, `block.number` snapshots, "shareholders can veto") predate several shipped refactors. Full drift catalog in `docs/pre-mainnet-punchlist.md` §6 (items A18, A19, A24, A25, A26, A28, A29). Authority order from `CLAUDE.md` applies: `contracts/src/` is canonical; treat anything that conflicts with the current Solidity or the spec at `docs/superpowers/specs/2026-04-19-guardian-review-lifecycle-design.md` (PR #229) as out-of-date. This doc will get a full pass once PR #229 lands.
+> **Known drift:** the `StrategyProposal` struct diagram below still shows `capitalRequired` and a single `calls[]` array (A24, A26 in `docs/pre-mainnet-punchlist.md` §6). These are stale — the real struct has **separate `executeCalls` / `settlementCalls`** arrays and **no `capitalRequired`** field. The `GuardianReview` state, `reviewEnd`, and the four-way emergency-settle split are **live code** as of PR #229; any earlier version of this doc that called them "designed, not yet implemented" is out-of-date.
 >
 > Specific corrections to keep in mind while reading:
 > - `StrategyProposal` has **no `capitalRequired` field** (A24). The vault's full asset balance is available; strategies request via their `executeCalls`.
 > - `StrategyProposal` has **separate `executeCalls` and `settlementCalls` arrays** — there is **no `splitIndex`**.
 > - Snapshots are **timestamp-based** via ERC20Votes `clock()` returning `uint48(block.timestamp)` — not `block.number` (A25). Note: `snapshotTimestamp = block.timestamp` (not `block.timestamp - 1`) is a same-block flash-delegate window on 2s L2 blocks — tracked as G-C1 in the punch list.
 > - `vetoProposal` is **vault-owner only**, not callable by shareholders (A18). Any doc that implies otherwise is stale.
-> - The "three-way settlement" description below **will change** once PR #229 lands: `emergencySettle` splits into `unstick` / `emergencySettleWithCalls` / `cancelEmergencySettle` / `finalizeEmergencySettle` with owner-stake slashing on guardian block.
 
 ## Overview
 
@@ -54,11 +53,9 @@ A governance system where agents propose strategies, vault shareholders vote, ap
    - No new strategy can execute until cooldown expires
 ```
 
-### Owner-side emergency paths (PR #229 redesign)
+### Owner-side emergency paths
 
-Before: a single `emergencySettle(proposalId, calls)` let the vault owner execute arbitrary calldata after strategy duration. This was an unbounded trusted-root.
-
-After PR #229, split into three functions with explicit intent:
+Previously a single `emergencySettle(proposalId, calls)` let the vault owner execute arbitrary calldata after strategy duration. That was an unbounded trusted-root. As of PR #229 it is split into four explicit entrypoints:
 
 - **`unstick(proposalId)`** — owner-instant, runs only the pre-committed `settlementCalls`. No new calldata; no guardian review. Use when the committed unwind is correct but the proposer is unresponsive.
 - **`emergencySettleWithCalls(proposalId, calls)`** — owner commits new calldata and opens a guardian-reviewed window. Requires `ownerStake(vault) >= requiredOwnerBond(vault)` at call time (re-check blocks stake-at-TVL=0-drain-at-scale). Does not execute yet.
