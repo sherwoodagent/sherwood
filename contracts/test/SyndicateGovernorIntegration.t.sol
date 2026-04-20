@@ -218,41 +218,10 @@ contract SyndicateGovernorIntegrationTest is Test {
         governor.executeProposal(proposalId);
     }
 
-    // ==================== EMERGENCY SETTLE WITH PROFIT ====================
-
-    function test_fullLifecycle_emergencySettle() public {
-        // TODO(task-24): re-enable after GovernorEmergency full implementation (guardian-review plan)
-        vm.skip(true);
-        BatchExecutorLib.Call[] memory execCalls = new BatchExecutorLib.Call[](1);
-        execCalls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 50_000e6)), value: 0
-        });
-
-        BatchExecutorLib.Call[] memory settleCalls = new BatchExecutorLib.Call[](1);
-        settleCalls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
-        });
-
-        uint256 proposalId = _proposeVoteApprove(execCalls, settleCalls, 1500, 7 days);
-        governor.executeProposal(proposalId);
-        usdc.mint(address(vault), 3_000e6);
-        vm.warp(block.timestamp + 7 days);
-
-        BatchExecutorLib.Call[] memory customCalls = new BatchExecutorLib.Call[](1);
-        customCalls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
-        });
-
-        uint256 agentBalBefore = usdc.balanceOf(agent);
-        vm.prank(owner);
-        governor.emergencySettle(proposalId, customCalls);
-
-        uint256 protocolFee = 3_000e6 * 200 / 10000;
-        uint256 expectedFee = (3_000e6 - protocolFee) * 1500 / 10000;
-        assertEq(usdc.balanceOf(agent), agentBalBefore + expectedFee);
-        assertEq(uint256(governor.getProposalState(proposalId)), uint256(ISyndicateGovernor.ProposalState.Settled));
-        assertFalse(vault.redemptionsLocked());
-    }
+    // The old `emergencySettle(uint256, Call[])` integration scenario was replaced
+    // by the Task 24 guardian-review lifecycle. See
+    // `test/governor/GovernorEmergency.t.sol` for full-lifecycle tests of
+    // unstick / emergencySettleWithCalls / cancel / finalize.
 
     // ==================== SEQUENTIAL STRATEGIES ====================
 

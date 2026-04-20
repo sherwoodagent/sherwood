@@ -101,8 +101,15 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     /// @notice Guardian registry (wired in Task 25). Zero until then; emergency fns revert.
     address internal _guardianRegistry;
 
-    /// @dev Reserved storage for future upgrades (shrunk by 1 for _guardianRegistry)
-    uint256[32] private __gap;
+    // ── Guardian-review storage (Task 24 / PR #229) ──
+    /// @dev keccak256(abi.encode(calls)) pre-committed at `emergencySettleWithCalls`
+    mapping(uint256 => bytes32) internal _emergencyCallsHashes;
+    /// @dev Stored calls mirror so the owner (or a watcher) can recover them on-chain
+    mapping(uint256 => BatchExecutorLib.Call[]) internal _emergencyCalls;
+
+    /// @dev Reserved storage for future upgrades (shrunk by 1 for _guardianRegistry,
+    ///      shrunk by 2 more for _emergencyCallsHashes + _emergencyCalls)
+    uint256[30] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -197,6 +204,29 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
 
     function _emergencyReentrancyLeave() internal override {
         _reentrancyStatus = _NOT_ENTERED;
+    }
+
+    // ── Task 24: emergency-call storage overrides ──
+
+    function _storeEmergencyCalls(uint256 id, BatchExecutorLib.Call[] calldata calls) internal override {
+        _emergencyCallsHashes[id] = keccak256(abi.encode(calls));
+        delete _emergencyCalls[id];
+        for (uint256 i = 0; i < calls.length; i++) {
+            _emergencyCalls[id].push(calls[i]);
+        }
+    }
+
+    function _clearEmergencyCalls(uint256 id) internal override {
+        delete _emergencyCallsHashes[id];
+        delete _emergencyCalls[id];
+    }
+
+    function _getEmergencyCallsHash(uint256 id) internal view override returns (bytes32) {
+        return _emergencyCallsHashes[id];
+    }
+
+    function _finishSettlementHook(uint256 id, StrategyProposal storage p) internal override returns (int256, uint256) {
+        return _finishSettlement(id, p);
     }
 
     // ==================== PROPOSAL LIFECYCLE ====================

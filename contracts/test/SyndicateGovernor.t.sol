@@ -424,25 +424,9 @@ contract SyndicateGovernorTest is Test {
         governor.settleProposal(proposalId);
     }
 
-    function test_emergencySettle_afterDuration() public {
-        // TODO(task-24): re-enable after GovernorEmergency full implementation (guardian-review plan)
-        vm.skip(true);
-        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
-        vm.warp(block.timestamp + 7 days);
-        vm.prank(owner);
-        governor.emergencySettle(proposalId, _simpleSettlementCalls());
-        assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Settled));
-        assertFalse(vault.redemptionsLocked());
-    }
-
-    function test_emergencySettle_beforeDuration_reverts() public {
-        // TODO(task-24): re-enable after GovernorEmergency full implementation (guardian-review plan)
-        vm.skip(true);
-        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
-        vm.prank(owner);
-        vm.expectRevert(ISyndicateGovernor.StrategyDurationNotElapsed.selector);
-        governor.emergencySettle(proposalId, _simpleSettlementCalls());
-    }
+    // Legacy `emergencySettle(uint256, Call[])` is a revert stub as of Task 24.
+    // See `test/governor/GovernorEmergency.t.sol` for the new 4-way lifecycle tests
+    // (unstick / emergencySettleWithCalls / cancelEmergencySettle / finalizeEmergencySettle).
 
     // ==================== P&L CALCULATION ====================
 
@@ -583,15 +567,7 @@ contract SyndicateGovernorTest is Test {
         governor.vetoProposal(proposalId);
     }
 
-    function test_emergencySettle_notVaultOwner_reverts() public {
-        // TODO(task-24): re-enable after GovernorEmergency full implementation (guardian-review plan)
-        vm.skip(true);
-        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
-        vm.warp(block.timestamp + 7 days);
-        vm.prank(random);
-        vm.expectRevert(ISyndicateGovernor.NotVaultOwner.selector);
-        governor.emergencySettle(proposalId, _simpleSettlementCalls());
-    }
+    // (Legacy `emergencySettle_notVaultOwner_reverts` deleted — Task 24 stub reverts unconditionally.)
 
     // ==================== PARAMETER SETTERS (TIMELOCK) ====================
 

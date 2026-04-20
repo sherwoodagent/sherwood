@@ -2,19 +2,29 @@
 pragma solidity 0.8.28;
 
 import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
+import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
 import {IGuardianRegistry} from "./interfaces/IGuardianRegistry.sol";
 import {BatchExecutorLib} from "./BatchExecutorLib.sol";
-
-// ISyndicateVault / IERC4626 / IERC20 intentionally NOT imported here — the
-// Task-24 implementation will pull them in when the bodies are fleshed out.
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 /// @title GovernorEmergency
 /// @notice Abstract — emergency settlement paths extracted for bytecode headroom.
 ///         Inherited by SyndicateGovernor alongside GovernorParameters.
 ///
-///         Functions are stubs in Task 2. Task 24 implements the full guardian
-///         review lifecycle: `unstick`, `emergencySettleWithCalls`,
-///         `cancelEmergencySettle`, `finalizeEmergencySettle`.
+///         Implements the Task 24 guardian review lifecycle:
+///           - `unstick`: vault owner rescues a proposal stuck in Executed state by
+///             running its pre-committed settlement calls (no guardian review — the
+///             calls were already governance-approved).
+///           - `emergencySettleWithCalls`: vault owner proposes owner-supplied
+///             settlement calls. Requires active owner bond. Opens a guardian review.
+///           - `cancelEmergencySettle`: vault owner withdraws their review before
+///             finalization.
+///           - `finalizeEmergencySettle`: once the review period has elapsed and the
+///             block quorum was not reached, the owner runs the reviewed calls.
+///
+///         The legacy `emergencySettle(uint256, Call[])` entrypoint is preserved as a
+///         revert stub to keep the ISyndicateGovernor ABI stable; Task 25 owns its
+///         removal.
 abstract contract GovernorEmergency is ISyndicateGovernor {
     // ── Virtual accessors (implemented by SyndicateGovernor) ──
 
@@ -24,6 +34,16 @@ abstract contract GovernorEmergency is ISyndicateGovernor {
     function _emergencyReentrancyEnter() internal virtual;
     function _emergencyReentrancyLeave() internal virtual;
 
+    // ── New virtual accessors (Task 24 — implemented by SyndicateGovernor) ──
+
+    function _storeEmergencyCalls(uint256 pid, BatchExecutorLib.Call[] calldata calls) internal virtual;
+    function _clearEmergencyCalls(uint256 pid) internal virtual;
+    function _getEmergencyCallsHash(uint256 pid) internal view virtual returns (bytes32);
+    function _finishSettlementHook(uint256 pid, StrategyProposal storage p)
+        internal
+        virtual
+        returns (int256 pnl, uint256 totalFee);
+
     // ── Reentrancy modifier (shares status var with SyndicateGovernor) ──
 
     modifier emergencyNonReentrant() {
@@ -32,64 +52,81 @@ abstract contract GovernorEmergency is ISyndicateGovernor {
         _emergencyReentrancyLeave();
     }
 
-    // ── Emergency settle lifecycle (stubs — Task 24) ──
+    // ── Emergency settle lifecycle ──
 
-    /// @notice Legacy emergency settle entrypoint. Preserved as a stub for
-    ///         ISyndicateGovernor interface compatibility until Task 25
-    ///         migrates the interface to the new lifecycle fns below.
-    /// @dev Reverts — callers must switch to `emergencySettleWithCalls` +
-    ///      `finalizeEmergencySettle` once Task 24 is live.
-    /// @param proposalId governor proposal id
-    /// @param calls owner-supplied fallback settlement calls
-    function emergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls)
-        external
-        emergencyNonReentrant
-    {
-        proposalId;
-        calls;
-        revert(); // TODO(task-24/25): remove after interface migration
+    /// @notice Legacy emergency settle entrypoint — kept as a revert stub for
+    ///         interface compatibility. Task 25 owns removal from ISyndicateGovernor.
+    /// @dev Do NOT remove; dropping it changes the governor ABI, which Task 25 owns.
+    function emergencySettle(uint256, BatchExecutorLib.Call[] calldata) external pure {
+        revert();
     }
 
-    /// @notice Rescues a proposal stuck in Executed state past its duration.
-    /// @dev Full implementation in Task 24 — currently reverts.
-    /// @param proposalId governor proposal id
+    /// @notice Rescues a proposal stuck in Executed state past its duration by
+    ///         running the governance-approved pre-committed settlement calls.
+    /// @dev Does NOT require active owner stake — the calls were already voted on.
+    ///      Settlement fees are distributed exactly as in the happy-path settle.
     function unstick(uint256 proposalId) external emergencyNonReentrant {
-        proposalId; // silence unused warning
-        revert(); // TODO(task-24)
+        StrategyProposal storage p = _getProposal(proposalId);
+        if (msg.sender != OwnableUpgradeable(p.vault).owner()) revert NotVaultOwner();
+        if (p.state != ProposalState.Executed) revert ProposalNotExecuted();
+        if (block.timestamp < p.executedAt + p.strategyDuration) revert StrategyDurationNotElapsed();
+        // unstick does NOT require active owner stake — pre-committed calls were governance-approved.
+        ISyndicateVault(p.vault).executeGovernorBatch(_getSettlementCalls(proposalId));
+        _finishSettlementHook(proposalId, p);
     }
 
     /// @notice Vault owner opens an emergency review on a stuck proposal with
-    ///         owner-supplied unwind calls. Requires bonded guardian review.
-    /// @dev Full implementation in Task 24 — currently reverts.
-    /// @param proposalId governor proposal id
-    /// @param calls owner-supplied settlement calls to be reviewed
+    ///         owner-supplied unwind calls. Requires bonded owner stake.
+    /// @dev Emits `EmergencySettleProposed`. Guardian block votes run via the
+    ///      registry during `reviewPeriod`; finalize via `finalizeEmergencySettle`.
     function emergencySettleWithCalls(uint256 proposalId, BatchExecutorLib.Call[] calldata calls)
         external
         emergencyNonReentrant
     {
-        proposalId;
-        calls;
-        revert(); // TODO(task-24)
+        StrategyProposal storage p = _getProposal(proposalId);
+        if (msg.sender != OwnableUpgradeable(p.vault).owner()) revert NotVaultOwner();
+        if (p.state != ProposalState.Executed) revert ProposalNotExecuted();
+        if (block.timestamp < p.executedAt + p.strategyDuration) revert StrategyDurationNotElapsed();
+
+        IGuardianRegistry reg = _getRegistry();
+        if (reg.ownerStake(p.vault) < reg.requiredOwnerBond(p.vault)) revert OwnerBondInsufficient();
+
+        bytes32 h = keccak256(abi.encode(calls));
+        _storeEmergencyCalls(proposalId, calls);
+        reg.openEmergencyReview(proposalId, h);
+        emit EmergencySettleProposed(proposalId, msg.sender, h, uint64(block.timestamp + reg.reviewPeriod()));
     }
 
-    /// @notice Vault owner cancels their own open emergency review before resolution.
-    /// @dev Full implementation in Task 24 — currently reverts.
-    /// @param proposalId governor proposal id
+    /// @notice Vault owner withdraws their open emergency review before resolution.
+    /// @dev Clears the stored calls hash and call array so a fresh review can be
+    ///      opened later. The registry-side review state is resolved lazily (its
+    ///      `resolveEmergencyReview` handles a cancelled/absent hash gracefully).
     function cancelEmergencySettle(uint256 proposalId) external emergencyNonReentrant {
-        proposalId;
-        revert(); // TODO(task-24)
+        StrategyProposal storage p = _getProposal(proposalId);
+        if (msg.sender != OwnableUpgradeable(p.vault).owner()) revert NotVaultOwner();
+        _clearEmergencyCalls(proposalId);
+        emit EmergencySettleCancelled(proposalId, msg.sender);
     }
 
     /// @notice Resolves a reviewed emergency settle and executes the approved calls.
-    /// @dev Full implementation in Task 24 — currently reverts.
-    /// @param proposalId governor proposal id
-    /// @param calls calls whose hash was pre-committed at review open time
+    /// @dev The caller must supply the same calls whose hash was pre-committed at
+    ///      review open time. Reverts with `EmergencySettleBlocked` if guardians
+    ///      reached the block quorum.
     function finalizeEmergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls)
         external
         emergencyNonReentrant
     {
-        proposalId;
-        calls;
-        revert(); // TODO(task-24)
+        StrategyProposal storage p = _getProposal(proposalId);
+        if (msg.sender != OwnableUpgradeable(p.vault).owner()) revert NotVaultOwner();
+        if (keccak256(abi.encode(calls)) != _getEmergencyCallsHash(proposalId)) revert EmergencySettleMismatch();
+
+        IGuardianRegistry reg = _getRegistry();
+        bool blocked = reg.resolveEmergencyReview(proposalId);
+        if (blocked) revert EmergencySettleBlocked();
+
+        ISyndicateVault(p.vault).executeGovernorBatch(calls);
+        (int256 pnl,) = _finishSettlementHook(proposalId, p);
+        _clearEmergencyCalls(proposalId);
+        emit EmergencySettleFinalized(proposalId, pnl);
     }
 }

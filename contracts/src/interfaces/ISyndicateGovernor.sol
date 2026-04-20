@@ -115,6 +115,11 @@ interface ISyndicateGovernor {
     error InvalidProtocolFeeBps();
     error InvalidProtocolFeeRecipient();
 
+    // ── Guardian-review emergency settle errors (Task 24) ──
+    error OwnerBondInsufficient();
+    error EmergencySettleBlocked();
+    error EmergencySettleMismatch();
+
     // ── Collaborative proposal errors ──
     error NotCoProposer();
     error CollaborationExpired();
@@ -163,6 +168,13 @@ interface ISyndicateGovernor {
     event ProposalVetoed(uint256 indexed proposalId, address indexed vetoedBy);
 
     event EmergencySettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 customCallCount);
+
+    // ── Guardian-review emergency settle events (Task 24) ──
+    event EmergencySettleProposed(
+        uint256 indexed proposalId, address indexed owner, bytes32 callsHash, uint64 reviewEnd
+    );
+    event EmergencySettleCancelled(uint256 indexed proposalId, address indexed owner);
+    event EmergencySettleFinalized(uint256 indexed proposalId, int256 pnl);
 
     event FactoryUpdated(address indexed factory);
     event VaultAdded(address indexed vault);
@@ -213,6 +225,12 @@ interface ISyndicateGovernor {
     function settleProposal(uint256 proposalId) external;
 
     function emergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external;
+
+    // ── Guardian-review emergency settle lifecycle (Task 24) ──
+    function unstick(uint256 proposalId) external;
+    function emergencySettleWithCalls(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external;
+    function cancelEmergencySettle(uint256 proposalId) external;
+    function finalizeEmergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external;
 
     function cancelProposal(uint256 proposalId) external;
 
