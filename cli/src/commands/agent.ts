@@ -998,6 +998,20 @@ export function registerAgentCommands(program: Command): void {
       console.log("");
     });
 
+  // ── serve (dashboard API) ──
+  agent
+    .command("serve")
+    .description("Start dashboard API server (REST + WebSocket)")
+    .option("--port <number>", "Port to listen on", "3939")
+    .option("--host <string>", "Host to bind to (default: 127.0.0.1 if no token, 0.0.0.0 with token)")
+    .option("--token <string>", "Bearer token for remote access")
+    .action(async (opts: { port: string; host?: string; token?: string }) => {
+      const { startServe } = await import("../agent/serve.js");
+      const port = parseInt(opts.port, 10);
+      const host = opts.host ?? (opts.token ? "0.0.0.0" : "127.0.0.1");
+      await startServe({ port, host, token: opts.token });
+    });
+
   // ── alerts ──
   const alerts = agent.command("alerts").description("Manage trading alerts");
 
