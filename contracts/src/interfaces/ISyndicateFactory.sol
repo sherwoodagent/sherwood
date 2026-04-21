@@ -8,6 +8,9 @@ interface ISyndicateFactory {
     // ── Errors (Task 26) ──
     error VaultStillStaked();
 
+    // ── Errors (V-H3) ──
+    error VaultImplMismatch();
+
     // ── Views ──
     function governor() external view returns (address);
     function vaultImpl() external view returns (address);

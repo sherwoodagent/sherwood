@@ -472,6 +472,52 @@ contract SyndicateFactoryTest is Test {
         );
     }
 
+    // ==================== V-H3: upgradeVault expectedImpl ====================
+
+    /// @notice V-H3 regression: if the factory owner calls `setVaultImpl`
+    ///         between the creator observing `vaultImpl` and calling
+    ///         `upgradeVault`, the creator must not end up on a different
+    ///         impl than they expected.
+    function test_upgradeVault_revertsIfImplChanged() public {
+        // Create syndicate
+        vm.prank(creator1);
+        (, address vaultAddr) = factory.createSyndicate(creator1AgentId, _defaultConfig());
+
+        // Owner enables upgrades and snapshots the current impl.
+        vm.prank(owner);
+        factory.setUpgradesEnabled(true);
+        address expected = factory.vaultImpl();
+
+        // Owner rotates the vault impl (front-run scenario).
+        SyndicateVault newImpl = new SyndicateVault();
+        vm.prank(owner);
+        factory.setVaultImpl(address(newImpl));
+
+        // Creator calls upgradeVault with the previously-observed impl -> revert.
+        vm.prank(creator1);
+        vm.expectRevert(SyndicateFactory.VaultImplMismatch.selector);
+        factory.upgradeVault(vaultAddr, expected);
+    }
+
+    /// @notice V-H3 positive path: upgradeVault succeeds when expectedImpl
+    ///         matches the factory's current vaultImpl.
+    function test_upgradeVault_succeedsWithCurrentImpl() public {
+        // Create syndicate
+        vm.prank(creator1);
+        (, address vaultAddr) = factory.createSyndicate(creator1AgentId, _defaultConfig());
+
+        // Enable upgrades, rotate to a new impl
+        vm.prank(owner);
+        factory.setUpgradesEnabled(true);
+        SyndicateVault newImpl = new SyndicateVault();
+        vm.prank(owner);
+        factory.setVaultImpl(address(newImpl));
+
+        // Creator passes the now-current impl -> succeeds.
+        vm.prank(creator1);
+        factory.upgradeVault(vaultAddr, address(newImpl));
+    }
+
     // ==================== V-H2: GOVERNOR IS SET-ONCE ====================
 
     /// @notice V-H2 regression: `setGovernor` was removed. The selector must

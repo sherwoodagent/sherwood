@@ -47,6 +47,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     error UpgradesDisabled();
     error VaultNotDeployed();
     error StrategyActive();
+    error VaultImplMismatch();
     // ── Task 26: owner-stake binding + rotation errors ──
     error InvalidGuardianRegistry();
     error PreparedStakeNotFound();
@@ -336,13 +337,21 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     }
 
     /// @notice Upgrade a vault to a new implementation. Callable by the syndicate owner (vault owner).
-    /// @dev Factory must have upgrades enabled, and newImpl must be the current factory vaultImpl.
+    /// @dev Factory must have upgrades enabled, and `vaultImpl` must equal `expectedImpl`.
+    ///      The `expectedImpl` parameter closes V-H3: otherwise a factory owner
+    ///      could call `setVaultImpl(newImpl)` between when the creator decides
+    ///      to upgrade and when the upgrade tx lands, landing the vault on an
+    ///      impl the creator did not opt into.
     /// @param vault The vault proxy to upgrade
-    function upgradeVault(address vault) external {
+    /// @param expectedImpl The vault implementation address the creator expects
+    ///                     to be applied. Reverts with `VaultImplMismatch` if
+    ///                     `vaultImpl` has changed since the caller observed it.
+    function upgradeVault(address vault, address expectedImpl) external {
         if (!upgradesEnabled) revert UpgradesDisabled();
         uint256 syndicateId = vaultToSyndicate[vault];
         if (syndicateId == 0) revert VaultNotDeployed();
         if (syndicates[syndicateId].creator != msg.sender) revert NotCreator();
+        if (vaultImpl != expectedImpl) revert VaultImplMismatch();
         // Cannot upgrade while a strategy is active
         if (governor != address(0) && ISyndicateGovernor(governor).getActiveProposal(vault) != 0) {
             revert StrategyActive();
