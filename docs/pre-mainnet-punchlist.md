@@ -249,7 +249,7 @@ Ranked by effort-to-impact. PR #229 doesn't touch items 1–5, 7, 8, 9; it lands
 6. Fix doc↔code mismatches (§6 above).
 7. Wire `maxSlippageBps` → `amountOutMin` in `PortfolioStrategy`.
 8. Rotate all owners to `TimelockController` + Gnosis Safe.
-9. Echidna harness for the 48 invariants (priority: INV-2, -3, -11, -15, -23). 🟡 **partial in #229** (`963e565` — 3 guardian-scope invariants; `bf0e4cd` — INV-2 / -3 / -30 / -33 / -46; `12deb4d` — INV-11 co-proposer split property test). INV-15 / -23 deferred to tokenomics / strategies branches per #236 scope.
+9. Echidna harness for the 48 invariants (priority: INV-2, -3, -11, -15, -23). 🟡 **partial in #229** (`963e565` — 3 guardian-scope invariants; `bf0e4cd` — INV-2 / -3 / -30 / -33 / -46; `12deb4d` — INV-11 co-proposer split property test; `feat/guardian-review-lifecycle` HEAD — INV-9 active-proposal pointer consistency + INV-10 capital-snapshot lifecycle, closes #236). INV-15 / -23 deferred to tokenomics / strategies branches per #236 scope.
 10. ~~CI size gate: `forge build --sizes` must fail if `SyndicateGovernor > 24,500` bytes.~~ ✅ **done in #229** (`607386e` — gate at 24,400).
 11. Document invariants at call sites (#226 §10.3).
 12. Add `Pausable` across tokenomics contracts. (Registry now has pause + 7d deadman — tokenomics still outstanding.)

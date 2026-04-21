@@ -19,8 +19,9 @@ import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 import {ProtocolHandler} from "./handlers/ProtocolHandler.sol";
 
 /// @title ProtocolInvariantsTest
-/// @notice 5-invariant harness closing INV-2, INV-3, INV-30, INV-33, INV-46
-///         from the pre-mainnet punch list (docs/pre-mainnet-punchlist.md §3.5).
+/// @notice 7-invariant harness closing INV-2, INV-3, INV-9, INV-10, INV-30,
+///         INV-33, INV-46 from the pre-mainnet punch list
+///         (docs/pre-mainnet-punchlist.md §3.5).
 ///
 ///         The harness spins up the real `SyndicateGovernor`, `SyndicateFactory`,
 ///         and `GuardianRegistry` (all behind ERC-1967 proxies with the
@@ -282,6 +283,92 @@ contract ProtocolInvariantsTest is StdInvariant, Test {
             );
             ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(pid);
             assertEq(p.vault, vaults[i], "INV-3: active proposal vault mismatch");
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // INV-9: `_activeProposal[vault]` pointer consistency
+    // ──────────────────────────────────────────────────────────────
+
+    /// @notice Structural counterpart to INV-3. For every registered vault v:
+    ///           (a) `getActiveProposal(v) == 0`  ⇒ no proposal exists in
+    ///               `Executed` state with `p.vault == v`
+    ///           (b) `getActiveProposal(v) != 0`  ⇒ the pointed-to proposal IS
+    ///               in `Executed` state AND `p.vault == v`
+    ///
+    ///         INV-3 asserts uniqueness of the pointer; INV-9 asserts the
+    ///         pointer is correct. Together they close the G-C2/C3 regression
+    ///         vector from issue #225 (unrelated `_activeProposal[vault]`
+    ///         writes / deletes): only `executeProposal` writes the pointer
+    ///         and only `_finishSettlement` clears it. Any refactor that
+    ///         reintroduces a sibling writer or a cancel/reject-path delete
+    ///         will break (a) or (b).
+    ///
+    ///         Iterates `1..proposalCount()` per vault — O(V*N) but acceptable
+    ///         at fuzz-harness scale. Under the current handler the set is
+    ///         empty, so the check is vacuous and guards against structural
+    ///         drift.
+    function invariant_activeProposalPointerConsistent() public view {
+        address[] memory vaults = governor.getRegisteredVaults();
+        uint256 total = governor.proposalCount();
+        for (uint256 i = 0; i < vaults.length; i++) {
+            uint256 activeId = governor.getActiveProposal(vaults[i]);
+            if (activeId == 0) {
+                // No active pointer: no Executed proposal may exist for this vault.
+                for (uint256 pid = 1; pid <= total; pid++) {
+                    ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(pid);
+                    if (p.vault != vaults[i]) continue;
+                    assertTrue(
+                        p.state != ISyndicateGovernor.ProposalState.Executed,
+                        "INV-9: _activeProposal == 0 but proposal is Executed"
+                    );
+                }
+            } else {
+                // Active pointer set: must point at an Executed proposal on this vault.
+                ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(activeId);
+                assertEq(
+                    uint8(p.state),
+                    uint8(ISyndicateGovernor.ProposalState.Executed),
+                    "INV-9: _activeProposal points at non-Executed proposal"
+                );
+                assertEq(p.vault, vaults[i], "INV-9: _activeProposal vault mismatch");
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // INV-10: `_capitalSnapshots[id]` lifecycle
+    // ──────────────────────────────────────────────────────────────
+
+    /// @notice For every proposal id ever created:
+    ///           - Proposal never reached Executed ⇒ `_capitalSnapshots[id] == 0`
+    ///           - Proposal reached Executed (or Settled — snapshot survives the
+    ///             transition) ⇒ `_capitalSnapshots[id] != 0`
+    ///
+    ///         `executeProposal` sets the snapshot (L392 of SyndicateGovernor)
+    ///         and `_finishSettlement` (L952) transitions Executed → Settled
+    ///         WITHOUT clearing `_capitalSnapshots` — the snapshot survives the
+    ///         transition by design (it is read at PnL computation time, L947).
+    ///         This invariant pins that lifecycle: it guards against any future
+    ///         refactor that accidentally clears snapshots on cancel/reject/
+    ///         settle paths, or writes them anywhere other than `executeProposal`.
+    ///
+    ///         Under the current handler the proposal set is empty, so the
+    ///         check is vacuous. The assertion ships now so a future iteration
+    ///         that wires a full vault + settlement flow immediately surfaces
+    ///         any snapshot-lifecycle drift.
+    function invariant_capitalSnapshotLifecycle() public view {
+        uint256 total = governor.proposalCount();
+        for (uint256 pid = 1; pid <= total; pid++) {
+            ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(pid);
+            bool wasExecuted = p.state == ISyndicateGovernor.ProposalState.Executed
+                || p.state == ISyndicateGovernor.ProposalState.Settled;
+            uint256 snap = governor.getCapitalSnapshot(pid);
+            if (wasExecuted) {
+                assertGt(snap, 0, "INV-10: Executed/Settled proposal must have non-zero capital snapshot");
+            } else {
+                assertEq(snap, 0, "INV-10: non-Executed proposal must have zero capital snapshot");
+            }
         }
     }
 
