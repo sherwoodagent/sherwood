@@ -78,11 +78,11 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - Use SafeERC20 for all token transfers
 - Run `forge build` and `forge test` before every PR
 - Run `forge fmt` before committing
-- SyndicateGovernor runtime is **24,550 / 24,576 bytes (26-byte margin — at CI gate)** as of 2026-04 (post-G-C5, post-W-1, post-I-3, post-G-M4). `GovernorEmergency` extracted + `via_ir` enabled + `GovernorParameters._applyChange` shares a uniform `ParameterChangeFinalized` event (no per-param typed events — saved 482 bytes; G-M4 merged `_applyAddressParam` virtuals for another 285 bytes). CI gate: ≤ 24,550 bytes (runtime sits exactly at gate — any addition requires bytecode reclaim first). Run `forge build --sizes` before any governor edit.
+- SyndicateGovernor runtime is **24,504 / 24,576 bytes (72-byte EIP-170 margin; 46 under CI gate)** as of 2026-04 (post-G-C5, post-W-1, post-I-3, post-G-M4, post-W-1-rekey). `GovernorEmergency` extracted + `via_ir` enabled + `GovernorParameters._applyChange` shares a uniform `ParameterChangeFinalized` event (no per-param typed events — saved 482 bytes; G-M4 merged `_applyAddressParam` virtuals for another 285 bytes; review-fixup dropped `bytes reason` from `FeeTransferFailed` + factored keccak into `_unclaimedKey` helper + removed defensive `nonReentrant` on `claimUnclaimedFees` — net -46 bytes while adding vault-keyed escrow). CI gate: ≤ 24,550 bytes. Run `forge build --sizes` before any governor edit.
 - **`via_ir` is on** in `foundry.toml`. Compile is ~2× slower than the legacy pipeline. Required to fit `GovernorEmergency` under the bytecode limit — do not disable without re-measuring the governor.
 - Under `via_ir = true`, the IR optimizer reorders `block.timestamp` reads across `vm.warp` cheatcodes. In tests, use `vm.getBlockTimestamp()` at each read site — never cache it in a local before a warp.
 - Reentrancy guard: use `@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol` (EIP-1153; Cancun-required but Base supports it). OZ v5 upgradeable doesn't ship `ReentrancyGuardUpgradeable`; transient is cheaper and storage-slot-free.
-- Bytecode reduction levers for `SyndicateGovernor`: (a) hoist shared event emits out of the `_applyChange` `else if` chain in `GovernorParameters` (saves ~20-50 bytes/branch), (b) drop per-parameter typed `*Updated` events in favor of the uniform `ParameterChangeFinalized(key, old, new)` (saved 482 bytes in one pass), (c) enable/bump `via_ir` (already on). `optimizer_runs` bumps didn't help meaningfully at runs=50.
+- Bytecode reduction levers for `SyndicateGovernor`: (a) hoist shared event emits out of the `_applyChange` `else if` chain in `GovernorParameters` (saves ~20-50 bytes/branch), (b) drop per-parameter typed `*Updated` events in favor of the uniform `ParameterChangeFinalized(key, old, new)` (saved 482 bytes in one pass), (c) enable/bump `via_ir` (already on). (d) Drop `bytes` / dynamic-length event params — memory encoding for dynamic fields costs ~70 bytes/event (biggest single-shot lever; used on `FeeTransferFailed` in the W-1 rekey). (e) Factor repeated `keccak256(abi.encode(...))` sites into a `private pure` helper — ~15 bytes. (f) Drop `nonReentrant` when CEI is verifiably respected (state write before external call + same-key reentry hits zero slot) — ~20 bytes. Counterintuitive under via_ir: `abi.encode` is cheaper than `abi.encodePacked` for fixed-width inputs (+9 bytes with packed); dropping `indexed` on an address topic *increases* bytecode (memory encoding > topic push). `optimizer_runs` bumps didn't help meaningfully at runs=50.
 - CI size gate filter: `forge build --sizes --json | jq -r '.SyndicateGovernor.runtime_size // empty'` — `// empty` makes an unknown contract fail the check loudly instead of silently passing.
 
 ### Address Management
@@ -98,7 +98,7 @@ Live contract sizes from `forge build --sizes` (2026-04):
 
 | Contract | Runtime | Notes |
 |---|---|---|
-| SyndicateGovernor | 24,550 | 26-byte margin; at CI gate (24,550) |
+| SyndicateGovernor | 24,504 | 72-byte margin; 46 under CI gate (24,550) |
 | SyndicateFactory | 11,206 | ample headroom |
 | GuardianRegistry | 17,403 | UUPS, guardian + owner stake + reviews + epoch rewards + appeal reserve + pause |
 | SyndicateVault | 11,069 | — |
@@ -262,6 +262,7 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 - **Exception to the timelock claim**: `setProtocolFeeRecipient` is owner-instant while `setProtocolFeeBps` is timelocked. Asymmetric; see issue #226 A7.
 - **Exception to the caps claim**: `maxPerTx` / `maxDailyTotal` / `maxBorrowRatio` / per-agent caps / target allowlist exist in `mintlify-docs/` but NOT in code (issue #226 §4 A10). Treat as aspirational until built.
 - `SyndicateFactory.setGovernor` is a global retroactive switch — one call rewires every existing vault's governor because `vault._getGovernor()` reads live. Rotate factory owner to multisig+timelock before mainnet.
+- **Pull-claim escrow key pattern**: any pull-based claim mapping (e.g. `_unclaimedFees`) MUST be keyed by the *origin* address when the claim function takes a caller-supplied target. Without it, an `onlyGovernor`-guarded `transferXxx(target, ...)` lets a user with any escrow redirect the pull to any target holding the token (cross-vault drain). Shape: `keccak256(originVault, recipient, token) => amount`, via a `private pure _unclaimedKey` helper to keep bytecode flat. Regression test: `FeeBlacklistResilience.t.sol::test_claimUnclaimedFees_cannotDrainUnrelatedVault`.
 
 ## Aspirational / not-yet-implemented (read docs with caution)
 
