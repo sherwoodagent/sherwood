@@ -535,16 +535,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         emit VaultRemoved(vault);
     }
 
-    // ==================== PROTOCOL FEE SETTERS ====================
-
-    /// @inheritdoc ISyndicateGovernor
-    function setProtocolFeeRecipient(address newRecipient) external onlyOwner {
-        if (newRecipient == address(0)) revert InvalidProtocolFeeRecipient();
-        address old = _protocolFeeRecipient;
-        _protocolFeeRecipient = newRecipient;
-        emit ProtocolFeeRecipientUpdated(old, newRecipient);
-    }
-
     // ==================== VIEWS ====================
 
     /// @inheritdoc ISyndicateGovernor
@@ -668,7 +658,10 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     function _applyProtocolFeeBpsChange(uint256 newValue) internal override returns (uint256 old) {
         old = _protocolFeeBps;
         _protocolFeeBps = newValue;
-        emit ProtocolFeeBpsUpdated(old, newValue);
+    }
+
+    function _setProtocolFeeRecipient(address newRecipient) internal override {
+        _protocolFeeRecipient = newRecipient;
     }
 
     // ==================== INTERNAL ====================

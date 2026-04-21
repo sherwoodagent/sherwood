@@ -87,7 +87,7 @@ Grouped by domain. All require separate PRs.
 |---|---|---|---|---|
 | G-C1 ✅ | `snapshotTimestamp = block.timestamp` flash-delegate | 95 | `snapshotTimestamp = block.timestamp - 1` (closed in `9608cd7`) | no |
 | G-C2/C3 ✅ | Unrelated `_activeProposal[vault]` delete | 92 / 91 | Narrowed cancel paths to Draft/Pending; blanket `delete` removed (closed in `ef5cf55` + `770a929`). Regression tests: `test/governor/ActiveProposalPreservation.t.sol`. | no |
-| G-C5 | `setProtocolFeeRecipient` not timelocked | 90 | Timelock it | no |
+| G-C5 ✅ | `setProtocolFeeRecipient` not timelocked | 90 | Routed through `GovernorParameters._applyChange` dispatcher with address-as-uint160 encoding; shares the same queue/finalize path as `protocolFeeBps` (bytecode reclaim in `daab171`; G-C5 fix follows on `feat/guardian-review-lifecycle`). Regression tests: `test/governor/ProtocolFeeRecipientTimelock.t.sol`. | no |
 | G-C6 | `nonReentrant` missing from `vote` / `vetoProposal` / `emergencyCancel` | 90 | Add `nonReentrant` on every state-mutating external fn | no |
 | G-C7 | Co-proposer fee rounding silently benefits lead | 88 | Revert if any active co-prop share rounds to 0, or distribute remainder proportionally | no |
 | G-H1 | `_capitalSnapshots` only measures asset balance; non-asset positions count as lost | 85 | Post-settle `require(nonAssetTokens == 0)` or document full-unwind requirement | no |

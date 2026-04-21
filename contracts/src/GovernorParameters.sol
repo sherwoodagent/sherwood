@@ -55,6 +55,7 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     bytes32 public constant PARAM_COLLAB_WINDOW = keccak256("collaborationWindow");
     bytes32 public constant PARAM_MAX_CO_PROPOSERS = keccak256("maxCoProposers");
     bytes32 public constant PARAM_PROTOCOL_FEE_BPS = keccak256("protocolFeeBps");
+    bytes32 public constant PARAM_PROTOCOL_FEE_RECIPIENT = keccak256("protocolFeeRecipient");
 
     // ── Virtual accessors (implemented by SyndicateGovernor) ──
 
@@ -142,6 +143,12 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
         _queueChange(PARAM_PROTOCOL_FEE_BPS, newProtocolFeeBps);
     }
 
+    /// @inheritdoc ISyndicateGovernor
+    function setProtocolFeeRecipient(address newRecipient) external onlyOwner {
+        if (newRecipient == address(0)) revert InvalidProtocolFeeRecipient();
+        _queueChange(PARAM_PROTOCOL_FEE_RECIPIENT, uint256(uint160(newRecipient)));
+    }
+
     // ── Timelock functions ──
 
     /// @inheritdoc ISyndicateGovernor
@@ -227,6 +234,9 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
             params.maxCoProposers = newValue;
         } else if (paramKey == PARAM_PROTOCOL_FEE_BPS) {
             old = _applyProtocolFeeBpsChange(newValue);
+        } else if (paramKey == PARAM_PROTOCOL_FEE_RECIPIENT) {
+            old = uint256(uint160(_getProtocolFeeRecipient()));
+            _setProtocolFeeRecipient(address(uint160(newValue)));
         } else {
             revert InvalidParameterKey();
         }
@@ -267,11 +277,16 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
         } else if (paramKey == PARAM_PROTOCOL_FEE_BPS) {
             if (newValue > MAX_PROTOCOL_FEE_BPS) revert InvalidProtocolFeeBps();
             if (newValue > 0 && _getProtocolFeeRecipient() == address(0)) revert InvalidProtocolFeeRecipient();
+        } else if (paramKey == PARAM_PROTOCOL_FEE_RECIPIENT) {
+            if (address(uint160(newValue)) == address(0)) revert InvalidProtocolFeeRecipient();
         }
     }
 
     /// @dev Apply protocol fee change — implemented by SyndicateGovernor
     function _applyProtocolFeeBpsChange(uint256 newValue) internal virtual returns (uint256 old);
+
+    /// @dev Apply protocol fee recipient change — implemented by SyndicateGovernor
+    function _setProtocolFeeRecipient(address newRecipient) internal virtual;
 
     // ── Validation helpers ──
 
