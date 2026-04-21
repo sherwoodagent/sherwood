@@ -598,4 +598,105 @@ contract SyndicateVaultTest is Test {
         vm.expectRevert();
         vault.redeem(shares, lp1, lp1);
     }
+
+    // ==================== EXECUTOR CODEHASH PIN (V-C2) ====================
+
+    /// @dev V-C2: delegatecall path re-verifies `_executorImpl.codehash`
+    ///      against the hash stamped at init. If the stored executor address
+    ///      is rewritten to point at a different contract, the next
+    ///      `executeGovernorBatch` must revert instead of delegatecalling
+    ///      into the swapped-in bytecode.
+    function test_executeGovernorBatch_revertsIfExecutorCodehashChanged() public {
+        // Deploy a second "evil" contract with different bytecode.
+        DifferentExecutor evil = new DifferentExecutor();
+        assertTrue(address(evil).codehash != address(executorLib).codehash);
+
+        // Overwrite _executorImpl (slot 3) with the evil address.
+        vm.store(address(vault), bytes32(uint256(3)), bytes32(uint256(uint160(address(evil)))));
+        assertEq(vault.getExecutorImpl(), address(evil));
+
+        // Attempt to execute a batch through the governor — should revert
+        // because the live codehash no longer matches the one pinned at init.
+        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
+        vm.prank(MOCK_GOVERNOR);
+        vm.expectRevert(ISyndicateVault.ExecutorCodehashMismatch.selector);
+        vault.executeGovernorBatch(calls);
+    }
+
+    /// @dev V-C2 reentrancy guard: if a target re-enters `executeGovernorBatch`
+    ///      during its callback, the re-entry must revert.
+    ///      We deploy a `ReentrantTarget` and re-mock
+    ///      `factory.governor()` to return its address, so when the target
+    ///      calls back into the vault as the governor the `onlyGovernor`
+    ///      modifier passes and the reentrancy guard is the next line of
+    ///      defence.
+    function test_executeGovernorBatch_reentrancy_blocked() public {
+        ReentrantTarget target = new ReentrantTarget(vault);
+
+        // Route the vault's `onlyGovernor` through the reentrant target.
+        vm.mockCall(address(this), abi.encodeWithSignature("governor()"), abi.encode(address(target)));
+        vm.mockCall(
+            address(target), abi.encodeWithSignature("getActiveProposal(address)"), abi.encode(uint256(0))
+        );
+
+        // Outer batch: one call into `target.ping()`, which re-enters the vault.
+        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
+        calls[0] = BatchExecutorLib.Call({
+            target: address(target),
+            data: abi.encodeWithSelector(ReentrantTarget.ping.selector),
+            value: 0
+        });
+
+        vm.prank(address(target));
+        // The re-entrant inner call reverts with OZ's ReentrancyGuardReentrantCall,
+        // and that revert bubbles up as the outer batch failure.
+        vm.expectRevert();
+        vault.executeGovernorBatch(calls);
+    }
+
+    // ==================== PAUSE GATES GOVERNOR BATCH (I-11) ====================
+
+    /// @dev I-11: pause must halt strategy execution (`executeGovernorBatch`)
+    ///      in addition to LP flow. Prior pause semantics were "LP flow off,
+    ///      strategy flow on" — closed by gating the governor batch path with
+    ///      `whenNotPaused`.
+    function test_executeGovernorBatch_revertsWhenPaused() public {
+        vm.prank(owner);
+        vault.pause();
+
+        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
+        vm.prank(MOCK_GOVERNOR);
+        // OZ v5 PausableUpgradeable reverts with `EnforcedPause()`.
+        vm.expectRevert();
+        vault.executeGovernorBatch(calls);
+    }
+}
+
+/// @dev Minimal standalone contract with bytecode different from
+///      `BatchExecutorLib`. Used to prove the codehash check rejects any
+///      swapped-in executor.
+contract DifferentExecutor {
+    function executeBatch(BatchExecutorLib.Call[] calldata) external {
+        // Different bytecode than BatchExecutorLib — reverts if called.
+        revert("different executor");
+    }
+}
+
+/// @dev Reentrancy probe: doubles as the mock governor. The vault calls
+///      `ping()` on this target inside a batch; `ping()` then calls back
+///      into `vault.executeGovernorBatch` with `msg.sender == address(this)`,
+///      which passes `onlyGovernor` because we mocked `factory.governor()`
+///      to return this target. The `nonReentrant` transient guard must
+///      reject the second entry.
+contract ReentrantTarget {
+    SyndicateVault public immutable vault;
+
+    constructor(SyndicateVault _vault) {
+        vault = _vault;
+    }
+
+    function ping() external {
+        BatchExecutorLib.Call[] memory inner = new BatchExecutorLib.Call[](0);
+        vault.executeGovernorBatch(inner);
+    }
 }

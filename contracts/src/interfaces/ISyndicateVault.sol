@@ -26,6 +26,7 @@ interface ISyndicateVault {
     error CannotRescueAsset();
     error NotFactory();
     error GovernorNotSet();
+    error ExecutorCodehashMismatch();
 
     // ── Init Params ──
     struct InitParams {

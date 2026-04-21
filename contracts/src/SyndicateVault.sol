@@ -14,6 +14,7 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
@@ -48,7 +49,8 @@ contract SyndicateVault is
     OwnableUpgradeable,
     PausableUpgradeable,
     UUPSUpgradeable,
-    ERC721Holder
+    ERC721Holder,
+    ReentrancyGuardTransient
 {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -83,8 +85,13 @@ contract SyndicateVault is
     /// @notice Factory that deployed this vault (controls upgrades, provides governor address)
     address private _factory;
 
+    /// @notice Expected bytecode hash of `_executorImpl`, stamped at init.
+    ///         Re-verified on every delegatecall so a swapped-in library cannot
+    ///         impersonate `BatchExecutorLib` without matching its bytecode.
+    bytes32 private _expectedExecutorCodehash;
+
     /// @dev Reserved storage for future upgrades
-    uint256[40] private __gap;
+    uint256[39] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -103,6 +110,7 @@ contract SyndicateVault is
         __Pausable_init();
 
         _executorImpl = p.executorImpl;
+        _expectedExecutorCodehash = p.executorImpl.codehash;
         _openDeposits = p.openDeposits;
         _agentRegistry = IERC721(p.agentRegistry);
         _managementFeeBps = p.managementFeeBps;
@@ -212,6 +220,11 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
+    /// @notice Freezes LP flow (`deposit` / `mint` / `withdraw` / `redeem`) AND
+    ///         strategy execution (`executeGovernorBatch`). Owner rescue paths
+    ///         (`rescueEth` / `rescueERC20` / `rescueERC721`) remain callable so
+    ///         the owner can respond to incidents. Rescues are still blocked by
+    ///         `redemptionsLocked()` whenever a proposal is active.
     function pause() external onlyOwner {
         _pause();
     }
@@ -245,7 +258,19 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
-    function executeGovernorBatch(BatchExecutorLib.Call[] calldata calls) external onlyGovernor {
+    /// @dev V-C2: every delegatecall re-verifies that `_executorImpl`'s bytecode
+    ///      still matches the hash stamped at init. A factory misconfig or a
+    ///      swapped executor address cannot deflect the delegatecall to a
+    ///      different library.
+    /// @dev I-11: gated by `whenNotPaused`. When the owner pauses the vault,
+    ///      strategy execution is halted alongside LP flow.
+    function executeGovernorBatch(BatchExecutorLib.Call[] calldata calls)
+        external
+        onlyGovernor
+        nonReentrant
+        whenNotPaused
+    {
+        if (_executorImpl.codehash != _expectedExecutorCodehash) revert ExecutorCodehashMismatch();
         (bool success, bytes memory returnData) =
             _executorImpl.delegatecall(abi.encodeCall(BatchExecutorLib.executeBatch, (calls)));
         if (!success) {
