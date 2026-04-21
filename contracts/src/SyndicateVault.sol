@@ -30,8 +30,10 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
  *   swapped tokens) via delegatecall to a shared BatchExecutorLib. Deploy one
  *   executor lib, share it across all syndicates.
  *
- *   Strategy execution goes through the governor via proposals. Owner retains
- *   executeBatch for manual vault management (e.g. recovering stuck tokens).
+ *   Strategy execution goes through the governor via proposals
+ *   (executeGovernorBatch). Asset recovery uses dedicated rescueERC20 /
+ *   rescueERC721 / rescueEth paths. The owner has no arbitrary-calldata entry
+ *   point into the vault.
  *
  *   Inherits ERC20VotesUpgradeable to provide proper vote checkpointing for
  *   the governor's snapshot-based voting system.
@@ -105,21 +107,6 @@ contract SyndicateVault is
         _agentRegistry = IERC721(p.agentRegistry);
         _managementFeeBps = p.managementFeeBps;
         _factory = msg.sender;
-    }
-
-    // ==================== BATCH EXECUTION ====================
-
-    /// @inheritdoc ISyndicateVault
-    /// @dev Owner-only for manual vault management (e.g. recovering stuck tokens).
-    ///      Strategy execution goes through the governor via executeGovernorBatch.
-    function executeBatch(BatchExecutorLib.Call[] calldata calls) external onlyOwner whenNotPaused {
-        (bool success, bytes memory returnData) =
-            _executorImpl.delegatecall(abi.encodeCall(BatchExecutorLib.executeBatch, (calls)));
-        if (!success) {
-            assembly {
-                revert(add(returnData, 32), mload(returnData))
-            }
-        }
     }
 
     // ==================== DEPOSITOR WHITELIST ====================

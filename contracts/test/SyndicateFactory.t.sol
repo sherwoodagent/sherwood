@@ -167,14 +167,14 @@ contract SyndicateFactoryTest is Test {
         vault.deposit(50_000e6, lp);
         vm.stopPrank();
 
-        // Owner executes batch (simple approve call — owner-only in governor model)
+        // Governor executes batch (strategy-style approve — onlyGovernor after V-C3)
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
             target: address(usdc), data: abi.encodeCall(usdc.approve, (makeAddr("protocol"), 1_000e6)), value: 0
         });
 
-        vm.prank(creator1); // vault owner
-        vault.executeBatch(calls);
+        vm.prank(governorAddr);
+        vault.executeGovernorBatch(calls);
 
         // Verify: vault set the approval (delegatecall)
         assertEq(usdc.allowance(vaultAddr, makeAddr("protocol")), 1_000e6);

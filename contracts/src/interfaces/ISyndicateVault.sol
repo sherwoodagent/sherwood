@@ -45,9 +45,6 @@ interface ISyndicateVault {
         bool active;
     }
 
-    // ── Owner Functions ──
-    function executeBatch(BatchExecutorLib.Call[] calldata calls) external;
-
     // ── Depositor Whitelist ──
     function approveDepositor(address depositor) external;
     function removeDepositor(address depositor) external;

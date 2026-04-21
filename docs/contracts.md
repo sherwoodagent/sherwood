@@ -2,7 +2,7 @@
 
 Solidity smart contracts for Sherwood, built with Foundry and OpenZeppelin (UUPS upgradeable). All contracts deploy on Base.
 
-> **Pre-mainnet tracker:** `docs/pre-mainnet-punchlist.md` consolidates the Critical/High findings from issues [#225](https://github.com/imthatcarlos/sherwood/issues/225) and [#226](https://github.com/imthatcarlos/sherwood/issues/226). Read it before making changes. Notable open items in this domain: V-C1 (donation-inflated PnL via `balanceOf` diff), V-C2 (`_executorImpl` codehash unchecked), V-C3 (owner `executeBatch` bypasses redemption lock), I-1 (`redemptionsLocked()` fails open on `gov == 0`). ERC-4626 `maxDeposit/maxMint/maxWithdraw/maxRedeem` currently don't honor `paused()` / `redemptionsLocked()` / whitelist — tracked in punch list §7.
+> **Pre-mainnet tracker:** `docs/pre-mainnet-punchlist.md` consolidates the Critical/High findings from issues [#225](https://github.com/imthatcarlos/sherwood/issues/225) and [#226](https://github.com/imthatcarlos/sherwood/issues/226). Read it before making changes. Notable open items in this domain: V-C1 (donation-inflated PnL via `balanceOf` diff), V-C2 (`_executorImpl` codehash unchecked), I-1 (`redemptionsLocked()` fails open on `gov == 0`). ERC-4626 `maxDeposit/maxMint/maxWithdraw/maxRedeem` currently don't honor `paused()` / `redemptionsLocked()` / whitelist — tracked in punch list §7. V-C3 (owner `executeBatch` bypass) was closed by removing the owner-direct batch path.
 
 ## Architecture
 
@@ -41,7 +41,7 @@ ERC-4626 vault with two-layer permission model. Extends `ERC4626Upgradeable`, `O
 - **Layer 2 (offchain):** Lit Action policies on agent PKP wallets
 
 **Key functions:**
-- `executeBatch(calls, assetAmount)` — delegatecalls to BatchExecutorLib. Enforces caps and target allowlist.
+- `executeGovernorBatch(calls)` — governor-only delegatecall to BatchExecutorLib. Strategy execution only reaches the vault via a passed shareholder proposal. (The owner-direct `executeBatch` path was removed to close V-C3.)
 - `simulateBatch(calls)` — dry-run via `eth_call`, returns success/failure per call without submitting onchain
 - `ragequit(receiver)` — LP emergency exit, burns all shares for pro-rata assets
 - `registerAgent(agentId, pkp, eoa, limits)` — registers agent with ERC-8004 identity verification

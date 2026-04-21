@@ -196,7 +196,7 @@ When a proposal is approved, the pre-committed calls are executed directly by th
 2. Governor verifies: proposal is Approved, within execution window, no other strategy live, cooldown elapsed
 3. Governor calls `vault.lockRedemptions()` — blocks withdraw/redeem
 4. Governor snapshots vault's deposit asset balance (`capitalSnapshot`)
-5. Governor calls `vault.executeBatch(proposal.calls[0..splitIndex-1])` — vault runs the execution calls
+5. Governor calls `vault.executeGovernorBatch(proposal.executeCalls)` — vault runs the execution calls
 6. All DeFi positions (mTokens, LP tokens, borrows) now live on the vault address
 
 **No new input from the agent at execution time.** The calls were locked in at proposal creation and voted on by shareholders. Execution is just replaying what was approved.
@@ -364,7 +364,7 @@ struct StrategyProposal {
 }
 ```
 
-**Settlement should return to deposit asset.** After the unwind calls execute, the vault should hold the deposit asset (e.g. USDC) again. If non-deposit-asset tokens remain on the vault after settlement (something went wrong), the owner can manually handle them via `executeBatch` (owner-only).
+**Settlement should return to deposit asset.** After the unwind calls execute, the vault should hold the deposit asset (e.g. USDC) again. If non-deposit-asset tokens remain on the vault after settlement (something went wrong), the owner can pull stranded balances via the `rescueERC20` / `rescueERC721` / `rescueEth` paths (each blocked while a proposal is active). Arbitrary owner-directed calldata into the vault is no longer supported (V-C3).
 
 **Stale parameters:** Since pre-committed unwind calls are a prediction of future state, agents should use generous slippage tolerances. If permissionless settlement reverts, the agent can use `settleByAgent` with fresh calls, or the vault owner can use `emergencySettle` as a backstop.
 
@@ -638,13 +638,13 @@ Shareholders govern **what happens with their money** (strategy proposals). The 
 **Modified functions:**
 - `withdraw` / `redeem` — revert with `RedemptionsLocked()` during live strategy
 - `deposit` / `mint` — auto-delegates to self via ERC20Votes on first deposit
-- `executeBatch` — owner-only (manual vault management)
 - `registerAgent` — simplified (no caps params)
 - `initialize` — takes `InitParams` struct (includes governor, managementFeeBps)
 
 **Removed functions:**
 - `simulateBatch`, `updateSyndicateCaps`, `getSyndicateCaps`, `getDailySpendTotal`
 - All target management (`addTarget`, `removeTarget`, `addTargets`, etc.)
+- `executeBatch` (owner-direct arbitrary delegatecall) — removed to close V-C3; strategy execution lives on `executeGovernorBatch`, stranded assets leave via `rescueERC20` / `rescueERC721` / `rescueEth`.
 
 #### SyndicateFactory.sol (modifications)
 
@@ -686,7 +686,7 @@ Some existing vault tests will need updates for the new redemption lock behavior
 - Deposit tests → should still pass unchanged (deposits always open)
 - Withdraw/redeem/ragequit tests → add cases for `RedemptionsLocked` revert during live strategy
 - `registerAgent` / `removeAgent` tests → keep, still used
-- `executeBatch` by agents → review, may restrict to owner-only
+- `executeBatch` tests → removed with the function (V-C3); coverage moved to `executeGovernorBatch` + rescue paths
 
 ### CLI Changes
 

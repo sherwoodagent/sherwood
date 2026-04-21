@@ -170,44 +170,24 @@ contract SyndicateVaultTest is Test {
         assertEq(vault.getAgentCount(), 0);
     }
 
-    // ==================== BATCH EXECUTION (owner-only, via delegatecall) ====================
+    // ==================== BATCH EXECUTION (V-C3: executeBatch removed) ====================
 
-    /// @dev Helper: fund the vault directly with USDC for batch tests
-    function _fundVault(uint256 amount) internal {
-        usdc.mint(address(vault), amount);
-    }
+    /// @dev V-C3: owner-direct `executeBatch(BatchExecutorLib.Call[])` was removed.
+    ///      A raw call with the old selector must revert (no matching function).
+    function test_executeBatch_removed() public {
+        // Old selector: executeBatch((address,bytes,uint256)[])
+        bytes4 oldSelector = bytes4(keccak256("executeBatch((address,bytes,uint256)[])"));
 
-    function test_executeBatch_ownerCanExecute() public {
-        _fundVault(100_000e6);
-
-        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
-        calls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(mUsdc), 10_000e6)), value: 0
-        });
+        // Craft minimal calldata: old selector + empty dynamic array.
+        // Encoding: selector || offset(0x20) || length(0)
+        bytes memory callData = abi.encodePacked(oldSelector, uint256(0x20), uint256(0));
 
         vm.prank(owner);
-        vault.executeBatch(calls);
+        (bool ok, bytes memory ret) = address(vault).call(callData);
 
-        assertEq(usdc.allowance(address(vault), address(mUsdc)), 10_000e6);
-    }
-
-    function test_executeBatch_notOwner_reverts() public {
-        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
-
-        vm.prank(agentAddr);
-        vm.expectRevert();
-        vault.executeBatch(calls);
-    }
-
-    function test_executeBatch_whenPaused_reverts() public {
-        vm.prank(owner);
-        vault.pause();
-
-        BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](0);
-
-        vm.prank(owner);
-        vm.expectRevert();
-        vault.executeBatch(calls);
+        // Function does not exist: call returns false with no error data.
+        assertFalse(ok);
+        assertEq(ret.length, 0);
     }
 
     // ==================== PAUSE ====================
@@ -373,6 +353,32 @@ contract SyndicateVaultTest is Test {
         vm.prank(lp1);
         vm.expectRevert();
         vault.rescueEth(payable(lp1), 1 ether);
+    }
+
+    // ==================== RESCUE ERC20 ====================
+
+    /// @dev Sanity check that `rescueERC20` covers stranded non-asset tokens
+    ///      that would previously have been pulled out via `executeBatch`.
+    function test_rescue_covers_strandedTokens() public {
+        // Send WETH (non-asset) directly to the vault
+        weth.mint(address(vault), 1e18);
+        assertEq(weth.balanceOf(address(vault)), 1e18);
+
+        address recipient = makeAddr("stranded-weth-recipient");
+
+        vm.prank(owner);
+        vault.rescueERC20(address(weth), recipient, 1e18);
+
+        assertEq(weth.balanceOf(recipient), 1e18);
+        assertEq(weth.balanceOf(address(vault)), 0);
+    }
+
+    function test_rescueERC20_cannotRescueAsset_reverts() public {
+        usdc.mint(address(vault), 1_000e6);
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateVault.CannotRescueAsset.selector);
+        vault.rescueERC20(address(usdc), makeAddr("recipient"), 1_000e6);
     }
 
     // ==================== RESCUE ERC721 ====================

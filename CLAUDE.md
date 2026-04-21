@@ -53,7 +53,7 @@ Full protocol and CLI documentation: **https://docs.sherwood.sh/**
 
 Source lives in `mintlify-docs/` (git submodule pointing to `imthatcarlos/mintlify-docs`).
 
-**Authority order when docs and code disagree:** `contracts/chains/{chainId}.json` (addresses) → `contracts/src/` (behavior) → this CLAUDE.md (intent) → `mintlify-docs/` last. Known drift areas: `reference/deployments.mdx` (stale Base addresses), `settlement.mdx` (references removed `lockRedemptions`, wrong `executeBatch` path), `concepts.mdx` (says shareholders can `vetoProposal` — they can't), `collaborative-proposals.mdx` (incorrect auth claims). See issue #226 §4.
+**Authority order when docs and code disagree:** `contracts/chains/{chainId}.json` (addresses) → `contracts/src/` (behavior) → this CLAUDE.md (intent) → `mintlify-docs/` last. Known drift areas: `reference/deployments.mdx` (stale Base addresses), `settlement.mdx` (references removed `lockRedemptions` and the removed owner-direct `executeBatch` — only `executeGovernorBatch` exists on the vault now, V-C3), `concepts.mdx` (says shareholders can `vetoProposal` — they can't), `collaborative-proposals.mdx` (incorrect auth claims). See issue #226 §4.
 
 LLM-friendly versions:
 - `https://docs.sherwood.sh/llms.txt` — structured index

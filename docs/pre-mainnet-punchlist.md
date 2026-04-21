@@ -23,7 +23,7 @@ Status key:
 | # | Finding | Status | Notes |
 |---|---|---|---|
 | 1 | **V-C1** — Settlement PnL via `balanceOf` diff is inflatable by donation. Fees paid on donations. | 🔨 separate-PR | Fix: `IStrategy.settle() returns (int256 realized)`, or snapshot immediate pre/post around settlement batch. Independent of guardian design. |
-| 2 | **V-C3** — Owner `executeBatch` bypasses `redemptionsLocked()`. Compromised owner drains mid-strategy. | 🔨 separate-PR | Simple fix: add `!redemptionsLocked()` check. |
+| 2 | **V-C3** — Owner `executeBatch` bypasses `redemptionsLocked()`. Compromised owner drains mid-strategy. | ✅ closed | Removed `executeBatch` entirely. Strategy execution flows through `executeGovernorBatch`; stranded assets leave via `rescueERC20` / `rescueERC721` / `rescueEth`. |
 | 3 | **G-C4** — `emergencySettle` fallback accepts arbitrary owner calls → vault drain. | ✅ fixed-in-229 | Split into `unstick` (no calldata) + `emergencySettleWithCalls` (guardian-reviewed) + `finalizeEmergencySettle` + `cancelEmergencySettle`. Owner posts slashable bond; guardian block-quorum slashes owner. See `5ba7939` (GovernorEmergency impl) + `f2e8224` (registry emergency review). |
 | 4 | **G-C2/C3** — `cancelProposal` / `vetoProposal` / `emergencyCancel` blindly `delete _activeProposal[vault]`. | 🔨 separate-PR | Fix: guard each with `if (_activeProposal[vault] == proposalId)`. Independent of guardian. |
 | 5 | **G-C1** — `snapshotTimestamp = block.timestamp` enables same-block flash-delegate on 2s L2 blocks. | ✅ closed | Fixed: `snapshotTimestamp = block.timestamp - 1` in both `propose()` and `approveCollaboration()` Draft→Pending transition. See `9608cd7`. |
@@ -73,7 +73,7 @@ Grouped by domain. All require separate PRs.
 |---|---|---|---|
 | V-C1 | Donation-inflated PnL | 92 | Strategy-reported realized return, OR snapshot pre/post settlement batch only |
 | V-C2 | `_executorImpl` delegatecall without codehash check; no `nonReentrant` | 90 | Assert `_executorImpl.codehash == EXPECTED`; add `nonReentrant` on `executeBatch` |
-| V-C3 | Owner `executeBatch` bypasses `redemptionsLocked()` | 90 | Add lock guard, or remove owner `executeBatch` |
+| V-C3 | Owner `executeBatch` bypasses `redemptionsLocked()` | 90 | ✅ closed — `executeBatch` removed from vault (this PR) |
 | V-C4 | Unbounded `getActiveSyndicates` loop | 90 | `EnumerableSet _activeSyndicateIds`; clamp `limit ≤ 100` |
 | V-H1 | Factory proxy `initialize` front-runnable | 85 | Confirm deploy script uses `ERC1967Proxy(impl, encodedInitCall)` atomic |
 | V-H2 | `setGovernor` orphans live proposals | 82 | Revert `setGovernor` if any registered vault has active proposal |
