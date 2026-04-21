@@ -37,8 +37,8 @@ jobs:
             echo "::error::could not read SyndicateGovernor runtime size"
             exit 1
           fi
-          if [ "$SIZE" -gt 24400 ]; then
-            echo "::error::SyndicateGovernor $SIZE > 24400 byte budget"
+          if [ "$SIZE" -gt 24550 ]; then
+            echo "::error::SyndicateGovernor $SIZE > 24550 byte budget"
             exit 1
           fi
 

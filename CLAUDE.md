@@ -75,7 +75,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - Use SafeERC20 for all token transfers
 - Run `forge build` and `forge test` before every PR
 - Run `forge fmt` before committing
-- SyndicateGovernor runtime is **24,327 / 24,576 bytes (73-byte margin)** as of 2026-04, with `GovernorEmergency` extracted and `via_ir` enabled. Run `forge build --sizes` before any governor edit; CI gate fails above 24,400.
+- SyndicateGovernor runtime is **24,327 / 24,576 bytes (73-byte margin)** as of 2026-04, with `GovernorEmergency` extracted and `via_ir` enabled. Run `forge build --sizes` before any governor edit; CI gate fails above 24,550. Gate raised to 24,550 (still 26 bytes under EIP-170 hard limit) to accommodate G-C5 timelock dispatcher extension. See PR #229.
 - **`via_ir` is on** in `foundry.toml`. Compile is ~2× slower than the legacy pipeline. Required to fit `GovernorEmergency` under the bytecode limit — do not disable without re-measuring the governor.
 
 ### Address Management
@@ -91,13 +91,13 @@ Live contract sizes from `forge build --sizes` (2026-04):
 
 | Contract | Runtime | Notes |
 |---|---|---|
-| SyndicateGovernor | 24,327 | 73-byte margin; CI gate at 24,400 |
+| SyndicateGovernor | 24,327 | 73-byte margin; CI gate at 24,550 |
 | SyndicateFactory | 11,206 | ample headroom |
 | GuardianRegistry | 17,403 | UUPS, guardian + owner stake + reviews + epoch rewards + appeal reserve + pause |
 | SyndicateVault | 11,069 | — |
 
 - **SyndicateVault** — ERC-4626 vault with ERC20Votes for governance. Standard `redeem()`/`withdraw()` for LP exits (no custom ragequit). `_decimalsOffset()` = `asset.decimals()` for first-depositor inflation protection (shares have 12 decimals for USDC). Deposits and `rescueERC20` are blocked during active proposals (`redemptionsLocked()`).
-- **SyndicateGovernor** — Proposal lifecycle, optimistic voting, execution, settlement, collaborative proposals. Inherits `GovernorParameters` (abstract) for parameter setters/timelock and `GovernorEmergency` (abstract) for `unstick` / `emergencySettleWithCalls` / `cancelEmergencySettle` / `finalizeEmergencySettle`. The `GovernorEmergency` extraction plus `via_ir` keep the runtime under 24,400 bytes with the guardian-review changes.
+- **SyndicateGovernor** — Proposal lifecycle, optimistic voting, execution, settlement, collaborative proposals. Inherits `GovernorParameters` (abstract) for parameter setters/timelock and `GovernorEmergency` (abstract) for `unstick` / `emergencySettleWithCalls` / `cancelEmergencySettle` / `finalizeEmergencySettle`. The `GovernorEmergency` extraction plus `via_ir` keep the runtime under 24,550 bytes with the guardian-review changes.
 - **GovernorEmergency** — Abstract extracted from `SyndicateGovernor` (PR #229). Holds the four emergency-settle entrypoints and the calldata-commit / hash-check helpers. `emergencySettleWithCalls` opens a guardian review in the registry; `finalizeEmergencySettle` executes if not blocked, reverts if blocked.
 - **GovernorParameters** — Abstract contract with constants, bounds, parameter setters (all timelock-gated: queue → delay → finalize), and validation helpers. Extracted to reduce governor bytecode.
 - **GuardianRegistry** — UUPS upgradeable single contract for guardian staking, owner staking, review vote accounting (approve/block + vote-change), slashing (approver stake burned on block quorum), epoch-based block rewards, slash-appeal reserve (20% per-epoch refund cap), pause + 7-day deadman auto-unpause, and 6-parameter timelocked config. Lives alongside the governor; the governor calls privileged hooks (`openEmergencyReview`, `resolveReview`). Replaces the old "governor.emergencySettle → owner-instant arbitrary calldata" escape hatch with a guardian-reviewed `emergencySettleWithCalls` path. `_slashApprovers` now clears `unstakeRequestedAt` as defense-in-depth. See `docs/superpowers/specs/2026-04-19-guardian-review-lifecycle-design.md`.
