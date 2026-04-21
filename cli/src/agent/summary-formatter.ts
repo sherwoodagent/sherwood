@@ -119,6 +119,14 @@ export function formatSummary(input: SummaryInput): string {
   lines.push(`\uD83D\uDCB0 $${cycle.portfolioValue.toFixed(2)} (${totalPct})`);
   lines.push(`   Today: ${fmtUsd(cycle.dailyRealizedPnl)} realized | ${fmtUsd(cycle.unrealizedPnl)} open`);
 
+  // Grid stats (if grid is active)
+  const gf = cycle.gridFills ?? 0;
+  const gr = cycle.gridRoundTrips ?? 0;
+  const gp = cycle.gridPnlUsd ?? 0;
+  if (gf > 0 || gr > 0) {
+    lines.push(`   Grid: ${gr} round-trips ${fmtUsd(gp)} | ${gf} fills this cycle`);
+  }
+
   // Signals — top 4 by |score|, always include any BUY/SELL
   const sorted = [...cycle.signals].sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
   const actionable = sorted.filter(s => s.action !== "HOLD");
@@ -135,10 +143,17 @@ export function formatSummary(input: SummaryInput): string {
 
   // Footer
   lines.push("");
-  if (!hasEntries && !hasExits) {
+  const parts: string[] = [];
+  if (hasEntries || hasExits) {
+    parts.push(`${cycle.tradesExecuted} entr${cycle.tradesExecuted === 1 ? "y" : "ies"} | ${cycle.exitsProcessed} exit${cycle.exitsProcessed === 1 ? "" : "s"}`);
+  }
+  if (gf > 0) {
+    parts.push(`Grid: ${gf} fills`);
+  }
+  if (parts.length === 0) {
     lines.push("\u26A1 No entries. No exits. Watching.");
   } else {
-    lines.push(`\u26A1 ${cycle.tradesExecuted} entr${cycle.tradesExecuted === 1 ? "y" : "ies"} | ${cycle.exitsProcessed} exit${cycle.exitsProcessed === 1 ? "" : "s"}`);
+    lines.push(`\u26A1 ${parts.join(" | ")}`);
   }
 
   return lines.join("\n");

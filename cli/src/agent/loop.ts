@@ -17,6 +17,10 @@ import { CoinGeckoProvider } from '../providers/data/coingecko.js';
 import { Reporter } from './reporter.js';
 import { DynamicTokenSelector } from './token-selector.js';
 import { PriceValidator } from './price-validator.js';
+import { GridManager } from './grid/grid-manager.js';
+import type { GridTickResult } from './grid/grid-manager.js';
+import { DEFAULT_GRID_CONFIG } from './grid/grid-config.js';
+import { HyperliquidProvider } from '../providers/data/hyperliquid.js';
 
 export interface LoopConfig {
   agent: AgentConfig;
@@ -48,6 +52,10 @@ export interface CycleResult {
   totalPnlUsd: number;
   /** Cumulative PnL as a fraction of initial value (e.g. +0.0162 = +1.62%). */
   totalPnlPct: number;
+  /** Grid strategy stats for this cycle (0 if grid disabled). */
+  gridFills: number;
+  gridRoundTrips: number;
+  gridPnlUsd: number;
   errors: string[];
 }
 
@@ -64,6 +72,12 @@ export class AgentLoop {
   /** Rejects bad-price ticks (floor + 20% delta cap). Persisted to disk so
    *  anchors survive across cron invocations. */
   private priceValidator: PriceValidator;
+  /** Grid manager — parallel ATR-based grid strategy on BTC+ETH. */
+  private gridManager: GridManager;
+  /** HL provider for grid prices (free, no rate limit). */
+  private hlForGrid: HyperliquidProvider;
+  /** Whether grid has been initialized this session. */
+  private gridInitialized = false;
   /** Last portfolio state loaded by runCycle(). Exposed to the judge via
    *  agent.setPortfolioStateGetter() so portfolio-veto branches can fire. */
   private lastPortfolioState: PortfolioState | undefined;
@@ -77,6 +91,8 @@ export class AgentLoop {
     this.coingecko = new CoinGeckoProvider();
     this.reporter = new Reporter();
     this.priceValidator = new PriceValidator();
+    this.gridManager = new GridManager(DEFAULT_GRID_CONFIG);
+    this.hlForGrid = new HyperliquidProvider();
     // Wire real portfolio state into the judge (replaces hardcoded zeros).
     this.agent.setPortfolioStateGetter(() => this.lastPortfolioState);
   }
@@ -97,6 +113,24 @@ export class AgentLoop {
         this.config.execution.strategyClone,
         this.config.execution.chain,
       );
+    }
+
+    // Initialize grid strategy — carve capital from directional portfolio
+    if (DEFAULT_GRID_CONFIG.enabled && !this.gridInitialized) {
+      try {
+        const preGridState = await this.portfolio.load();
+        const carved = await this.gridManager.init(preGridState.totalValue);
+        if (carved > 0) {
+          // Deduct from directional portfolio
+          preGridState.totalValue -= carved;
+          preGridState.cash -= carved;
+          await this.portfolio.save(preGridState);
+          console.log(chalk.dim(`  Grid initialized: $${carved.toFixed(2)} carved (${(DEFAULT_GRID_CONFIG.allocationPct * 100).toFixed(0)}% of portfolio)`));
+        }
+        this.gridInitialized = true;
+      } catch (err) {
+        console.error(chalk.yellow(`  Grid init failed: ${(err as Error).message} — continuing without grid`));
+      }
     }
 
     // Startup banner
@@ -181,6 +215,9 @@ export class AgentLoop {
         dailyPnl: state.dailyPnl,
         totalPnlUsd: totalPnlUsdPause,
         totalPnlPct: totalPnlUsdPause / initValPause,
+        gridFills: 0,
+        gridRoundTrips: 0,
+        gridPnlUsd: 0,
         errors: [drawdown.message],
       };
       await this.logCycle(result);
@@ -251,6 +288,25 @@ export class AgentLoop {
         }
       } catch (err) {
         errors.push(`Price update failed: ${(err as Error).message}`);
+      }
+    }
+
+    // 2b. Grid tick — simulate fills against HL prices (free, no rate limit).
+    //     Runs before directional analysis because it's fast (~10ms) and
+    //     uses separate capital. Grid prices come from HL, not CG.
+    let gridResult: GridTickResult = { fills: 0, roundTrips: 0, pnlUsd: 0, paused: false };
+    if (DEFAULT_GRID_CONFIG.enabled && this.gridInitialized) {
+      try {
+        const gridPrices: Record<string, number> = {};
+        for (const token of DEFAULT_GRID_CONFIG.tokens) {
+          const hlData = await this.hlForGrid.getHyperliquidData(token);
+          if (hlData?.markPrice && hlData.markPrice > 0) {
+            gridPrices[token] = hlData.markPrice;
+          }
+        }
+        gridResult = await this.gridManager.tick(gridPrices);
+      } catch (err) {
+        errors.push(`Grid tick failed: ${(err as Error).message}`);
       }
     }
 
@@ -354,6 +410,9 @@ export class AgentLoop {
       dailyPnl: updatedState.dailyPnl,
       totalPnlUsd,
       totalPnlPct: totalPnlUsd / initVal,
+      gridFills: gridResult.fills,
+      gridRoundTrips: gridResult.roundTrips,
+      gridPnlUsd: gridResult.pnlUsd,
       errors,
     };
 
