@@ -55,7 +55,7 @@ PR #229 directly addresses a specific subset. All other items remain open.
 | Ref | Original finding | What #229 did | What's still open |
 |---|---|---|---|
 | #225 G-C6 | `nonReentrant` missing from `vote` / `vetoProposal` / `emergencyCancel` | All new registry state-mutating externals use `nonReentrant` (e.g. `stakeAsGuardian`, `resolveReview`, `claimEpochReward`). New governor emergency path is reentrancy-safe via CEI + registry's own guard. | Legacy governor `vote`, `vetoProposal`, `cancelProposal` are untouched by #229. Still need modifiers in a separate PR. |
-| #226 §3.5 | Zero invariant tests, 48 listed, priority INV-2/-3/-11/-15/-23 | Shipped guardian-specific invariant harness: WOOD conservation, totalGuardianStake accounting, activeGuardianCount monotonicity. 3 priority invariants (adjacent to INV-23 strategy asset conservation, INV-2 fee sum, INV-11 co-prop split). | INV-2 (fee sum), INV-3 (single-active-proposal), INV-11 (co-prop splits), INV-15 (veWOOD conservation) still need harnesses. |
+| #226 §3.5 | Zero invariant tests, 48 listed, priority INV-2/-3/-11/-15/-23 | Shipped guardian-specific harness (3 invariants), then `ProtocolInvariants.t.sol` closing **INV-2** (fee-sum bound), **INV-3** (single-active-proposal), **INV-30** (protocol-fee recipient non-zero when bps > 0), **INV-33** (registry-address immutability factory == governor), **INV-46** (pause semantics). Commit `<pending-commit-SHA>`. | **INV-11** (co-prop splits), **INV-15** (veWOOD conservation), **INV-23** (strategy asset conservation) still need harnesses. |
 
 ### Not addressed by #229
 
@@ -201,7 +201,7 @@ Each row is a **doc update** (not a code change). `mintlify-docs/` changes route
 | 3.2 | Every Critical in #225 lacks a PoC test | 🧪 test-only | 26 items; red → fix → green per item |
 | 3.3 | Missing fork tests: Synthra (none), Hyperliquid (mock only), Mamo (no real factory), Chainlink Data Streams, wstETH/ETH on Base, Create3 squat | 🧪 test-only | Add integration suites |
 | 3.4 | No test file at all for: `Create3Factory`, `SynthraSwapAdapter`, `SynthraDirectAdapter`, `L1Write`, `L1Read`, `WoodToken` (LZ cross-chain), `VaultRewardsDistributor` flash-deposit, `MockSwapAdapter` | 🧪 test-only | Create suites |
-| 3.5 | Zero invariant / property tests (`grep invariant_ test/` returns 0) | 🟡 partial-in-229 (`963e565`) | First 3 priority invariants shipped (WOOD conservation + stake accounting), touching INV-23 territory. INV-2 / -3 / -11 / -15 still open — 48 invariants total in #226 §8; ship handler + echidna config. |
+| 3.5 | Zero invariant / property tests (`grep invariant_ test/` returns 0) | 🟡 partial-in-229 (`963e565`, `<pending-commit-SHA>`) | 3 guardian invariants (`963e565`) + 5 protocol invariants INV-2/-3/-30/-33/-46 (`<pending-commit-SHA>`) shipped. INV-11 / -15 / -23 still open — 48 invariants total in #226 §8; ship handler + echidna config. |
 
 ---
 
@@ -230,7 +230,7 @@ Ranked by effort-to-impact. PR #229 doesn't touch items 1–5, 7, 8, 9; it lands
 6. Fix doc↔code mismatches (§6 above).
 7. Wire `maxSlippageBps` → `amountOutMin` in `PortfolioStrategy`.
 8. Rotate all owners to `TimelockController` + Gnosis Safe.
-9. Echidna harness for the 48 invariants (priority: INV-2, -3, -11, -15, -23). 🟡 **partial in #229** (`963e565` — 3 guardian-scope invariants).
+9. Echidna harness for the 48 invariants (priority: INV-2, -3, -11, -15, -23). 🟡 **partial in #229** (`963e565` — 3 guardian-scope invariants; `<pending-commit-SHA>` — INV-2 / -3 / -30 / -33 / -46).
 10. ~~CI size gate: `forge build --sizes` must fail if `SyndicateGovernor > 24,500` bytes.~~ ✅ **done in #229** (`607386e` — gate at 24,400).
 11. Document invariants at call sites (#226 §10.3).
 12. Add `Pausable` across tokenomics contracts. (Registry now has pause + 7d deadman — tokenomics still outstanding.)
