@@ -25,7 +25,7 @@ Status key:
 | 1 | **V-C1** — Settlement PnL via `balanceOf` diff is inflatable by donation. Fees paid on donations. | 🔨 separate-PR | Fix: `IStrategy.settle() returns (int256 realized)`, or snapshot immediate pre/post around settlement batch. Independent of guardian design. |
 | 2 | **V-C3** — Owner `executeBatch` bypasses `redemptionsLocked()`. Compromised owner drains mid-strategy. | ✅ closed | Removed `executeBatch` entirely. Strategy execution flows through `executeGovernorBatch`; stranded assets leave via `rescueERC20` / `rescueERC721` / `rescueEth`. |
 | 3 | **G-C4** — `emergencySettle` fallback accepts arbitrary owner calls → vault drain. | ✅ fixed-in-229 | Split into `unstick` (no calldata) + `emergencySettleWithCalls` (guardian-reviewed) + `finalizeEmergencySettle` + `cancelEmergencySettle`. Owner posts slashable bond; guardian block-quorum slashes owner. See `5ba7939` (GovernorEmergency impl) + `f2e8224` (registry emergency review). |
-| 4 | **G-C2/C3** — `cancelProposal` / `vetoProposal` / `emergencyCancel` blindly `delete _activeProposal[vault]`. | 🔨 separate-PR | Fix: guard each with `if (_activeProposal[vault] == proposalId)`. Independent of guardian. |
+| 4 | **G-C2/C3** — `cancelProposal` / `vetoProposal` / `emergencyCancel` blindly `delete _activeProposal[vault]`. | ✅ closed | Narrowed cancel paths to Draft/Pending only (commits `ef5cf55` + `770a929`); unrelated `delete` removed. Only `executeProposal` writes to `_activeProposal`; only `_finishSettlement` clears it. Regression tests in `test/governor/ActiveProposalPreservation.t.sol`. |
 | 5 | **G-C1** — `snapshotTimestamp = block.timestamp` enables same-block flash-delegate on 2s L2 blocks. | ✅ closed | Fixed: `snapshotTimestamp = block.timestamp - 1` in both `propose()` and `approveCollaboration()` Draft→Pending transition. See `9608cd7`. |
 | 6 | **T-C3/T-C4/T-C5** — veNFT transferable while vote/bribe state is attached. | 🔨 separate-PR | Fix: block transfers while `_lastVotedEpoch == currentEpoch`, OR snapshot owner into vote/bribe state. |
 | 7 | **T-C1** — LP rewards permanently stuck (`_calculateLPReward` reverts unconditionally). | 🗓️ deferred | Documented in `CLAUDE.md` as aspirational. Either ship LP rewards or strip the entry point. |
@@ -86,7 +86,7 @@ Grouped by domain. All require separate PRs.
 | Ref | Finding | Severity | Fix | Guardian-adjacent? |
 |---|---|---|---|---|
 | G-C1 ✅ | `snapshotTimestamp = block.timestamp` flash-delegate | 95 | `snapshotTimestamp = block.timestamp - 1` (closed in `9608cd7`) | no |
-| G-C2/C3 | Unrelated `_activeProposal[vault]` delete | 92 / 91 | Guard with `if (... == proposalId)`; only `_finishSettlement` clears | no |
+| G-C2/C3 ✅ | Unrelated `_activeProposal[vault]` delete | 92 / 91 | Narrowed cancel paths to Draft/Pending; blanket `delete` removed (closed in `ef5cf55` + `770a929`). Regression tests: `test/governor/ActiveProposalPreservation.t.sol`. | no |
 | G-C5 | `setProtocolFeeRecipient` not timelocked | 90 | Timelock it | no |
 | G-C6 | `nonReentrant` missing from `vote` / `vetoProposal` / `emergencyCancel` | 90 | Add `nonReentrant` on every state-mutating external fn | no |
 | G-C7 | Co-proposer fee rounding silently benefits lead | 88 | Revert if any active co-prop share rounds to 0, or distribute remainder proportionally | no |
