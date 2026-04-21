@@ -93,9 +93,10 @@ Grouped by domain. All require separate PRs.
 | G-C6 | `nonReentrant` missing from `vote` / `vetoProposal` / `emergencyCancel` | 90 | Add `nonReentrant` on every state-mutating external fn | no |
 | G-C7 | Co-proposer fee rounding silently benefits lead | 88 | Revert if any active co-prop share rounds to 0, or distribute remainder proportionally | no |
 | G-H1 | `_capitalSnapshots` only measures asset balance; non-asset positions count as lost | 85 | Post-settle `require(nonAssetTokens == 0)` or document full-unwind requirement | no |
-| G-H2 | `cancelProposal` during Draft front-runs last co-proposer approve | 82 | Block cancel if all-but-one co-proposer has approved | no |
-| G-H4 | Veto threshold divides by 0 on empty `pastTotalSupply` | 78 | Return Approved when `totalSupply == 0` | no |
-| G-H6 | `vetoThresholdBps` read at state-resolution, not creation | 77 | Snapshot into `StrategyProposal` at create | no |
+| G-H2 ✅ | `cancelProposal` during Draft front-runs last co-proposer approve | 82 | Closed — `CancelNotAllowedNearQuorum` revert when `approvedCount + 1 >= total` (`fe2fd72`). Regression tests: `test/governor/GovernorHardening.t.sol`. | no |
+| G-H3 ✅ | `getVoteWeight` returns 0 for Draft proposals (snapshotTimestamp unset) | 80 | Closed — reverts `ProposalInDraft` instead of silent zero (`09dabed`). Regression tests: `test/governor/GovernorHardening.t.sol`. | no |
+| G-H4 ✅ | Veto threshold divides by 0 on empty `pastTotalSupply` | 78 | Closed — veto check skipped when `pastTotalSupply == 0`; proposal falls through to GuardianReview/Approved (`f4a9f26`). Regression tests: `test/governor/GovernorHardening.t.sol`. | no |
+| G-H6 ✅ | `vetoThresholdBps` read at state-resolution, not creation | 77 | Closed — snapshotted into `StrategyProposal.vetoThresholdBps` at Draft -> Pending (propose + approveCollaboration) (`ce07179`). Regression tests: `test/governor/GovernorHardening.t.sol`. | no |
 
 ### 3.3 Strategies (Domain 3)
 
