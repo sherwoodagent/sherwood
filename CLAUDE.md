@@ -78,7 +78,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - Use SafeERC20 for all token transfers
 - Run `forge build` and `forge test` before every PR
 - Run `forge fmt` before committing
-- SyndicateGovernor runtime is **24,325 / 24,576 bytes (225-byte margin)** as of 2026-04 (post-G-C5, post-W-1, post-I-3). `GovernorEmergency` extracted + `via_ir` enabled + `GovernorParameters._applyChange` shares a uniform `ParameterChangeFinalized` event (no per-param typed events — saved 482 bytes). CI gate: ≤ 24,550 bytes. Run `forge build --sizes` before any governor edit.
+- SyndicateGovernor runtime is **24,550 / 24,576 bytes (26-byte margin — at CI gate)** as of 2026-04 (post-G-C5, post-W-1, post-I-3, post-G-M4). `GovernorEmergency` extracted + `via_ir` enabled + `GovernorParameters._applyChange` shares a uniform `ParameterChangeFinalized` event (no per-param typed events — saved 482 bytes; G-M4 merged `_applyAddressParam` virtuals for another 285 bytes). CI gate: ≤ 24,550 bytes (runtime sits exactly at gate — any addition requires bytecode reclaim first). Run `forge build --sizes` before any governor edit.
 - **`via_ir` is on** in `foundry.toml`. Compile is ~2× slower than the legacy pipeline. Required to fit `GovernorEmergency` under the bytecode limit — do not disable without re-measuring the governor.
 - Under `via_ir = true`, the IR optimizer reorders `block.timestamp` reads across `vm.warp` cheatcodes. In tests, use `vm.getBlockTimestamp()` at each read site — never cache it in a local before a warp.
 - Reentrancy guard: use `@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol` (EIP-1153; Cancun-required but Base supports it). OZ v5 upgradeable doesn't ship `ReentrancyGuardUpgradeable`; transient is cheaper and storage-slot-free.
@@ -98,7 +98,7 @@ Live contract sizes from `forge build --sizes` (2026-04):
 
 | Contract | Runtime | Notes |
 |---|---|---|
-| SyndicateGovernor | 24,327 | 73-byte margin; CI gate at 24,550 |
+| SyndicateGovernor | 24,550 | 26-byte margin; at CI gate (24,550) |
 | SyndicateFactory | 11,206 | ample headroom |
 | GuardianRegistry | 17,403 | UUPS, guardian + owner stake + reviews + epoch rewards + appeal reserve + pause |
 | SyndicateVault | 11,069 | — |

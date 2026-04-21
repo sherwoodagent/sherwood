@@ -181,12 +181,4 @@ contract GuardianInvariantsTest is StdInvariant, Test {
     //   exposure. The guards-by-construction invariant is implied by
     //   `voteOnProposal`'s enum write, but fuzzing can't verify it
     //   without public readback.
-    // - active-counter structural bound: initial formulation flagged an
-    //   accounting drift in the registry that is out-of-scope for this
-    //   test-only batch (stake() top-up post requestUnstake still bumps
-    //   totalGuardianStake while isActiveGuardian remains false; also
-    //   cancelUnstake after a mid-unstake slash can push activeCount
-    //   above the # of actors with stake). Both are real findings worth
-    //   filing, but not the job of the invariant suite to paper over.
-    //   Flagged for issue #226 / spec §8 follow-up.
 }

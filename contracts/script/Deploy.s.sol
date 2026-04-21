@@ -144,6 +144,12 @@ contract DeploySherwood is ScriptBase {
         //    timelocked via the GovernorParameters dispatcher. The deployer
         //    must run `FinalizeParams.s.sol` with the PARAM_FACTORY key after
         //    `parameterChangeDelay` has elapsed to complete the wiring.
+        //
+        //    Deploy-day freeze: during the [deploy, finalize] window (min 6h
+        //    up to 7d, depending on the configured delay), `governor.factory()`
+        //    returns address(0), so `SyndicateFactory.createSyndicate` will
+        //    revert at `SyndicateGovernor.addVault`'s `msg.sender == factory`
+        //    check. Do NOT accept user syndicate creations until finalize.
         SyndicateGovernor(d.governorProxy).setFactory(d.factoryProxy);
         console.log("Governor.setFactory queued -- finalize after parameterChangeDelay");
 
