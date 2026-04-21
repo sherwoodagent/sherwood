@@ -374,6 +374,49 @@ contract GovernorHardeningTest is Test {
         governor.emergencyCancel(proposalId);
     }
 
+    // ==================== G-M2/G-M6 — calls array cap ====================
+
+    /// @dev Builds an oversized Call array of the requested length pointing at
+    ///      `usdc.approve(...)` — benign calldata, cheap to construct.
+    function _buildOversizedCalls(uint256 len) internal view returns (BatchExecutorLib.Call[] memory arr) {
+        arr = new BatchExecutorLib.Call[](len);
+        for (uint256 i = 0; i < len; i++) {
+            arr[i] = BatchExecutorLib.Call({
+                target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 1e6)), value: 0
+            });
+        }
+    }
+
+    /// @notice G-M2: propose reverts when executeCalls exceeds the cap.
+    function test_propose_revertsIfExecuteCallsExceedCap() public {
+        uint256 cap = governor.MAX_CALLS_PER_PROPOSAL();
+        BatchExecutorLib.Call[] memory oversized = _buildOversizedCalls(cap + 1);
+
+        vm.prank(leadAgent);
+        vm.expectRevert(ISyndicateGovernor.TooManyCalls.selector);
+        governor.propose(
+            address(vault),
+            "ipfs://big",
+            2000,
+            7 days,
+            oversized,
+            _settleCalls(),
+            new ISyndicateGovernor.CoProposer[](0)
+        );
+    }
+
+    /// @notice G-M6: propose reverts when settlementCalls exceeds the cap.
+    function test_propose_revertsIfSettlementCallsExceedCap() public {
+        uint256 cap = governor.MAX_CALLS_PER_PROPOSAL();
+        BatchExecutorLib.Call[] memory oversized = _buildOversizedCalls(cap + 1);
+
+        vm.prank(leadAgent);
+        vm.expectRevert(ISyndicateGovernor.TooManyCalls.selector);
+        governor.propose(
+            address(vault), "ipfs://big", 2000, 7 days, _execCalls(), oversized, new ISyndicateGovernor.CoProposer[](0)
+        );
+    }
+
     // ==================== G-M11 — metadata URI length cap ====================
 
     /// @notice G-M11: `propose` must revert when `metadataURI.length`

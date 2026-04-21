@@ -82,6 +82,10 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ///         `propose`. 512 bytes comfortably fits ipfs / arweave / https
     ///         pointers while capping event-storage and calldata-copy griefing.
     uint256 public constant MAX_METADATA_URI_LENGTH = 512;
+    /// @notice G-M2/G-M6: upper bound on the `executeCalls` and
+    ///         `settlementCalls` arrays passed to `propose`. Caps batch size
+    ///         so executeGovernorBatch can't be weaponized for gas griefing.
+    uint256 public constant MAX_CALLS_PER_PROPOSAL = 64;
 
     // ── New storage (appended -- UUPS safe) ──
 
@@ -282,6 +286,10 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         if (strategyDuration < _params.minStrategyDuration) revert StrategyDurationTooShort();
         if (executeCalls.length == 0) revert EmptyExecuteCalls();
         if (settlementCalls.length == 0) revert EmptySettlementCalls();
+        // G-M2/G-M6: cap batch sizes.
+        if (executeCalls.length > MAX_CALLS_PER_PROPOSAL || settlementCalls.length > MAX_CALLS_PER_PROPOSAL) {
+            revert TooManyCalls();
+        }
         // G-M11: cap metadata URI length.
         if (bytes(metadataURI).length > MAX_METADATA_URI_LENGTH) revert MetadataURITooLong();
 

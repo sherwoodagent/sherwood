@@ -130,6 +130,11 @@ interface ISyndicateGovernor {
     ///         MAX_METADATA_URI_LENGTH. Bounds a calldata-unbounded string
     ///         that would otherwise let a proposer grief gas / event storage.
     error MetadataURITooLong();
+    /// @notice G-M2/G-M6: Revert if `executeCalls.length` or
+    ///         `settlementCalls.length` exceeds MAX_CALLS_PER_PROPOSAL. Bounds
+    ///         calldata-unbounded arrays that otherwise let a proposer grief
+    ///         gas when the batch is executed.
+    error TooManyCalls();
 
     // ── Guardian-review emergency settle errors (Task 24) ──
     error OwnerBondInsufficient();
