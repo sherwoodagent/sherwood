@@ -301,4 +301,76 @@ contract GovernorHardeningTest is Test {
     }
 
     // (remaining tests for G-H3, G-H4, G-H6 appended in later commits)
+
+    // ==================== G-M7 — emergencyCancel rejects terminal states ====================
+
+    /// @dev Helper: create a Pending solo proposal.
+    function _createSoloPending() internal returns (uint256 proposalId) {
+        vm.prank(leadAgent);
+        proposalId = governor.propose(
+            address(vault),
+            "ipfs://term",
+            2000,
+            7 days,
+            _execCalls(),
+            _settleCalls(),
+            new ISyndicateGovernor.CoProposer[](0)
+        );
+        vm.warp(vm.getBlockTimestamp() + 1);
+    }
+
+    /// @notice G-M7: emergencyCancel on a Rejected proposal (reached via
+    ///         vetoProposal) must revert — owner should not be able to "re-cancel"
+    ///         a terminal state.
+    function test_emergencyCancel_revertsOnRejectedProposal() public {
+        _depositLps();
+        uint256 proposalId = _createSoloPending();
+
+        // Veto while Pending — flips to Rejected.
+        vm.prank(owner);
+        governor.vetoProposal(proposalId);
+
+        ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
+        assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Rejected));
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotCancellable.selector);
+        governor.emergencyCancel(proposalId);
+    }
+
+    /// @notice G-M7: emergencyCancel on a Cancelled proposal must revert.
+    function test_emergencyCancel_revertsOnCancelledProposal() public {
+        _depositLps();
+        uint256 proposalId = _createSoloPending();
+
+        // Proposer cancels (Pending -> Cancelled).
+        vm.prank(leadAgent);
+        governor.cancelProposal(proposalId);
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotCancellable.selector);
+        governor.emergencyCancel(proposalId);
+    }
+
+    /// @notice G-M7: emergencyCancel on an Expired proposal must revert. An
+    ///         Approved proposal whose executeBy has passed resolves to Expired;
+    ///         owner cannot cancel what's already terminal.
+    function test_emergencyCancel_revertsOnExpiredProposal() public {
+        _depositLps();
+        uint256 proposalId = _createSoloPending();
+
+        // Vote YES, warp past voting so it resolves to Approved, then past
+        // executeBy so it resolves to Expired.
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+
+        ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
+        vm.warp(p.executeBy + 1);
+
+        assertEq(uint256(governor.getProposalState(proposalId)), uint256(ISyndicateGovernor.ProposalState.Expired));
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotCancellable.selector);
+        governor.emergencyCancel(proposalId);
+    }
 }
