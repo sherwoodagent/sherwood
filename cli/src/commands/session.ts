@@ -6,10 +6,13 @@
  * streaming (--stream).
  *
  * Usage:
- *   sherwood session check <name>             — one-shot catch-up (JSON to stdout)
- *   sherwood session check <name> --stream    — persistent stream (JSON lines to stdout)
- *   sherwood session status [name]            — show session cursor positions
- *   sherwood session reset <name> [--full]    — reset session cursors
+ *   sherwood session check <name>                — one-shot catch-up (JSON to stdout)
+ *   sherwood session check <name> --stream       — persistent stream (JSON lines to stdout)
+ *   sherwood session check <name> --no-xmtp      — skip XMTP entirely (on-chain events only)
+ *   sherwood session status [name]               — show session cursor positions
+ *   sherwood session reset <name> [--full]       — reset session cursors
+ *
+ * Env: SHERWOOD_SKIP_XMTP=1 is equivalent to --no-xmtp.
  */
 
 import { Command } from "commander";
@@ -113,7 +116,11 @@ function toSessionMessage(msg: {
 
 // ── Command handlers ──
 
-async function handleCheck(name: string, stream: boolean): Promise<void> {
+async function handleCheck(
+  name: string,
+  stream: boolean,
+  noXmtp: boolean,
+): Promise<void> {
   // Resolve syndicate
   const syndicate = await resolveSyndicate(name);
   const vaultAddress = syndicate.vault;
@@ -133,23 +140,28 @@ async function handleCheck(name: string, stream: boolean): Promise<void> {
   const lastMessageTimestamp = session?.lastMessageTimestamp || 0;
 
   // ── Fetch XMTP messages ──
+  // Skipped entirely when noXmtp is true — used by callers that own XMTP
+  // themselves (e.g. the sherwood-monitor Hermes plugin via its bundled
+  // sidecar) or when the local @xmtp/node-bindings load would fail.
   let messages: SessionMessage[] = [];
-  try {
-    const xmtp = await loadXmtp();
-    const groupId = await xmtp.getGroup("", name);
-    const recent = await xmtp.getRecentMessages(groupId, 100);
+  if (!noXmtp) {
+    try {
+      const xmtp = await loadXmtp();
+      const groupId = await xmtp.getGroup("", name);
+      const recent = await xmtp.getRecentMessages(groupId, 100);
 
-    // Filter to messages after our cursor, excluding our own messages
-    const cursorMs = lastMessageTimestamp * 1000;
-    const ownInboxId = loadConfig().xmtpInboxId;
-    const newMessages = recent.filter(
-      (m) =>
-        m.sentAt.getTime() > cursorMs &&
-        (!ownInboxId || m.senderInboxId !== ownInboxId),
-    );
-    messages = newMessages.map(toSessionMessage);
-  } catch {
-    // XMTP not available or group not found — skip messages
+      // Filter to messages after our cursor, excluding our own messages
+      const cursorMs = lastMessageTimestamp * 1000;
+      const ownInboxId = loadConfig().xmtpInboxId;
+      const newMessages = recent.filter(
+        (m) =>
+          m.sentAt.getTime() > cursorMs &&
+          (!ownInboxId || m.senderInboxId !== ownInboxId),
+      );
+      messages = newMessages.map(toSessionMessage);
+    } catch {
+      // XMTP not available or group not found — skip messages
+    }
   }
 
   // ── Fetch on-chain events ──
@@ -221,7 +233,7 @@ async function handleCheck(name: string, stream: boolean): Promise<void> {
 
   // ── If --stream, stay alive ──
   if (stream) {
-    await startStream(name, vaultAddress, governorAddress);
+    await startStream(name, vaultAddress, governorAddress, noXmtp);
   }
 }
 
@@ -229,35 +241,41 @@ async function startStream(
   name: string,
   vaultAddress: Address,
   governorAddress: Address,
+  noXmtp: boolean,
 ): Promise<void> {
   // Cache for proposal metadata — immutable once pinned, safe to reuse across polls
   const metadataCache = new Map<string, { name: string; description: string }>();
 
   // Start XMTP message stream
+  // Skipped entirely when noXmtp is true — see handleCheck for the rationale.
+  // xmtpCleanup stays undefined in that case; the on-exit cleanup does
+  // `xmtpCleanup?.()` which is a no-op on undefined, so teardown is unaffected.
   let xmtpCleanup: (() => void) | undefined;
-  try {
-    const xmtp = await loadXmtp();
-    const groupId = await xmtp.getGroup("", name);
+  if (!noXmtp) {
+    try {
+      const xmtp = await loadXmtp();
+      const groupId = await xmtp.getGroup("", name);
 
-    const streamOwnInboxId = loadConfig().xmtpInboxId;
-    xmtpCleanup = await xmtp.streamMessages(groupId, (msg) => {
-      // Skip own messages to prevent self-replies
-      if (streamOwnInboxId && msg.senderInboxId === streamOwnInboxId) return;
+      const streamOwnInboxId = loadConfig().xmtpInboxId;
+      xmtpCleanup = await xmtp.streamMessages(groupId, (msg) => {
+        // Skip own messages to prevent self-replies
+        if (streamOwnInboxId && msg.senderInboxId === streamOwnInboxId) return;
 
-      const sessionMsg = toSessionMessage(msg);
-      process.stdout.write(JSON.stringify(sessionMsg) + "\n");
+        const sessionMsg = toSessionMessage(msg);
+        process.stdout.write(JSON.stringify(sessionMsg) + "\n");
 
-      // Update session state incrementally
-      updateSession(name, {
-        lastMessageId: msg.id,
-        lastMessageTimestamp: Math.floor(msg.sentAt.getTime() / 1000),
-        lastCheckAt: Math.floor(Date.now() / 1000),
-        totalMessagesProcessed:
-          (getSession(name)?.totalMessagesProcessed || 0) + 1,
+        // Update session state incrementally
+        updateSession(name, {
+          lastMessageId: msg.id,
+          lastMessageTimestamp: Math.floor(msg.sentAt.getTime() / 1000),
+          lastCheckAt: Math.floor(Date.now() / 1000),
+          totalMessagesProcessed:
+            (getSession(name)?.totalMessagesProcessed || 0) + 1,
+        });
       });
-    });
-  } catch {
-    // XMTP not available — continue with event polling only
+    } catch {
+      // XMTP not available — continue with event polling only
+    }
   }
 
   // Start on-chain event polling (~30s interval)
@@ -397,9 +415,18 @@ export function registerSessionCommands(program: Command): void {
     .command("check <name>")
     .description("Fetch new XMTP messages and on-chain events since last check")
     .option("--stream", "Stay alive streaming messages and polling events", false)
-    .action(async (name: string, opts: { stream: boolean }) => {
-      await handleCheck(name, opts.stream);
-    });
+    .option(
+      "--no-xmtp",
+      "Skip XMTP catch-up and streaming. Use when XMTP bindings are unavailable or when an external process owns XMTP (e.g. the sherwood-monitor Hermes plugin's bundled sidecar). Also honors SHERWOOD_SKIP_XMTP=1.",
+      false,
+    )
+    .action(
+      async (name: string, opts: { stream: boolean; noXmtp: boolean }) => {
+        const skipXmtp =
+          opts.noXmtp || process.env.SHERWOOD_SKIP_XMTP === "1";
+        await handleCheck(name, opts.stream, skipXmtp);
+      },
+    );
 
   session
     .command("status [name]")
