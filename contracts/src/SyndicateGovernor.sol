@@ -107,9 +107,19 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     /// @dev Stored calls mirror so the owner (or a watcher) can recover them on-chain
     mapping(uint256 => BatchExecutorLib.Call[]) internal _emergencyCalls;
 
+    /// @notice Per-vault count of non-terminal proposals — Pending,
+    ///         GuardianReview, Approved, Executed. Used by
+    ///         `GuardianRegistry.requestUnstakeOwner` alongside
+    ///         `_activeProposal` to block owner rage-quit while any proposal
+    ///         binds the vault. Incremented on Draft -> Pending. Decremented
+    ///         on the terminal edge (Rejected / Expired / Cancelled / Settled).
+    ///         Added in PR #229 Fix 2.
+    mapping(address => uint256) public openProposalCount;
+
     /// @dev Reserved storage for future upgrades (shrunk by 1 for _guardianRegistry,
-    ///      shrunk by 2 more for _emergencyCallsHashes + _emergencyCalls)
-    uint256[30] private __gap;
+    ///      shrunk by 2 more for _emergencyCallsHashes + _emergencyCalls,
+    ///      shrunk by 1 more for openProposalCount)
+    uint256[29] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -168,10 +178,14 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     }
 
     modifier nonReentrant() {
-        if (_reentrancyStatus == _ENTERED) revert Reentrancy();
-        _reentrancyStatus = _ENTERED;
+        _reentrancyEnter();
         _;
         _reentrancyStatus = _NOT_ENTERED;
+    }
+
+    function _reentrancyEnter() private {
+        if (_reentrancyStatus == _ENTERED) revert Reentrancy();
+        _reentrancyStatus = _ENTERED;
     }
 
     // ── GovernorParameters virtual accessor overrides ──
@@ -282,11 +296,19 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         p.metadataURI = metadataURI;
         p.performanceFeeBps = performanceFeeBps;
         p.strategyDuration = strategyDuration;
-        p.snapshotTimestamp = isCollaborative ? 0 : block.timestamp;
-        p.voteEnd = isCollaborative ? 0 : block.timestamp + _params.votingPeriod;
-        p.reviewEnd = isCollaborative ? 0 : block.timestamp + _params.votingPeriod + reviewPeriod_;
-        p.executeBy = isCollaborative ? 0 : p.reviewEnd + _params.executionWindow;
-        p.state = isCollaborative ? ProposalState.Draft : ProposalState.Pending;
+        if (isCollaborative) {
+            p.state = ProposalState.Draft;
+        } else {
+            p.snapshotTimestamp = block.timestamp;
+            p.voteEnd = block.timestamp + _params.votingPeriod;
+            p.reviewEnd = p.voteEnd + reviewPeriod_;
+            p.executeBy = p.reviewEnd + _params.executionWindow;
+            p.state = ProposalState.Pending;
+            // Draft doesn't count (not binding on the vault); Pending does.
+            unchecked {
+                ++openProposalCount[vault];
+            }
+        }
 
         // Store calls separately
         _storeCalls(_executeCalls, proposalId, executeCalls);
@@ -329,8 +351,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         StrategyProposal storage proposal = _proposals[proposalId];
 
         // Resolve state (may transition Pending->Approved/Rejected/Expired or Approved->Expired)
-        ProposalState currentState = _resolveState(proposal);
-        if (currentState != ProposalState.Approved) revert ProposalNotApproved();
+        if (_resolveState(proposal) != ProposalState.Approved) revert ProposalNotApproved();
 
         address vault = proposal.vault;
         if (_activeProposal[vault] != 0) revert StrategyAlreadyActive();
@@ -349,6 +370,9 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _activeProposal[vault] = proposalId;
         proposal.state = ProposalState.Executed;
         proposal.executedAt = block.timestamp;
+        // Counter stays incremented through Executed; decremented once on the
+        // Executed -> Settled edge in `_finishSettlement`. `_activeProposal`
+        // also guards the Executed window (see `requestUnstakeOwner`).
 
         // Execute the opening calls via the vault
         ISyndicateVault(vault).executeGovernorBatch(_loadCalls(_executeCalls, proposalId));
@@ -383,18 +407,15 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     function cancelProposal(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != proposal.proposer) revert NotProposer();
-        ProposalState currentState = _resolveState(proposal);
-        // Can cancel during Draft (collaborative) or Pending (voting) state
-        if (currentState != ProposalState.Pending && currentState != ProposalState.Draft) {
+        ProposalState s = _resolveState(proposal);
+        if (s == ProposalState.Pending) {
+            // Pending: only during the voting period.
+            if (block.timestamp > proposal.voteEnd) revert ProposalNotCancellable();
+            _decOpen(proposal.vault);
+        } else if (s != ProposalState.Draft) {
             revert ProposalNotCancellable();
         }
-        // For Pending proposals, can only cancel during voting period
-        if (currentState == ProposalState.Pending && block.timestamp > proposal.voteEnd) {
-            revert ProposalNotCancellable();
-        }
-
         proposal.state = ProposalState.Cancelled;
-        delete _activeProposal[proposal.vault];
         emit ProposalCancelled(proposalId, msg.sender);
     }
 
@@ -405,14 +426,21 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     function emergencyCancel(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
-        ProposalState currentState = _resolveState(proposal);
-        if (currentState != ProposalState.Draft && currentState != ProposalState.Pending) {
-            revert ProposalNotCancellable();
-        }
-
+        ProposalState s = _resolveState(proposal);
+        if (s == ProposalState.Pending) _decOpen(proposal.vault);
+        else if (s != ProposalState.Draft) revert ProposalNotCancellable();
         proposal.state = ProposalState.Cancelled;
-        delete _activeProposal[proposal.vault];
         emit ProposalCancelled(proposalId, msg.sender);
+    }
+
+    /// @dev Single-site decrement for the open-proposal counter (PR #229 Fix 2).
+    ///      Unchecked to save bytecode; the caller guarantees the counter is > 0
+    ///      (each dec is matched by a prior inc on Draft -> Pending in
+    ///      `propose` / `approveCollaboration`).
+    function _decOpen(address vault) private {
+        unchecked {
+            --openProposalCount[vault];
+        }
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -421,14 +449,10 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     function vetoProposal(uint256 proposalId) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != OwnableUpgradeable(proposal.vault).owner()) revert NotVaultOwner();
-
-        ProposalState currentState = _resolveState(proposal);
-        if (currentState != ProposalState.Pending) {
-            revert ProposalNotCancellable();
-        }
-
+        if (_resolveState(proposal) != ProposalState.Pending) revert ProposalNotCancellable();
         proposal.state = ProposalState.Rejected;
-        delete _activeProposal[proposal.vault];
+        // `_activeProposal` is unset during Pending (only set by execute).
+        _decOpen(proposal.vault);
         emit ProposalVetoed(proposalId, msg.sender);
     }
 
@@ -473,6 +497,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
             proposal.voteEnd = block.timestamp + _params.votingPeriod;
             proposal.reviewEnd = proposal.voteEnd + reviewPeriod_;
             proposal.executeBy = proposal.reviewEnd + _params.executionWindow;
+            // Draft -> Pending: this is the first non-terminal state that binds
+            // the vault, so start counting it now.
+            unchecked {
+                ++openProposalCount[proposal.vault];
+            }
             emit CollaborationTransitionedToPending(proposalId);
         }
     }
@@ -585,6 +614,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     function getActiveProposal(address vault) external view returns (uint256) {
         return _activeProposal[vault];
     }
+
+    // `openProposalCount(address)` served by the public mapping auto-getter above.
 
     /// @inheritdoc ISyndicateGovernor
     function getCooldownEnd(address vault) external view returns (uint256) {
@@ -766,8 +797,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
 
         if (resolved != stored) {
             proposal.state = resolved;
-            if (stored == ProposalState.Draft && resolved == ProposalState.Expired) {
-                emit CollaborationDeadlineExpired(proposal.id);
+            // Terminal transitions from a counted state dec the counter; the
+            // only uncounted source (Draft) emits its distinct event instead.
+            if (resolved == ProposalState.Rejected || resolved == ProposalState.Expired) {
+                if (stored != ProposalState.Draft) _decOpen(proposal.vault);
+                else emit CollaborationDeadlineExpired(proposal.id);
             }
         }
         return resolved;
@@ -848,6 +882,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _activeProposal[vault] = 0;
         _lastSettledAt[vault] = block.timestamp;
         proposal.state = ProposalState.Settled;
+        // PR #229 Fix 2: single dec for the happy-path lifecycle
+        // (Pending -> GuardianReview? -> Approved -> Executed -> Settled).
+        // `_activeProposal` also covers Executed so `requestUnstakeOwner`'s
+        // OR-check blocks rage-quit even before this dec fires.
+        _decOpen(vault);
 
         uint256 totalFee = 0;
         if (pnl > 0) {

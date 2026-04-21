@@ -536,7 +536,11 @@ contract GuardianRegistryOwnerUnstakeTest is Test {
     }
 
     function test_requestUnstakeOwner_revertsIfActiveProposal() public {
-        governor.setActiveProposal(address(vault), 42);
+        // PR #229 Fix 2: `requestUnstakeOwner` now gates on `openProposalCount`
+        // (Pending / GuardianReview / Approved / Executed) rather than only
+        // `getActiveProposal` (Executed only). Prime the counter to simulate
+        // a live proposal and verify the revert path still triggers.
+        governor.setOpenProposalCount(address(vault), 1);
         vm.prank(creator);
         vm.expectRevert(IGuardianRegistry.VaultHasActiveProposal.selector);
         registry.requestUnstakeOwner(address(vault));

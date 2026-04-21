@@ -235,9 +235,10 @@ interface ISyndicateGovernor {
 
     function settleProposal(uint256 proposalId) external;
 
-    function emergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external;
-
     // ── Guardian-review emergency settle lifecycle (Task 24) ──
+    // NOTE (Task 25 / PR #229): legacy `emergencySettle` removed — use
+    // `unstick` (pre-committed calls) or `emergencySettleWithCalls` +
+    // `finalizeEmergencySettle` (guardian-gated) for the owner-driven path.
     function unstick(uint256 proposalId) external;
     function emergencySettleWithCalls(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external;
     function cancelEmergencySettle(uint256 proposalId) external;
@@ -294,6 +295,15 @@ interface ISyndicateGovernor {
     function getGovernorParams() external view returns (GovernorParams memory);
     function getRegisteredVaults() external view returns (address[] memory);
     function getActiveProposal(address vault) external view returns (uint256);
+    /// @notice Count of proposals for a vault in any non-terminal state
+    ///         (Pending / GuardianReview / Approved / Executed).
+    /// @dev Incremented on Draft -> Pending, decremented on the terminal edge
+    ///      (Rejected / Expired / Cancelled / Settled). Consumed by
+    ///      `GuardianRegistry.requestUnstakeOwner` alongside `getActiveProposal`
+    ///      to block rage-quit while any proposal binds the vault — the OR
+    ///      check is belt-and-braces so stale-cache transitions can't slip
+    ///      through. See PR #229 Fix 2.
+    function openProposalCount(address vault) external view returns (uint256);
     function getCooldownEnd(address vault) external view returns (uint256);
     function getCapitalSnapshot(uint256 proposalId) external view returns (uint256);
     function isRegisteredVault(address vault) external view returns (bool);

@@ -16,9 +16,17 @@ contract MockGovernorMinimal {
 
     mapping(address => uint256) public activeProposal;
     mapping(uint256 => ProposalView) internal _proposals;
+    /// @dev Mirrors the per-vault open-proposal counter added in PR #229 Fix 2.
+    mapping(address => uint256) public openProposalCount;
 
     function setActiveProposal(address vault, uint256 proposalId) external {
         activeProposal[vault] = proposalId;
+    }
+
+    /// @dev Test helper — mirrors `SyndicateGovernor.openProposalCount(vault)`
+    ///      which the registry now consults in `requestUnstakeOwner`.
+    function setOpenProposalCount(address vault, uint256 n) external {
+        openProposalCount[vault] = n;
     }
 
     function getActiveProposal(address vault) external view returns (uint256) {

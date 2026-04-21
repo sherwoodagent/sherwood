@@ -53,13 +53,11 @@ abstract contract GovernorEmergency is ISyndicateGovernor {
     }
 
     // ── Emergency settle lifecycle ──
-
-    /// @notice Legacy emergency settle entrypoint — kept as a revert stub for
-    ///         interface compatibility. Task 25 owns removal from ISyndicateGovernor.
-    /// @dev Do NOT remove; dropping it changes the governor ABI, which Task 25 owns.
-    function emergencySettle(uint256, BatchExecutorLib.Call[] calldata) external pure {
-        revert();
-    }
+    // NOTE (Task 25 / PR #229): the legacy `emergencySettle(uint256, Call[])`
+    // entrypoint was removed from both the interface and this abstract along
+    // with the rest of the guardian-review narrowing. Use `unstick` (runs the
+    // pre-committed settlement calls) or `emergencySettleWithCalls` (guardian
+    // gate) / `finalizeEmergencySettle` (after review).
 
     /// @notice Rescues a proposal stuck in Executed state past its duration by
     ///         running the governance-approved pre-committed settlement calls.

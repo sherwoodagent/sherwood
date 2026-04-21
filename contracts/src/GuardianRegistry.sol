@@ -27,6 +27,13 @@ interface IGovernorMinimal {
     }
 
     function getActiveProposal(address vault) external view returns (uint256);
+    /// @notice Count of proposals for a vault in any non-terminal state
+    ///         (Pending / GuardianReview / Approved / Executed). Consumed
+    ///         by the rage-quit gate in `requestUnstakeOwner`. The OR check
+    ///         against `getActiveProposal` below is belt-and-braces — any
+    ///         real open proposal must trip at least one of the two signals
+    ///         (PR #229 Fix 2).
+    function openProposalCount(address vault) external view returns (uint256);
     function getProposalView(uint256 proposalId) external view returns (ProposalView memory);
 }
 
@@ -464,15 +471,23 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     /// @inheritdoc IGuardianRegistry
-    /// @dev Vault owner signals intent to exit. Blocked while the vault has an
-    ///      active proposal (any governor state between `Pending` and `Executed`)
-    ///      to prevent rage-quit around malicious executions. Immediately stamps
+    /// @dev Vault owner signals intent to exit. Blocked while the vault has any
+    ///      open proposal (Pending / GuardianReview / Approved / Executed) to
+    ///      prevent rage-quit around malicious executions. Immediately stamps
     ///      `unstakeRequestedAt`; WOOD stays escrowed until `claimUnstakeOwner`.
+    ///
+    ///      PR #229 Fix 2: the legacy `getActiveProposal` check only covered
+    ///      the Executed state; a malicious owner could propose a draining
+    ///      strategy and rage-quit before execution. `openProposalCount` now
+    ///      tracks every non-terminal state (Pending / GuardianReview /
+    ///      Approved / Executed). The OR against `getActiveProposal` below
+    ///      is belt-and-braces so that any stale-cache window still reverts.
     function requestUnstakeOwner(address vault) external {
         OwnerStake storage s = _ownerStakes[vault];
         if (s.owner != msg.sender || s.stakedAmount == 0) revert NoActiveStake();
         if (s.unstakeRequestedAt != 0) revert UnstakeAlreadyRequested();
-        if (IGovernorMinimal(governor).getActiveProposal(vault) != 0) {
+        IGovernorMinimal gov = IGovernorMinimal(governor);
+        if (gov.openProposalCount(vault) != 0 || gov.getActiveProposal(vault) != 0) {
             revert VaultHasActiveProposal();
         }
 
