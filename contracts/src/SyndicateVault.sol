@@ -157,6 +157,19 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
+    /// @notice Whether `depositor` is allowed to receive shares when the vault
+    ///         is in closed-deposit mode (`_openDeposits == false`).
+    /// @dev V-M4: the whitelist check in `_deposit` runs against `receiver` —
+    ///      the share holder — **not** `caller` (the asset payer). A whitelisted
+    ///      user can therefore receive shares funded by a non-whitelisted party
+    ///      (pay-on-behalf semantics), which is intentional for KYC flows where
+    ///      compliance attaches to the share holder (residency / accreditation
+    ///      attestations travel with the shares, not the USDC).
+    ///
+    ///      If a deployment needs **both** sides checked, extend `_deposit` to
+    ///      assert `isApprovedDepositor(caller)` in addition to the existing
+    ///      `isApprovedDepositor(receiver)` check. This is deliberately not the
+    ///      default because doing so would break subsidised onboarding flows.
     function isApprovedDepositor(address depositor) external view returns (bool) {
         return _approvedDepositors.contains(depositor);
     }
