@@ -196,58 +196,42 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
 
     function _applyChange(bytes32 paramKey, uint256 newValue) internal {
         GovernorParams storage params = _getParams();
+        uint256 old;
 
         if (paramKey == PARAM_VOTING_PERIOD) {
-            uint256 old = params.votingPeriod;
+            old = params.votingPeriod;
             params.votingPeriod = newValue;
-            emit ParameterChangeFinalized(paramKey, old, newValue);
-            emit VotingPeriodUpdated(old, newValue);
         } else if (paramKey == PARAM_EXECUTION_WINDOW) {
-            uint256 old = params.executionWindow;
+            old = params.executionWindow;
             params.executionWindow = newValue;
-            emit ParameterChangeFinalized(paramKey, old, newValue);
-            emit ExecutionWindowUpdated(old, newValue);
         } else if (paramKey == PARAM_VETO_THRESHOLD_BPS) {
-            uint256 old = params.vetoThresholdBps;
+            old = params.vetoThresholdBps;
             params.vetoThresholdBps = newValue;
-            emit ParameterChangeFinalized(paramKey, old, newValue);
-            emit VetoThresholdBpsUpdated(old, newValue);
         } else if (paramKey == PARAM_MAX_PERF_FEE) {
-            uint256 old = params.maxPerformanceFeeBps;
+            old = params.maxPerformanceFeeBps;
             params.maxPerformanceFeeBps = newValue;
-            emit ParameterChangeFinalized(paramKey, old, newValue);
-            emit MaxPerformanceFeeBpsUpdated(old, newValue);
         } else if (paramKey == PARAM_MIN_STRATEGY_DURATION) {
-            uint256 old = params.minStrategyDuration;
+            old = params.minStrategyDuration;
             params.minStrategyDuration = newValue;
-            emit ParameterChangeFinalized(paramKey, old, newValue);
-            emit MinStrategyDurationUpdated(old, newValue);
         } else if (paramKey == PARAM_MAX_STRATEGY_DURATION) {
-            uint256 old = params.maxStrategyDuration;
+            old = params.maxStrategyDuration;
             params.maxStrategyDuration = newValue;
-            emit ParameterChangeFinalized(paramKey, old, newValue);
-            emit MaxStrategyDurationUpdated(old, newValue);
         } else if (paramKey == PARAM_COOLDOWN) {
-            uint256 old = params.cooldownPeriod;
+            old = params.cooldownPeriod;
             params.cooldownPeriod = newValue;
-            emit ParameterChangeFinalized(paramKey, old, newValue);
-            emit CooldownPeriodUpdated(old, newValue);
         } else if (paramKey == PARAM_COLLAB_WINDOW) {
-            uint256 old = params.collaborationWindow;
+            old = params.collaborationWindow;
             params.collaborationWindow = newValue;
-            emit ParameterChangeFinalized(paramKey, old, newValue);
-            emit CollaborationWindowUpdated(old, newValue);
         } else if (paramKey == PARAM_MAX_CO_PROPOSERS) {
-            uint256 old = params.maxCoProposers;
+            old = params.maxCoProposers;
             params.maxCoProposers = newValue;
-            emit ParameterChangeFinalized(paramKey, old, newValue);
-            emit MaxCoProposersUpdated(old, newValue);
         } else if (paramKey == PARAM_PROTOCOL_FEE_BPS) {
-            uint256 old = _applyProtocolFeeBpsChange(newValue);
-            emit ParameterChangeFinalized(paramKey, old, newValue);
+            old = _applyProtocolFeeBpsChange(newValue);
         } else {
             revert InvalidParameterKey();
         }
+
+        emit ParameterChangeFinalized(paramKey, old, newValue);
     }
 
     /// @dev Re-validate at finalize time for params with cross-dependencies
