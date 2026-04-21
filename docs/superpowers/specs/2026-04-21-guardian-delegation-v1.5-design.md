@@ -17,12 +17,17 @@
 
 A WOOD holder who trusts a specific agent's judgement currently has two options: run their own guardian operation (monitor, review, respond within 24h windows) or have no governance voice at all. The activation floor (`minGuardianStake` = 10k WOOD) and the operational burden put passive delegation out of reach. The guardian cohort is smaller and less legitimate than it should be because WOOD supply sitting in passive wallets contributes zero quorum weight.
 
+### Problem 3 — Approve-bias (asymmetric incentives)
+
+Under V1, approving carries slashing risk with zero upside: if a proposal passes optimistic review but was malicious, approvers are slashed; if it passes and was good, approvers earn nothing. Rational guardians only vote Block (or abstain), never Approve — there is no economic reason to signal a *good* proposal. The optimistic-governance model assumes an active Approve side that doesn't materialize under V1 incentives. V1.5 fixes this with a **guardian fee** slice of settled performance that flows to approvers pro-rata by their vote weight, restoring incentive symmetry.
+
 ### What V1.5 delivers
 
 1. **Checkpoint-based vote weight.** Replace live `stakedAmount` reads with `getPastStake(g, openedAt)` at the review open time. Both numerator and denominator are now measured at the same instant — top-up bias eliminated.
 2. **Stake-pool delegation.** Any WOOD holder can `delegateStake(delegate, amount)`, moving WOOD from their wallet into the registry. The delegate's vote weight at a review = own stake + sum of delegated stakes (all checkpointed at `openedAt`). Delegators can `requestUnstakeDelegation` with the same 7-day cooldown as guardians.
 3. **DPoS commission split.** Each delegate sets a `commissionBps` (default 0, max `MAX_COMMISSION_BPS` = 5000). When a delegate earns epoch rewards from Block-voting on blocked proposals, `commissionBps` of the reward flows to the delegate and `(10000 - commissionBps)` flows pro-rata to their delegators. Delegators claim via a pull function.
 4. **WOOD as ERC20VotesUpgradeable.** Redeploy WOOD to standard OZ `ERC20VotesUpgradeable` for off-chain governance UX (vote-weight indexers, Snapshot-style signalling tools). Not used for on-chain registry logic — registry uses its own checkpoints because it needs per-delegator-per-delegate attribution that ERC20Votes doesn't provide natively.
+5. **Guardian fee on settled performance.** New timelocked `guardianFeeBps` governor parameter (default 100 bps = 1%, max 500 bps = 5%). On successful settlement, `grossPnL * guardianFeeBps / 10_000` is carved out before agent fee and funneled to the proposal's approvers pro-rata by their frozen `_voteStake`. Applies DPoS commission split: `commissionBps` to the approver (delegate), remainder to their delegators. Fixes Problem 3 and closes the incentive asymmetry.
 
 ---
 
@@ -64,6 +69,9 @@ A WOOD holder who trusts a specific agent's judgement currently has two options:
 - **INV-V1.5-5** (reward split): for any epoch E and delegate D, `commissionPaid[D][E] + sum(delegatorReward[D][delegator][E]) == totalRewardEarned[D][E]`; nothing is created or destroyed in the split.
 - **INV-V1.5-6** (commission bounds): `0 <= commissionBps[D] <= MAX_COMMISSION_BPS` at all times.
 - **INV-V1.5-7** (no retroactive commission): commission rate applied at reward claim is the rate checkpointed at the epoch end, not the current rate.
+- **INV-V1.5-8** (guardian-fee sum): for any settled proposal P, `sum(claimedProposalReward[P][approver]) + sum(claimedDelegatorProposalReward[P][*][delegator]) <= _proposalGuardianPool[P].amount`; the reverse inequality holds once all claims resolve.
+- **INV-V1.5-9** (guardian-fee bounds): `0 <= guardianFeeBps <= MAX_GUARDIAN_FEE_BPS = 500` at all times; enforced at queue AND finalize.
+- **INV-V1.5-10** (fee-waterfall ordering): in `_distributeFees`, `protocolFee + guardianFee + agentFee + mgmtFee <= grossPnL` by construction (each taken from remaining).
 
 ---
 
@@ -197,7 +205,66 @@ delegate ──setCommission(newBps)──▶ GuardianRegistry
 
 **Checkpointed application (INV-V1.5-7):** at epoch rollover, the commission-at-epoch is frozen. Claims for past epochs use the frozen rate, not the current rate.
 
-### 4.8 Time-weighted delegation attribution (§4.6 refinement)
+### 4.8 Guardian-fee flow (approver reward on settled performance)
+
+```
+_distributeFees(proposalId, vault, asset, proposer, perfFeeBps, grossPnl):
+  protocolFee = grossPnl * protocolFeeBps / 10000
+  guardianFee = grossPnl * guardianFeeBps / 10000            ← NEW
+  remaining   = grossPnl - protocolFee - guardianFee
+  agentFee    = remaining * perfFeeBps / 10000
+  mgmtFee     = (remaining - agentFee) * mgmtFeeBps / 10000
+
+  _payFee(vault, asset, protocolRecipient, protocolFee)
+  _fundGuardianPool(proposalId, vault, asset, guardianFee)    ← NEW
+  _distributeAgentFee(...)
+  _payFee(vault, asset, vaultOwner, mgmtFee)
+
+_fundGuardianPool(proposalId, vault, asset, amount):
+  if (amount == 0) return
+  ISyndicateVault(vault).transferPerformanceFee(asset, address(registry), amount)
+  IGuardianRegistry(registry).fundProposalGuardianPool(proposalId, asset, amount)
+  emit ProposalGuardianPoolFunded(proposalId, asset, amount)
+```
+
+```
+approver ──claimProposalReward(proposalId)──▶ GuardianRegistry
+                                               - pool = _proposalGuardianPool[proposalId]
+                                               - require pool.amount > 0
+                                               - w = _voteStakeAtReview(proposalId, msg.sender) // Approve-side only
+                                               - require w > 0 (was an Approver)
+                                               - require !_approverClaimed[proposalId][msg.sender]
+                                               - _approverClaimed[proposalId][msg.sender] = true
+                                               - total = r.approveStakeWeight (from the Review)
+                                               - gross = (pool.amount * w) / total
+                                               - rate = _commissionCheckpoints[msg.sender]
+                                                          .upperLookupRecent(settledAt)
+                                               - commission = (gross * rate) / 10_000
+                                               - remainder  = gross - commission
+                                               - _delegatorProposalPool[msg.sender][proposalId] = remainder
+                                               - IERC20(pool.asset).safeTransfer(msg.sender, commission)
+                                               - emit ApproverRewardClaimed(
+                                                   proposalId, msg.sender, gross, commission, remainder
+                                                 )
+
+delegator ──claimDelegatorProposalReward(delegate, proposalId)──▶ GuardianRegistry
+                                                                 - pool = _delegatorProposalPool[delegate][proposalId]
+                                                                 - my = getPastDelegationTo(msg.sender, delegate, settledAt)
+                                                                 - total = getPastDelegated(delegate, settledAt)
+                                                                 - share = (pool * my) / total
+                                                                 - require !_delegatorProposalClaimed[delegate][proposalId][msg.sender]
+                                                                 - _delegatorProposalClaimed[...] = true
+                                                                 - transfer share in pool.asset
+                                                                 - emit DelegatorProposalRewardClaimed
+```
+
+Notes:
+- **Approve-side-only:** only Approvers earn guardian fee. Blockers on a settled (not-blocked) proposal earn nothing — they lost the vote, the proposal passed optimistic review, and the strategy executed.
+- **Non-settled → no pool:** if a proposal is Blocked, never executes, so `_distributeFees` never runs, so `_proposalGuardianPool[proposalId].amount == 0`. Blockers earn via the epoch pool as before.
+- **Two-step claim:** approver (delegate) claims first, seeding `_delegatorProposalPool[delegate][proposalId]`. Delegators then claim their pro-rata share. Same attribution timestamp: `settledAt` (frozen when `_fundGuardianPool` is called).
+- **W-1 escrow:** if the approver is USDC-blacklisted at claim time, the registry escrows the `commission` amount in `_unclaimedApproverFees[keccak256(proposalId, approver, asset)]`. Same pattern as governor's `_unclaimedFees`, keyed by `(proposalId, approver, asset)` to prevent cross-proposal drain.
+
+### 4.9 Time-weighted delegation attribution (§4.6 refinement)
 
 Naive `getPastDelegationTo(delegator, delegate, epochEnd)` returns the balance AT epoch end — punishes delegators who delegated late-epoch and rewards those who unstaked mid-epoch with their full original balance. Time-weighted attribution is correct but more complex.
 
@@ -251,11 +318,23 @@ mapping(uint256 => mapping(address => uint256)) private _blockerWeightInEpoch;  
 mapping(uint256 => uint256) private _totalBlockerWeightInEpoch;                  // epoch => total
 mapping(address => mapping(uint256 => bool)) private _delegateEpochClaimed;     // delegate => epoch => claimed
 
-// Reward accounting — per-delegator
+// Reward accounting — per-delegator (epoch pool)
 mapping(address => mapping(uint256 => uint256)) private _delegatorPool;         // delegate => epoch => remainder
 mapping(address => mapping(uint256 => mapping(address => bool))) private _delegatorClaimed;
 
-uint256[33] private __gap; // reduced from current value by slot count above
+// ── Guardian fee pool (proposal-level approver reward, NEW in V1.5) ──
+struct ProposalRewardPool {
+    address asset;
+    uint128 amount;
+    uint64 settledAt;
+}
+mapping(uint256 => ProposalRewardPool) private _proposalGuardianPool;                       // proposalId => pool
+mapping(uint256 => mapping(address => bool)) private _approverClaimed;                      // proposalId => approver => claimed
+mapping(address => mapping(uint256 => uint256)) private _delegatorProposalPool;             // delegate => proposalId => remainder
+mapping(address => mapping(uint256 => mapping(address => bool))) private _delegatorProposalClaimed;
+mapping(bytes32 => uint256) private _unclaimedApproverFees;                                 // keccak256(proposalId, approver, asset) => amount
+
+uint256[28] private __gap; // reduced from current value by slot count above (was 33 pre-guardian-fee; 5 slots added)
 ```
 
 **Slot cost:** ~15 new slots (mostly for the mappings' base slots; checkpoints grow O(N) on history but that's per-user cost, not fixed).
@@ -295,11 +374,20 @@ interface IGuardianRegistryV15 is IGuardianRegistry {
     function commissionOf(address delegate) external view returns (uint256);
     function commissionAtEpoch(address delegate, uint256 epochId) external view returns (uint256);
 
-    // Reward claims
+    // Epoch-pool reward claims
     function claimEpochReward(uint256 epochId) external; // overrides V1 — now two-step
     function claimDelegatorReward(address delegate, uint256 epochId) external;
     function pendingDelegatorReward(address delegator, address delegate, uint256 epochId)
         external view returns (uint256);
+
+    // Guardian-fee reward claims (proposal-level, approver-only)
+    function fundProposalGuardianPool(uint256 proposalId, address asset, uint256 amount) external; // onlyGovernor
+    function claimProposalReward(uint256 proposalId) external;                                     // approver pulls
+    function claimDelegatorProposalReward(address delegate, uint256 proposalId) external;          // delegator pulls
+    function pendingProposalReward(uint256 proposalId, address approver) external view returns (uint256);
+    function pendingDelegatorProposalReward(address delegator, address delegate, uint256 proposalId)
+        external view returns (uint256);
+    function proposalGuardianPool(uint256 proposalId) external view returns (address asset, uint256 amount, uint64 settledAt);
 
     // Events
     event DelegationIncreased(address indexed delegator, address indexed delegate, uint256 amount);
@@ -313,10 +401,116 @@ interface IGuardianRegistryV15 is IGuardianRegistry {
     event EpochRewardSplit(
         address indexed delegate, uint256 indexed epochId, uint256 gross, uint256 commission, uint256 remainder
     );
+    event ProposalGuardianPoolFunded(uint256 indexed proposalId, address indexed asset, uint256 amount);
+    event ApproverRewardClaimed(
+        uint256 indexed proposalId, address indexed approver, uint256 gross, uint256 commission, uint256 remainder
+    );
+    event DelegatorProposalRewardClaimed(
+        address indexed delegator, address indexed delegate, uint256 indexed proposalId, uint256 share
+    );
 }
 ```
 
 ---
+
+## 6a. Governor additions (V1.5)
+
+### New parameter: `guardianFeeBps`
+
+Standard timelocked parameter (queue → delay → finalize → cancel pattern, like every other fee param):
+
+```solidity
+// GovernorParameters bounds
+uint256 public constant MAX_GUARDIAN_FEE_BPS = 500;  // 5%
+bytes32 public constant PARAM_GUARDIAN_FEE_BPS = keccak256("guardianFeeBps");
+
+// Storage (appended to SyndicateGovernor)
+uint256 private _guardianFeeBps;
+
+// Setter (in GovernorParameters virtual chain)
+function setGuardianFeeBps(uint256 newBps) external onlyOwner {
+    _queueChange(PARAM_GUARDIAN_FEE_BPS, newBps);
+}
+
+// Validation (in _applyChange dispatcher)
+if (key == PARAM_GUARDIAN_FEE_BPS) {
+    require(newValue <= MAX_GUARDIAN_FEE_BPS, InvalidGuardianFeeBps());
+    uint256 old = _guardianFeeBps;
+    _guardianFeeBps = newValue;
+    return old;
+}
+```
+
+**Launch default:** 100 bps (1%). Owner-timelocked, adjustable up to 500 bps cap.
+
+### Fee waterfall change in `_distributeFees`
+
+```solidity
+function _distributeFees(
+    uint256 proposalId, address vault, address asset, address proposer, uint256 perfFeeBps, uint256 profit
+) internal returns (uint256 agentFee, uint256 totalFee) {
+    uint256 protocolFee = 0;
+    uint256 guardianFee = 0;
+
+    if (_protocolFeeBps > 0) {
+        protocolFee = (profit * _protocolFeeBps) / 10000;
+        if (protocolFee > 0) {
+            if (_protocolFeeRecipient == address(0)) revert InvalidProtocolFeeRecipient();
+            _payFee(vault, asset, _protocolFeeRecipient, protocolFee);
+        }
+    }
+
+    if (_guardianFeeBps > 0) {                                              // ← NEW BRANCH
+        guardianFee = (profit * _guardianFeeBps) / 10000;
+        if (guardianFee > 0) {
+            address registry = _getRegistry();
+            if (registry == address(0)) revert RegistryNotSet();
+            ISyndicateVault(vault).transferPerformanceFee(asset, registry, guardianFee);
+            IGuardianRegistry(registry).fundProposalGuardianPool(proposalId, asset, guardianFee);
+        }
+    }
+
+    uint256 remaining = profit - protocolFee - guardianFee;
+    agentFee = (remaining * perfFeeBps) / 10000;
+    if (agentFee > 0) {
+        _distributeAgentFee(proposalId, vault, asset, proposer, agentFee);
+    }
+
+    uint256 netRemaining = remaining - agentFee;
+    uint256 mgmtFee = (netRemaining * ISyndicateVault(vault).managementFeeBps()) / 10000;
+    if (mgmtFee > 0) {
+        _payFee(vault, asset, OwnableUpgradeable(vault).owner(), mgmtFee);
+    }
+
+    totalFee = protocolFee + guardianFee + agentFee + mgmtFee;
+    return (agentFee, totalFee);
+}
+```
+
+**Bytecode impact:** ~80 bytes added to `SyndicateGovernor`. Current margin: 46 bytes under CI gate, 72 under EIP-170 → tight but feasible. Reclaim options if needed: drop `ProposalGuardianPoolFunded` event emission (mirrored in registry event), share `_getRegistry()` lookup across `_fundGuardianPool` and existing registry-call sites.
+
+### Registry call hook: `fundProposalGuardianPool`
+
+```solidity
+// In GuardianRegistry
+function fundProposalGuardianPool(uint256 proposalId, address asset, uint256 amount) external {
+    if (msg.sender != governor) revert OnlyGovernor();
+    if (amount == 0) return;
+    // asset is trusted — governor just transferred it in; re-check balance as defense:
+    // (omitted for brevity — spec invariant INV-V1.5-4)
+
+    // Look up settledAt from governor if not already set
+    uint64 settledAt = uint64(block.timestamp);
+
+    _proposalGuardianPool[proposalId] = ProposalRewardPool({
+        asset: asset,
+        amount: uint128(amount),
+        settledAt: settledAt
+    });
+
+    emit ProposalGuardianPoolFunded(proposalId, asset, amount);
+}
+```
 
 ## 7. Voting weight integration
 
@@ -363,6 +557,17 @@ Since this is a fresh deployment (not an upgrade of an already-deployed V1 regis
 `SyndicateGovernor` unchanged by V1.5. Still at 24,504.
 
 ---
+
+## 9a. Guardian-fee test matrix additions
+
+- Settle proposal with `guardianFeeBps > 0`, 2 approvers of different weights → each claims pro-rata share
+- Settle with `guardianFeeBps == 0` → no pool funded, claim reverts with `NoPoolFunded`
+- Settle with 0 profit → `guardianFee == 0` → no pool funded (no division-by-zero on claim since `r.approveStakeWeight` could be arbitrary)
+- Blocked proposal → never settles → no pool → no approver can claim (view returns 0)
+- Approver + delegator commission split — verify `commission + sum(delegator shares) == gross`
+- Double-claim reverts
+- W-1 escrow: approver blacklisted on USDC → `commission` transfer fails → escrowed in `_unclaimedApproverFees` → claim after unblacklist works
+- Fee-sum invariant extended: `protocolFee + guardianFee + agentFee + mgmtFee <= grossPnL` (INV-V1.5-10)
 
 ## 10. Test matrix (V1.5)
 
