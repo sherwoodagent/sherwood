@@ -37,12 +37,15 @@ export interface OrderParams {
   takeProfit: number;
 }
 
-/** Score-based position sizing multiplier. Higher-conviction entries get larger positions. */
-function convictionMultiplier(score: number): number {
-  const absScore = Math.abs(score);
-  if (absScore >= 0.45) return 2.0;
-  if (absScore >= 0.35) return 1.5;
-  return 1.0;
+/** Score-based position sizing multiplier.
+ *  Nunchi autoresearch (103 experiments): removing strength/volume scaling
+ *  improved Sharpe by +1.7. Uniform position sizing beats conviction-weighted
+ *  because the score predicts DIRECTION, not MAGNITUDE. A high-score entry
+ *  isn't more likely to be a BIG winner — it's just more likely to be RIGHT.
+ *  Oversizing on high scores amplifies losses on the 40% that still stop out.
+ *  Kept as a function for easy revert if calibration proves otherwise. */
+function convictionMultiplier(_score: number): number {
+  return 1.0; // uniform sizing — autoresearch-proven
 }
 
 export class TradeExecutor {
@@ -185,10 +188,14 @@ export class TradeExecutor {
     const isShort = decision.action === 'SELL' || decision.action === 'STRONG_SELL';
     const direction: 'long' | 'short' = isShort ? 'short' : 'long';
     const RR_RATIO = 2.0;
-    const ATR_STOP_MULTIPLIER = 1.5;
-    const STOP_FLOOR = 0.02;   // minimum 2%
-    const STOP_CAP = 0.10;     // maximum 10%
-    const FALLBACK_STOP = 0.03; // when no ATR available
+    // Nunchi autoresearch (103 experiments): wider ATR stops let winners run.
+    // Their optimal was 5.5x ATR; we use 3.5x as a compromise between letting
+    // winners breathe and controlling loss on stopped trades. Prior 1.5x was
+    // too tight — 64% of trades hit the stop, many of which reversed after.
+    const ATR_STOP_MULTIPLIER = 3.5;
+    const STOP_FLOOR = 0.03;   // minimum 3% (was 2%)
+    const STOP_CAP = 0.15;     // maximum 15% (was 10% — wider stops need more room)
+    const FALLBACK_STOP = 0.05; // when no ATR available (was 3%)
 
     const atrPct = (atr && currentPrice > 0 && !isNaN(atr))
       ? atr / currentPrice

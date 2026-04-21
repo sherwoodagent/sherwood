@@ -506,19 +506,19 @@ describe("RiskManager", () => {
       });
       // rm uses DEFAULT_RISK_CONFIG — trailing is now ON by default.
       // HWM: peak=150, highest-triggered tier (+20%) → 100 + (150-100)*0.85 = 142.50.
-      // Percent-trail: 150 × (1 - 0.025) = 146.25. Trail wins (higher stop).
+      // Percent-trail: 150 × (1 - 0.04) = 144.00. Trail wins (higher stop).
       const [updated] = rm.updateTrailingStops([pos]);
-      expect(updated!.stopLoss).toBe(146.25);
+      expect(updated!.stopLoss).toBe(144);
     });
 
-    it("moves stop to breakeven after +1.5% gain", () => {
+    it("moves stop to breakeven after +3% gain", () => {
       const pos = makePosition({
         entryPrice: 100,
-        currentPrice: 101.6, // +1.6% triggers breakeven (1.5%) but no HWM tier (first is +5%)
+        currentPrice: 103.5, // +3.5% triggers breakeven (3%) but no HWM tier (first is +5%)
         stopLoss: 97,
       });
       const [updated] = trailingRm.updateTrailingStops([pos]);
-      // breakeven → 100; percent-trail 2.5% → 99.06; max = 100
+      // breakeven → 100; percent-trail 4% → 103.5*0.96=99.36; max = 100
       expect(updated!.stopLoss).toBe(100);
     });
 
@@ -530,9 +530,9 @@ describe("RiskManager", () => {
       });
       const [updated] = trailingRm.updateTrailingStops([pos]);
       // peak=105, lock = 100 + (105-100)*0.30 = 101.50
-      // breakeven → 100; percent-trail 105*0.975 = 102.375
-      // max(97, 100, 101.50, 102.375) = 102.375
-      expect(updated!.stopLoss).toBeCloseTo(102.375, 2);
+      // breakeven → 100; percent-trail 105*0.96 = 100.80
+      // max(97, 100, 101.50, 100.80) = 101.50 (HWM lock wins)
+      expect(updated!.stopLoss).toBeCloseTo(101.50, 2);
       expect(updated!.peakPrice).toBe(105);
     });
 
@@ -544,8 +544,8 @@ describe("RiskManager", () => {
       });
       const [updated] = trailingRm.updateTrailingStops([pos]);
       // peak=110; +10% tier (lockPct=0.50) → 100 + 10*0.50 = 105.
-      // percent-trail 110*0.975 = 107.25. Max = 107.25.
-      expect(updated!.stopLoss).toBeCloseTo(107.25, 2);
+      // percent-trail 110*0.96 = 105.60. Trail wins (105.60 > 105).
+      expect(updated!.stopLoss).toBeCloseTo(105.60, 2);
     });
 
     it("percent-trail beats HWM lock at large gains", () => {
@@ -555,8 +555,8 @@ describe("RiskManager", () => {
         stopLoss: 97,
       });
       const [updated] = trailingRm.updateTrailingStops([pos]);
-      // HWM lock = 100 + 15*0.70 = 110.50. Trail = 115*0.975 = 112.125. Trail wins.
-      expect(updated!.stopLoss).toBeCloseTo(112.125, 2);
+      // HWM lock = 100 + 15*0.70 = 110.50. Trail = 115*0.96 = 110.40. HWM lock wins.
+      expect(updated!.stopLoss).toBeCloseTo(110.50, 2);
     });
 
     it("never moves stop down (peak updates but stopLoss pinned)", () => {
@@ -880,8 +880,8 @@ describe("RiskManager", () => {
       const pos1 = makePosition({ entryPrice: 100, currentPrice: 110, stopLoss: 97 });
       const [c1] = hwmRm.updateTrailingStops([pos1]);
       const lockAfterC1 = c1!.stopLoss;
-      // 100 + 10*0.50 = 105 vs trail 110*0.975 = 107.25 → 107.25
-      expect(lockAfterC1).toBeCloseTo(107.25, 2);
+      // 100 + 10*0.50 = 105 vs trail 110*0.96 = 105.6 → 105.6 (trail wins by tiny margin)
+      expect(lockAfterC1).toBeCloseTo(105.6, 2);
 
       // Cycle 2: retrace to 108 (still +8%). stopLoss must NOT decrease.
       const pos2 = { ...c1!, currentPrice: 108 };
@@ -889,7 +889,7 @@ describe("RiskManager", () => {
       expect(c2!.stopLoss).toBeGreaterThanOrEqual(lockAfterC1);
 
       // Cycle 3: new peak at 120 (+20%) — tier 0.85 applies on peak=120.
-      // 100 + 20*0.85 = 117. Trail = 120*0.975 = 117. Max = 117.
+      // 100 + 20*0.85 = 117. Trail = 120*0.96 = 115.2. Lock wins → 117.
       const pos3 = { ...c2!, currentPrice: 120 };
       const [c3] = hwmRm.updateTrailingStops([pos3]);
       expect(c3!.stopLoss).toBeCloseTo(117, 2);

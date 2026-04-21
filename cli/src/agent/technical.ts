@@ -289,7 +289,10 @@ export function getLatestSignals(candles: Candle[]): TechnicalSignals {
     return NaN;
   };
 
-  const rsiArr = calculateRSI(candles, 14);
+  // RSI(8) outperforms RSI(14) on hourly crypto — Nunchi autoresearch finding:
+  // +4.9 Sharpe from this single change across 103 experiments. Hourly crypto
+  // needs faster indicators than the traditional 14-period standard.
+  const rsiArr = calculateRSI(candles, 8);
   const macdResult = calculateMACD(candles, 12, 26, 9);
   const bbResult = calculateBollingerBands(candles, 20, 2.0);
   const closes = candles.map((c) => c.close);
