@@ -266,9 +266,12 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
+    /// @dev Fail-closed on missing governor: if the factory is misconfigured
+    ///      and `governor() == address(0)`, deposits / withdrawals / rescues
+    ///      must NOT silently unlock. Revert instead.
     function redemptionsLocked() public view returns (bool) {
         address gov = _getGovernor();
-        if (gov == address(0)) return false;
+        if (gov == address(0)) revert GovernorNotSet();
         return ISyndicateGovernor(gov).getActiveProposal(address(this)) != 0;
     }
 

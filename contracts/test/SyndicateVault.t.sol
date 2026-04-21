@@ -83,9 +83,15 @@ contract SyndicateVaultTest is Test {
         vm.prank(owner);
         vault.registerAgent(agent1NftId, agentAddr);
 
-        // Mock factory.governor() to return address(0) (no governor = deposits allowed)
-        vm.mockCall(address(this), abi.encodeWithSignature("governor()"), abi.encode(address(0)));
+        // Mock factory.governor() to return a non-zero placeholder, with
+        // getActiveProposal → 0 so deposits/withdrawals stay unlocked by default.
+        // `redemptionsLocked()` fails closed on governor == address(0).
+        vm.mockCall(address(this), abi.encodeWithSignature("governor()"), abi.encode(MOCK_GOVERNOR));
+        vm.mockCall(MOCK_GOVERNOR, abi.encodeWithSignature("getActiveProposal(address)"), abi.encode(uint256(0)));
     }
+
+    /// @dev Deterministic placeholder for factory.governor() in tests.
+    address internal constant MOCK_GOVERNOR = address(0xF00D);
 
     // ==================== INITIALIZATION ====================
 
@@ -210,6 +216,19 @@ contract SyndicateVaultTest is Test {
         (bool success,) = address(vault).call{value: 1 ether}("");
         assertTrue(success);
         assertEq(address(vault).balance, 1 ether);
+    }
+
+    // ==================== REDEMPTIONS LOCKED (I-1) ====================
+
+    /// @dev I-1: `redemptionsLocked()` must fail closed when the factory
+    ///      returns a zero governor. Any misconfig should block deposits /
+    ///      withdrawals / rescues instead of silently unlocking them.
+    function test_redemptionsLocked_revertsIfGovernorZero() public {
+        // Re-mock the factory to return address(0) as governor.
+        vm.mockCall(address(this), abi.encodeWithSignature("governor()"), abi.encode(address(0)));
+
+        vm.expectRevert(ISyndicateVault.GovernorNotSet.selector);
+        vault.redemptionsLocked();
     }
 
     // ==================== DEPOSITOR WHITELIST ====================
