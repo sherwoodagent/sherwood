@@ -103,6 +103,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 
 - `which sherwood` → `~/.linuxbrew/bin/sherwood` → symlinks into the **local `cli/dist/index.js`**. `npm run build` is enough to deploy changes — no `npm install -g` needed. Cron picks up rebuilds immediately.
 - `sherwood agent start --auto --cycle 1` — runs ONE dry-run cycle, then exits. Used by the hermes trade-scanner cron. For continuous runs use `--cycle 15m`.
+- `sherwood agent start --auto --cycle 5m --use-judge` — persistent agent loop via systemd. Manage: `systemctl --user {start|stop|restart|status} sherwood-agent`. Logs: `journalctl --user -u sherwood-agent -f`.
 - `sherwood agent summary` — deterministic formatted message for XMTP/Telegram. Pipe to `chat send --stdin`.
 - `sherwood chat <name> send --stdin` — pipe via stdin to avoid bash `$`-expansion (`$10,000` → `0,000`). Required for any dynamic message containing `$`. Added in 0.40.2.
 - CoinGecko free tier: 30 calls/min, circuit breaker trips on 429 (5-min cooldown). HL candles are the PRIMARY candle source since 0.44.0 — CG OHLC is fallback only.
@@ -113,7 +114,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 
 - **Candle path** (`sherwood agent calibrate`) — re-fetches OHLC from CoinGecko and recomputes signals from candles only. **Cannot replay HL flow / fundingRate / smartMoney** (those need live data). Output is a lower bound on production performance; many configs show 0 trades because the candle-only signal stack rarely fires.
 - **Replay path** (`sherwood agent calibrate --from-history`) — replays captured production signals from `signal-history.jsonl`. Far truer to live behavior. Add `--last <days>` after a scoring change to ignore stale rows captured under the prior code.
-- Backtester is direction-aware: `Position.side` + SHORT entries on SELL signals; exit math (stop/TP/trail) flips for shorts. Ranging-regime BUY threshold currently `0.15`, SELL `-0.08`.
+- Backtester is direction-aware: `Position.side` + SHORT entries on SELL signals; exit math (stop/TP/trail) flips for shorts. Ranging-regime BUY threshold currently `0.15`, SELL `-0.20`. Minimum conviction gate: |score| >= 0.12 in executor.
 
 ### Agent State Files (`~/.sherwood/agent/`)
 
@@ -122,6 +123,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - `portfolio.json` — positions, cash, PnL counters. Atomic write via `.tmp` rename.
 - `trades.json` — closed-trade history (entry/exit/PnL/reason).
 - `calibration-results.json` / `replay-calibration-results.json` — last calibrator run output.
+- `grid-portfolio.json` — grid strategy state: per-token levels, open fills, cumulative PnL, allocation. Isolated from directional `portfolio.json`.
 
 ## Chat (XMTP)
 
@@ -197,6 +199,7 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 - CLI: vitest (when wired up)
 - Always include test results in PR description
 - `cli/src/lib/network.test.ts` has 4 pre-existing failures from `BASE_RPC_URL` env-var leak (Moonwell RPC override). Always verify with `git stash && npm test` before assuming new test failures are from your changes.
+- **systemd services** need `Environment="NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"` — linuxbrew Node.js can't find CA certs without it. All HTTPS fetch calls fail silently with `TypeError: fetch failed`.
 
 ## Key Addresses (Base)
 
