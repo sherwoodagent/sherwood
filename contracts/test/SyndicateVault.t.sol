@@ -176,6 +176,44 @@ contract SyndicateVaultTest is Test {
         assertEq(vault.getAgentCount(), 0);
     }
 
+    /// @dev V-M5: after `removeAgent`, the `_agents[agentAddress]` struct must
+    ///      be fully deleted, not just `active = false`. Otherwise a later
+    ///      `registerAgent` for the same address would silently leak the old
+    ///      `agentId` into the new entry if the caller assumed struct fields
+    ///      were untouched. We assert:
+    ///      1. After remove, `getAgentConfig` returns the zero struct.
+    ///      2. After re-register with a new `agentId`, the stored fields match
+    ///         the *new* args, not the old.
+    function test_removeAgent_deletesStructData() public {
+        // Pre-condition: agent registered in setUp with `agent1NftId`.
+        ISyndicateVault.AgentConfig memory before = vault.getAgentConfig(agentAddr);
+        assertEq(before.agentId, agent1NftId);
+        assertTrue(before.active);
+
+        // Remove
+        vm.prank(owner);
+        vault.removeAgent(agentAddr);
+
+        // 1. Struct must be wiped (not just `active = false`).
+        ISyndicateVault.AgentConfig memory afterRemove = vault.getAgentConfig(agentAddr);
+        assertEq(afterRemove.agentId, 0, "agentId not cleared");
+        assertEq(afterRemove.agentAddress, address(0), "agentAddress not cleared");
+        assertFalse(afterRemove.active, "active not cleared");
+
+        // 2. Re-register with a fresh NFT (different id) owned by the same
+        //    agent address — fields must reflect the new args, not old.
+        uint256 newNftId = agentRegistry.mint(agentAddr);
+        assertTrue(newNftId != agent1NftId, "test setup: new id must differ");
+
+        vm.prank(owner);
+        vault.registerAgent(newNftId, agentAddr);
+
+        ISyndicateVault.AgentConfig memory reRegistered = vault.getAgentConfig(agentAddr);
+        assertEq(reRegistered.agentId, newNftId, "re-register: id reflects new");
+        assertEq(reRegistered.agentAddress, agentAddr, "re-register: addr");
+        assertTrue(reRegistered.active, "re-register: active");
+    }
+
     // ==================== BATCH EXECUTION (V-C3: executeBatch removed) ====================
 
     /// @dev V-C3: owner-direct `executeBatch(BatchExecutorLib.Call[])` was removed.

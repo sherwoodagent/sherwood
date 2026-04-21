@@ -262,10 +262,16 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
+    /// @dev V-M5: fully delete the `_agents[agentAddress]` struct (not just
+    ///      flip `active = false`). This prevents stale `agentId` /
+    ///      `agentAddress` fields from being silently reused if `registerAgent`
+    ///      is later called for the same slot. After `removeAgent`,
+    ///      `getAgentConfig(addr)` returns the zero struct, and a subsequent
+    ///      `registerAgent(newId, addr)` writes a fresh entry.
     function removeAgent(address agentAddress) external onlyOwner {
         if (!_agents[agentAddress].active) revert AgentNotActive();
 
-        _agents[agentAddress].active = false;
+        delete _agents[agentAddress];
         _agentSet.remove(agentAddress);
 
         emit AgentRemoved(agentAddress);
