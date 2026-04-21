@@ -511,6 +511,49 @@ contract SyndicateVaultTest is Test {
         assertEq(vault.convertToShares(1e6), 1e12, "convertToShares drifted after asset mock");
     }
 
+    /// @dev V-M2: tighter regression on the 1-wei-deposit donation attack.
+    ///      Pins the expected share bookkeeping at each step and requires the
+    ///      victim to retain `>=99%` of their deposit value. If someone ever
+    ///      reverts `_decimalsOffset` back to a constant 0, this turns red
+    ///      alongside `test_inflationAttack_mitigated` below.
+    function test_inflationAttack_1weiDeposit_blocked() public {
+        address attacker = makeAddr("attacker_v_m2");
+        address victim = makeAddr("victim_v_m2");
+
+        usdc.mint(attacker, 2_000_000e6);
+        usdc.mint(victim, 10_000e6);
+
+        // Step 1: attacker deposits 1 wei. With _decimalsOffset() = 6 (USDC),
+        // the 1-wei deposit yields `1 * 10**offset` shares via ERC-4626 virtual
+        // shares.
+        vm.startPrank(attacker);
+        usdc.approve(address(vault), 1);
+        vault.deposit(1, attacker);
+        vm.stopPrank();
+
+        uint8 offset = 6;
+        assertEq(vault.balanceOf(attacker), uint256(1) * 10 ** offset, "attacker share accounting");
+
+        // Step 2: attacker donates 1M USDC directly (not via deposit) trying
+        // to inflate share price so the victim's shares round to zero.
+        vm.prank(attacker);
+        usdc.transfer(address(vault), 1_000_000e6);
+
+        // Step 3: victim deposits 100 USDC. Without inflation protection they'd
+        // receive 0 shares. With protection the deposit is proportional and
+        // redeemable.
+        uint256 victimDepositAmount = 100e6;
+        vm.startPrank(victim);
+        usdc.approve(address(vault), victimDepositAmount);
+        uint256 victimShares = vault.deposit(victimDepositAmount, victim);
+        vm.stopPrank();
+
+        assertGt(victimShares, 0, "inflation attack would give victim 0 shares");
+
+        uint256 victimAssets = vault.convertToAssets(victimShares);
+        assertGe(victimAssets, (victimDepositAmount * 99) / 100, "victim loses >1% to inflation");
+    }
+
     function test_inflationAttack_mitigated() public {
         // Classic ERC-4626 inflation attack:
         // 1. Attacker deposits 1 wei, gets shares
