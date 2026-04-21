@@ -156,7 +156,7 @@ Grouped by domain. All require separate PRs.
 |---|---|---|---|---|
 | I-1 ✅ | HIGH | `SyndicateVault.redemptionsLocked()` | `if (gov == address(0)) return false` | Closed — reverts `GovernorNotSet` (`d8bdf00`) |
 | I-2 | HIGH | `PortfolioStrategy` | `chainlinkVerifier == 0` accepted at init | Require non-zero |
-| I-3 | HIGH | `SyndicateGovernor._distributeFees` | `recipient == 0` silently skips the protocol fee | Require recipient non-zero when `bps > 0` (partial guard exists at init — also enforce at fee-distribution time) |
+| I-3 ✅ | HIGH | `SyndicateGovernor._distributeFees` | `recipient == 0` silently skips the protocol fee | Closed — `_applyProtocolFeeBpsChange` re-asserts the `bps > 0 ⇒ recipient != 0` invariant at finalize time; `_distributeFees` now reverts instead of silent-skip. Regression tests in `test/governor/ProtocolFeeRecipientTimelock.t.sol`. |
 | I-6 | HIGH | `PortfolioStrategy` + `AerodromeLPStrategy` | `amountOutMin = 0` | S-C4 fix |
 | I-13 | MED | `MoonwellSupplyStrategy`, `MamoYieldStrategy`, `HyperliquidPerpStrategy` | `minRedeemAmount = 0` | Require non-zero; document semantic |
 | I-14 | LOW | `VeniceInferenceStrategy` | `repaymentAmount = 1` allowed via `updateParams` | Minimum bound |

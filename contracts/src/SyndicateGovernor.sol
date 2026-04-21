@@ -663,6 +663,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     }
 
     function _applyProtocolFeeBpsChange(uint256 newValue) internal override returns (uint256 old) {
+        // I-3: defence-in-depth — the same check runs in `_validateForFinalize`
+        // a moment earlier, but re-asserting here closes any future path that
+        // bypasses the dispatcher (e.g. a new setter wired directly to this
+        // virtual). bps > 0 must always imply a non-zero recipient.
+        if (newValue > 0 && _protocolFeeRecipient == address(0)) revert InvalidProtocolFeeRecipient();
         old = _protocolFeeBps;
         _protocolFeeBps = newValue;
     }
@@ -903,10 +908,15 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ) internal returns (uint256 agentFee, uint256 totalFee) {
         uint256 protocolFee = 0;
 
-        // Protocol fee taken first from gross profit
-        if (_protocolFeeBps > 0 && _protocolFeeRecipient != address(0)) {
+        // Protocol fee taken first from gross profit.
+        // I-3: `bps > 0 ⇒ recipient != 0` is enforced at every write site
+        // (initialize + _applyProtocolFeeBpsChange + _validateForFinalize);
+        // previously this branch silently skipped the fee if a future path
+        // violated the invariant. We now assert instead so the bug is loud.
+        if (_protocolFeeBps > 0) {
             protocolFee = (profit * _protocolFeeBps) / 10000;
             if (protocolFee > 0) {
+                if (_protocolFeeRecipient == address(0)) revert InvalidProtocolFeeRecipient();
                 _payFee(vault, asset, _protocolFeeRecipient, protocolFee);
             }
         }

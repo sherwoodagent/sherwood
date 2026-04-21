@@ -158,4 +158,56 @@ contract ProtocolFeeRecipientTimelockTest is Test {
         vm.expectRevert();
         governor.setProtocolFeeRecipient(recipient2);
     }
+
+    // ==================== I-3: bps > 0 ⇒ recipient ≠ 0 invariant ====================
+
+    /// @notice I-3: finalizing a PARAM_PROTOCOL_FEE_BPS > 0 change must revert
+    ///         if the recipient has been zeroed out since queue time. Defense
+    ///         in depth — `_validateForFinalize` catches it first and
+    ///         `_applyProtocolFeeBpsChange` re-asserts the same invariant.
+    /// @dev Storage slot 0x1b is `_protocolFeeRecipient` (see governor storage
+    ///      layout; used by the TOCTOU test in the main governor suite).
+    function test_applyProtocolFeeBps_revertsIfRecipientZero() public {
+        bytes32 bpsKey = governor.PARAM_PROTOCOL_FEE_BPS();
+
+        vm.startPrank(owner);
+        governor.setProtocolFeeBps(500);
+        vm.warp(block.timestamp + PARAM_CHANGE_DELAY + 1);
+
+        // Zero the recipient storage slot to simulate a TOCTOU between queue
+        // and finalize. The setter path can't zero it directly (see
+        // `test_setProtocolFeeRecipient_revertsZeroAddress`), so storage hack
+        // is the only way to hit this branch in a unit test.
+        assertNotEq(governor.protocolFeeRecipient(), address(0));
+        vm.store(address(governor), bytes32(uint256(0x1b)), bytes32(0));
+        assertEq(governor.protocolFeeRecipient(), address(0));
+
+        vm.expectRevert(ISyndicateGovernor.InvalidProtocolFeeRecipient.selector);
+        governor.finalizeParameterChange(bpsKey);
+        vm.stopPrank();
+
+        // Storage state unchanged — bps still 200 (init value).
+        assertEq(governor.protocolFeeBps(), 200);
+    }
+
+    /// @notice I-3: finalizing a PARAM_PROTOCOL_FEE_BPS == 0 change with a
+    ///         zero recipient is still allowed — the invariant only bites when
+    ///         bps > 0.
+    function test_applyProtocolFeeBps_allowsZeroWithZeroRecipient() public {
+        bytes32 bpsKey = governor.PARAM_PROTOCOL_FEE_BPS();
+
+        vm.startPrank(owner);
+        governor.setProtocolFeeBps(0);
+        vm.warp(block.timestamp + PARAM_CHANGE_DELAY + 1);
+
+        // Zero the recipient.
+        vm.store(address(governor), bytes32(uint256(0x1b)), bytes32(0));
+        assertEq(governor.protocolFeeRecipient(), address(0));
+
+        // bps = 0 with recipient = 0 is fine.
+        governor.finalizeParameterChange(bpsKey);
+        vm.stopPrank();
+
+        assertEq(governor.protocolFeeBps(), 0);
+    }
 }
