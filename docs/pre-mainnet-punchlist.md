@@ -55,7 +55,7 @@ PR #229 directly addresses a specific subset. All other items remain open.
 | Ref | Original finding | What #229 did | What's still open |
 |---|---|---|---|
 | #225 G-C6 | `nonReentrant` missing from `vote` / `vetoProposal` / `emergencyCancel` | All new registry state-mutating externals use `nonReentrant` (e.g. `stakeAsGuardian`, `resolveReview`, `claimEpochReward`). New governor emergency path is reentrancy-safe via CEI + registry's own guard. | Legacy governor `vote`, `vetoProposal`, `cancelProposal` are untouched by #229. Still need modifiers in a separate PR. |
-| #226 §3.5 | Zero invariant tests, 48 listed, priority INV-2/-3/-11/-15/-23 | Shipped guardian-specific harness (3 invariants), then `ProtocolInvariants.t.sol` closing **INV-2** (fee-sum bound), **INV-3** (single-active-proposal), **INV-30** (protocol-fee recipient non-zero when bps > 0), **INV-33** (registry-address immutability factory == governor), **INV-46** (pause semantics). Commit `bf0e4cd`. | **INV-11** (co-prop splits), **INV-15** (veWOOD conservation), **INV-23** (strategy asset conservation) still need harnesses. |
+| #226 §3.5 | Zero invariant tests, 48 listed, priority INV-2/-3/-11/-15/-23 | Shipped guardian-specific harness (3 invariants), then `ProtocolInvariants.t.sol` closing **INV-2** (fee-sum bound), **INV-3** (single-active-proposal), **INV-30** (protocol-fee recipient non-zero when bps > 0), **INV-33** (registry-address immutability factory == governor), **INV-46** (pause semantics) in `bf0e4cd`; **INV-11** (co-proposer split math sum equals agentFee) added as a property test in `12deb4d`. | **INV-15** (veWOOD conservation) and **INV-23** (strategy asset conservation) are deferred to their respective branches — tokenomics and strategies are out-of-scope for this protocol-only branch per #236's boundary. |
 
 ### Not addressed by #229
 
@@ -86,7 +86,7 @@ Grouped by domain. All require separate PRs.
 | V-M4 ✅ | `isApprovedDepositor(receiver)` receiver-only check undocumented | LOW | Closed — NatSpec documents the KYC intent + override recipe (`ebe3036`) |
 | V-M5 ✅ | `removeAgent` leaves stale `AgentConfig` struct data | MED | Closed — `delete _agents[agentAddress]` fully wipes slot (`78c5afb`) |
 | V-M6 ✅ | Agent NFT ownership not re-checked post-registration | LOW | Closed — documented snapshot-at-registration semantics (`5660331`) |
-| V-M7 | Factory-side analogue (tracked elsewhere) | — | Out of scope for vault fixes; factory agent owns this. |
+| V-M7 ✅ | `createSyndicate` accepts zero/empty `SyndicateConfig` fields | MED | Closed — consolidated entrypoint check reverts `InvalidSyndicateConfig` for zero `asset`, empty `name` / `symbol` / `subdomain` / `metadataURI` (`03c9390`). Regression tests: `test/SyndicateFactory.t.sol` (5 cases). |
 | V-M8 ✅ | No regression test on fee-sum ≤ pnl invariant | MED | Closed — fuzz + pinned worst-case pure-math tests (`f04e9f6`) |
 | V-M9 ✅ | `executeGovernorBatch` emits no event — no vault-level execution marker | LOW | Closed — `GovernorBatchExecuted(governor, callCount)` event (`f606811`) |
 | I-1 ✅ | `redemptionsLocked()` fails open on `gov == 0` | — | Closed — reverts `GovernorNotSet` (`d8bdf00`) |
@@ -214,7 +214,7 @@ Each row is a **doc update** (not a code change). `mintlify-docs/` changes route
 | 3.2 | Every Critical in #225 lacks a PoC test | 🧪 test-only | 26 items; red → fix → green per item |
 | 3.3 | Missing fork tests: Synthra (none), Hyperliquid (mock only), Mamo (no real factory), Chainlink Data Streams, wstETH/ETH on Base, Create3 squat | 🧪 test-only | Add integration suites |
 | 3.4 | No test file at all for: `Create3Factory`, `SynthraSwapAdapter`, `SynthraDirectAdapter`, `L1Write`, `L1Read`, `WoodToken` (LZ cross-chain), `VaultRewardsDistributor` flash-deposit, `MockSwapAdapter` | 🧪 test-only | Create suites |
-| 3.5 | Zero invariant / property tests (`grep invariant_ test/` returns 0) | 🟡 partial-in-229 (`963e565`, `bf0e4cd`) | 3 guardian invariants (`963e565`) + 5 protocol invariants INV-2/-3/-30/-33/-46 (`bf0e4cd`) shipped. INV-11 / -15 / -23 still open — 48 invariants total in #226 §8; ship handler + echidna config. |
+| 3.5 | Zero invariant / property tests (`grep invariant_ test/` returns 0) | 🟡 partial-in-229 (`963e565`, `bf0e4cd`, `12deb4d`) | 3 guardian invariants (`963e565`) + 5 protocol invariants INV-2/-3/-30/-33/-46 (`bf0e4cd`) + INV-11 co-proposer split property test (`12deb4d`) shipped. INV-15 (veWOOD conservation) + INV-23 (strategy asset conservation) are deferred to tokenomics / strategies branches per #236's scope boundary. 48 invariants total in #226 §8; ship handler + echidna config for remaining. |
 
 ---
 
@@ -243,7 +243,7 @@ Ranked by effort-to-impact. PR #229 doesn't touch items 1–5, 7, 8, 9; it lands
 6. Fix doc↔code mismatches (§6 above).
 7. Wire `maxSlippageBps` → `amountOutMin` in `PortfolioStrategy`.
 8. Rotate all owners to `TimelockController` + Gnosis Safe.
-9. Echidna harness for the 48 invariants (priority: INV-2, -3, -11, -15, -23). 🟡 **partial in #229** (`963e565` — 3 guardian-scope invariants; `bf0e4cd` — INV-2 / -3 / -30 / -33 / -46).
+9. Echidna harness for the 48 invariants (priority: INV-2, -3, -11, -15, -23). 🟡 **partial in #229** (`963e565` — 3 guardian-scope invariants; `bf0e4cd` — INV-2 / -3 / -30 / -33 / -46; `12deb4d` — INV-11 co-proposer split property test). INV-15 / -23 deferred to tokenomics / strategies branches per #236 scope.
 10. ~~CI size gate: `forge build --sizes` must fail if `SyndicateGovernor > 24,500` bytes.~~ ✅ **done in #229** (`607386e` — gate at 24,400).
 11. Document invariants at call sites (#226 §10.3).
 12. Add `Pausable` across tokenomics contracts. (Registry now has pause + 7d deadman — tokenomics still outstanding.)
