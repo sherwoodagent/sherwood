@@ -144,7 +144,7 @@ Grouped by domain. All require separate PRs.
 
 | Ref | Finding | Severity | Fix |
 |---|---|---|---|
-| W-1 | USDC blacklist bricks settlement. If lead proposer / co-proposer / protocol-fee recipient / vault owner is USDC-blacklisted, `_distributeFees` reverts and `settleProposal` reverts with it — entire vault stuck. | MED | Wrap per-recipient transfers in try/catch; emit `FeeTransferFailed` on failure; escrow unclaimed fees for later pull-claim. Closes the A22 doc↔code mismatch. |
+| W-1 ✅ | USDC blacklist bricks settlement. If lead proposer / co-proposer / protocol-fee recipient / vault owner is USDC-blacklisted, `_distributeFees` reverts and `settleProposal` reverts with it — entire vault stuck. | MED | ✅ fixed — per-recipient transfers now wrapped in try/catch; failures escrow via `_unclaimedFees` and emit `FeeTransferFailed`; recipients pull via `claimUnclaimedFees`. Regression tests in `test/governor/FeeBlacklistResilience.t.sol`. Closes the A22 doc↔code mismatch. |
 | W-3 | No FOT accounting on `_pullFromVault` (no snapshot balanceOf before/after). | LOW | Snapshot balance around pull; assert expected delta. Matters only if USDC ever adds FOT semantics. |
 | W-4 | `PortfolioStrategy` accepts arbitrary tokens with no decimals check, no allowlist, no supply check. | LOW | Add minimum validation at allocation config; consider a protocol-level token allowlist. |
 

@@ -176,6 +176,16 @@ interface ISyndicateGovernor {
 
     event EmergencySettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 customCallCount);
 
+    // ── Fee-distribution resilience events (W-1) ──
+    /// @notice Emitted when a per-recipient fee transfer in `_distributeFees` /
+    ///         `_distributeAgentFee` reverts (e.g., USDC blacklist). The amount
+    ///         is escrowed against `recipient` and retrievable via
+    ///         `claimUnclaimedFees`.
+    event FeeTransferFailed(address indexed recipient, address indexed token, uint256 amount, bytes reason);
+    /// @notice Emitted when a recipient pulls previously escrowed fees via
+    ///         `claimUnclaimedFees`.
+    event FeeClaimed(address indexed recipient, address indexed token, uint256 amount);
+
     // ── Guardian-review emergency settle events (Task 24) ──
     event EmergencySettleProposed(
         uint256 indexed proposalId, address indexed owner, bytes32 callsHash, uint64 reviewEnd
@@ -313,4 +323,18 @@ interface ISyndicateGovernor {
 
     /// @notice Address of the guardian registry (zero if not yet wired).
     function guardianRegistry() external view returns (address);
+
+    // ── Fee-escrow (W-1) ──
+
+    /// @notice Pull previously escrowed fees after the blacklist / revert
+    ///         condition that caused the original settlement transfer has been
+    ///         lifted. Retries the transfer against the vault that still holds
+    ///         the underlying asset.
+    /// @param vault The vault that originally held the fee asset.
+    /// @param token The ERC-20 address the fee was denominated in.
+    function claimUnclaimedFees(address vault, address token) external;
+
+    /// @notice Amount of fees escrowed against `recipient` in `token` awaiting
+    ///         a retryable claim.
+    function unclaimedFees(address recipient, address token) external view returns (uint256);
 }

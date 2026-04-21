@@ -116,10 +116,17 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ///         Added in PR #229 Fix 2.
     mapping(address => uint256) public openProposalCount;
 
+    /// @dev Escrow of fee transfers that reverted (e.g., USDC blacklist) so the
+    ///      rest of `_distributeFees` keeps flowing and settlement never bricks.
+    ///      Recipients pull via `claimUnclaimedFees`. The underlying amount
+    ///      remains in the vault; this mapping is pure bookkeeping. (W-1)
+    mapping(address recipient => mapping(address token => uint256)) private _unclaimedFees;
+
     /// @dev Reserved storage for future upgrades (shrunk by 1 for _guardianRegistry,
     ///      shrunk by 2 more for _emergencyCallsHashes + _emergencyCalls,
-    ///      shrunk by 1 more for openProposalCount)
-    uint256[29] private __gap;
+    ///      shrunk by 1 more for openProposalCount,
+    ///      shrunk by 1 more for _unclaimedFees)
+    uint256[28] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -900,7 +907,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         if (_protocolFeeBps > 0 && _protocolFeeRecipient != address(0)) {
             protocolFee = (profit * _protocolFeeBps) / 10000;
             if (protocolFee > 0) {
-                ISyndicateVault(vault).transferPerformanceFee(asset, _protocolFeeRecipient, protocolFee);
+                _payFee(vault, asset, _protocolFeeRecipient, protocolFee);
             }
         }
 
@@ -916,7 +923,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
             _distributeAgentFee(proposalId, vault, asset, proposer, agentFee);
         }
         if (mgmtFee > 0) {
-            ISyndicateVault(vault).transferPerformanceFee(asset, OwnableUpgradeable(vault).owner(), mgmtFee);
+            _payFee(vault, asset, OwnableUpgradeable(vault).owner(), mgmtFee);
         }
 
         totalFee = protocolFee + agentFee + mgmtFee;
@@ -934,19 +941,48 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
             for (uint256 i = 0; i < coProps.length; i++) {
                 uint256 share = (agentFee * coProps[i].splitBps) / 10000;
                 if (share > 0 && ISyndicateVault(vault).isAgent(coProps[i].agent)) {
-                    ISyndicateVault(vault).transferPerformanceFee(asset, coProps[i].agent, share);
+                    _payFee(vault, asset, coProps[i].agent, share);
                     distributed += share;
                 }
             }
             // Lead proposer gets remainder (handles rounding)
             uint256 leadShare = agentFee - distributed;
             if (leadShare > 0) {
-                ISyndicateVault(vault).transferPerformanceFee(asset, proposer, leadShare);
+                _payFee(vault, asset, proposer, leadShare);
             }
         } else {
             // Solo proposal -- all to proposer
-            ISyndicateVault(vault).transferPerformanceFee(asset, proposer, agentFee);
+            _payFee(vault, asset, proposer, agentFee);
         }
+    }
+
+    /// @dev Per-recipient fee transfer wrapped in try/catch. On failure
+    ///      (e.g. USDC blacklist) the amount is escrowed against `recipient`
+    ///      so settlement never bricks. Recipients pull via
+    ///      `claimUnclaimedFees` once the failure condition is lifted. (W-1)
+    function _payFee(address vault, address asset, address recipient, uint256 amount) internal {
+        if (amount == 0) return;
+        try ISyndicateVault(vault).transferPerformanceFee(asset, recipient, amount) {
+        // ok
+        }
+        catch (bytes memory reason) {
+            _unclaimedFees[recipient][asset] += amount;
+            emit FeeTransferFailed(recipient, asset, amount, reason);
+        }
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    function claimUnclaimedFees(address vault, address token) external nonReentrant {
+        uint256 amt = _unclaimedFees[msg.sender][token];
+        if (amt == 0) return;
+        _unclaimedFees[msg.sender][token] = 0;
+        ISyndicateVault(vault).transferPerformanceFee(token, msg.sender, amt);
+        emit FeeClaimed(msg.sender, token, amt);
+    }
+
+    /// @inheritdoc ISyndicateGovernor
+    function unclaimedFees(address recipient, address token) external view returns (uint256) {
+        return _unclaimedFees[recipient][token];
     }
 
     // ==================== UUPS ====================
