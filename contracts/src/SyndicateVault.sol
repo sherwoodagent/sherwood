@@ -377,6 +377,9 @@ contract SyndicateVault is
 
     // ==================== RECEIVE ====================
 
-    /// @notice Accept ETH (needed for WETH unwrapping and protocol interactions)
-    receive() external payable {}
+    /// @dev V-H6: No `receive()` / `fallback()`. The vault's ERC-4626 asset
+    ///      is USDC; raw ETH has no accounting slot and would strand forever.
+    ///      Any legitimate mid-batch native ETH (e.g. Moonwell mWETH redeem)
+    ///      is caught by the strategy's own `receive()` at its own address
+    ///      and wrapped to WETH before being pushed back via `safeTransfer`.
 }

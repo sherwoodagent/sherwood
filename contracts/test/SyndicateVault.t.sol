@@ -209,13 +209,18 @@ contract SyndicateVaultTest is Test {
         vm.stopPrank();
     }
 
-    // ==================== RECEIVE ETH ====================
+    // ==================== RECEIVE ETH (removed — V-H6) ====================
 
-    function test_vaultReceivesETH() public {
+    /// @dev V-H6: Vault no longer exposes a public `receive()`. Raw ETH
+    ///      transfers must fail. Any legitimate mid-batch ETH arrival
+    ///      (e.g. mWETH redemption) is wrapped inside strategy code and
+    ///      pushed back as WETH, not native ETH. The vault is a pure
+    ///      ERC-4626 USDC vault and has no accounting slot for ETH.
+    function test_receive_rejectsEth() public {
         vm.deal(address(this), 1 ether);
         (bool success,) = address(vault).call{value: 1 ether}("");
-        assertTrue(success);
-        assertEq(address(vault).balance, 1 ether);
+        assertFalse(success);
+        assertEq(address(vault).balance, 0);
     }
 
     // ==================== REDEMPTIONS LOCKED (I-1) ====================
