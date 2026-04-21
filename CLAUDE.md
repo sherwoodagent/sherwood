@@ -109,12 +109,14 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - CoinGecko free tier: 30 calls/min, circuit breaker trips on 429 (5-min cooldown). HL candles are the PRIMARY candle source since 0.44.0 — CG OHLC is fallback only.
 - BTC correlation uses Hyperliquid-native data (markPrice, funding, OI, flow) since 0.43.5 — no CG dependency.
 - **Hermes skill sync**: cron reads skills from `~/.hermes/skills/sherwood/*/SKILL.md`, NOT from the repo. After editing `cron/skills/*/SKILL.md`, copy to hermes: `cp cron/skills/<name>/SKILL.md ~/.hermes/skills/sherwood/<name>/SKILL.md`.
+- `sherwood agent autoresearch [--experiments N] [--last D]` — autonomous parameter optimization against signal-history.jsonl. Mutates weights/thresholds/stops, replays, keeps improvements. Results in `autoresearch-best-params.json`.
+- Default weights are autoresearch-optimized (50 exp, Sharpe 4.79): technical=0.30, sentiment=0.15, onchain=0.15, smartMoney=0.10, fundamental=0.05, event=0.00. Re-run `sherwood agent autoresearch` after accumulating new signal data to re-optimize.
 
 ### Calibrator
 
 - **Candle path** (`sherwood agent calibrate`) — re-fetches OHLC from CoinGecko and recomputes signals from candles only. **Cannot replay HL flow / fundingRate / smartMoney** (those need live data). Output is a lower bound on production performance; many configs show 0 trades because the candle-only signal stack rarely fires.
 - **Replay path** (`sherwood agent calibrate --from-history`) — replays captured production signals from `signal-history.jsonl`. Far truer to live behavior. Add `--last <days>` after a scoring change to ignore stale rows captured under the prior code.
-- Backtester is direction-aware: `Position.side` + SHORT entries on SELL signals; exit math (stop/TP/trail) flips for shorts. Ranging-regime BUY threshold currently `0.15`, SELL `-0.20`. Minimum conviction gate: |score| >= 0.12 in executor.
+- Backtester is direction-aware: `Position.side` + SHORT entries on SELL signals; exit math (stop/TP/trail) flips for shorts. Ranging-regime BUY threshold currently `0.17`, SELL `-0.22` (autoresearch-optimized). Minimum conviction gate: |score| >= 0.12 in executor.
 
 ### Agent State Files (`~/.sherwood/agent/`)
 
