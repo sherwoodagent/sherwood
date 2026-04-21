@@ -109,6 +109,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - CoinGecko free tier: 30 calls/min, circuit breaker trips on 429 (5-min cooldown). HL candles are the PRIMARY candle source since 0.44.0 — CG OHLC is fallback only.
 - BTC correlation uses Hyperliquid-native data (markPrice, funding, OI, flow) since 0.43.5 — no CG dependency.
 - **Hermes skill sync**: cron reads skills from `~/.hermes/skills/sherwood/*/SKILL.md`, NOT from the repo. After editing `cron/skills/*/SKILL.md`, copy to hermes: `cp cron/skills/<name>/SKILL.md ~/.hermes/skills/sherwood/<name>/SKILL.md`.
+- **Hermes cron prompt**: the job's `--prompt` text overrides SKILL.md instructions. After changing a skill's behavior, also update the prompt via `hermes cron edit <id> --prompt "..."`. The cron for trade-scanner is `c51a4fe8314e`.
 - `sherwood agent autoresearch [--experiments N] [--last D]` — autonomous parameter optimization against signal-history.jsonl. Mutates weights/thresholds/stops, replays, keeps improvements. Results in `autoresearch-best-params.json`.
 - Default weights are autoresearch-optimized (50 exp, Sharpe 4.79): technical=0.30, sentiment=0.15, onchain=0.15, smartMoney=0.10, fundamental=0.05, event=0.00. Re-run `sherwood agent autoresearch` after accumulating new signal data to re-optimize.
 
