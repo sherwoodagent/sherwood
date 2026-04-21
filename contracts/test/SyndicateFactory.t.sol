@@ -412,4 +412,63 @@ contract SyndicateFactoryTest is Test {
         vm.expectRevert();
         factory.setCreationFee(address(usdc), 100e6, owner);
     }
+
+    // ==================== V-H1: ATOMIC PROXY INITIALIZE ====================
+
+    /// @notice V-H1 regression: deploying the factory proxy with atomic init data
+    ///         (ERC1967Proxy(impl, encodedInitCall)) is the ONLY path our deploy
+    ///         scripts use. This test asserts that once the proxy is deployed
+    ///         atomically, `initialize` can never be called a second time — so
+    ///         no attacker can front-run the owner slot even if they watch the
+    ///         proxy creation tx.
+    /// @dev    Under a non-atomic deploy (empty init data), any caller could
+    ///         initialize the proxy first. Our scripts never do this; see
+    ///         `contracts/script/Deploy.s.sol`, `script/testnet/Deploy.s.sol`,
+    ///         `script/robinhood-testnet/Deploy.s.sol` — each encodes the init
+    ///         call into the proxy constructor as a single tx.
+    function test_factoryInitialize_atomicProxy_cannotBeReinitialized() public {
+        // The `factory` in setUp was deployed via atomic init. Attempt to
+        // re-initialize as an attacker — must revert with OZ's InvalidInitialization.
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert(); // Initializable: contract is already initialized
+        factory.initialize(
+            SyndicateFactory.InitParams({
+                owner: attacker,
+                executorImpl: address(executorLib),
+                vaultImpl: address(vaultImpl),
+                ensRegistrar: address(ensRegistrar),
+                agentRegistry: address(agentRegistry),
+                governor: governorAddr,
+                managementFeeBps: 50,
+                guardianRegistry: guardianRegistryAddr
+            })
+        );
+
+        // Owner slot untouched by the reinit attempt.
+        assertEq(factory.owner(), owner);
+    }
+
+    /// @notice V-H1 regression: the implementation contract itself has
+    ///         `_disableInitializers()` in its constructor, so `initialize`
+    ///         on the raw impl reverts regardless of who calls it.
+    function test_factoryInitialize_implementation_initializersDisabled() public {
+        SyndicateFactory rawImpl = new SyndicateFactory();
+
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert(); // InvalidInitialization
+        rawImpl.initialize(
+            SyndicateFactory.InitParams({
+                owner: attacker,
+                executorImpl: address(executorLib),
+                vaultImpl: address(vaultImpl),
+                ensRegistrar: address(ensRegistrar),
+                agentRegistry: address(agentRegistry),
+                governor: governorAddr,
+                managementFeeBps: 50,
+                guardianRegistry: guardianRegistryAddr
+            })
+        );
+    }
 }
