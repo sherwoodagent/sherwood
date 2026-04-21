@@ -169,6 +169,11 @@ interface ISyndicateGovernor {
     error ChangeNotReady();
     error InvalidParameterChangeDelay();
     error InvalidParameterKey();
+    /// @notice G-M5: Revert when a queued parameter change is finalized more
+    ///         than MAX_PARAM_STALENESS after its `effectiveAt`. Prevents
+    ///         owner-ignored stale queues from reactivating long after the
+    ///         context that motivated the change has passed.
+    error ChangeStale();
 
     // ── Events ──
 

@@ -42,6 +42,11 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
 
     uint256 public constant MIN_PARAM_CHANGE_DELAY = 6 hours;
     uint256 public constant MAX_PARAM_CHANGE_DELAY = 7 days;
+    /// @notice G-M5: a queued parameter change must be finalized within this
+    ///         window of `effectiveAt`, otherwise `finalizeParameterChange`
+    ///         reverts `ChangeStale()`. Prevents stale queues from reactivating
+    ///         long after the motivating context has passed.
+    uint256 public constant MAX_PARAM_STALENESS = 30 days;
 
     // ── Parameter keys ──
 
@@ -157,6 +162,9 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
         PendingChange storage change = pending[paramKey];
         if (!change.exists) revert NoChangePending();
         if (block.timestamp < change.effectiveAt) revert ChangeNotReady();
+        // G-M5: reject stale queues. Owner must re-queue if more than
+        // MAX_PARAM_STALENESS has elapsed since `effectiveAt`.
+        if (block.timestamp > change.effectiveAt + MAX_PARAM_STALENESS) revert ChangeStale();
 
         // Re-validate + apply in a single ladder (merged to save bytecode).
         _applyChange(paramKey, change.newValue);

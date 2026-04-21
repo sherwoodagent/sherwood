@@ -374,6 +374,25 @@ contract GovernorHardeningTest is Test {
         governor.emergencyCancel(proposalId);
     }
 
+    // ==================== G-M5 — stale parameter change ====================
+
+    /// @notice G-M5: `finalizeParameterChange` must revert `ChangeStale` once
+    ///         `block.timestamp > effectiveAt + MAX_PARAM_STALENESS`. Owner
+    ///         must re-queue to reactivate.
+    function test_finalizeParameterChange_revertsIfStale() public {
+        bytes32 key = keccak256("votingPeriod");
+
+        vm.prank(owner);
+        governor.setVotingPeriod(2 days);
+
+        // Warp past the delay AND beyond MAX_PARAM_STALENESS from effectiveAt.
+        vm.warp(block.timestamp + PARAM_CHANGE_DELAY + governor.MAX_PARAM_STALENESS() + 1);
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ChangeStale.selector);
+        governor.finalizeParameterChange(key);
+    }
+
     // ==================== G-M1 — propose blocks on open proposal ====================
 
     /// @notice G-M1: `propose` must revert when the vault already has a
