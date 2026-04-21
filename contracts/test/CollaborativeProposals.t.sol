@@ -271,6 +271,22 @@ contract CollaborativeProposalsTest is Test {
         assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Pending));
     }
 
+    /// @notice G-C1: approveCollaboration() must also stamp the snapshot at
+    ///         block.timestamp - 1 when Draft -> Pending transition fires, so
+    ///         a same-block delegation cannot be counted. Mirrors propose().
+    function test_approveCollaboration_snapshotIsPriorTimestamp() public {
+        uint256 proposalId = _createCollabProposal();
+        vm.prank(coAgent1);
+        governor.approveCollaboration(proposalId);
+        uint256 tsAtTransition = block.timestamp;
+        vm.prank(coAgent2);
+        governor.approveCollaboration(proposalId);
+
+        ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
+        assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Pending));
+        assertEq(p.snapshotTimestamp, tsAtTransition - 1);
+    }
+
     function test_fullConsentFlow_votingTimestampsResetOnTransition() public {
         uint256 proposalId = _createCollabProposal();
         vm.warp(block.timestamp + 12 hours);
@@ -281,7 +297,9 @@ contract CollaborativeProposalsTest is Test {
         governor.approveCollaboration(proposalId);
 
         ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
-        assertEq(p.snapshotTimestamp, block.timestamp);
+        // G-C1: snapshot stamped one second in the past so same-block
+        // delegations cannot count via ERC20Votes.getPastVotes.
+        assertEq(p.snapshotTimestamp, block.timestamp - 1);
         assertEq(p.voteEnd, block.timestamp + VOTING_PERIOD);
         assertEq(p.executeBy, block.timestamp + VOTING_PERIOD + EXECUTION_WINDOW);
     }

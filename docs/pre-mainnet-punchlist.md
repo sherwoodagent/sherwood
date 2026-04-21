@@ -26,7 +26,7 @@ Status key:
 | 2 | **V-C3** — Owner `executeBatch` bypasses `redemptionsLocked()`. Compromised owner drains mid-strategy. | 🔨 separate-PR | Simple fix: add `!redemptionsLocked()` check. |
 | 3 | **G-C4** — `emergencySettle` fallback accepts arbitrary owner calls → vault drain. | ✅ fixed-in-229 | Split into `unstick` (no calldata) + `emergencySettleWithCalls` (guardian-reviewed) + `finalizeEmergencySettle` + `cancelEmergencySettle`. Owner posts slashable bond; guardian block-quorum slashes owner. See `5ba7939` (GovernorEmergency impl) + `f2e8224` (registry emergency review). |
 | 4 | **G-C2/C3** — `cancelProposal` / `vetoProposal` / `emergencyCancel` blindly `delete _activeProposal[vault]`. | 🔨 separate-PR | Fix: guard each with `if (_activeProposal[vault] == proposalId)`. Independent of guardian. |
-| 5 | **G-C1** — `snapshotTimestamp = block.timestamp` enables same-block flash-delegate on 2s L2 blocks. | 🔨 separate-PR | Fix: `snapshotTimestamp = block.timestamp - 1`. Independent. |
+| 5 | **G-C1** — `snapshotTimestamp = block.timestamp` enables same-block flash-delegate on 2s L2 blocks. | ✅ closed | Fixed: `snapshotTimestamp = block.timestamp - 1` in both `propose()` and `approveCollaboration()` Draft→Pending transition. See `9608cd7`. |
 | 6 | **T-C3/T-C4/T-C5** — veNFT transferable while vote/bribe state is attached. | 🔨 separate-PR | Fix: block transfers while `_lastVotedEpoch == currentEpoch`, OR snapshot owner into vote/bribe state. |
 | 7 | **T-C1** — LP rewards permanently stuck (`_calculateLPReward` reverts unconditionally). | 🗓️ deferred | Documented in `CLAUDE.md` as aspirational. Either ship LP rewards or strip the entry point. |
 | 8 | **S-C4 + A2** — `PortfolioStrategy` passes `amountOutMin=0` + `SynthraDirectAdapter` ignores its `amountOutMin`. | 🔨 separate-PR | Fix: wire `maxSlippageBps` into `amountOutMin`; require `amountOutMin > 0` at adapter entry. |
@@ -85,7 +85,7 @@ Grouped by domain. All require separate PRs.
 
 | Ref | Finding | Severity | Fix | Guardian-adjacent? |
 |---|---|---|---|---|
-| G-C1 | `snapshotTimestamp = block.timestamp` flash-delegate | 95 | `snapshotTimestamp = block.timestamp - 1` | no |
+| G-C1 ✅ | `snapshotTimestamp = block.timestamp` flash-delegate | 95 | `snapshotTimestamp = block.timestamp - 1` (closed in `9608cd7`) | no |
 | G-C2/C3 | Unrelated `_activeProposal[vault]` delete | 92 / 91 | Guard with `if (... == proposalId)`; only `_finishSettlement` clears | no |
 | G-C5 | `setProtocolFeeRecipient` not timelocked | 90 | Timelock it | no |
 | G-C6 | `nonReentrant` missing from `vote` / `vetoProposal` / `emergencyCancel` | 90 | Add `nonReentrant` on every state-mutating external fn | no |

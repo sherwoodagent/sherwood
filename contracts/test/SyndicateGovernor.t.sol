@@ -285,6 +285,62 @@ contract SyndicateGovernorTest is Test {
         governor.propose(address(vault), "ipfs://test", 1500, 7 days, _simpleExecuteCalls(), empty, _emptyCoProposers());
     }
 
+    /// @notice G-C1: propose() stamps snapshot at block.timestamp - 1 so any
+    ///         delegation landing in the same block cannot be counted via
+    ///         ERC20Votes.getPastVotes (which returns votes "at or before t").
+    function test_propose_snapshotIsPriorTimestamp() public {
+        uint256 tsBefore = block.timestamp;
+        uint256 proposalId = governor.proposalCount() + 1;
+        vm.prank(agent);
+        governor.propose(
+            address(vault),
+            "ipfs://test",
+            1500,
+            7 days,
+            _simpleExecuteCalls(),
+            _simpleSettlementCalls(),
+            _emptyCoProposers()
+        );
+        ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
+        assertEq(p.snapshotTimestamp, tsBefore - 1);
+    }
+
+    /// @notice G-C1: a delegation that lands in the same block as propose()
+    ///         must NOT count toward voting weight. Exercises the full path
+    ///         via governor.vote(): the voter holds shares but only delegates
+    ///         in the propose block, so getPastVotes at snapshotTimestamp
+    ///         (= block.timestamp - 1) returns 0 and the vote reverts as
+    ///         NoVotingPower.
+    function test_flashDelegate_sameBlock_notCounted() public {
+        address flashVoter = makeAddr("flashVoter");
+
+        // flashVoter receives shares via transfer so auto-delegation in
+        // _deposit() does not fire -- delegates(flashVoter) stays at zero.
+        vm.prank(lp1);
+        vault.transfer(flashVoter, 10_000e6);
+
+        // Same block: flashVoter delegates to self AND agent proposes.
+        vm.prank(flashVoter);
+        vault.delegate(flashVoter);
+
+        vm.prank(agent);
+        uint256 proposalId = governor.propose(
+            address(vault),
+            "ipfs://test",
+            1500,
+            7 days,
+            _simpleExecuteCalls(),
+            _simpleSettlementCalls(),
+            _emptyCoProposers()
+        );
+
+        // Snapshot is block.timestamp - 1; delegation checkpoint was written
+        // at block.timestamp, so getPastVotes returns 0 and vote() reverts.
+        vm.prank(flashVoter);
+        vm.expectRevert(ISyndicateGovernor.NoVotingPower.selector);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+    }
+
     // ==================== VOTING ====================
 
     function test_vote() public {

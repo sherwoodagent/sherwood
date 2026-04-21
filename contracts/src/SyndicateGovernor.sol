@@ -292,7 +292,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         if (isCollaborative) {
             p.state = ProposalState.Draft;
         } else {
-            p.snapshotTimestamp = block.timestamp;
+            // -1 closes the same-block flash-delegate window (G-C1).
+            p.snapshotTimestamp = block.timestamp - 1;
             p.voteEnd = block.timestamp + _params.votingPeriod;
             p.reviewEnd = p.voteEnd + reviewPeriod_;
             p.executeBy = p.reviewEnd + _params.executionWindow;
@@ -486,7 +487,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
             uint256 reviewPeriod_ =
                 _guardianRegistry != address(0) ? IGuardianRegistry(_guardianRegistry).reviewPeriod() : 0;
             proposal.state = ProposalState.Pending;
-            proposal.snapshotTimestamp = block.timestamp;
+            // -1: see propose() (G-C1).
+            proposal.snapshotTimestamp = block.timestamp - 1;
             proposal.voteEnd = block.timestamp + _params.votingPeriod;
             proposal.reviewEnd = proposal.voteEnd + reviewPeriod_;
             proposal.executeBy = proposal.reviewEnd + _params.executionWindow;
