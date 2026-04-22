@@ -57,6 +57,14 @@ export interface StrategyContext {
   };
   tokenSymbol?: string;       // resolved symbol (e.g. "ETH" for "ethereum")
   groupReturns?: Record<string, number>;  // cross-sectional: 7-day returns for all tokens in cycle
+  /** Fincept: Polymarket/Manifold prediction market probabilities. */
+  predictionData?: {
+    markets: Array<{
+      question: string;
+      probability: number;
+      volume: number;
+    }>;
+  };
 }
 
 export interface Strategy {
