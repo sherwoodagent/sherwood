@@ -137,7 +137,7 @@ export function formatSummary(input: SummaryInput): string {
 
   lines.push("");
   lines.push(`\uD83D\uDCB0 $${cycle.portfolioValue.toFixed(2)}`);
-  lines.push(`   Realized: ${fmtUsd(realizedPnl)} (${fmtPct(realizedPct)}) from ${input.allTrades.length} trades`);
+  lines.push(`   Total Realized: ${fmtUsd(realizedPnl)} (${fmtPct(realizedPct)}) from ${input.allTrades.length} trades`);
   lines.push(`   Open P&L: ${fmtUsd(unrealized)} | Cash: $${portfolio.cash.toFixed(0)} | Positions: $${positionValue.toFixed(0)}`);
   lines.push(`   Today: ${fmtUsd(cycle.dailyRealizedPnl)} realized | ${fmtUsd(unrealized)} open`);
 
