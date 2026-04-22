@@ -72,6 +72,14 @@ export interface StrategyContext {
     marketPriceUsd: number;
     transactionCount: number;
   };
+  /** Fincept: Messari fundamentals (supply, revenue, developer activity). */
+  messariFundamentals?: {
+    marketCap: number;
+    supply: { circulating: number; max: number; percentCirculating: number };
+    revenueUsd24h: number;
+    revenueGrowth7d: number;
+    developerActivity: number;
+  };
   tokenSymbol?: string;       // resolved symbol (e.g. "ETH" for "ethereum")
   groupReturns?: Record<string, number>;  // cross-sectional: 7-day returns for all tokens in cycle
   /** Fincept: Polymarket/Manifold prediction market probabilities. */
