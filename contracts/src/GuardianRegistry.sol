@@ -7,6 +7,7 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 
 /// @dev Minimal governor surface consumed by the registry. Intentionally a
 ///      narrow stub so that GuardianRegistry does not depend on the full
@@ -100,6 +101,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         uint128 totalStakeAtOpen;
         uint128 approveStakeWeight;
         uint128 blockStakeWeight;
+        uint64 openedAt; // V1.5: timestamp for checkpoint lookup of vote weight
     }
 
     mapping(uint256 => Review) internal _reviews;
@@ -118,6 +120,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         bool resolved;
         bool blocked;
         uint8 nonce; // bumped on open/cancel so prior block votes go stale
+        uint64 openedAt; // V1.5: timestamp for checkpoint lookup of vote weight
     }
 
     mapping(uint256 => EmergencyReview) internal _emergencyReviews;
@@ -172,10 +175,24 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     address public minter;
     IERC20 public wood;
 
-    /// @dev Reserved storage for future upgrades. Shrink by 1 when adding a
-    ///      new storage slot. Matches the pattern on SyndicateGovernor /
-    ///      SyndicateFactory / SyndicateVault.
-    uint256[51] private __gap;
+    // ── V1.5 vote-weight checkpoints (Task 1.2) ──
+    using Checkpoints for Checkpoints.Trace224;
+
+    /// @dev Per-guardian own-stake history, keyed by timestamp. Pushed on every
+    ///      state change that affects votable weight: stakeAsGuardian,
+    ///      requestUnstakeGuardian (push 0), cancelUnstakeGuardian, slash.
+    ///      `getPastStake(g, t)` returns the votable amount at `t`.
+    mapping(address => Checkpoints.Trace224) internal _stakeCheckpoints;
+
+    /// @dev Global total-active-stake history. Mirrors `totalGuardianStake`
+    ///      but indexed by timestamp for historical quorum-denominator lookups.
+    Checkpoints.Trace224 internal _totalStakeCheckpoint;
+
+    /// @dev Reserved storage for future upgrades. Shrink by the slot count
+    ///      used above when adding a new storage slot.
+    ///      Slot accounting: -2 for _stakeCheckpoints (mapping root) and
+    ///      _totalStakeCheckpoint (Trace224 inline).
+    uint256[49] private __gap;
 
     // ── Initializer ──
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -263,6 +280,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         }
         totalGuardianStake += amount;
 
+        // V1.5: checkpoint votable stake for historical quorum lookups.
+        _stakeCheckpoints[msg.sender].push(uint32(block.timestamp), uint224(newTotal));
+        _totalStakeCheckpoint.push(uint32(block.timestamp), uint224(totalGuardianStake));
+
         emit GuardianStaked(msg.sender, amount, agentId);
     }
 
@@ -278,6 +299,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         g.unstakeRequestedAt = uint64(block.timestamp);
         totalGuardianStake -= g.stakedAmount;
         activeGuardianCount -= 1;
+
+        // V1.5: unstake-requested stake is not votable. Push 0 so getPastStake
+        // reflects the on-cooldown state accurately.
+        _stakeCheckpoints[msg.sender].push(uint32(block.timestamp), 0);
+        _totalStakeCheckpoint.push(uint32(block.timestamp), uint224(totalGuardianStake));
 
         emit GuardianUnstakeRequested(msg.sender, block.timestamp);
     }
@@ -297,6 +323,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         g.unstakeRequestedAt = 0;
         totalGuardianStake += g.stakedAmount;
         activeGuardianCount += 1;
+
+        // V1.5: stake is votable again.
+        _stakeCheckpoints[msg.sender].push(uint32(block.timestamp), uint224(g.stakedAmount));
+        _totalStakeCheckpoint.push(uint32(block.timestamp), uint224(totalGuardianStake));
 
         emit GuardianUnstakeCancelled(msg.sender);
     }
@@ -329,13 +359,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      semantics are added in a later task — any existing vote currently
     ///      reverts.
     ///
-    ///      Known limitation: vote weight is read live at first-vote time,
-    ///      while `totalStakeAtOpen` was frozen at `openReview`. A guardian
-    ///      who stakes additional WOOD between open and first vote contributes
-    ///      their NEW weight to the numerator while the denominator stays
-    ///      fixed — slight bias toward the voting side. A proper fix requires
-    ///      per-guardian stake snapshots at open (O(N) gas) or a stake
-    ///      cooldown; deferred pending audit.
+    ///      V1.5: vote weight is read from `_stakeCheckpoints[voter]` at
+    ///      `r.openedAt`, so both numerator (each voter's contribution) and
+    ///      denominator (`r.totalStakeAtOpen`) are measured at the same
+    ///      instant. Closes the top-up-before-vote bias.
     function voteOnProposal(uint256 proposalId, GuardianVoteType support) external whenNotPaused {
         if (support == GuardianVoteType.None) revert();
 
@@ -351,8 +378,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         if (existing == support) revert NoVoteChange();
 
         if (existing == GuardianVoteType.None) {
-            // First vote — snapshot stake and push onto chosen side.
-            uint128 weight = _guardians[msg.sender].stakedAmount;
+            // First vote — snapshot the voter's stake AT `r.openedAt` (not live).
+            uint128 weight = uint128(_stakeCheckpoints[msg.sender].upperLookupRecent(uint32(r.openedAt)));
+            if (weight == 0) revert NotActiveGuardian(); // no active stake at open time
             _voteStake[proposalId][msg.sender] = weight;
 
             if (support == GuardianVoteType.Approve) {
@@ -581,6 +609,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         er.blockStakeWeight = 0;
         er.resolved = false;
         er.blocked = false;
+        er.openedAt = uint64(block.timestamp); // V1.5: vote-weight lookup anchor
         unchecked {
             er.nonce++;
         }
@@ -628,6 +657,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         uint128 totalAtOpen = uint128(totalGuardianStake);
         r.opened = true;
         r.totalStakeAtOpen = totalAtOpen;
+        r.openedAt = uint64(block.timestamp); // V1.5: freeze vote-weight timestamp
         if (totalAtOpen < MIN_COHORT_STAKE_AT_OPEN) {
             r.cohortTooSmall = true;
             emit CohortTooSmallToReview(proposalId, totalAtOpen);
@@ -717,6 +747,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
                 if (gs.stakedAmount == 0) {
                     activeGuardianCount -= 1;
                 }
+                // V1.5: checkpoint the post-slash votable stake. Only when the
+                // approver was still active; if unstake was requested they were
+                // already at 0-votable and the checkpoint push already happened
+                // in requestUnstakeGuardian.
+                _stakeCheckpoints[a].push(uint32(block.timestamp), uint224(gs.stakedAmount));
             } else if (gs.stakedAmount == 0) {
                 // Defense in depth for Bug B: a fully-slashed guardian keeps no
                 // stake — there's nothing for cancelUnstake to restore, so
@@ -726,6 +761,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         }
 
         if (total == 0) return 0;
+
+        // V1.5: checkpoint the aggregate total-stake drop once after the loop.
+        _totalStakeCheckpoint.push(uint32(block.timestamp), uint224(totalGuardianStake));
 
         // Single burn transfer wrapped in try/catch. A malicious / broken WOOD
         // that reverts or returns false on transfer to BURN_ADDRESS falls
@@ -798,13 +836,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     /// @dev Active-guardian-only. Block-only side (no Approve pool for
     ///      emergency reviews). One vote per guardian — double-votes revert.
     ///      Weight is the caller's current `guardianStake` at call time.
-    /// @dev Live-stake-at-first-vote semantics, matching `voteOnProposal`. A
-    ///      guardian who tops up between `openEmergencyReview` and their first
-    ///      vote contributes their new weight to `blockStakeWeight` while the
-    ///      `totalStakeAtOpen` denominator is frozen — known limitation shared
-    ///      with the standard-review path. Vote weight is snapshotted into
-    ///      `_emergencyVoteStake` at first vote (mirrors `_voteStake`) so the
-    ///      weight is recoverable and any future vote-change path can reuse it.
+    /// @dev V1.5: weight is read from `_stakeCheckpoints[voter]` at
+    ///      `er.openedAt`, matching the standard-review semantics. Numerator
+    ///      and denominator both measured at the same instant.
     function voteBlockEmergencySettle(uint256 proposalId) external whenNotPaused {
         EmergencyReview storage er = _emergencyReviews[proposalId];
         if (er.reviewEnd == 0 || block.timestamp >= er.reviewEnd) revert ReviewNotOpen();
@@ -812,7 +846,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         uint8 nonce = er.nonce;
         if (_emergencyBlockVotes[proposalId][nonce][msg.sender]) revert AlreadyVoted();
 
-        uint128 weight = _guardians[msg.sender].stakedAmount;
+        uint128 weight = uint128(_stakeCheckpoints[msg.sender].upperLookupRecent(uint32(er.openedAt)));
+        if (weight == 0) revert NotActiveGuardian(); // no stake at review-open time
         _emergencyBlockVotes[proposalId][nonce][msg.sender] = true;
         _emergencyVoteStake[proposalId][nonce][msg.sender] = weight;
         er.blockStakeWeight += weight;
@@ -1092,6 +1127,19 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
 
     function guardianStake(address g) external view returns (uint256) {
         return _guardians[g].stakedAmount;
+    }
+
+    /// @notice Historical votable own-stake for `guardian` at `timestamp`.
+    /// @dev    V1.5: used by `voteOnProposal` / `voteBlockEmergencySettle`
+    ///         to read weight at `openedAt` instead of live stake — closes
+    ///         the top-up-before-vote bias.
+    function getPastStake(address guardian, uint256 timestamp) external view returns (uint256) {
+        return _stakeCheckpoints[guardian].upperLookupRecent(uint32(timestamp));
+    }
+
+    /// @notice Historical total active stake (quorum denominator) at `timestamp`.
+    function getPastTotalStake(uint256 timestamp) external view returns (uint256) {
+        return _totalStakeCheckpoint.upperLookupRecent(uint32(timestamp));
     }
 
     function ownerStake(address v) external view returns (uint256) {

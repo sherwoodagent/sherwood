@@ -120,6 +120,54 @@ contract GuardianRegistryStakeTest is Test {
         assertEq(wood.balanceOf(alice), balBefore - 10_000e18);
         assertEq(wood.balanceOf(address(registry)), 10_000e18);
     }
+
+    // ── V1.5: checkpoint + getPastStake ──
+
+    /// @notice Stake → top-up → partial state ops all push checkpoints that
+    ///         `getPastStake` resolves historically. Closes the top-up-bias
+    ///         vector: a guardian topping up after review-open reads the
+    ///         pre-topup amount at the earlier timestamp.
+    function test_getPastStake_returnsHistoricalValue() public {
+        vm.prank(alice);
+        registry.stakeAsGuardian(10_000e18, 42);
+        uint256 t1 = vm.getBlockTimestamp();
+
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        vm.prank(alice);
+        registry.stakeAsGuardian(5_000e18, 42);
+        uint256 t2 = vm.getBlockTimestamp();
+
+        vm.warp(vm.getBlockTimestamp() + 1);
+
+        assertEq(registry.getPastStake(alice, t1), 10_000e18, "at t1: first stake only");
+        assertEq(registry.getPastStake(alice, t2), 15_000e18, "at t2: after top-up");
+    }
+
+    function test_getPastStake_zeroAfterRequestUnstake() public {
+        vm.prank(alice);
+        registry.stakeAsGuardian(10_000e18, 42);
+        uint256 t1 = vm.getBlockTimestamp();
+
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        vm.prank(alice);
+        registry.requestUnstakeGuardian();
+        uint256 t2 = vm.getBlockTimestamp();
+
+        vm.warp(vm.getBlockTimestamp() + 1);
+
+        assertEq(registry.getPastStake(alice, t1), 10_000e18, "active at t1");
+        assertEq(registry.getPastStake(alice, t2), 0, "0 at unstake-request time (not votable)");
+    }
+
+    function test_getPastTotalStake_tracksAggregate() public {
+        vm.prank(alice);
+        registry.stakeAsGuardian(10_000e18, 42);
+        uint256 t1 = vm.getBlockTimestamp();
+
+        vm.warp(vm.getBlockTimestamp() + 1);
+
+        assertEq(registry.getPastTotalStake(t1), 10_000e18, "aggregate matches total after first stake");
+    }
 }
 
 contract GuardianRegistryUnstakeTest is Test {
