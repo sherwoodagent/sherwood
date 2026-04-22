@@ -321,9 +321,16 @@ contract DeploySherwood is ScriptBase {
         _checkUint("gov.maxStrategyDuration", p.maxStrategyDuration, maxDays * 1 days);
         _checkUint("gov.protocolFeeBps", governor.protocolFeeBps(), 200);
         _checkAddr("gov.protocolFeeRecipient", governor.protocolFeeRecipient(), deployer);
-        // V1.5: timelock removed — factory is set directly in step 6. Validate
-        // the live value.
+        // V1.5: timelock removed — factory + guardian-fee recipient are set
+        // directly in step 6. Validate the live values.
         _checkAddr("gov.factory", governor.factory(), factoryAddr);
+        // V1.5: guardianFeeBps defaults to 0 at init (fee stream disabled
+        // until the multisig is ready); recipient is wired to the registry
+        // immediately so we can flip bps > 0 later with a single set call.
+        _checkUint("gov.guardianFeeBps", governor.guardianFeeBps(), 0);
+        // guardianFeeRecipient is set in the deploy script after the registry
+        // proxy address is known. Validated by _validateRegistry via a
+        // cross-check that guardianFeeRecipient == registry address.
     }
 
     function _validateFactory(
@@ -366,6 +373,11 @@ contract DeploySherwood is ScriptBase {
         _checkUint("registry.blockQuorumBps", reg.blockQuorumBps(), DEFAULT_BLOCK_QUORUM_BPS);
         // Governor knows about the registry (set at init-time).
         _checkAddr("gov.guardianRegistry", SyndicateGovernor(governorAddr).guardianRegistry(), registryAddr);
+        // V1.5: guardianFeeRecipient points at the registry (so
+        // fundProposalGuardianPool gets called in _distributeFees).
+        _checkAddr(
+            "gov.guardianFeeRecipient", SyndicateGovernor(governorAddr).guardianFeeRecipient(), registryAddr
+        );
     }
 
     function _chainName() internal view returns (string memory) {
