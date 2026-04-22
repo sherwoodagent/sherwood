@@ -51,23 +51,22 @@ export class PredictionMarketStrategy implements Strategy {
 
       // Only process high-conviction markets
       if (prob > 0.75) {
-        // Event is likely to happen
+        // Scale: 0 at 75%, 1 at 100%, then × 0.15 per market (max contribution)
+        const strength = (prob - 0.75) * 4 * 0.15;
         if (classification === "bullish") {
-          bullishScore += prob - 0.5;
+          bullishScore += strength;
           details.push(`Bullish event likely (${(prob * 100).toFixed(0)}%): ${market.question}`);
         } else {
-          bearishScore += prob - 0.5;
+          bearishScore += strength;
           details.push(`Bearish event likely (${(prob * 100).toFixed(0)}%): ${market.question}`);
         }
       } else if (prob < 0.25) {
-        // Event is unlikely
+        // Event is unlikely — mild contrarian signal
         if (classification === "bullish") {
-          // Bullish event unlikely → mild bearish
-          bearishScore += 0.5 - prob;
+          bearishScore += 0.05;
           details.push(`Bullish event unlikely (${(prob * 100).toFixed(0)}%): ${market.question}`);
         } else {
-          // Bearish event unlikely → mild bullish
-          bullishScore += 0.5 - prob;
+          bullishScore += 0.05;
           details.push(`Bearish event unlikely (${(prob * 100).toFixed(0)}%): ${market.question}`);
         }
       }

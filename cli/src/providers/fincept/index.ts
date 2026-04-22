@@ -7,5 +7,3 @@ export { getCryptoCompareCandles } from './cryptocompare.js';
 export { getProtocolTvl, getYieldPools } from './defillama.js';
 export { searchDexPairs, getTokenBoosts } from './dexscreener.js';
 export type { FinceptDexPair } from './dexscreener.js';
-export { getAggregateFunding } from './funding-rate.js';
-export type { AggregateFunding } from './funding-rate.js';

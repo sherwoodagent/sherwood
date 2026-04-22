@@ -89,14 +89,6 @@ export interface StrategyContext {
       volume: number;
     }>;
   };
-  /** Fincept: Multi-exchange aggregate funding rates. */
-  aggregateFunding?: {
-    meanRate: number;
-    maxRate: number;
-    minRate: number;
-    exchanges: string[];
-    consensus: 'long-crowded' | 'short-crowded' | 'neutral';
-  };
 }
 
 export interface Strategy {
