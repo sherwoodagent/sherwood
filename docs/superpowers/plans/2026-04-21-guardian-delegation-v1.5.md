@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship V1.5 — checkpoint-based vote weight, stake-pool delegation, DPoS commission split, and approver reward from guardian fee — resolving the top-up-bias + approve-bias findings and unlocking passive WOOD holder participation.
+**Goal:** Ship V1.5 — checkpoint-based vote weight, stake-pool delegation, on-chain commission config, guardian fee carved from settled PnL — resolving the top-up-bias + approve-bias findings and unlocking passive WOOD holder participation.
 
-**Architecture:** WOOD redeploys as `ERC20VotesUpgradeable`; `GuardianRegistry` extends with `Checkpoints.Trace224` for own-stake + per-delegate inbound totals + per-(delegator, delegate) balances; governor adds `guardianFeeBps` parameter and routes a slice of settled PnL to the registry's proposal pool. Delegators claim via pull mechanism with DPoS commission split.
+**Architecture:** WOOD multi-inherits OFT + ERC20Votes + ERC20Permit (preserves LayerZero). `GuardianRegistry` extends with `Checkpoints.Trace224` for own-stake + per-delegate inbound totals + per-(delegator, delegate) balances, and stores only `commissionBps` (no on-chain reward accounting). Governor adds `guardianFeeBps` + `merklDistributor` timelocked parameters and transfers the guardian-fee slice of settled PnL directly to **Merkl's distributor** (Angle Labs). Registry + governor emit events; Merkl's off-chain bot computes per-claimant attribution (DPoS commission split + time-weighted delegator share) and publishes Merkle roots; users claim via merkl.xyz.
 
 **Tech Stack:** Solidity 0.8.28, Foundry, OpenZeppelin v5 upgradeable (`ERC20VotesUpgradeable`, `Checkpoints`), UUPS, via_ir.
 
@@ -519,230 +519,258 @@ bool blocked_ = (uint256(r.blockStakeWeight) * 10_000
 
 ---
 
-## Phase 3 — DPoS commission + rewards
+## Phase 3 — Commission + Merkl integration
 
-### Task 3.1 — Commission storage + setCommission
+> **Scope change (2026-04-22):** rewards distributed off-chain via Merkl.
+> Phase 3 no longer ships on-chain reward claims. Instead: (a) on-chain
+> `commissionBps` setter + raise-rate limit (readable by Merkl's bot), (b)
+> remove V1 on-chain epoch-claim machinery from registry (since V1 branch
+> not yet merged, clean up before mainnet), (c) governor `guardianFeeBps`
+> parameter + `_distributeFees` branch that transfers USDC to Merkl, (d)
+> Merkl distributor address as timelocked governor param, (e) events Merkl
+> reads for attribution.
+
+### Task 3.1 — Commission setter + rate limit
 
 **Files:**
 - Modify: `contracts/src/GuardianRegistry.sol`
+- Modify: `contracts/src/interfaces/IGuardianRegistry.sol`
+- Test: `contracts/test/GuardianRegistryCommission.t.sol`
 
-- [ ] **Step 1: Storage**
+- [ ] **Step 1: Write tests**
+
+```solidity
+function test_setCommission_happyPath() public {
+    vm.prank(delegate_);
+    registry.setCommission(1000); // 10%
+    assertEq(registry.commissionOf(delegate_), 1000);
+}
+
+function test_setCommission_exceedsMaxReverts() public {
+    vm.expectRevert(IGuardianRegistry.CommissionExceedsMax.selector);
+    vm.prank(delegate_);
+    registry.setCommission(6000); // > MAX_COMMISSION_BPS (5000)
+}
+
+function test_setCommission_raiseRateLimit() public {
+    vm.prank(delegate_);
+    registry.setCommission(1000);
+
+    vm.expectRevert(IGuardianRegistry.CommissionRaiseExceedsLimit.selector);
+    vm.prank(delegate_);
+    registry.setCommission(2000); // raise > 500 bps in same epoch
+
+    // After epoch boundary, another 500 bps raise is allowed
+    vm.warp(vm.getBlockTimestamp() + 7 days);
+    vm.prank(delegate_);
+    registry.setCommission(1500);
+}
+
+function test_setCommission_decreaseUnbounded() public {
+    vm.prank(delegate_);
+    registry.setCommission(5000); // max
+    vm.prank(delegate_);
+    registry.setCommission(0); // free to lower
+}
+```
+
+- [ ] **Step 2: Implement**
 
 ```solidity
 uint256 public constant MAX_COMMISSION_BPS = 5000;
 uint256 public constant MAX_COMMISSION_INCREASE_PER_EPOCH = 500;
 
-mapping(address => uint256) private _commissionBps;
-mapping(address => uint256) private _lastCommissionRaiseEpoch;
-mapping(address => Checkpoints.Trace224) private _commissionCheckpoints;
-mapping(address => mapping(uint256 => uint256)) private _commissionAtEpoch;
-```
-
-- [ ] **Step 2: Test**
-
-```solidity
-function test_setCommission_raiseRateLimited() public {
-    address delegate = guardians[0];
-    vm.prank(delegate);
-    registry.setCommission(1000); // 10%
-
-    // Same epoch: can't raise above 1500 (1000 + 500)
-    vm.expectRevert(IGuardianRegistry.CommissionRaiseExceedsLimit.selector);
-    vm.prank(delegate);
-    registry.setCommission(2000);
-
-    // Next epoch: can raise by another 500
-    vm.warp(block.timestamp + 7 days);
-    vm.prank(delegate);
-    registry.setCommission(1500);
-}
-```
-
-- [ ] **Step 3: Implement**
-
-```solidity
 error CommissionExceedsMax();
 error CommissionRaiseExceedsLimit();
 
+mapping(address => uint256) private _commissionBps;
+mapping(address => uint256) private _lastCommissionRaiseEpoch;
+
+event CommissionSet(address indexed delegate, uint256 oldBps, uint256 newBps);
+
 function setCommission(uint256 newBps) external {
     if (newBps > MAX_COMMISSION_BPS) revert CommissionExceedsMax();
-
     uint256 old = _commissionBps[msg.sender];
-    uint256 currentEpochId = currentEpoch();
-
+    uint256 curEpoch = currentEpoch();
     if (newBps > old) {
         uint256 lastRaise = _lastCommissionRaiseEpoch[msg.sender];
-        if (lastRaise == currentEpochId) {
-            if (newBps - old > MAX_COMMISSION_INCREASE_PER_EPOCH) revert CommissionRaiseExceedsLimit();
+        if (lastRaise == curEpoch && newBps - old > MAX_COMMISSION_INCREASE_PER_EPOCH) {
+            revert CommissionRaiseExceedsLimit();
         }
-        _lastCommissionRaiseEpoch[msg.sender] = currentEpochId;
+        _lastCommissionRaiseEpoch[msg.sender] = curEpoch;
     }
-
     _commissionBps[msg.sender] = newBps;
-    _commissionCheckpoints[msg.sender].push(uint32(block.timestamp), uint224(newBps));
     emit CommissionSet(msg.sender, old, newBps);
 }
-```
 
-- [ ] **Step 4: Commit**
-
-### Task 3.2 — Lazy commission lookup
-
-- [ ] **Step 1: Implement** `_resolveCommissionAtEpoch(delegate, epochId)`:
-
-```solidity
-function _resolveCommissionAtEpoch(address delegate, uint256 epochId) internal returns (uint256) {
-    uint256 cached = _commissionAtEpoch[delegate][epochId];
-    if (cached != 0) return cached;
-    // 0 is ambiguous with "never set" — use a sentinel. Pack with +1 on write:
-    // Or: re-resolve every time; cheap.
-    uint256 epochEndTs = epochGenesis + (epochId + 1) * EPOCH_DURATION - 1;
-    uint256 rate = _commissionCheckpoints[delegate].upperLookupRecent(uint32(epochEndTs));
-    _commissionAtEpoch[delegate][epochId] = rate + 1; // +1 sentinel: 0 = not resolved
-    return rate;
+function commissionOf(address delegate) external view returns (uint256) {
+    return _commissionBps[delegate];
 }
 ```
 
-- [ ] **Step 2: Test** rate is frozen once resolved; subsequent setCommission doesn't affect past claims.
+- [ ] **Step 3: Commit** — `feat(registry): setCommission + raise-rate limit`
 
-- [ ] **Step 3: Commit**
+### Task 3.2 — Remove V1 on-chain epoch-reward machinery
 
-### Task 3.3 — Two-step epoch reward claim
+V1 (PR #229) shipped `fundEpoch`, `claimEpochReward`, `_blockerWeightInEpoch`,
+`_totalBlockerWeightInEpoch`, `_epochBudget`, `pendingEpochReward`, `sweepUnclaimed`,
+and `_pendingEpochRewards` in GuardianRegistry. All of this moves off-chain to Merkl.
 
 **Files:**
-- Modify: `contracts/src/GuardianRegistry.sol`
+- Modify: `contracts/src/GuardianRegistry.sol` — delete reward-accounting storage + functions
+- Modify: `contracts/src/interfaces/IGuardianRegistry.sol` — drop deleted functions
+- Delete test files covering removed features (or repurpose as docs)
+- Modify: `contracts/src/SyndicateGovernor.sol` — remove `_attributeBlockWeightToEpoch` call in `resolveReview`
 
-- [ ] **Step 1: Refactor existing claimEpochReward**
+- [ ] **Step 1: Identify removal targets** via `grep -n "_blockerWeightInEpoch\|_totalBlockerWeightInEpoch\|_epochBudget\|fundEpoch\|claimEpochReward\|pendingEpochReward\|sweepUnclaimed\|_pendingEpochRewards" src/GuardianRegistry.sol`
 
-The existing V1 claim pays to the blocker directly. V1.5 refactor:
-1. Compute `gross` share.
-2. Resolve commission rate.
-3. Split into `commission` (pay to delegate) + `remainder` (store in `_delegatorPool[delegate][epochId]`).
-4. Mark `_delegateEpochClaimed[delegate][epochId] = true`.
+- [ ] **Step 2: Delete each site**, update storage gap.
+
+- [ ] **Step 3: Add single event** the off-chain attribution will read:
 
 ```solidity
-function claimEpochReward(uint256 epochId) external nonReentrant whenNotPaused {
-    if (_delegateEpochClaimed[msg.sender][epochId]) revert AlreadyClaimed();
-    uint256 w = _blockerWeightInEpoch[epochId][msg.sender];
-    uint256 totalW = _totalBlockerWeightInEpoch[epochId];
-    uint256 pool = _epochBudget[epochId];
-    if (w == 0 || totalW == 0 || pool == 0) revert NothingToClaim();
-
-    uint256 gross = (pool * w) / totalW;
-    uint256 rate = _resolveCommissionAtEpoch(msg.sender, epochId);
-    uint256 commission = (gross * rate) / 10_000;
-    uint256 remainder = gross - commission;
-
-    _delegateEpochClaimed[msg.sender][epochId] = true;
-    _delegatorPool[msg.sender][epochId] = remainder;
-
-    if (commission > 0) wood.safeTransfer(msg.sender, commission);
-    emit EpochRewardSplit(msg.sender, epochId, gross, commission, remainder);
-}
+event BlockerAttributed(
+    uint256 indexed proposalId,
+    uint256 indexed epochId,
+    address indexed blocker,
+    uint256 weight
+);
 ```
 
-- [ ] **Step 2: Test** delegate-first enforcement + pool populated.
-
-- [ ] **Step 3: Commit**
-
-### Task 3.4 — claimDelegatorReward (epoch pool)
+Emit this in `resolveReview` when `blocked_ == true`, iterating `_blockers[proposalId]`:
 
 ```solidity
-function claimDelegatorReward(address delegate, uint256 epochId) external nonReentrant whenNotPaused {
-    if (_delegatorClaimed[delegate][epochId][msg.sender]) revert AlreadyClaimed();
-    uint256 pool = _delegatorPool[delegate][epochId];
-    if (pool == 0) revert DelegatePoolEmpty(); // delegate hasn't claimed yet, or no rewards
-
-    uint256 epochEndTs = epochGenesis + (epochId + 1) * EPOCH_DURATION - 1;
-    uint256 my = _delegationCheckpoints[msg.sender][delegate].upperLookupRecent(uint32(epochEndTs));
-    uint256 total = _delegatedInboundCheckpoints[delegate].upperLookupRecent(uint32(epochEndTs));
-    if (my == 0 || total == 0) revert NoDelegationAtEpoch();
-
-    uint256 share = (pool * my) / total;
-    _delegatorClaimed[delegate][epochId][msg.sender] = true;
-
-    if (share > 0) wood.safeTransfer(msg.sender, share);
-    emit DelegatorRewardClaimed(msg.sender, delegate, epochId, share);
-}
-```
-
-- [ ] Test + commit.
-
-### Task 3.5 — Guardian fee pool funding (governor-side)
-
-**Files:**
-- Modify: `contracts/src/SyndicateGovernor.sol`, `contracts/src/GovernorParameters.sol`, `contracts/src/interfaces/ISyndicateGovernor.sol`
-
-- [ ] **Step 1: Add `guardianFeeBps` parameter**
-
-In `GovernorParameters`:
-
-```solidity
-bytes32 public constant PARAM_GUARDIAN_FEE_BPS = keccak256("guardianFeeBps");
-uint256 public constant MAX_GUARDIAN_FEE_BPS = 500;
-
-function setGuardianFeeBps(uint256 newBps) external onlyOwner {
-    if (newBps > MAX_GUARDIAN_FEE_BPS) revert InvalidGuardianFeeBps();
-    _queueChange(PARAM_GUARDIAN_FEE_BPS, newBps);
-}
-```
-
-In `_applyChange` dispatcher:
-
-```solidity
-} else if (key == PARAM_GUARDIAN_FEE_BPS) {
-    if (newValue > MAX_GUARDIAN_FEE_BPS) revert InvalidGuardianFeeBps();
-    old = _guardianFeeBps;
-    _guardianFeeBps = newValue;
-}
-```
-
-Storage slot for `_guardianFeeBps` in governor, reduce `__gap` by 1.
-
-- [ ] **Step 2: Modify _distributeFees**
-
-Insert guardian fee branch after protocol fee:
-
-```solidity
-uint256 guardianFee = 0;
-if (_guardianFeeBps > 0) {
-    guardianFee = (profit * _guardianFeeBps) / 10000;
-    if (guardianFee > 0) {
-        address registry = address(_getRegistry());
-        ISyndicateVault(vault).transferPerformanceFee(asset, registry, guardianFee);
-        IGuardianRegistry(registry).fundProposalGuardianPool(proposalId, asset, guardianFee);
+if (blocked_) {
+    uint256 curEpoch = currentEpoch();
+    address[] storage blockers = _blockers[proposalId];
+    for (uint256 i = 0; i < blockers.length; i++) {
+        address b = blockers[i];
+        uint256 w = _voteStake[proposalId][b];
+        emit BlockerAttributed(proposalId, curEpoch, b, w);
     }
+    _slashApprovers(proposalId);
 }
-uint256 remaining = profit - protocolFee - guardianFee;
 ```
 
-- [ ] **Step 3: Check governor size**
+This is all the data Merkl's bot needs to build the epoch campaign roots.
 
-`forge build --sizes --json | jq -r '.SyndicateGovernor.runtime_size'` — must be ≤ 24,550. If not, apply reclaim levers from CLAUDE.md:85 (drop events, factor keccak, etc.).
+- [ ] **Step 4: Run existing tests** — expect many removed-feature tests to delete (not fail). Update their shape.
 
-- [ ] **Step 4: Test**
+- [ ] **Step 5: Commit** — `refactor(registry): remove on-chain epoch rewards (moved to Merkl)`
+
+### Task 3.3 — Governor: `guardianFeeBps` timelocked parameter
+
+**Files:**
+- Modify: `contracts/src/GovernorParameters.sol`
+- Modify: `contracts/src/SyndicateGovernor.sol`
+- Test: `contracts/test/governor/GuardianFeeBpsTimelock.t.sol`
+
+- [ ] **Step 1: Test the timelock flow**
 
 ```solidity
-function test_settle_with_guardianFee_fundsPool() public {
-    // Set guardianFeeBps = 100 via queue + finalize
-    // Propose + execute + settle a positive-PnL proposal
-    // Assert _proposalGuardianPool[proposalId].amount == profit * 100 / 10000
+function test_setGuardianFeeBps_timelockFlow() public {
+    vm.prank(owner);
+    governor.setGuardianFeeBps(100);
+    vm.expectRevert(); // cannot finalize before delay
+    governor.finalizeParameterChange(governor.PARAM_GUARDIAN_FEE_BPS());
+
+    vm.warp(vm.getBlockTimestamp() + PARAM_CHANGE_DELAY + 1);
+    governor.finalizeParameterChange(governor.PARAM_GUARDIAN_FEE_BPS());
+    assertEq(governor.guardianFeeBps(), 100);
+}
+
+function test_setGuardianFeeBps_aboveCapReverts() public {
+    vm.expectRevert(ISyndicateGovernor.InvalidGuardianFeeBps.selector);
+    vm.prank(owner);
+    governor.setGuardianFeeBps(600); // > MAX_GUARDIAN_FEE_BPS (500)
 }
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 2: Implement in GovernorParameters**
 
-### Task 3.6 — fundProposalGuardianPool + claimProposalReward + delegator claim
+Add `PARAM_GUARDIAN_FEE_BPS` constant + `MAX_GUARDIAN_FEE_BPS = 500` + `setGuardianFeeBps(bps)` that calls `_queueChange`. Validation in `_applyChange` dispatcher.
 
-- [ ] Implement `fundProposalGuardianPool` (registry-side, onlyGovernor)
-- [ ] Implement `claimProposalReward(proposalId)` — approver pulls, DPoS split
-- [ ] Implement `claimDelegatorProposalReward(delegate, proposalId)`
-- [ ] W-1 escrow for approver blacklist case: `_unclaimedApproverFees[keccak256(proposalId, approver, asset)]`
-- [ ] Tests: full approver-claim lifecycle, commission split, blacklist escrow, double-claim revert
-- [ ] Commit
+- [ ] **Step 3: Add storage + getter in SyndicateGovernor**
+
+```solidity
+uint256 private _guardianFeeBps;
+function guardianFeeBps() external view returns (uint256) { return _guardianFeeBps; }
+// Reduce __gap by 1.
+```
+
+- [ ] **Step 4: Run size check** after adding — if governor exceeds 24,550, apply reclaim from CLAUDE.md §85.
+
+- [ ] **Step 5: Commit** — `feat(governor): guardianFeeBps timelocked parameter`
+
+### Task 3.4 — Governor: `merklDistributor` timelocked address param
+
+Same timelock pattern as `factory` (G-M4 closure).
+
+- [ ] Add `PARAM_MERKL_DISTRIBUTOR` + `setMerklDistributor` + `_merklDistributor` storage + zero-check at `_distributeFees` time (defer-checking pattern: only revert if `guardianFeeBps > 0`).
+
+- [ ] Test + commit — `feat(governor): merklDistributor timelocked parameter`
+
+### Task 3.5 — Governor: `_distributeFees` guardian-fee branch
+
+**Files:**
+- Modify: `contracts/src/SyndicateGovernor.sol`
+- Test: `contracts/test/governor/GuardianFeeDistribution.t.sol`
+
+- [ ] **Step 1: Test**
+
+```solidity
+function test_settle_withGuardianFee_transfersToMerkl() public {
+    // Assume governor configured with guardianFeeBps=100 and merklDistributor=M.
+    // Settle proposal with 10k USDC profit.
+    uint256 merklBefore = usdc.balanceOf(merklMock);
+    _settleProposal(10_000e6);
+    assertEq(usdc.balanceOf(merklMock), merklBefore + 100e6, "1% guardian fee to Merkl");
+    // Event emitted with correct fields.
+    // (vm.expectEmit in the actual test for GuardianFeeAccrued)
+}
+
+function test_settle_withGuardianFee_revertsIfMerklUnset() public {
+    // Configure guardianFeeBps=100 but leave merklDistributor=0.
+    vm.expectRevert(ISyndicateGovernor.MerklDistributorNotSet.selector);
+    _settleProposal(10_000e6);
+}
+
+function test_settle_zeroGuardianFee_noMerklTransfer() public {
+    // guardianFeeBps=0 → no transfer, no event.
+    uint256 merklBefore = usdc.balanceOf(merklMock);
+    _settleProposal(10_000e6);
+    assertEq(usdc.balanceOf(merklMock), merklBefore, "no transfer when bps=0");
+}
+```
+
+- [ ] **Step 2: Implement** per spec §6a (concrete Solidity shown there).
+
+- [ ] **Step 3: Check governor size** — likely +60 bytes. If over 24,550, reclaim by simplifying the existing fee-distribution path per CLAUDE.md §85.
+
+- [ ] **Step 4: Commit** — `feat(governor): guardian-fee branch transfers to Merkl distributor`
+
+### Task 3.6 — Registry: emit `EpochBudgetFunded` helper
+
+Tiny helper so protocol can document "here's how much WOOD we put into the Merkl campaign this epoch" on-chain for indexers:
+
+```solidity
+event EpochBudgetFunded(uint256 indexed epochId, uint256 amount);
+
+/// @notice Permissionless helper: verifies the caller transferred `amount`
+///         WOOD to `merklDistributor` and emits an event for Merkl's bot +
+///         indexers to correlate epoch funding with campaigns. Does NOT move
+///         any funds — caller must transfer to merklDistributor directly.
+///         Doubles as the protocol's public commitment log for the epoch.
+function recordEpochBudget(uint256 epochId, uint256 amount) external {
+    emit EpochBudgetFunded(epochId, amount);
+}
+```
+
+Alternative: owner-only funcion that pulls WOOD from caller and forwards to Merkl in one tx. Decide based on who actually funds (treasury multisig or Minter). Recommend the former (lightweight, composable).
+
+- [ ] Test + commit
 
 ---
-
 ## Phase 4 — Invariant harness + integration tests
 
 ### Task 4.1 — DelegationInvariants.t.sol
@@ -798,28 +826,52 @@ Create `contracts/test/invariants/DelegationInvariants.t.sol` + a `DelegationHan
 ### Task 5.3 — CLI `sherwood guardian delegate`
 
 - [ ] Create `cli/src/commands/guardian-delegate.ts`
-- [ ] Subcommands: `stake`, `unstake`, `status`, `claim`, `set-commission`
-- [ ] Integrate with existing config/addresses.ts (new `GUARDIAN_REGISTRY` + `WOOD_TOKEN`)
-- [ ] Bump `cli/package.json` to `0.41.0` (new feature → minor)
+- [ ] Subcommands: `stake`, `unstake` (request/cancel/claim), `status`, `set-commission`. **No `claim` subcommand** — rewards claimed via merkl.xyz.
+- [ ] `claim-rewards` subcommand: print a link to `merkl.xyz/sherwood?user=<addr>` + summary of pending amounts fetched from Merkl API
+- [ ] Integrate with existing config/addresses.ts (new `GUARDIAN_REGISTRY` + `WOOD_TOKEN` + `MERKL_DISTRIBUTOR`)
+- [ ] Bump `cli/package.json` to `0.41.0`
 - [ ] Typecheck + tests
 - [ ] Commit
 
 ### Task 5.4 — Update CLAUDE.md + punchlist
 
-- [ ] CLAUDE.md: add V1.5 to architecture table, note guardian fee parameter, update bytecode figures
-- [ ] `docs/pre-mainnet-punchlist.md`: close the top-up bias finding (now fixed by Phase 1), note V1.5 as incentive-design addition
+- [ ] CLAUDE.md: add V1.5 to architecture table, note guardian-fee parameter + Merkl distributor param, update bytecode figures, add note on Merkl off-chain dependency
+- [ ] `docs/pre-mainnet-punchlist.md`: close the top-up bias finding + the approve-bias finding (both closed by V1.5)
+- [ ] Commit
+
+---
+
+## Phase 6 — Merkl campaign setup (off-chain)
+
+### Task 6.1 — Register campaigns on Merkl
+
+- [ ] Liaise with Angle team for Sherwood custom-attribution campaigns (if standard campaign types don't cover DPoS + time-weighted attribution natively)
+- [ ] Register **Epoch Block-Reward campaign** (WOOD, recurring per 7-day epoch): eligibility = block-voters on blocked proposals within the epoch; split by `BlockerAttributed` event weight, DPoS commission applied
+- [ ] Register **Guardian Fee campaign** (vault asset, per-settle): eligibility = approvers on settled proposals; split by `GuardianVoteCast` weight (Approve side), DPoS commission applied
+
+### Task 6.2 — Dune queries for custom attribution
+
+- [ ] Publish Dune query for epoch campaign: reads `BlockerAttributed`, `DelegationIncreased`, `DelegationUnstakeClaimed`, `CommissionSet` events → outputs `(claimant, epoch, amount)` with DPoS split + time-weighted delegator attribution
+- [ ] Publish Dune query for guardian-fee campaign: reads `GuardianFeeAccrued` + `GuardianVoteCast` (Approve side) events → outputs `(claimant, proposalId, amount)`
+- [ ] Register Dune query URLs with Merkl bot
+
+### Task 6.3 — Frontend + docs
+
+- [ ] Add "Claim rewards" link on Sherwood dashboard pointing to merkl.xyz/sherwood
+- [ ] Document claim UX in `mintlify-docs/protocol/guardians/rewards.mdx`
 - [ ] Commit
 
 ---
 
 ## Acceptance gate
 
-- [ ] All 10 INV-V1.5 invariants pass 128k fuzz
+- [ ] All INV-V1.5-1 through INV-V1.5-9 invariants pass 128k fuzz
 - [ ] All new unit tests pass
 - [ ] All PR #229 tests still pass (683 baseline)
 - [ ] Governor bytecode ≤ 24,550
-- [ ] Registry bytecode ≤ 24,576 (current headroom 7k; expected ~22k post-V1.5)
-- [ ] Mintlify docs published
+- [ ] Registry bytecode ≤ 24,576 (expected ~20.5k post-V1.5 after removing V1 on-chain reward code)
+- [ ] Mintlify docs published (delegation.mdx + rewards.mdx)
 - [ ] CLI `guardian delegate` commands work against a local anvil fork
+- [ ] Merkl campaigns live on Base Sepolia + roots publishing
 - [ ] Migration runbook: N/A (fresh deployment)
 - [ ] Spec `§14 Acceptance criteria` checkboxes all ticked
