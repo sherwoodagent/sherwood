@@ -45,11 +45,11 @@ export async function getBtcNetworkStats(): Promise<BtcNetworkStats | null> {
 
   const raw = result.data;
   return {
-    hashRate: raw.hash_rate,
-    difficulty: raw.difficulty,
-    mempoolSize: raw.mempool_size,
-    minerRevenueBtc: raw.miners_revenue_btc,
-    marketPriceUsd: raw.market_price_usd,
-    transactionCount: raw.n_tx,
+    hashRate: raw.hash_rate ?? 0,
+    difficulty: raw.difficulty ?? 0,
+    mempoolSize: raw.mempool_size ?? 0,
+    minerRevenueBtc: raw.miners_revenue_btc ?? 0,
+    marketPriceUsd: raw.market_price_usd ?? 0,
+    transactionCount: raw.n_tx ?? 0,
   };
 }

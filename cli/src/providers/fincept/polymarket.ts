@@ -48,7 +48,7 @@ export async function getCryptoPredictions(): Promise<PredictionMarket[]> {
   try {
     const result = await callFincept<RawMarket[]>(
       "polymarket.py",
-      ["markets", "50"],
+      ["get_markets", "50"],
       30_000,
       CACHE_TTL,
     );
