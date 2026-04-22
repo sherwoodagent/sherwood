@@ -192,18 +192,14 @@ contract ProtocolHandler is Test {
         }
     }
 
-    /// @dev Attempt `claimEpochReward` — guarded by `whenNotPaused`. Epoch
-    ///      is bounded so the call reaches the pause check (epoch check
-    ///      happens after modifiers).
-    function tryClaimEpochReward(uint256 actorSeed) external {
-        address g = guardians[bound(actorSeed, 0, guardians.length - 1)];
-        bool isPaused = registry.paused();
-        if (isPaused) pausedCallAttempts += 1;
-        vm.prank(g);
-        try registry.claimEpochReward(0) {}
-        catch {
-            if (isPaused) pausedCallReverts += 1;
-        }
+    // V1.5: claimEpochReward removed from on-chain surface. Replaced by
+    // tryRecordEpochBudget below — the one public entrypoint that remains.
+    function tryRecordEpochBudget(uint256 epochSeed, uint256 amount) external {
+        amount = bound(amount, 0, 100_000e18);
+        uint256 ep = bound(epochSeed, 0, 5);
+        // recordEpochBudget is NOT pause-gated (it's a pure event emit),
+        // so no pause tracking.
+        registry.recordEpochBudget(ep, amount);
     }
 
     /// @dev Attempt `voteOnProposal` with pause semantics tracking. Uses a

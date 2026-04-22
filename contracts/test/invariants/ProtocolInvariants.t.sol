@@ -179,7 +179,7 @@ contract ProtocolInvariantsTest is StdInvariant, Test {
         selectors[4] = ProtocolHandler.pauseRegistry.selector;
         selectors[5] = ProtocolHandler.unpauseRegistry.selector;
         selectors[6] = ProtocolHandler.tryFlushBurn.selector;
-        selectors[7] = ProtocolHandler.tryClaimEpochReward.selector;
+        selectors[7] = ProtocolHandler.tryRecordEpochBudget.selector;
         selectors[8] = ProtocolHandler.tryVoteOnProposal.selector;
         selectors[9] = ProtocolHandler.tryOpenReview.selector;
         selectors[10] = ProtocolHandler.tryResolveReview.selector;

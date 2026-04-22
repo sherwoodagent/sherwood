@@ -196,25 +196,15 @@ contract GuardianHandler is Test {
     }
 
     // ──────────────────────────────────────────────────────────────
-    // Epochs & rewards
+    // Epochs & rewards (V1.5: WOOD epoch rewards moved to Merkl; only the
+    // permissionless indexer helper remains on-chain.)
     // ──────────────────────────────────────────────────────────────
 
-    function fundEpoch(uint256 epochSeed, uint256 amount) external {
-        amount = bound(amount, 1e18, 100_000e18);
+    function recordEpochBudget(uint256 epochSeed, uint256 amount) external {
+        amount = bound(amount, 0, 100_000e18);
         uint256 curEp = registry.currentEpoch();
-        // Allow current or future epoch (past epochs require budget==0).
         uint256 ep = curEp + bound(epochSeed, 0, 3);
-        vm.prank(registryOwner);
-        try registry.fundEpoch(ep, amount) {} catch {}
-    }
-
-    function claimReward(uint256 actorSeed, uint256 epochSeed) external {
-        address a = actors[bound(actorSeed, 0, actors.length - 1)];
-        uint256 cur = registry.currentEpoch();
-        if (cur == 0) return;
-        uint256 ep = bound(epochSeed, 0, cur - 1);
-        vm.prank(a);
-        try registry.claimEpochReward(ep) {} catch {}
+        registry.recordEpochBudget(ep, amount);
     }
 
     function fundSlashAppealReserve(uint256 amount) external {

@@ -33,11 +33,8 @@ interface IGuardianRegistry {
     error PreparedStakeAlreadyBound();
     error VaultHasActiveProposal();
     error OwnerBondInsufficient();
-    error InvalidEpoch();
-    error EpochNotEnded();
-    error NothingToClaim();
-    error FundEpochLocked();
-    error SweepTooEarly();
+    // V1.5 removed: InvalidEpoch, EpochNotEnded, NothingToClaim, FundEpochLocked,
+    // SweepTooEarly — all tied to the on-chain epoch-claim path now in Merkl.
     error ProtocolPaused();
     error NotPausedOrDeadmanNotElapsed();
     error RefundCapExceeded();
@@ -82,9 +79,13 @@ interface IGuardianRegistry {
     event EmergencyReviewCancelled(uint256 indexed proposalId);
     event EmergencyBlockVoteCast(uint256 indexed proposalId, address indexed guardian, uint128 weight);
     event EmergencyReviewResolved(uint256 indexed proposalId, bool blocked, uint256 slashedAmount);
-    event EpochFunded(uint256 indexed epochId, address indexed funder, uint256 amount);
-    event EpochRewardClaimed(uint256 indexed epochId, address indexed guardian, uint256 amount);
-    event EpochUnclaimedSwept(uint256 indexed fromEpoch, uint256 indexed toEpoch, uint256 amount);
+    // V1.5: WOOD epoch rewards moved to Merkl. Indexer event retained:
+    event EpochBudgetFunded(uint256 indexed epochId, uint256 amount);
+    // Emitted per blocker when a review resolves blocked = true. Merkl's
+    // off-chain bot reads this to build the epoch WOOD campaign's Merkle roots.
+    event BlockerAttributed(
+        uint256 indexed proposalId, uint256 indexed epochId, address indexed blocker, uint256 weight
+    );
     event PendingBurnRecorded(uint256 amount);
     event BurnFlushed(uint256 amount);
     event Paused(address indexed by);
@@ -123,11 +124,7 @@ interface IGuardianRegistry {
     function resolveEmergencyReview(uint256 proposalId) external returns (bool blocked);
     function voteBlockEmergencySettle(uint256 proposalId) external;
     function flushBurn() external;
-    function sweepUnclaimed(uint256 epochId) external;
-
-    // ── Epoch rewards ──
-    function fundEpoch(uint256 epochId, uint256 amount) external;
-    function claimEpochReward(uint256 epochId) external;
+    function recordEpochBudget(uint256 epochId, uint256 amount) external;
 
     // ── Slash appeal ──
     function fundSlashAppealReserve(uint256 amount) external;
@@ -166,7 +163,7 @@ interface IGuardianRegistry {
     function canCreateVault(address owner) external view returns (bool);
     function requiredOwnerBond(address vault) external view returns (uint256);
     function currentEpoch() external view returns (uint256);
-    function pendingEpochReward(address guardian, uint256 epochId) external view returns (uint256);
+    // V1.5: pendingEpochReward removed — query Merkl API / merkl.xyz for pending rewards.
     function governor() external view returns (address);
     function factory() external view returns (address);
 

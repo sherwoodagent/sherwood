@@ -136,12 +136,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     // that support emergency-vote-change can reuse the frozen weight.
     mapping(uint256 => mapping(uint8 => mapping(address => uint128))) internal _emergencyVoteStake;
 
-    // Epoch rewards
+    // Epoch accounting (V1.5: WOOD epoch block-rewards moved to Merkl; only
+    // epochGenesis remains on-chain as the epoch-index anchor used by
+    // setCommission's raise-epoch calculation and off-chain Merkl bot.)
     uint256 public epochGenesis;
-    mapping(uint256 => uint256) public epochBudget;
-    mapping(uint256 => uint256) public epochTotalBlockWeight;
-    mapping(uint256 => mapping(address => uint256)) public epochGuardianBlockWeight;
-    mapping(uint256 => mapping(address => bool)) public epochRewardClaimed;
 
     // Pending burn
     mapping(address => uint256) internal _pendingBurn;
@@ -918,7 +916,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         uint256 slashed;
         if (blocked_) {
             slashed = _slashApprovers(proposalId);
-            _attributeBlockWeightToEpoch(proposalId);
+            _emitBlockerAttribution(proposalId);
         }
 
         emit ReviewResolved(proposalId, blocked_, slashed);
@@ -994,24 +992,20 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         }
     }
 
-    /// @dev Credits each blocker's snapshot weight to
-    ///      `epochGuardianBlockWeight[currentEpoch][g]` and bumps
-    ///      `epochTotalBlockWeight[currentEpoch]`. Epoch is resolved at the
-    ///      resolve-time `block.timestamp` (not reviewEnd), matching the spec.
-    function _attributeBlockWeightToEpoch(uint256 proposalId) private {
+    /// @dev V1.5: emits `BlockerAttributed(proposalId, epochId, blocker, weight)`
+    ///      for each blocker so Merkl's off-chain bot can build the epoch WOOD
+    ///      campaign's Merkle roots. Replaces V1's on-chain
+    ///      `epochGuardianBlockWeight` + `epochTotalBlockWeight` + `epochBudget`
+    ///      accounting, which moved to Merkl.
+    function _emitBlockerAttribution(uint256 proposalId) private {
         uint256 epochId = (block.timestamp - epochGenesis) / EPOCH_DURATION;
         address[] storage blockers = _blockers[proposalId];
         uint256 n = blockers.length;
-        uint256 epochTotalDelta;
         for (uint256 i = 0; i < n; i++) {
             address b = blockers[i];
             uint256 w = _voteStake[proposalId][b];
             if (w == 0) continue;
-            epochGuardianBlockWeight[epochId][b] += w;
-            epochTotalDelta += w;
-        }
-        if (epochTotalDelta != 0) {
-            epochTotalBlockWeight[epochId] += epochTotalDelta;
+            emit BlockerAttributed(proposalId, epochId, b, w);
         }
     }
 
@@ -1113,67 +1107,21 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     /// @inheritdoc IGuardianRegistry
-    /// @dev Permissionless. After `SWEEP_DELAY` (12 weeks) beyond
-    ///      `epochEnd`, moves any residual `epochBudget[epochId]` into the
-    ///      current epoch so late-arriving guardians can still claim against
-    ///      a pool. No-op (no revert) when residual is zero, so the
-    ///      entrypoint remains callable without gating even if a keeper
-    ///      races a manual sweep.
-    function sweepUnclaimed(uint256 epochId) external nonReentrant whenNotPaused {
-        uint256 epochEnd = epochGenesis + (epochId + 1) * EPOCH_DURATION;
-        if (block.timestamp < epochEnd + SWEEP_DELAY) revert SweepTooEarly();
-        uint256 residual = epochBudget[epochId];
-        if (residual == 0) return;
+    // ── V1.5: WOOD epoch block-rewards moved to Merkl ──
+    //
+    // Removed V1 on-chain machinery: `fundEpoch`, `claimEpochReward`,
+    // `sweepUnclaimed`, `pendingEpochReward`, + all per-epoch accounting
+    // storage. Merkl campaign attribution is driven by the
+    // `BlockerAttributed` event emitted in `_emitBlockerAttribution` during
+    // `resolveReview`, plus `CommissionSet` + `DelegationIncreased` /
+    // `DelegationUnstakeClaimed` events already emitted elsewhere.
 
-        uint256 to = currentEpoch();
-        epochBudget[epochId] = 0;
-        epochBudget[to] += residual;
-        emit EpochUnclaimedSwept(epochId, to, residual);
-    }
-
-    // ── Epoch rewards ──
-    /// @inheritdoc IGuardianRegistry
-    /// @dev Callable by owner or minter. Allowed for current and future
-    ///      epochs. Past epochs can only be funded if
-    ///      `epochBudget[epochId] == 0` — once any funding exists, the epoch
-    ///      is effectively locked so already-claimed pro-rata splits cannot
-    ///      be retroactively diluted.
-    function fundEpoch(uint256 epochId, uint256 amount) external nonReentrant onlyMinterOrOwner {
-        if (epochId < currentEpoch() && epochBudget[epochId] != 0) revert FundEpochLocked();
-
-        wood.safeTransferFrom(msg.sender, address(this), amount);
-        epochBudget[epochId] += amount;
-
-        emit EpochFunded(epochId, msg.sender, amount);
-    }
-
-    /// @inheritdoc IGuardianRegistry
-    /// @dev Payout = `epochBudget * weight / totalWeight` evaluated against
-    ///      the *remaining* budget and remaining total weight at claim time.
-    ///      Decrementing both preserves pro-rata fairness regardless of
-    ///      claim order (first claimer gets their full share even if other
-    ///      guardians never claim). Reverts `NothingToClaim` on zero payout
-    ///      (unfunded epoch, zero guardian weight, or rounding to zero) — so
-    ///      guardians can come back and claim after a late `fundEpoch` for
-    ///      the same past epoch. CEI: marks claimed and decrements budget +
-    ///      total weight BEFORE transfer; the epoch's residual remains
-    ///      accurate for `sweepUnclaimed`.
-    function claimEpochReward(uint256 epochId) external nonReentrant whenNotPaused {
-        if (epochId >= currentEpoch()) revert EpochNotEnded();
-        if (epochRewardClaimed[epochId][msg.sender]) revert NothingToClaim();
-
-        uint256 weight = epochGuardianBlockWeight[epochId][msg.sender];
-        uint256 total = epochTotalBlockWeight[epochId];
-        uint256 budget = epochBudget[epochId];
-        uint256 payout = (weight == 0 || total == 0) ? 0 : (budget * weight) / total;
-        if (payout == 0) revert NothingToClaim();
-
-        epochRewardClaimed[epochId][msg.sender] = true;
-        epochBudget[epochId] = budget - payout;
-        epochTotalBlockWeight[epochId] = total - weight;
-
-        wood.safeTransfer(msg.sender, payout);
-        emit EpochRewardClaimed(epochId, msg.sender, payout);
+    /// @notice Permissionless — indexer helper for Merkl's epoch campaign.
+    ///         Caller transfers WOOD to the Merkl distributor separately (not
+    ///         a function of the registry); this emits the event so indexers
+    ///         can correlate the deposit with an epoch ID.
+    function recordEpochBudget(uint256 epochId, uint256 amount) external {
+        emit EpochBudgetFunded(epochId, amount);
     }
 
     // ── Slash appeal ──
@@ -1431,17 +1379,5 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         return (block.timestamp - epochGenesis) / EPOCH_DURATION;
     }
 
-    /// @notice Mirrors `claimEpochReward` payout computation. Returns 0 when
-    ///         already claimed, epoch not yet ended, or the computed payout
-    ///         rounds to zero — matching what `claimEpochReward` would
-    ///         revert on.
-    function pendingEpochReward(address guardian, uint256 epochId) external view returns (uint256) {
-        if (epochId >= currentEpoch()) return 0;
-        if (epochRewardClaimed[epochId][guardian]) return 0;
-
-        uint256 weight = epochGuardianBlockWeight[epochId][guardian];
-        uint256 total = epochTotalBlockWeight[epochId];
-        if (weight == 0 || total == 0) return 0;
-        return (epochBudget[epochId] * weight) / total;
-    }
+    // pendingEpochReward removed in V1.5 — claimed via Merkl (merkl.xyz).
 }

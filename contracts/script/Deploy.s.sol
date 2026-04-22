@@ -281,9 +281,13 @@ contract DeploySherwood is ScriptBase {
             GuardianRegistry(registryProxy).fundSlashAppealReserve(cfg.slashAppealSeed);
             console.log("SlashAppealReserve seeded:", cfg.slashAppealSeed);
         }
+        // V1.5: epoch-0 seed removed — WOOD epoch block-rewards distributed
+        // via Merkl off-chain. Protocol owner funds Merkl campaign directly
+        // (transfer WOOD to merkl distributor) then calls `recordEpochBudget`
+        // for the indexer event. Not scripted into Deploy to keep deployment
+        // scope disjoint from off-chain reward infra.
         if (cfg.epochZeroSeed > 0) {
-            GuardianRegistry(registryProxy).fundEpoch(0, cfg.epochZeroSeed);
-            console.log("Epoch 0 budget seeded:", cfg.epochZeroSeed);
+            console.log("Note: epochZeroSeed ignored (moved to Merkl):", cfg.epochZeroSeed);
         }
     }
 

@@ -67,7 +67,7 @@ contract GuardianInvariantsTest is StdInvariant, Test {
 
         // Further restrict to the bounded actions so Foundry doesn't call
         // view helpers on the handler (which would just waste fuzz calls).
-        bytes4[] memory selectors = new bytes4[](12);
+        bytes4[] memory selectors = new bytes4[](11);
         selectors[0] = GuardianHandler.stake.selector;
         selectors[1] = GuardianHandler.requestUnstake.selector;
         selectors[2] = GuardianHandler.cancelUnstake.selector;
@@ -77,9 +77,8 @@ contract GuardianInvariantsTest is StdInvariant, Test {
         selectors[6] = GuardianHandler.resolveReview.selector;
         selectors[7] = GuardianHandler.createProposal.selector;
         selectors[8] = GuardianHandler.warp.selector;
-        selectors[9] = GuardianHandler.fundEpoch.selector;
-        selectors[10] = GuardianHandler.claimReward.selector;
-        selectors[11] = GuardianHandler.fundSlashAppealReserve.selector;
+        selectors[9] = GuardianHandler.recordEpochBudget.selector;
+        selectors[10] = GuardianHandler.fundSlashAppealReserve.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 
@@ -88,22 +87,13 @@ contract GuardianInvariantsTest is StdInvariant, Test {
     // ──────────────────────────────────────────────────────────────
 
     /// @notice The registry's WOOD balance must cover every obligation it
-    ///         tracks: guardian stake, epoch budgets, and the slash-appeal
-    ///         reserve. Anything above that is fine (e.g., legitimate donations).
-    ///         INV-1 is the conservative soundness statement: the registry
-    ///         never claims to hold more WOOD than it actually has.
+    ///         tracks: guardian stake, prepared stake, owner stake, and the
+    ///         slash-appeal reserve. V1.5: epoch-reward budgets moved to
+    ///         Merkl (distributor-held); no longer on-registry.
     function invariant_woodConservation() public view {
         uint256 contractBal = wood.balanceOf(address(registry));
 
         uint256 claimed = registry.slashAppealReserve();
-
-        uint256 cur = registry.currentEpoch();
-        // Sum budgets across the current epoch and a handful of past/future
-        // epochs (handler can fund up to curEp+3). The upper bound matches
-        // the handler's fundEpoch range.
-        for (uint256 ep = 0; ep <= cur + 3; ep++) {
-            claimed += registry.epochBudget(ep);
-        }
 
         address[] memory actors = handler.getActors();
         for (uint256 i = 0; i < actors.length; i++) {
@@ -148,27 +138,8 @@ contract GuardianInvariantsTest is StdInvariant, Test {
         }
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // INV-5: epoch-reward claim is strictly monotonic (no double claim)
-    // ──────────────────────────────────────────────────────────────
-
-    /// @notice Once `epochRewardClaimed[ep][guardian] == true`,
-    ///         `pendingEpochReward(guardian, ep)` MUST be zero. Guarantees
-    ///         no double-payout is possible via a second claim call.
-    function invariant_noDoubleClaim() public view {
-        address[] memory actors = handler.getActors();
-        uint256 cur = registry.currentEpoch();
-        if (cur == 0) return;
-        for (uint256 ep = 0; ep < cur; ep++) {
-            for (uint256 i = 0; i < actors.length; i++) {
-                if (registry.epochRewardClaimed(ep, actors[i])) {
-                    assertEq(
-                        registry.pendingEpochReward(actors[i], ep), 0, "INV-5: pendingEpochReward non-zero after claim"
-                    );
-                }
-            }
-        }
-    }
+    // V1.5: INV-5 (no-double-claim) removed — epoch-reward claims live in
+    // Merkl, not on-chain. Merkle roots enforce no-double-claim by construction.
 
     // ──────────────────────────────────────────────────────────────
     // TODO(audit): additional invariants deferred to V2 harness
