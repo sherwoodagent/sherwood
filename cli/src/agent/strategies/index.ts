@@ -15,6 +15,7 @@ import { TradingViewSignalStrategy } from './tradingview-signal.js';
 import { BtcNetworkHealthStrategy } from './btc-network-health.js';
 import { PredictionMarketStrategy } from './prediction-market.js';
 import { SocialVolumeStrategy } from './social-volume.js';
+import { KronosVolForecastStrategy } from './kronos-vol-forecast.js';
 
 export type { Strategy, StrategyContext, StrategyConfig };
 export { SentimentContrarianStrategy, BreakoutOnChainStrategy, FundingRateStrategy };
@@ -23,6 +24,7 @@ export { MultiTimeframeStrategy, CrossSectionalMomentumStrategy };
 export { TradingViewSignalStrategy };
 export { BtcNetworkHealthStrategy };
 export { PredictionMarketStrategy, SocialVolumeStrategy };
+export { KronosVolForecastStrategy };
 
 export const DEFAULT_STRATEGIES: Strategy[] = [
   new SentimentContrarianStrategy(),    // sentiment — F&G contrarian
@@ -36,6 +38,7 @@ export const DEFAULT_STRATEGIES: Strategy[] = [
   new BtcNetworkHealthStrategy(),       // technical — BTC network health
   new PredictionMarketStrategy(),       // event — prediction market catalysts
   new SocialVolumeStrategy(),           // sentiment — social volume contrarian
+  new KronosVolForecastStrategy(),      // technical — ML volatility forecast
 ];
 
 /**

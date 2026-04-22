@@ -90,12 +90,15 @@ export class TradeExecutor {
     return TradeExecutor.TOKEN_TO_ASSET_INDEX[tokenId];
   }
 
-  /** Execute a trade based on a decision */
+  /** Execute a trade based on a decision.
+   *  @param predictedVol - Kronos ML-predicted per-candle volatility (fraction).
+   *    When provided, overrides ATR-based stop distance for more forward-looking risk. */
   async execute(
     decision: TradeDecision,
     tokenId: string,
     currentPrice: number,
     atr?: number,
+    predictedVol?: number,
   ): Promise<{
     success: boolean;
     position?: Position;
@@ -201,10 +204,18 @@ export class TradeExecutor {
     const STOP_CAP = 0.12;     // maximum 12% (tightened from 15%)
     const FALLBACK_STOP = 0.05; // when no ATR available (was 4%)
 
+    // Kronos ML-predicted vol overrides ATR when available.
+    // predictedVol4h is the per-candle (4h) volatility from Monte Carlo paths.
+    // Use 2.5× predicted vol as stop distance (captures ~95% of expected move).
+    // Falls back to ATR×3.5 when Kronos is unavailable.
+    const KRONOS_STOP_MULTIPLIER = 2.5;
+    const useKronos = predictedVol && Number.isFinite(predictedVol) && predictedVol > 0;
     const atrPct = (atr && currentPrice > 0 && !isNaN(atr))
       ? atr / currentPrice
       : FALLBACK_STOP / ATR_STOP_MULTIPLIER;
-    const stopPct = Math.min(STOP_CAP, Math.max(STOP_FLOOR, atrPct * ATR_STOP_MULTIPLIER));
+    const kronosPct = useKronos ? predictedVol! * KRONOS_STOP_MULTIPLIER : 0;
+    const rawStopPct = useKronos ? kronosPct : atrPct * ATR_STOP_MULTIPLIER;
+    const stopPct = Math.min(STOP_CAP, Math.max(STOP_FLOOR, rawStopPct));
     this.lastAtr = atr;
     const stopLossDistance = currentPrice * stopPct;
     const stopLossPrice = isShort

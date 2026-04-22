@@ -32,6 +32,7 @@ import {
   getSocialData,
   getCryptoCompareCandles,
   getProtocolTvl,
+  getKronosVolForecast,
 } from '../providers/fincept/index.js';
 import { logSignal } from "./signal-logger.js";
 import type { JudgeLogData } from "./signal-logger.js";
@@ -107,6 +108,9 @@ export interface TokenAnalysis {
   preVelocity?: { action: string; score: number };
   /** Original action/score before regime gate blocked a short in non-bearish regime. */
   preRegime?: { action: string; score: number };
+  /** Kronos ML-predicted per-candle volatility (fraction). Used by executor
+   *  for dynamic stop-loss width when available. */
+  kronosVol4h?: number;
 }
 
 export class TradingAgent {
@@ -377,12 +381,14 @@ export class TradingAgent {
     // phase 1, or Nansen/Messari from x402).
 
     // Phase 2b: Fincept data (parallel, all fault-tolerant)
-    const [messariResult, btcNetResult, predictionResult, socialResult] =
+    const [messariResult, btcNetResult, predictionResult, socialResult, kronosResult] =
       await Promise.allSettled([
         getMessariFundamentals(tokenId),
         tokenId === 'bitcoin' ? getBtcNetworkStats() : Promise.resolve(null),
         getCryptoPredictions(),
         getSocialData(tokenId),
+        // Kronos vol forecast — uses existing candles (1h cache, ~2.3s on CPU)
+        candles && candles.length >= 30 ? getKronosVolForecast(tokenId, candles) : Promise.resolve(null),
       ]);
 
     const messariFundamentals = messariResult.status === 'fulfilled' ? messariResult.value ?? undefined : undefined;
@@ -391,6 +397,7 @@ export class TradingAgent {
       ? { markets: predictionResult.value }
       : undefined;
     const socialData = socialResult.status === 'fulfilled' ? socialResult.value ?? undefined : undefined;
+    const kronosData = kronosResult.status === 'fulfilled' ? kronosResult.value ?? undefined : undefined;
 
     // Feed Messari fundamentals into scoreFundamental if available
     if (messariFundamentals && messariFundamentals.marketCap > 0) {
@@ -484,6 +491,7 @@ export class TradingAgent {
         btcNetworkData,
         predictionData,
         socialData,
+        kronosData,
       };
 
       let strategySignals = await runStrategies(stratCtx, this.config.strategyConfigs);
@@ -573,6 +581,7 @@ export class TradingAgent {
       data: { technicalSignals, fearAndGreed: fearAndGreedValue, tvl, price: currentPrice },
       regime: regimeAnalysis,
       correlation: correlationCheck,
+      kronosVol4h: kronosData?.predictedVol4h,
     };
 
     // ── Velocity freshness gate (Orca-inspired) ──

@@ -506,6 +506,7 @@ const SIGNAL_CATEGORY_MAP: Record<string, keyof ScoringWeights> = {
   btcNetworkHealth: "technical",
   predictionMarket: "event",
   socialVolume: "sentiment",
+  kronosVolForecast: "technical",
 };
 
 /** Categories that rely on x402 paid data (Nansen, Messari). */

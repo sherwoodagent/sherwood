@@ -89,6 +89,16 @@ export interface StrategyContext {
       volume: number;
     }>;
   };
+  /** Kronos ML volatility forecast — predicted vol and directional bias. */
+  kronosData?: {
+    predictedVolatility: number;
+    predictedVol4h: number;
+    directionalBias: number;
+    pathSpreadPct: number;
+    lastClose: number;
+    meanPredictedClose: number;
+    inferenceTimeMs: number;
+  };
 }
 
 export interface Strategy {

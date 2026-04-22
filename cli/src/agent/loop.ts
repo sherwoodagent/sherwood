@@ -376,7 +376,8 @@ export class AgentLoop {
 
           const currentPrice = check.price;
           const atr = result.data?.technicalSignals?.atr;
-          const execResult = await this.executor.execute(result.decision, result.token, currentPrice, atr);
+          const kronosVol = result.kronosVol4h;
+          const execResult = await this.executor.execute(result.decision, result.token, currentPrice, atr, kronosVol);
           if (execResult.success) {
             tradesExecuted++;
             console.log(this.executor.formatExecution(execResult));
