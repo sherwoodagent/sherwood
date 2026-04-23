@@ -309,11 +309,12 @@ export class TradingAgent {
 
       const nansenProvider = getResearchProvider("nansen") as import("../providers/research/nansen.js").NansenProvider;
 
-      // Nansen netflow dropped — returns 422 for token_symbol filter.
-      // HL perp-trades is the higher-value signal (same venue we trade).
+      // Two Nansen calls in parallel:
+      //   1. HL perp trades — cross-venue smart money positioning
+      //   2. Smart money netflow — aggregate on-chain accumulation/distribution
       const [hlPerpResult, flowResult] = await Promise.allSettled([
         nansenProvider.queryHyperliquidSmartMoney(hlSymbol),
-        nansenProvider.queryFlowIntelligence(hlSymbol),
+        nansenProvider.query({ type: 'smart-money', target: hlSymbol }),
       ]);
 
       // Process HL perp trades — derive a smartMoney signal from recent trade direction
@@ -357,28 +358,37 @@ export class TradingAgent {
         console.error(chalk.dim(`  x402 Nansen HL perps unavailable: ${hlPerpResult.reason}`));
       }
 
-      // Flow Intelligence — aggregate accumulation/distribution by investor type
+      // Smart Money Netflow — aggregate accumulation/distribution across chains
       if (flowResult.status === 'fulfilled' && flowResult.value?.data) {
         const flowData = flowResult.value.data as Record<string, unknown>;
-        // The API returns flow data by investor type. Extract net flows.
-        // Positive net_flow = smart money accumulating = bullish.
-        // Negative net_flow = smart money distributing = bearish.
-        const netFlow = Number(flowData.net_flow_24h_usd ?? flowData.net_flow ?? 0);
+        const flows = flowData.flows as Array<Record<string, unknown>> | undefined;
+        // Sum net_flow_24h_usd across all chains for this token
+        let netFlow = 0;
+        let traderCount = 0;
+        if (flows && flows.length > 0) {
+          for (const f of flows) {
+            netFlow += Number(f.net_flow_24h_usd ?? 0);
+            traderCount += Number(f.trader_count ?? 0);
+          }
+        } else {
+          // Single-row response format
+          netFlow = Number(flowData.net_flow_24h_usd ?? 0);
+          traderCount = Number(flowData.trader_count ?? 0);
+        }
+
         if (netFlow !== 0 && !isNaN(netFlow)) {
-          // Normalize: $1M+ flow = strong signal (±0.5), scale linearly
           const normalizedFlow = Math.max(-0.5, Math.min(0.5, netFlow / 2_000_000));
           signals.push({
             name: 'flowIntelligence',
             value: normalizedFlow,
             confidence: Math.min(0.7, 0.3 + Math.abs(normalizedFlow)),
-            source: 'Nansen Flow Intelligence',
-            details: `Smart money 24h net flow: $${(netFlow / 1_000_000).toFixed(2)}M ${netFlow > 0 ? '(accumulating)' : '(distributing)'}`,
+            source: 'Nansen Smart Money Netflow',
+            details: `Smart money 24h net flow: $${(netFlow / 1_000_000).toFixed(2)}M ${netFlow > 0 ? '(accumulating)' : '(distributing)'} (${traderCount} wallets)`,
           });
-          console.error(chalk.dim(`  Nansen flow-intelligence: $${(netFlow / 1_000_000).toFixed(2)}M net flow, cost ${flowResult.value.costUsdc}`));
-          // Capture for NarrativeVacuum + WhaleIntent strategies
-          const traderCount = Number(flowData.trader_count ?? flowData.active_wallets ?? 0);
-          nansenFlowData = { netFlow24hUsd: netFlow, traderCount };
+          console.error(chalk.dim(`  Nansen netflow: $${(netFlow / 1_000_000).toFixed(2)}M, ${traderCount} wallets, cost ${flowResult.value.costUsdc}`));
         }
+        // Capture for NarrativeVacuum + WhaleIntent strategies
+        nansenFlowData = { netFlow24hUsd: netFlow, traderCount };
       }
 
       // Push event signal (no Messari — use free path)
