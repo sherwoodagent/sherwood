@@ -351,6 +351,11 @@ export class TradingAgent {
           console.error(chalk.dim(`  Nansen HL perps: ${trades.length} trades, ${(longRatio * 100).toFixed(0)}% long bias, cost ${hlResult.costUsdc}`));
           // Capture for WhaleIntent strategy
           nansenHlPerps = { longRatio, tradeCount: trades.length, longValueUsd, shortValueUsd };
+          // Derive flow data from HL perps when netflow endpoint fails (422 on token_symbol)
+          if (!nansenFlowData) {
+            const netFlowFromPerps = longValueUsd - shortValueUsd;
+            nansenFlowData = { netFlow24hUsd: netFlowFromPerps, traderCount: trades.length };
+          }
         } else {
           console.error(chalk.dim(`  Nansen HL perps: no recent trades for ${hlSymbol}`));
         }
