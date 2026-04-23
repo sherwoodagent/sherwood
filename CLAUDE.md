@@ -111,7 +111,7 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - **Hermes skill sync**: cron reads skills from `~/.hermes/skills/sherwood/*/SKILL.md`, NOT from the repo. After editing `cron/skills/*/SKILL.md`, copy to hermes: `cp cron/skills/<name>/SKILL.md ~/.hermes/skills/sherwood/<name>/SKILL.md`.
 - **Hermes cron prompt**: the job's `--prompt` text overrides SKILL.md instructions. After changing a skill's behavior, also update the prompt via `hermes cron edit <id> --prompt "..."`. The cron for trade-scanner is `c51a4fe8314e`.
 - `sherwood agent autoresearch [--experiments N] [--last D]` — autonomous parameter optimization against signal-history.jsonl. Mutates weights/thresholds/stops, replays, keeps improvements. Results in `autoresearch-best-params.json`.
-- Default weights are autoresearch-optimized (50 exp, Sharpe 4.79): technical=0.30, sentiment=0.15, onchain=0.15, smartMoney=0.10, fundamental=0.05, event=0.00. Re-run `sherwood agent autoresearch` after accumulating new signal data to re-optimize.
+- Default weights (Apr 23 2026, post-Fincept): technical=0.35, sentiment=0.10, onchain=0.20, fundamental=0.15, event=0.15, smartMoney=0.05. Dead signals (sentimentContrarian, dexFlow) disabled — they diluted scores with zeros. Re-run `sherwood agent autoresearch` after accumulating new signal data.
 
 ### Calibrator
 
@@ -127,6 +127,35 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - `trades.json` — closed-trade history (entry/exit/PnL/reason).
 - `calibration-results.json` / `replay-calibration-results.json` — last calibrator run output.
 - `grid-portfolio.json` — grid strategy state: per-token levels, open fills, cumulative PnL, allocation. Isolated from directional `portfolio.json`.
+- **Portfolio accounting**: `portfolio.totalValue` only tracks directional cash + positions. Grid allocation (`grid-portfolio.json`) is separate. To get true total capital: `portfolio.totalValue + gridAllocation`. The summary formatter (`summary-formatter.ts`) combines both for the headline number.
+
+### Fincept Data Bridge
+
+External data providers use vendored Python scripts from FinceptTerminal, called via subprocess bridge (`cli/src/providers/fincept/bridge.ts`). Scripts live in `cli/scripts/fincept/`, output JSON to stdout.
+- **Active**: Messari (fundamentals), Blockchain.com (BTC network), Polymarket (predictions), CryptoCompare (candles fallback + social), DefiLlama (TVL/yields), DexScreener (DEX pairs)
+- **Kept in-house**: Hyperliquid (native exchange), TradingView (MCP subprocess)
+- **Removed**: Glassnode (requires $999/mo API), CoinGecko OHLCV (replaced by CryptoCompare fallback)
+- Bridge path resolution: tries source layout, then dist layout, then cwd — handles both `tsc` and bundled builds
+- `CRYPTOCOMPARE_API_KEY` env var needed for news/social endpoints (price/OHLCV is free)
+
+### Kronos Volatility Forecaster
+
+Kronos-mini (4.1M param foundation model) predicts future OHLCV via Monte Carlo paths. Used for dynamic stop-loss width and directional bias signal.
+- Venv at `~/.sherwood/kronos-venv/` with CPU-only PyTorch (~200MB). Model code vendored at `cli/scripts/fincept/kronos_model/`.
+- Inference: ~2.3s per token for 5 paths on CPU. Results cached 1 hour per token.
+- If venv missing, Kronos signals gracefully return null (agent runs without it).
+- Model weights auto-download from HuggingFace (`NeoQuasar/Kronos-mini`, `NeoQuasar/Kronos-Tokenizer-base`) on first run, cached in `~/.cache/huggingface/`.
+
+### Grid Strategy
+
+- Config in `grid-config.ts`: BTC 45% / ETH 30% / SOL 25% split, 15 levels/side, 4x leverage, 55% rebalance drift.
+- Runs parallel to directional strategy with isolated capital (50% of portfolio). Grid PnL tracked in `grid-portfolio.json`.
+
+### Regime Gate & Short Protection
+
+- Shorts blocked in non-bearish regimes (trending-up, ranging, low-volatility). Only allowed in trending-down and high-volatility.
+- Per-token consecutive loss cooldown: 24h ban after 2 losses on same token.
+- Short position sizing halved (0.5x multiplier).
 
 ## Chat (XMTP)
 
