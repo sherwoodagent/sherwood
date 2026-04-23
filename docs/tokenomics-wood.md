@@ -4,6 +4,18 @@
 > **Author:** Ally (AI CEO)
 > **Date:** 2026-04-06
 > **History:** Replaced the ve(3,3) emission-driven model after comparative analysis showed 50%+ emission budgets cause death spirals for non-DEX protocols. Redesigned around real protocol fee revenue.
+>
+> **Pre-mainnet tracker:** `docs/pre-mainnet-punchlist.md` §3.4 lists the Critical tokenomics findings from [#225](https://github.com/imthatcarlos/sherwood/issues/225). Summary for readers of this doc: the shipped contracts have known bugs that affect statements below —
+>
+> - **T-C1** — `SyndicateGauge.claimLPRewards` always reverts (`_calculateLPReward` is a stub). LP bootstrapping rewards accumulate on-chain but cannot be claimed until the function ships.
+> - **T-C3** — `balanceOfNFTAt` reads current lock state, not historical. Historical voting power in `Voter` is retroactively mutable — affects every epoch's distribution until fixed.
+> - **T-C4** — veNFTs transfer freely while votes are attached. Vote double-count via transfer + re-vote.
+> - **T-C5** — `VoteIncentive` bribe claim checks current NFT owner, not vote-time owner. Bribe theft via transfer before claim.
+> - **T-C6** — rebase in `Minter` is weighted by `amount`, not `amount × lockDuration` — undercompensates long lockers.
+> - **T-C7** — `VaultRewardsDistributor` captures full-epoch rewards for a deposit placed one block before epoch end.
+> - **D-1** — `Minter` rebase denominator uses `votingEscrow.totalSupply()` (decay-adjusted voting power) instead of `totalLockedAmount()`. Rebase is systematically **over-issued** and inflates as locks approach expiry.
+>
+> These are **not fixed in code yet**. PR #229 (guardian review) doesn't touch them. This doc describes the **intended** tokenomics; the punch list tracks where reality drifts.
 
 ## Overview
 
@@ -15,8 +27,25 @@ A revenue-driven tokenomics system for the Sherwood protocol. Users lock WOOD to
 
 | Token | Standard | Purpose |
 |-------|----------|---------|
-| `$WOOD` | ERC-20 (LayerZero OFT) | Utility token — locked for fee sharing, traded. Natively bridgeable to any LZ-supported chain. Fixed supply minted at genesis. |
+| `$WOOD` | ERC-20 (LayerZero OFT) | Utility token — locked for fee sharing, traded, **staked as guardian bond**, **staked as vault-owner bond**. Natively bridgeable to any LZ-supported chain. Fixed supply minted at genesis. |
 | `$veWOOD` | ERC-721 (veNFT) | Fee-sharing NFT — represents locked WOOD with time-weighted fee share weight. Earns pro-rata share of real protocol fee revenue. |
+
+### WOOD as security collateral (PR #229)
+
+Beyond fee-share locking, WOOD is the protocol's **security bond** for two roles:
+
+- **Guardians** (third-party reviewers) stake WOOD in `GuardianRegistry` (≥ `minGuardianStake`, default 10k) to join the review cohort. Voted-Approve-on-a-malicious-proposal → stake burned. Voted-Block-on-a-correctly-blocked-proposal → pro-rata share of that epoch's block bounty pool.
+- **Vault owners** post a WOOD bond at vault creation (≥ `minOwnerStake`, default 10k; TVL-scalable). Owners who try to drain via `emergencySettleWithCalls` → guardians block, owner slashed.
+
+Both categories use the same 7-day unstake cool-down. Slashed WOOD is **burned** (sent to `0x…dEaD`), creating a deflationary sink tied to protocol health.
+
+## WOOD sinks (deflationary pressure)
+
+| Sink | Source | Comment |
+|---|---|---|
+| Buyback-and-lock | 20% of protocol fees → veWOOD | Net issuance-neutral; circulates WOOD but removes sell pressure. |
+| **Slash burn** _(new, PR #229)_ | Guardian + owner misbehaviour | Hard burn to `0x…dEaD`. Uncapped in theory; bounded in practice by cohort stake at any time. |
+| Manual veWOOD lock | User choice | Not a sink per se — withdrawal is possible after lock expiry. |
 
 ## Core Mechanism
 
@@ -91,6 +120,14 @@ BOOTSTRAPPING ACCELERATOR (months 1-12):
   Non-transferable WOOD rewards → lockIntoVeWOOD() → fee share weight WITHOUT sell pressure
   This bootstraps veWOOD supply from day 1: early participants earn fee share + accumulate
   governance weight, all before a single bootstrapping token hits the market (6-month lock)
+
+SECURITY LOOP (PR #229):
+  Stake WOOD as guardian → review proposals → earn epoch Block bounties
+                                             ↘ slash-on-bad-approve → WOOD burned
+  Stake WOOD as vault owner → safer vaults attract deposits → more fees
+                                             ↘ slash-on-bad-emergency-settle → WOOD burned
+  Burn sink reduces circulating supply → price support; healthy cohort reduces LP risk
+  → more TVL → more fees → veWOOD yield up → more WOOD locked into guardian/owner roles
 ```
 
 **Key difference from v3:** The v3 flywheel depended on WOOD emissions being valuable (WOOD price ↑ → emissions more valuable → more deposits). This is circular — it only works if WOOD price goes up. This flywheel is grounded in real protocol fee revenue. If strategies perform well, fees are generated regardless of WOOD price. veWOOD holders earn USDC, not more WOOD.
@@ -426,7 +463,7 @@ At scale, the buyback becomes a significant supply sink — but only if the prot
 
 **All protocol operations are controlled by a 3-of-5 protocol multisig.** There is no on-chain governance via veWOOD. veWOOD is purely an economic mechanism for fee sharing.
 
-A separate **2-of-3 pause guardian multisig** can halt contracts in emergencies (faster response than 3-of-5). Unpausing requires the full 3-of-5 protocol multisig. The two multisigs share some but not all signers.
+A separate **2-of-3 pause authority multisig** can halt contracts in emergencies (faster response than 3-of-5). Unpausing requires the full 3-of-5 protocol multisig. The two multisigs share some but not all signers. (Note: "pause authority" here is distinct from the PR #229 "guardian" cohort — separate concepts, renamed to avoid terminology collision.)
 
 **Protocol multisig responsibilities:**
 - Protocol parameter changes (fee rates, bootstrapping schedule adjustments)
@@ -478,17 +515,38 @@ Aerodrome protocol-owned LP positions (WOOD/WETH + shareToken/WOOD)
 
 **Who earns what:**
 
-| Participant | Vault Asset Profits | Fee Revenue Share | Bootstrapping WOOD | LP Fees |
-|-------------|:---:|:---:|:---:|:---:|
-| Vault depositors | Remainder after fees | — | 55% (months 1-12) | — |
-| Vault owner | Management fee | — | — | — |
-| Agent (proposer) | Performance fee | — | — | — |
-| veWOOD holders | — | 60% (protocol fee share in USDC) | 30% (months 1-12) | — |
-| shareToken/WOOD LPs | — | — | 15% (months 1-6) | Swap fees (kept) |
-| Protocol treasury | Protocol fee → FeeDistributor | 20% | — | Protocol-owned position fees |
-| Buyback engine | — | 20% (→ locked veWOOD) | — | — |
+| Participant | Vault Asset Profits | Fee Revenue Share | Bootstrapping WOOD | LP Fees | Guardian Block Bounty |
+|-------------|:---:|:---:|:---:|:---:|:---:|
+| Vault depositors | Remainder after fees | — | 55% (months 1-12) | — | — |
+| Vault owner | Management fee | — | — | — | — |
+| Agent (proposer) | Performance fee | — | — | — | — |
+| veWOOD holders | — | 60% (protocol fee share in USDC) | 30% (months 1-12) | — | — |
+| shareToken/WOOD LPs | — | — | 15% (months 1-6) | Swap fees (kept) | — |
+| **Guardians** _(PR #229)_ | — | — | — | — | **Pro-rata WOOD from `epochBudget` for correct Block votes** |
+| Protocol treasury | Protocol fee → FeeDistributor | 20% | — | Protocol-owned position fees | Funds `epochBudget` and `slashAppealReserve` |
+| Buyback engine | — | 20% (→ locked veWOOD) | — | — | — |
 
-**Comparison to v3:** v3 had four distinct revenue streams (strategy profits, WOOD emissions, trading fees, bribes) flowing through multiple contracts (Minter, FeeCollector, VoteIncentive, VaultRewardsDistributor, RewardsDistributor). This consolidates to two: strategy profits (existing) and fee distribution (new), plus LP fees from protocol-owned positions managed by multisig. This reduces contract surface area from 9 to 5.
+### 4. Guardian epoch budget (PR #229, not yet implemented)
+
+A new flow independent of the fee waterfall:
+
+```
+Protocol treasury (V1) or Minter emissions (V1.5)
+  → GuardianRegistry.fundEpoch(epochId, amount)
+  → epochBudget[epochId] accumulates during the 7-day epoch
+  → Block voters on proposals blocked during that epoch claim pro-rata
+  → Unclaimed after 12 weeks sweeps forward to current epoch (permissionless)
+
+Separate flow for wrongful-slash refunds:
+  Protocol treasury
+  → GuardianRegistry.fundSlashAppealReserve(amount)
+  → slashAppealReserve holds WOOD
+  → refundSlash(recipient, amount) pulls from here (onlyOwner, capped 20%/epoch)
+```
+
+Budget per epoch is a policy decision made fresh each epoch — no static rate parameter. V1 funds via multisig; V1.5 wires the Minter to call `fundEpoch` alongside other emission allocations.
+
+**Comparison to v3:** v3 had four distinct revenue streams (strategy profits, WOOD emissions, trading fees, bribes) flowing through multiple contracts (Minter, FeeCollector, VoteIncentive, VaultRewardsDistributor, RewardsDistributor). This consolidates to two: strategy profits (existing) and fee distribution (new), plus LP fees from protocol-owned positions managed by multisig. This reduces contract surface area from 9 to 5. PR #229 adds one new recipient (guardians) funded from treasury, not fees.
 
 ## Token Distribution
 
@@ -671,7 +729,7 @@ Wednesday 23:59 UTC — Epoch N ends
 
 7. **Non-transferable token edge cases:** BootstrapRewards non-transferable balances must not be usable as collateral, transferable via approval, or flashable. Internal accounting only — no ERC-20 balance until `convertToTransferable()` is called after 6 months.
 
-8. **Access control:** All pausable contracts use a 2-of-3 multisig as pause guardian. Unpausing requires a 3-of-5 protocol multisig to prevent premature restart.
+8. **Access control:** All pausable contracts use a 2-of-3 multisig as pause authority. Unpausing requires a 3-of-5 protocol multisig to prevent premature restart.
 
 9. **Upgradeability:** All WOOD contracts are deployed as **immutable** (not UUPS upgradeable). VotingEscrow holds locked tokens — upgradeability would introduce rug risk. Migration path for bugs: (a) pause affected contract, (b) deploy new contract, (c) snapshot state, (d) users migrate via claim mechanism.
 
@@ -789,7 +847,7 @@ Reduced from 5 phases (v3) to 2 phases. Fewer contracts = faster deployment.
 - **If gate not met within 8 weeks — Path A:** Increase bootstrapping rewards front-loading (pull from months 4-6 budget into months 1-3). Reduce veWOOD lock minimum to 2 weeks temporarily.
 - **If gate still not met by week 16 — Path B:** Enter maintenance mode. Pause bootstrapping rewards. The protocol continues operating without token incentives until organic demand justifies resumption.
 
-**Emergency infrastructure:** All contracts include OpenZeppelin Pausable. Pause guardian (2-of-3 multisig) can halt any contract. Unpause requires 3-of-5 multisig.
+**Emergency infrastructure:** All contracts include OpenZeppelin Pausable. Pause authority (2-of-3 multisig) can halt any contract. Unpause requires 3-of-5 multisig.
 
 **Testnet deployment (before each phase):** Full deployment on Base Sepolia with simulated epochs, fee generation, and bootstrapping reward distribution.
 

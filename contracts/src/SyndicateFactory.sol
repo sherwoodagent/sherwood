@@ -5,12 +5,14 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {SyndicateVault} from "./SyndicateVault.sol";
 import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
 import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
+import {IGuardianRegistry} from "./interfaces/IGuardianRegistry.sol";
 import {IL2Registrar} from "./interfaces/IL2Registrar.sol";
 
 /**
@@ -29,6 +31,7 @@ import {IL2Registrar} from "./interfaces/IL2Registrar.sol";
  */
 contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     using SafeERC20 for IERC20;
+    using EnumerableSet for EnumerableSet.UintSet;
 
     // ── Errors ──
     error InvalidExecutorImpl();
@@ -46,6 +49,15 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     error UpgradesDisabled();
     error VaultNotDeployed();
     error StrategyActive();
+    error VaultImplMismatch();
+    // ── Task 26: owner-stake binding + rotation errors ──
+    error InvalidGuardianRegistry();
+    error PreparedStakeNotFound();
+    error VaultStillStaked();
+    error RegistryMismatch();
+    error ZeroAddress();
+    // ── V-M7: reject zero/empty SyndicateConfig fields ──
+    error InvalidSyndicateConfig();
 
     struct SyndicateConfig {
         string metadataURI; // ipfs://Qm... (name, description, strategies)
@@ -80,7 +92,15 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     /// @notice ERC-8004 agent identity registry (ERC-721)
     IERC721 public agentRegistry;
 
-    /// @notice Shared governor contract
+    /// @notice Shared governor contract.
+    /// @dev Set once at `initialize` and never rewired. There is no setter —
+    ///      `setGovernor` was removed to close V-H2, a factory-owner instant
+    ///      global retroactive switch that would have orphaned in-flight
+    ///      proposals across every registered vault (vaults read the governor
+    ///      live via `_getGovernor()`, so a rewire would leave the old
+    ///      governor unable to call `onlyGovernor` fns and the new governor
+    ///      with no knowledge of the proposal). Governor upgrades must go
+    ///      through a UUPS upgrade of the governor itself.
     address public governor;
 
     /// @notice Management fee for vault owners (bps of strategy profits)
@@ -108,8 +128,26 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     /// @notice Whether vault upgrades are enabled (default: false)
     bool public upgradesEnabled;
 
-    /// @dev Reserved for future storage — reduce by 1 for each new slot added
-    uint256[50] private __gap;
+    /// @notice Guardian registry used to gate vault creation on prepared owner stake
+    ///         and to coordinate owner-stake slot transfers on `rotateOwner`.
+    /// @dev Set once at `initialize` and never rewired. The governor and factory
+    ///      MUST share the same registry — `rotateOwner` asserts this invariant.
+    address public guardianRegistry;
+
+    /// @dev Active-syndicate IDs for O(1) paginated enumeration (V-C4).
+    ///      Added on `createSyndicate`, removed on `deactivate`. The legacy
+    ///      `syndicates[id].active` flag remains the source of truth for
+    ///      individual rows; this set is kept in lock-step.
+    EnumerableSet.UintSet private _activeSyndicateIds;
+
+    /// @notice Hard cap on the per-call page size for `getActiveSyndicates`.
+    ///         Paginated reads above this cap silently clamp to `MAX_PAGE_LIMIT`.
+    uint256 public constant MAX_PAGE_LIMIT = 100;
+
+    /// @dev Reserved for future storage — reduced by 1 for `guardianRegistry`,
+    ///      reduced by 1 for `_activeSyndicateIds` (EnumerableSet.UintSet uses
+    ///      a single storage slot for the Set struct).
+    uint256[48] private __gap;
 
     // ── Events ──
 
@@ -119,11 +157,11 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     event MetadataUpdated(uint256 indexed id, string metadataURI);
     event SyndicateDeactivated(uint256 indexed id);
     event CreationFeeUpdated(address token, uint256 amount, address recipient);
-    event GovernorUpdated(address oldGovernor, address newGovernor);
     event VaultImplUpdated(address oldImpl, address newImpl);
     event ManagementFeeBpsUpdated(uint256 oldBps, uint256 newBps);
     event VaultUpgraded(address indexed vault, address indexed newImpl);
     event UpgradesEnabledUpdated(bool enabled);
+    event OwnerRotated(address indexed vault, address indexed newOwner);
 
     struct InitParams {
         address owner;
@@ -133,6 +171,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         address agentRegistry;
         address governor;
         uint256 managementFeeBps;
+        address guardianRegistry;
     }
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -145,6 +184,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         if (p.vaultImpl == address(0)) revert InvalidVaultImpl();
         // NOTE: ensRegistrar and agentRegistry can be address(0) on chains without ENS/ERC-8004
         if (p.governor == address(0)) revert InvalidGovernor();
+        if (p.guardianRegistry == address(0)) revert InvalidGuardianRegistry();
 
         __Ownable_init(p.owner);
 
@@ -153,6 +193,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         ensRegistrar = IL2Registrar(p.ensRegistrar);
         agentRegistry = IERC721(p.agentRegistry);
         governor = p.governor;
+        guardianRegistry = p.guardianRegistry;
         if (p.managementFeeBps > 1000) revert ManagementFeeTooHigh();
         managementFeeBps = p.managementFeeBps;
     }
@@ -168,6 +209,22 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         external
         returns (uint256 syndicateId, address vault)
     {
+        // V-M7: reject zero/empty config fields before any side effects. Without
+        // these checks, `cfg.asset == 0` would only trip in `SyndicateVault.initialize`
+        // (after ENS subdomain registration + registry stake bind), leaving stranded
+        // state. Empty name / symbol / metadataURI would deploy a vault with blank
+        // ERC-4626 metadata + no IPFS pointer. `subdomain.length < 3` is already
+        // checked below (`SubdomainTooShort`) so we only assert non-empty here.
+        if (address(config.asset) == address(0)) revert InvalidSyndicateConfig();
+        if (bytes(config.name).length == 0) revert InvalidSyndicateConfig();
+        if (bytes(config.symbol).length == 0) revert InvalidSyndicateConfig();
+        if (bytes(config.subdomain).length == 0) revert InvalidSyndicateConfig();
+        if (bytes(config.metadataURI).length == 0) revert InvalidSyndicateConfig();
+
+        // Gate on prepared owner stake BEFORE any side effects (Task 26).
+        IGuardianRegistry reg = IGuardianRegistry(guardianRegistry);
+        if (!reg.canCreateVault(msg.sender)) revert PreparedStakeNotFound();
+
         // Collect creation fee (if set)
         if (creationFee > 0) {
             if (address(creationFeeToken) == address(0)) revert InvalidFeeToken();
@@ -203,6 +260,10 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         // Register vault with the governor so it can receive proposals
         ISyndicateGovernor(governor).addVault(vault);
 
+        // Bind the prepared owner stake to the newly deployed vault (Task 26).
+        // Reverts roll back the whole creation tx — atomic.
+        reg.bindOwnerStake(msg.sender, vault);
+
         // Register ENS subname — vault is both address record + NFT owner
         if (address(ensRegistrar) != address(0)) {
             ensRegistrar.register(config.subdomain, vault);
@@ -220,6 +281,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
 
         vaultToSyndicate[vault] = syndicateId;
         subdomainToSyndicate[config.subdomain] = syndicateId;
+        _activeSyndicateIds.add(syndicateId);
 
         emit SyndicateCreated(syndicateId, vault, msg.sender, config.metadataURI, config.subdomain);
     }
@@ -239,6 +301,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         Syndicate storage s = syndicates[syndicateId];
         if (s.creator != msg.sender) revert NotCreator();
         s.active = false;
+        _activeSyndicateIds.remove(syndicateId);
         emit SyndicateDeactivated(syndicateId);
     }
 
@@ -252,14 +315,6 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         creationFee = amount;
         creationFeeRecipient = recipient;
         emit CreationFeeUpdated(token, amount, recipient);
-    }
-
-    /// @notice Update the governor contract for new vaults
-    function setGovernor(address newGovernor) external onlyOwner {
-        if (newGovernor == address(0)) revert InvalidGovernor();
-        address old = governor;
-        governor = newGovernor;
-        emit GovernorUpdated(old, newGovernor);
     }
 
     /// @notice Update the vault implementation for new vaults (existing vaults unaffected)
@@ -284,14 +339,49 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         emit UpgradesEnabledUpdated(enabled);
     }
 
+    /// @notice Transfer a vault's ownership to `newOwner` and rebind the owner-stake
+    ///         slot in the guardian registry.
+    /// @dev Owner-only. Requires the old owner to have already unstaked
+    ///      (`hasOwnerStake(vault) == false`) — otherwise rotating would strand
+    ///      the old stake. Asserts the factory + governor point at the same
+    ///      registry to catch misconfiguration. `newOwner` must have a prepared
+    ///      stake sized ≥ `requiredOwnerBond(vault)`; the registry's
+    ///      `transferOwnerStakeSlot` enforces this.
+    function rotateOwner(address vault, address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert ZeroAddress();
+        if (vaultToSyndicate[vault] == 0) revert VaultNotDeployed();
+
+        IGuardianRegistry reg = IGuardianRegistry(guardianRegistry);
+        if (reg.hasOwnerStake(vault)) revert VaultStillStaked();
+        // Registry-consistency invariant: governor and factory must share one registry.
+        if (ISyndicateGovernor(governor).guardianRegistry() != guardianRegistry) revert RegistryMismatch();
+
+        SyndicateVault(payable(vault)).rotateOwnership(newOwner);
+        reg.transferOwnerStakeSlot(vault, newOwner);
+
+        // Keep creator record in sync so downstream invariants (e.g. NotCreator
+        // gates on updateMetadata / deactivate) follow the active owner.
+        syndicates[vaultToSyndicate[vault]].creator = newOwner;
+
+        emit OwnerRotated(vault, newOwner);
+    }
+
     /// @notice Upgrade a vault to a new implementation. Callable by the syndicate owner (vault owner).
-    /// @dev Factory must have upgrades enabled, and newImpl must be the current factory vaultImpl.
+    /// @dev Factory must have upgrades enabled, and `vaultImpl` must equal `expectedImpl`.
+    ///      The `expectedImpl` parameter closes V-H3: otherwise a factory owner
+    ///      could call `setVaultImpl(newImpl)` between when the creator decides
+    ///      to upgrade and when the upgrade tx lands, landing the vault on an
+    ///      impl the creator did not opt into.
     /// @param vault The vault proxy to upgrade
-    function upgradeVault(address vault) external {
+    /// @param expectedImpl The vault implementation address the creator expects
+    ///                     to be applied. Reverts with `VaultImplMismatch` if
+    ///                     `vaultImpl` has changed since the caller observed it.
+    function upgradeVault(address vault, address expectedImpl) external {
         if (!upgradesEnabled) revert UpgradesDisabled();
         uint256 syndicateId = vaultToSyndicate[vault];
         if (syndicateId == 0) revert VaultNotDeployed();
         if (syndicates[syndicateId].creator != msg.sender) revert NotCreator();
+        if (vaultImpl != expectedImpl) revert VaultImplMismatch();
         // Cannot upgrade while a strategy is active
         if (governor != address(0) && ISyndicateGovernor(governor).getActiveProposal(vault) != 0) {
             revert StrategyActive();
@@ -308,48 +398,45 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
             && (address(ensRegistrar) == address(0) || ensRegistrar.available(subdomain));
     }
 
-    /// @notice Get active syndicates with pagination (for dashboard)
-    /// @param offset Starting index (0-based)
-    /// @param limit Maximum number of results to return
-    /// @return result Array of active syndicates
-    /// @return total Total count of active syndicates
+    /// @notice Get active syndicates with pagination (for dashboard).
+    /// @dev    Backed by `_activeSyndicateIds` (EnumerableSet) so reads are
+    ///         O(limit) instead of O(syndicateCount). `limit` is hard-capped at
+    ///         `MAX_PAGE_LIMIT` to guarantee the call stays well below block
+    ///         gas even as the set grows. Closes V-C4.
+    /// @param offset Starting index (0-based) into the active-set
+    /// @param limit  Maximum number of results to return; clamped to `MAX_PAGE_LIMIT`
+    /// @return result Array of active syndicates (in insertion order with swap-pop gaps filled)
+    /// @return total  Total count of active syndicates
     function getActiveSyndicates(uint256 offset, uint256 limit)
         external
         view
         returns (Syndicate[] memory result, uint256 total)
     {
-        // First pass: count active syndicates
-        uint256 count = 0;
-        for (uint256 i = 1; i <= syndicateCount; i++) {
-            if (syndicates[i].active) count++;
-        }
-        total = count;
+        total = _activeSyndicateIds.length();
 
-        if (offset >= count || limit == 0) {
+        if (offset >= total || limit == 0) {
             return (new Syndicate[](0), total);
         }
+        if (limit > MAX_PAGE_LIMIT) {
+            limit = MAX_PAGE_LIMIT;
+        }
 
-        // Calculate actual return size
-        uint256 remaining = count - offset;
-        uint256 size = remaining < limit ? remaining : limit;
-        result = new Syndicate[](size);
+        uint256 end = offset + limit;
+        if (end > total) {
+            end = total;
+        }
 
-        // Second pass: fill results starting from offset
-        uint256 activeIdx = 0;
-        uint256 resultIdx = 0;
-        for (uint256 i = 1; i <= syndicateCount && resultIdx < size; i++) {
-            if (syndicates[i].active) {
-                if (activeIdx >= offset) {
-                    result[resultIdx++] = syndicates[i];
-                }
-                activeIdx++;
-            }
+        result = new Syndicate[](end - offset);
+        for (uint256 i = offset; i < end; i++) {
+            uint256 id = _activeSyndicateIds.at(i);
+            result[i - offset] = syndicates[id];
         }
     }
 
-    /// @notice Get ALL active syndicates (may exceed gas at scale — prefer paginated version)
+    /// @notice Get ALL active syndicates. Clamped at `MAX_PAGE_LIMIT` per call;
+    ///         callers that need every row must paginate via `getActiveSyndicates`.
     function getAllActiveSyndicates() external view returns (Syndicate[] memory) {
-        (Syndicate[] memory result,) = this.getActiveSyndicates(0, syndicateCount);
+        (Syndicate[] memory result,) = this.getActiveSyndicates(0, MAX_PAGE_LIMIT);
         return result;
     }
 

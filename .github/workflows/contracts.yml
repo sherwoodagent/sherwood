@@ -29,12 +29,48 @@ jobs:
       - name: Build
         run: forge build --sizes
 
+      - name: Enforce bytecode size budget
+        run: |
+          SIZES_JSON=$(forge build --sizes --json)
+
+          GOV_SIZE=$(echo "$SIZES_JSON" | jq -r '.SyndicateGovernor.runtime_size // empty')
+          echo "SyndicateGovernor runtime size: $GOV_SIZE bytes"
+          if [ -z "$GOV_SIZE" ]; then
+            echo "::error::could not read SyndicateGovernor runtime size"
+            exit 1
+          fi
+          if [ "$GOV_SIZE" -gt 24550 ]; then
+            echo "::error::SyndicateGovernor $GOV_SIZE > 24550 byte budget"
+            exit 1
+          fi
+
+          # I-3 (V1.5): registry bytecode gate. Registry approached EIP-170
+          # (24,576) during V1.5 claim-path additions — gate at 24,550 matches
+          # the governor's pattern and provides a 26-byte headroom alarm.
+          REG_SIZE=$(echo "$SIZES_JSON" | jq -r '.GuardianRegistry.runtime_size // empty')
+          echo "GuardianRegistry runtime size: $REG_SIZE bytes"
+          if [ -z "$REG_SIZE" ]; then
+            echo "::error::could not read GuardianRegistry runtime size"
+            exit 1
+          fi
+          if [ "$REG_SIZE" -gt 24550 ]; then
+            echo "::error::GuardianRegistry $REG_SIZE > 24550 byte budget"
+            exit 1
+          fi
+
       - name: Unit tests
         run: forge test -vvv --no-match-path "test/integration/*"
 
       - name: Fork integration tests
         if: env.BASE_RPC_URL != ''
-        run: forge test -vvv --fork-url base --match-path "test/integration/*" --no-match-contract "SimulateExecution|PortfolioIntegration"
+        # Skipped suites:
+        #   - SimulateExecution, PortfolioIntegration: require specific live-state configs.
+        #   - GovernanceIntegrationTest, AerodromeLPIntegrationTest, MoonwellSupplyIntegrationTest,
+        #     WstETHMoonwellIntegrationTest: assert post-PR-229 ProposalState enum indices
+        #     (Settled=7, Rejected=4) but run against the mainnet governor proxy that still
+        #     serves the pre-PR-229 impl (Settled=6, Rejected=3 — no GuardianReview slot).
+        #     Re-enable after V1.5 governor + GuardianRegistry are deployed on Base.
+        run: forge test -vvv --fork-url base --match-path "test/integration/*" --no-match-contract "SimulateExecution|PortfolioIntegration|GovernanceIntegrationTest|AerodromeLPIntegrationTest|MoonwellSupplyIntegrationTest|WstETHMoonwellIntegrationTest"
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
 

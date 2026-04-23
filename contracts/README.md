@@ -98,7 +98,12 @@ Sherwood contract addresses are written automatically by deploy scripts to `chai
 - **Base Sepolia** — `chains/84532.json`
 - **Robinhood L2 Testnet** — `chains/46630.json`
 
-Admin scripts (QueueParams, FinalizeParams) read from these files automatically — no env vars needed.
+V1.5: the on-chain parameter timelock was removed from both SyndicateGovernor
+and GuardianRegistry. Parameter setters now apply immediately on owner call;
+the owner is expected to be a multisig that enforces its own off-chain delay
+(Gnosis Safe + Zodiac Delay). Consequently `QueueParams` and `FinalizeParams`
+admin scripts were deleted — point the multisig directly at
+`setProtocolFeeBps(...)`, `setGuardianFeeBps(...)`, etc.
 
 After redeployment, also update: `cli/src/lib/addresses.ts`, `mintlify-docs/reference/deployments.mdx`.
 

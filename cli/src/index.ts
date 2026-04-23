@@ -31,6 +31,7 @@ import { registerAllowanceCommands } from "./commands/allowance.js";
 import { registerIdentityCommands } from "./commands/identity.js";
 import { registerProposalCommands } from "./commands/proposal.js";
 import { registerGovernorCommands } from "./commands/governor.js";
+import { registerGuardianCommands } from "./commands/guardian-delegate.js";
 import { setTextRecord, getTextRecord, resolveVaultSyndicate, resolveSyndicate } from "./lib/ens.js";
 import * as easLib from "./lib/eas.js";
 import { EAS_SCHEMAS } from "./lib/addresses.js";
@@ -1458,6 +1459,9 @@ registerProposalCommands(program);
 
 // ── Governor commands ──
 registerGovernorCommands(program);
+
+// ── Guardian delegation commands (V1.5) ──
+registerGuardianCommands(program);
 
 // ── Research commands ──
 const { registerResearchCommands } = await import("./commands/research.js");

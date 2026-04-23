@@ -10,6 +10,7 @@ import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
+import {MockRegistryMinimal} from "./mocks/MockRegistryMinimal.sol";
 
 contract SyndicateGovernorTest is Test {
     SyndicateGovernor public governor;
@@ -17,6 +18,7 @@ contract SyndicateGovernorTest is Test {
     BatchExecutorLib public executorLib;
     ERC20Mock public usdc;
     MockAgentRegistry public agentRegistry;
+    MockRegistryMinimal public guardianRegistry;
 
     address public owner = makeAddr("owner");
     address public agent = makeAddr("agent");
@@ -33,7 +35,6 @@ contract SyndicateGovernorTest is Test {
     uint256 constant MAX_PERF_FEE_BPS = 3000;
     uint256 constant MAX_STRATEGY_DURATION = 30 days;
     uint256 constant COOLDOWN_PERIOD = 1 days;
-    uint256 constant PARAM_CHANGE_DELAY = 1 days;
 
     ERC20Mock public targetToken;
 
@@ -42,6 +43,7 @@ contract SyndicateGovernorTest is Test {
         targetToken = new ERC20Mock("Target", "TGT", 18);
         executorLib = new BatchExecutorLib();
         agentRegistry = new MockAgentRegistry();
+        guardianRegistry = new MockRegistryMinimal();
         agentNftId = agentRegistry.mint(agent);
 
         SyndicateVault vaultImpl = new SyndicateVault();
@@ -66,7 +68,8 @@ contract SyndicateGovernorTest is Test {
         SyndicateGovernor govImpl = new SyndicateGovernor();
         bytes memory govInit = abi.encodeCall(
             SyndicateGovernor.initialize,
-            (ISyndicateGovernor.InitParams({
+            (
+                ISyndicateGovernor.InitParams({
                     owner: owner,
                     votingPeriod: VOTING_PERIOD,
                     executionWindow: EXECUTION_WINDOW,
@@ -77,10 +80,12 @@ contract SyndicateGovernorTest is Test {
                     maxCoProposers: 5,
                     minStrategyDuration: 1 hours,
                     maxStrategyDuration: MAX_STRATEGY_DURATION,
-                    parameterChangeDelay: PARAM_CHANGE_DELAY,
                     protocolFeeBps: 200,
-                    protocolFeeRecipient: owner
-                }))
+                    protocolFeeRecipient: owner,
+                    guardianFeeBps: 0
+                }),
+                address(guardianRegistry)
+            )
         );
         governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
 
@@ -279,6 +284,62 @@ contract SyndicateGovernorTest is Test {
         governor.propose(address(vault), "ipfs://test", 1500, 7 days, _simpleExecuteCalls(), empty, _emptyCoProposers());
     }
 
+    /// @notice G-C1: propose() stamps snapshot at block.timestamp - 1 so any
+    ///         delegation landing in the same block cannot be counted via
+    ///         ERC20Votes.getPastVotes (which returns votes "at or before t").
+    function test_propose_snapshotIsPriorTimestamp() public {
+        uint256 tsBefore = block.timestamp;
+        uint256 proposalId = governor.proposalCount() + 1;
+        vm.prank(agent);
+        governor.propose(
+            address(vault),
+            "ipfs://test",
+            1500,
+            7 days,
+            _simpleExecuteCalls(),
+            _simpleSettlementCalls(),
+            _emptyCoProposers()
+        );
+        ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
+        assertEq(p.snapshotTimestamp, tsBefore - 1);
+    }
+
+    /// @notice G-C1: a delegation that lands in the same block as propose()
+    ///         must NOT count toward voting weight. Exercises the full path
+    ///         via governor.vote(): the voter holds shares but only delegates
+    ///         in the propose block, so getPastVotes at snapshotTimestamp
+    ///         (= block.timestamp - 1) returns 0 and the vote reverts as
+    ///         NoVotingPower.
+    function test_flashDelegate_sameBlock_notCounted() public {
+        address flashVoter = makeAddr("flashVoter");
+
+        // flashVoter receives shares via transfer so auto-delegation in
+        // _deposit() does not fire -- delegates(flashVoter) stays at zero.
+        vm.prank(lp1);
+        vault.transfer(flashVoter, 10_000e6);
+
+        // Same block: flashVoter delegates to self AND agent proposes.
+        vm.prank(flashVoter);
+        vault.delegate(flashVoter);
+
+        vm.prank(agent);
+        uint256 proposalId = governor.propose(
+            address(vault),
+            "ipfs://test",
+            1500,
+            7 days,
+            _simpleExecuteCalls(),
+            _simpleSettlementCalls(),
+            _emptyCoProposers()
+        );
+
+        // Snapshot is block.timestamp - 1; delegation checkpoint was written
+        // at block.timestamp, so getPastVotes returns 0 and vote() reverts.
+        vm.prank(flashVoter);
+        vm.expectRevert(ISyndicateGovernor.NoVotingPower.selector);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+    }
+
     // ==================== VOTING ====================
 
     function test_vote() public {
@@ -374,11 +435,23 @@ contract SyndicateGovernorTest is Test {
         governor.executeProposal(proposalId);
     }
 
-    function test_executeProposal_strategyAlreadyActive_reverts() public {
+    /// @dev Post G-M1, `propose` reverts on `VaultHasOpenProposal` before
+    ///      reaching the `StrategyAlreadyActive` guard inside `executeProposal`.
+    ///      Belt-and-suspenders: the `executeProposal` guard stays as a safety
+    ///      net, but the new primary defense is the propose-time check.
+    function test_propose_blocksDuplicateWhileExecuted() public {
         _createAndExecuteProposal(1500, 7 days);
-        uint256 proposalId2 = _createApprovedProposal(1500, 7 days);
-        vm.expectRevert(ISyndicateGovernor.StrategyAlreadyActive.selector);
-        governor.executeProposal(proposalId2);
+        vm.prank(agent);
+        vm.expectRevert(ISyndicateGovernor.VaultHasOpenProposal.selector);
+        governor.propose(
+            address(vault),
+            "ipfs://dup",
+            1500,
+            7 days,
+            _simpleExecuteCalls(),
+            _simpleSettlementCalls(),
+            _emptyCoProposers()
+        );
     }
 
     function test_executeProposal_afterCooldown_succeeds() public {
@@ -424,21 +497,9 @@ contract SyndicateGovernorTest is Test {
         governor.settleProposal(proposalId);
     }
 
-    function test_emergencySettle_afterDuration() public {
-        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
-        vm.warp(block.timestamp + 7 days);
-        vm.prank(owner);
-        governor.emergencySettle(proposalId, _simpleSettlementCalls());
-        assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Settled));
-        assertFalse(vault.redemptionsLocked());
-    }
-
-    function test_emergencySettle_beforeDuration_reverts() public {
-        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
-        vm.prank(owner);
-        vm.expectRevert(ISyndicateGovernor.StrategyDurationNotElapsed.selector);
-        governor.emergencySettle(proposalId, _simpleSettlementCalls());
-    }
+    // Legacy `emergencySettle(uint256, Call[])` is a revert stub as of Task 24.
+    // See `test/governor/GovernorEmergency.t.sol` for the new 4-way lifecycle tests
+    // (unstick / emergencySettleWithCalls / cancelEmergencySettle / finalizeEmergencySettle).
 
     // ==================== P&L CALCULATION ====================
 
@@ -517,20 +578,31 @@ contract SyndicateGovernorTest is Test {
     }
 
     function test_emergencyCancel() public {
-        uint256 proposalId = _createApprovedProposal(1500, 7 days);
+        // Task 25: emergencyCancel is narrowed to Draft/Pending only.
+        uint256 proposalId = _createSimpleProposal(1500, 7 days);
         vm.prank(owner);
         governor.emergencyCancel(proposalId);
         assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Cancelled));
     }
 
     function test_emergencyCancel_clearsActiveProposal() public {
-        uint256 proposalId = _createApprovedProposal(1500, 7 days);
+        // Task 25: emergencyCancel is narrowed to Draft/Pending only.
+        uint256 proposalId = _createSimpleProposal(1500, 7 days);
         vm.prank(owner);
         governor.emergencyCancel(proposalId);
         assertEq(
             governor.getActiveProposal(address(vault)), 0, "activeProposal should be cleared after emergencyCancel"
         );
         assertFalse(vault.redemptionsLocked(), "vault should not be locked after emergencyCancel");
+    }
+
+    function test_emergencyCancel_approved_reverts() public {
+        // Task 25: once the vote passes the proposal enters GuardianReview (or Approved
+        // when no registry is wired); owner can no longer unilaterally cancel.
+        uint256 proposalId = _createApprovedProposal(1500, 7 days);
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotCancellable.selector);
+        governor.emergencyCancel(proposalId);
     }
 
     function test_emergencyCancel_executedProposal_reverts() public {
@@ -557,11 +629,13 @@ contract SyndicateGovernorTest is Test {
         assertFalse(vault.redemptionsLocked(), "vault should not be locked after veto");
     }
 
-    function test_vetoProposal_approved() public {
+    function test_vetoProposal_approved_reverts() public {
+        // Task 25: vetoProposal is narrowed to Pending only; approved/GuardianReview
+        // proposals flow through the guardian-review path instead.
         uint256 proposalId = _createApprovedProposal(1500, 7 days);
         vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotCancellable.selector);
         governor.vetoProposal(proposalId);
-        assertEq(uint256(governor.getProposal(proposalId).state), uint256(ISyndicateGovernor.ProposalState.Rejected));
     }
 
     function test_vetoProposal_notVaultOwner_reverts() public {
@@ -579,28 +653,18 @@ contract SyndicateGovernorTest is Test {
         governor.vetoProposal(proposalId);
     }
 
-    function test_emergencySettle_notVaultOwner_reverts() public {
-        uint256 proposalId = _createAndExecuteProposal(1500, 7 days);
-        vm.warp(block.timestamp + 7 days);
-        vm.prank(random);
-        vm.expectRevert(ISyndicateGovernor.NotVaultOwner.selector);
-        governor.emergencySettle(proposalId, _simpleSettlementCalls());
-    }
+    // (Legacy `emergencySettle_notVaultOwner_reverts` deleted — Task 24 stub reverts unconditionally.)
 
     // ==================== PARAMETER SETTERS (TIMELOCK) ====================
 
-    function test_setVotingPeriod_queuesChange() public {
+    function test_setVotingPeriod_appliesImmediately() public {
         vm.prank(owner);
         governor.setVotingPeriod(2 days);
-        assertEq(governor.getGovernorParams().votingPeriod, VOTING_PERIOD);
-        vm.warp(block.timestamp + PARAM_CHANGE_DELAY + 1);
-        bytes32 key = governor.PARAM_VOTING_PERIOD();
-        vm.prank(owner);
-        governor.finalizeParameterChange(key);
         assertEq(governor.getGovernorParams().votingPeriod, 2 days);
     }
 
     function test_setVotingPeriod_tooLow_reverts() public {
+        // V1.5: setters apply immediately and bounds are validated at call time.
         vm.prank(owner);
         vm.expectRevert(ISyndicateGovernor.InvalidVotingPeriod.selector);
         governor.setVotingPeriod(30 minutes);
@@ -626,7 +690,10 @@ contract SyndicateGovernorTest is Test {
     // ==================== VAULT MANAGEMENT ====================
 
     function test_addVault() public {
-        address newVault = makeAddr("newVault");
+        // G-M9: governor rejects EOAs via extcodesize probe, so use a
+        // deployed contract address — the executorLib has bytecode and is
+        // not already registered.
+        address newVault = address(executorLib);
         vm.prank(owner);
         governor.addVault(newVault);
         assertTrue(governor.isRegisteredVault(newVault));
@@ -645,8 +712,12 @@ contract SyndicateGovernorTest is Test {
     }
 
     function test_addVault_fromFactory() public {
-        address newVault = makeAddr("factoryVault");
+        // G-M9: new vault must be a deployed contract. Use executorLib as a
+        // benign contract address.
+        address newVault = address(executorLib);
         address factoryAddr = makeAddr("factory");
+        // V1.5: setFactory now applies immediately (owner-multisig governs via
+        // its own delay).
         vm.prank(owner);
         governor.setFactory(factoryAddr);
         vm.prank(factoryAddr);
@@ -720,58 +791,32 @@ contract SyndicateGovernorTest is Test {
 
     // ==================== COOLDOWN BLOCKS RE-EXECUTION ====================
 
+    /// @dev Post G-M1: proposal 2 cannot be created while proposal 1 is still
+    ///      Executed (openProposalCount != 0). After settling proposal 1, the
+    ///      cooldown window opens on the vault. We pin the COOLDOWN path by
+    ///      creating+approving proposal 2 purely via propose + votes + warp
+    ///      past ONLY the voting window (not the cooldown), then showing
+    ///      `executeProposal` reverts `CooldownNotElapsed`.
     function test_cooldown_blocksExecution() public {
-        // Execute proposal 1
+        // Execute proposal 1 then settle it. `_lastSettledAt[vault]` = now.
         uint256 proposalId1 = _createAndExecuteProposal(1500, 7 days);
-
-        // While proposal 1 is active, create proposal 2 and let it reach voting
-        uint256 proposalId2 = _createSimpleProposal(1500, 7 days);
-        // Vote to approve proposal 2
-        vm.prank(lp1);
-        governor.vote(proposalId2, ISyndicateGovernor.VoteType.For);
-        vm.prank(lp2);
-        governor.vote(proposalId2, ISyndicateGovernor.VoteType.For);
-        // Warp past voting period for proposal 2
-        vm.warp(block.timestamp + VOTING_PERIOD + 1);
-
-        // Settle proposal 1 (proposer can settle anytime)
         vm.prank(agent);
         governor.settleProposal(proposalId1);
+        uint256 settledAt = block.timestamp;
 
-        // Immediately try to execute proposal 2 — cooldown should block it
+        // Stretch cooldown to make it safely exceed voting window for this test.
+        vm.prank(owner);
+        governor.setCooldownPeriod(5 days);
+
+        // Propose 2 + drive to Approved. Uses `_createApprovedProposal` which
+        // warps past voting period but NOT past the 5-day cooldown.
+        uint256 proposalId2 = _createApprovedProposal(1500, 7 days);
+
+        // Cooldown has not elapsed — execute must revert.
+        assertGt(governor.getCooldownEnd(address(vault)), block.timestamp, "still in cooldown");
+        assertLt(block.timestamp, settledAt + 5 days, "pre-cooldown sanity");
         vm.expectRevert(ISyndicateGovernor.CooldownNotElapsed.selector);
         governor.executeProposal(proposalId2);
-    }
-
-    // ==================== CANCEL PARAMETER CHANGE ====================
-
-    function test_cancelParameterChange() public {
-        bytes32 key = governor.PARAM_VOTING_PERIOD();
-        vm.prank(owner);
-        governor.setVotingPeriod(2 days);
-        // Verify the change is pending
-        ISyndicateGovernor.PendingChange memory pending = governor.getPendingChange(key);
-        assertTrue(pending.exists);
-        // Cancel it
-        vm.prank(owner);
-        governor.cancelParameterChange(key);
-        // Verify cancelled — finalizing should revert
-        vm.warp(block.timestamp + PARAM_CHANGE_DELAY + 1);
-        vm.prank(owner);
-        vm.expectRevert(ISyndicateGovernor.NoChangePending.selector);
-        governor.finalizeParameterChange(key);
-        // Original value unchanged
-        assertEq(governor.getGovernorParams().votingPeriod, VOTING_PERIOD);
-    }
-
-    function test_prematureFinalization_reverts() public {
-        bytes32 key = governor.PARAM_VOTING_PERIOD();
-        vm.prank(owner);
-        governor.setVotingPeriod(2 days);
-        // Immediately try to finalize — delay not elapsed
-        vm.prank(owner);
-        vm.expectRevert(ISyndicateGovernor.ChangeNotReady.selector);
-        governor.finalizeParameterChange(key);
     }
 
     // ==================== DEPOSIT LOCK DURING ACTIVE PROPOSAL ====================
@@ -832,7 +877,8 @@ contract SyndicateGovernorTest is Test {
         SyndicateGovernor govImpl2 = new SyndicateGovernor();
         bytes memory govInit2 = abi.encodeCall(
             SyndicateGovernor.initialize,
-            (ISyndicateGovernor.InitParams({
+            (
+                ISyndicateGovernor.InitParams({
                     owner: owner,
                     votingPeriod: VOTING_PERIOD,
                     executionWindow: EXECUTION_WINDOW,
@@ -843,14 +889,16 @@ contract SyndicateGovernorTest is Test {
                     maxCoProposers: 5,
                     minStrategyDuration: 1 hours,
                     maxStrategyDuration: MAX_STRATEGY_DURATION,
-                    parameterChangeDelay: PARAM_CHANGE_DELAY,
                     protocolFeeBps: 0,
-                    protocolFeeRecipient: address(0)
-                }))
+                    protocolFeeRecipient: address(0),
+                    guardianFeeBps: 0
+                }),
+                address(guardianRegistry)
+            )
         );
         SyndicateGovernor gov2 = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl2), govInit2)));
 
-        // Try to set fee > 0 without a recipient — should revert
+        // V1.5: setter applies immediately; bps > 0 with no recipient reverts at call time.
         vm.prank(owner);
         vm.expectRevert(ISyndicateGovernor.InvalidProtocolFeeRecipient.selector);
         gov2.setProtocolFeeBps(200);
@@ -861,7 +909,8 @@ contract SyndicateGovernorTest is Test {
         SyndicateGovernor govImpl2 = new SyndicateGovernor();
         bytes memory govInit2 = abi.encodeCall(
             SyndicateGovernor.initialize,
-            (ISyndicateGovernor.InitParams({
+            (
+                ISyndicateGovernor.InitParams({
                     owner: owner,
                     votingPeriod: VOTING_PERIOD,
                     executionWindow: EXECUTION_WINDOW,
@@ -872,10 +921,12 @@ contract SyndicateGovernorTest is Test {
                     maxCoProposers: 5,
                     minStrategyDuration: 1 hours,
                     maxStrategyDuration: MAX_STRATEGY_DURATION,
-                    parameterChangeDelay: PARAM_CHANGE_DELAY,
                     protocolFeeBps: 0,
-                    protocolFeeRecipient: address(0)
-                }))
+                    protocolFeeRecipient: address(0),
+                    guardianFeeBps: 0
+                }),
+                address(guardianRegistry)
+            )
         );
         SyndicateGovernor gov2 = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl2), govInit2)));
 
@@ -884,27 +935,11 @@ contract SyndicateGovernorTest is Test {
         gov2.setProtocolFeeBps(0);
     }
 
-    function test_finalizeProtocolFeeBps_toctou_reverts() public {
-        // Verify _validateForFinalize re-checks recipient at finalize time (defense in depth).
-        // Queue a valid fee bps change (recipient is set), then use vm.store to clear
-        // the recipient — simulating a state change between queue and finalize.
-        vm.startPrank(owner);
-        governor.setProtocolFeeBps(500);
-        vm.warp(block.timestamp + PARAM_CHANGE_DELAY + 1);
-
-        // Clear _protocolFeeRecipient via vm.store to simulate state change between queue and finalize
-        assertNotEq(governor.protocolFeeRecipient(), address(0));
-        vm.store(address(governor), bytes32(uint256(0x1b)), bytes32(0));
-        assertEq(governor.protocolFeeRecipient(), address(0));
-
-        // Finalize should revert — _validateForFinalize catches recipient is now address(0)
-        bytes32 paramKey = governor.PARAM_PROTOCOL_FEE_BPS();
-        vm.expectRevert(ISyndicateGovernor.InvalidProtocolFeeRecipient.selector);
-        governor.finalizeParameterChange(paramKey);
-        vm.stopPrank();
-    }
-
     // ==================== RESCUE ERC721 LOCK ====================
+
+    // P1-1: setGuardianFeeRecipient + guardianFeeRecipient removed — fees
+    //       always route to the bound `_guardianRegistry`, so the recipient
+    //       is no longer a settable parameter.
 
     function test_rescueERC721_blockedDuringActiveProposal() public {
         _createAndExecuteProposal(1500, 7 days);

@@ -139,39 +139,11 @@ contract GovernanceIntegrationTest is BaseIntegrationTest {
         governor.executeProposal(proposalId);
     }
 
-    // ==================== TEST 3: EMERGENCY SETTLE ====================
+    // ==================== TEST 3: EMERGENCY SETTLE (Task 24 moved) ====================
 
-    /// @notice Owner emergency-settles after strategy duration with custom calls.
-    function test_governance_emergencySettle() public {
-        (address strategy, BatchExecutorLib.Call[] memory execCalls, BatchExecutorLib.Call[] memory settleCalls) =
-            _deployMoonwellStrategy(SUPPLY_AMOUNT);
-
-        // Propose, vote, execute via helper
-        uint256 proposalId = _proposeVoteExecute(execCalls, settleCalls, PERF_FEE_BPS, STRATEGY_DURATION);
-
-        // Verify strategy is active
-        assertTrue(vault.redemptionsLocked(), "redemptions should be locked during active strategy");
-
-        // Warp past strategy duration
-        vm.warp(block.timestamp + STRATEGY_DURATION);
-
-        // Build custom settlement calls (just call strategy.settle())
-        BatchExecutorLib.Call[] memory customCalls = new BatchExecutorLib.Call[](1);
-        customCalls[0] = BatchExecutorLib.Call({target: strategy, data: abi.encodeWithSignature("settle()"), value: 0});
-
-        // Owner emergency settles
-        vm.prank(owner);
-        governor.emergencySettle(proposalId, customCalls);
-
-        // Assert: state is Settled, redemptions unlocked
-        assertEq(
-            uint256(governor.getProposalState(proposalId)),
-            uint256(ISyndicateGovernor.ProposalState.Settled),
-            "proposal should be Settled after emergency settle"
-        );
-        assertFalse(vault.redemptionsLocked(), "redemptions should be unlocked after emergency settle");
-        assertEq(governor.getActiveProposal(address(vault)), 0, "no active proposal after settlement");
-    }
+    // Legacy `emergencySettle` is now a revert stub; see
+    // `test/governor/GovernorEmergency.t.sol` for the guardian-review lifecycle
+    // (unstick / emergencySettleWithCalls / cancel / finalize) that replaces it.
 
     // ==================== TEST 4: COOLDOWN ENFORCED ====================
 

@@ -66,7 +66,8 @@ abstract contract RobinhoodIntegrationTest is Test {
         governor = SyndicateGovernor(_readAddress("SYNDICATE_GOVERNOR"));
 
         // Governor needs factory authorized to call addVault().
-        // On a fresh deployment this may not be set yet — set it via the deployer/owner.
+        // On a fresh deployment this may not be set yet — set it via the
+        // deployer/owner. V1.5: setFactory applies immediately.
         address govOwner = governor.owner();
         if (governor.factory() != address(factory)) {
             vm.prank(govOwner);

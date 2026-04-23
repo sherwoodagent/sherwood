@@ -45,6 +45,15 @@ abstract contract ScriptBase is Script {
         console.log("Addresses written to %s", path);
     }
 
+    /// @notice Patch a single address into chains/{chainId}.json at a top-level
+    ///         key, preserving any existing keys (uses `vm.writeJson` path mode).
+    ///         Used by deploy scripts that add to an existing JSON rather than
+    ///         replacing it wholesale.
+    function _patchAddress(string memory key, address value) internal {
+        string memory path = string.concat(vm.projectRoot(), "/chains/", vm.toString(block.chainid), ".json");
+        vm.writeJson(vm.serializeAddress("", "", value), path, string.concat(".", key));
+    }
+
     /// @notice Read a deployed address from chains/{chainId}.json
     function _readAddress(string memory key) internal view returns (address) {
         string memory path = string.concat(vm.projectRoot(), "/chains/", vm.toString(block.chainid), ".json");

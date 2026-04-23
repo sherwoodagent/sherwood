@@ -28,6 +28,9 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
 mamo-contracts-ref/
 market-maker/package-lock.json
 

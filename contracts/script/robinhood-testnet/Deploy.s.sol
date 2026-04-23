@@ -8,6 +8,7 @@ import {SyndicateVault} from "../../src/SyndicateVault.sol";
 import {BatchExecutorLib} from "../../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../../src/SyndicateFactory.sol";
 import {SyndicateGovernor} from "../../src/SyndicateGovernor.sol";
+import {GuardianRegistry} from "../../src/GuardianRegistry.sol";
 import {ISyndicateGovernor} from "../../src/interfaces/ISyndicateGovernor.sol";
 import {ScriptBase} from "../ScriptBase.sol";
 
@@ -44,11 +45,20 @@ contract DeployRobinhoodTestnet is ScriptBase {
         SyndicateVault vaultImpl = new SyndicateVault();
         console.log("Vault implementation:", address(vaultImpl));
 
-        // 3. Deploy SyndicateGovernor (UUPS proxy)
+        // 3. Deploy SyndicateGovernor (UUPS proxy). Governor init requires the
+        //    registry address; registry init requires the governor — predict
+        //    both proxy addresses via `vm.computeCreateAddress`: govImpl (+0),
+        //    govProxy (+1), registryImpl (+2), registryProxy (+3), factoryImpl (+4),
+        //    factoryProxy (+5).
+        uint256 baseNonce = vm.getNonce(deployer);
+        address predictedRegistryProxy = vm.computeCreateAddress(deployer, baseNonce + 3);
+        address predictedFactoryProxy = vm.computeCreateAddress(deployer, baseNonce + 5);
+
         SyndicateGovernor govImpl = new SyndicateGovernor();
         bytes memory govInitData = abi.encodeCall(
             SyndicateGovernor.initialize,
-            (ISyndicateGovernor.InitParams({
+            (
+                ISyndicateGovernor.InitParams({
                     owner: deployer,
                     votingPeriod: 1 hours,
                     executionWindow: 1 days,
@@ -59,15 +69,28 @@ contract DeployRobinhoodTestnet is ScriptBase {
                     maxCoProposers: 5,
                     minStrategyDuration: 1 hours,
                     maxStrategyDuration: 7 days,
-                    parameterChangeDelay: 1 days,
                     protocolFeeBps: 200,
-                    protocolFeeRecipient: deployer
-                }))
+                    protocolFeeRecipient: deployer,
+                    guardianFeeBps: 0
+                }),
+                predictedRegistryProxy
+            )
         );
         address governorProxy = address(new ERC1967Proxy(address(govImpl), govInitData));
         console.log("SyndicateGovernor:", governorProxy);
 
-        // 4. Deploy SyndicateFactory (UUPS proxy, no ENS registrar, no agent registry)
+        // 4. Deploy GuardianRegistry at the predicted address.
+        GuardianRegistry registryImpl = new GuardianRegistry();
+        address woodToken = vm.envOr("WOOD_TOKEN", address(0x1));
+        bytes memory regInitData = abi.encodeCall(
+            GuardianRegistry.initialize,
+            (deployer, governorProxy, predictedFactoryProxy, woodToken, 10_000e18, 10_000e18, 7 days, 24 hours, 3000)
+        );
+        address registryProxy = address(new ERC1967Proxy(address(registryImpl), regInitData));
+        require(registryProxy == predictedRegistryProxy, "registry addr mismatch");
+        console.log("GuardianRegistry:", registryProxy);
+
+        // 5. Deploy SyndicateFactory (UUPS proxy, no ENS registrar, no agent registry)
         SyndicateFactory factoryImpl = new SyndicateFactory();
         bytes memory factoryInitData = abi.encodeCall(
             SyndicateFactory.initialize,
@@ -78,15 +101,18 @@ contract DeployRobinhoodTestnet is ScriptBase {
                     ensRegistrar: L2_REGISTRAR,
                     agentRegistry: AGENT_REGISTRY,
                     governor: governorProxy,
-                    managementFeeBps: 50
+                    managementFeeBps: 50,
+                    guardianRegistry: registryProxy
                 }))
         );
         SyndicateFactory factory = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInitData)));
+        require(address(factory) == predictedFactoryProxy, "factory addr mismatch");
         console.log("SyndicateFactory:", address(factory));
 
-        // 5. Register factory on governor so addVault() works during createSyndicate
+        // 6. Register factory on governor. V1.5: setters apply immediately.
+        //    P1-1: guardian fee recipient pinned at init — no separate wiring.
         SyndicateGovernor(governorProxy).setFactory(address(factory));
-        console.log("Governor.setFactory:", address(factory));
+        console.log("Governor.setFactory applied:", address(factory));
 
         vm.stopBroadcast();
 
@@ -97,6 +123,7 @@ contract DeployRobinhoodTestnet is ScriptBase {
         _writeAddresses(
             "Robinhood L2 Testnet", deployer, address(factory), governorProxy, address(executorLib), address(vaultImpl)
         );
+        _patchAddress("GUARDIAN_REGISTRY", registryProxy);
 
         console.log("\nNote: No ENS or ERC-8004 on this chain.");
         console.log("Identity and attestations remain on Base.");

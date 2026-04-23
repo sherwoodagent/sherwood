@@ -12,6 +12,7 @@ import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
 import {MockMToken} from "./mocks/MockMToken.sol";
 import {MockComptroller} from "./mocks/MockComptroller.sol";
+import {MockRegistryMinimal} from "./mocks/MockRegistryMinimal.sol";
 
 /**
  * @title SyndicateGovernorIntegrationTest
@@ -28,6 +29,7 @@ contract SyndicateGovernorIntegrationTest is Test {
     MockAgentRegistry public agentRegistry;
     MockMToken public mUsdc;
     MockComptroller public comptroller;
+    MockRegistryMinimal public guardianRegistry;
 
     address public owner = makeAddr("owner");
     address public agent = makeAddr("agent");
@@ -44,7 +46,6 @@ contract SyndicateGovernorIntegrationTest is Test {
     uint256 constant MAX_PERF_FEE_BPS = 3000;
     uint256 constant MAX_STRATEGY_DURATION = 30 days;
     uint256 constant COOLDOWN_PERIOD = 1 days;
-    uint256 constant PARAM_CHANGE_DELAY = 1 days;
 
     function setUp() public {
         usdc = new ERC20Mock("USD Coin", "USDC", 6);
@@ -53,6 +54,7 @@ contract SyndicateGovernorIntegrationTest is Test {
         comptroller = new MockComptroller();
         executorLib = new BatchExecutorLib();
         agentRegistry = new MockAgentRegistry();
+        guardianRegistry = new MockRegistryMinimal();
         agentNftId = agentRegistry.mint(agent);
 
         SyndicateVault vaultImpl = new SyndicateVault();
@@ -77,7 +79,8 @@ contract SyndicateGovernorIntegrationTest is Test {
         SyndicateGovernor govImpl = new SyndicateGovernor();
         bytes memory govInit = abi.encodeCall(
             SyndicateGovernor.initialize,
-            (ISyndicateGovernor.InitParams({
+            (
+                ISyndicateGovernor.InitParams({
                     owner: owner,
                     votingPeriod: VOTING_PERIOD,
                     executionWindow: EXECUTION_WINDOW,
@@ -88,10 +91,12 @@ contract SyndicateGovernorIntegrationTest is Test {
                     maxCoProposers: 5,
                     minStrategyDuration: 1 hours,
                     maxStrategyDuration: MAX_STRATEGY_DURATION,
-                    parameterChangeDelay: PARAM_CHANGE_DELAY,
                     protocolFeeBps: 200,
-                    protocolFeeRecipient: owner
-                }))
+                    protocolFeeRecipient: owner,
+                    guardianFeeBps: 0
+                }),
+                address(guardianRegistry)
+            )
         );
         governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
 
@@ -132,12 +137,14 @@ contract SyndicateGovernorIntegrationTest is Test {
         proposalId = governor.propose(
             address(vault), "ipfs://test", feeBps, duration, executeCalls, settlementCalls, _emptyCoProposers()
         );
-        vm.warp(block.timestamp + 1);
+        // via_ir-safe: use vm.getBlockTimestamp() so the IR optimizer can't reorder
+        // block.timestamp reads across vm.warp cheatcodes
+        vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(lp1);
         governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
         vm.prank(lp2);
         governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
-        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+        vm.warp(vm.getBlockTimestamp() + VOTING_PERIOD + 1);
     }
 
     // ==================== FULL LIFECYCLE: PROPOSE -> VOTE -> EXECUTE -> SETTLE ====================
@@ -216,39 +223,10 @@ contract SyndicateGovernorIntegrationTest is Test {
         governor.executeProposal(proposalId);
     }
 
-    // ==================== EMERGENCY SETTLE WITH PROFIT ====================
-
-    function test_fullLifecycle_emergencySettle() public {
-        BatchExecutorLib.Call[] memory execCalls = new BatchExecutorLib.Call[](1);
-        execCalls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 50_000e6)), value: 0
-        });
-
-        BatchExecutorLib.Call[] memory settleCalls = new BatchExecutorLib.Call[](1);
-        settleCalls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
-        });
-
-        uint256 proposalId = _proposeVoteApprove(execCalls, settleCalls, 1500, 7 days);
-        governor.executeProposal(proposalId);
-        usdc.mint(address(vault), 3_000e6);
-        vm.warp(block.timestamp + 7 days);
-
-        BatchExecutorLib.Call[] memory customCalls = new BatchExecutorLib.Call[](1);
-        customCalls[0] = BatchExecutorLib.Call({
-            target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
-        });
-
-        uint256 agentBalBefore = usdc.balanceOf(agent);
-        vm.prank(owner);
-        governor.emergencySettle(proposalId, customCalls);
-
-        uint256 protocolFee = 3_000e6 * 200 / 10000;
-        uint256 expectedFee = (3_000e6 - protocolFee) * 1500 / 10000;
-        assertEq(usdc.balanceOf(agent), agentBalBefore + expectedFee);
-        assertEq(uint256(governor.getProposalState(proposalId)), uint256(ISyndicateGovernor.ProposalState.Settled));
-        assertFalse(vault.redemptionsLocked());
-    }
+    // The old `emergencySettle(uint256, Call[])` integration scenario was replaced
+    // by the Task 24 guardian-review lifecycle. See
+    // `test/governor/GovernorEmergency.t.sol` for full-lifecycle tests of
+    // unstick / emergencySettleWithCalls / cancel / finalize.
 
     // ==================== SEQUENTIAL STRATEGIES ====================
 

@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {console} from "forge-std/Script.sol";
 import {SyndicateGovernor} from "../src/SyndicateGovernor.sol";
+import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
 import {ScriptBase} from "./ScriptBase.sol";
 
 /**
@@ -33,9 +34,13 @@ contract RegisterVaults is ScriptBase {
 
         vm.startBroadcast();
 
-        // 1. Set factory on governor (so future createSyndicate auto-registers)
-        governor.setFactory(factoryAddr);
-        console.log("setFactory done");
+        // V1.5: timelock removed. setFactory applies immediately.
+        if (governor.factory() != factoryAddr) {
+            governor.setFactory(factoryAddr);
+            console.log("setFactory applied");
+        } else {
+            console.log("factory already wired");
+        }
 
         // 2. Register existing vaults
         for (uint256 i = 0; i < vaults.length; i++) {

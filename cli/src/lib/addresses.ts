@@ -216,24 +216,40 @@ const HYPEREVM_AGENT_REGISTRY = { IDENTITY_REGISTRY: ZERO, REPUTATION_REGISTRY: 
 
 // ── Sherwood Protocol (our deployed contracts) ──
 
+// V1.5: per-network Sherwood entries now include GUARDIAN_REGISTRY + WOOD_TOKEN +
+// MERKL_DISTRIBUTOR. ZERO == not-yet-deployed on that network.
 const BASE_SHERWOOD = {
   FACTORY: "0x4a761D4C101a3aaDE53C7aA2b5c3278b217B6C29" as Address,
   GOVERNOR: "0x2F7C27007AC5Bad8400EaDBcdaa767597cfE186a" as Address,
+  GUARDIAN_REGISTRY: ZERO,
+  WOOD_TOKEN: ZERO,
+  // Merkl mainnet distributor — Angle Labs:
+  // https://docs.merkl.xyz/merkl-for-providers/merkl-technical-documentation/addresses
+  MERKL_DISTRIBUTOR: "0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae" as Address,
 } as const;
 
 const BASE_SEPOLIA_SHERWOOD = {
   FACTORY: "0x121AaC2B96Ec365e457fcCc1C2ED5a6142064069" as Address,
   GOVERNOR: "0xE5ecf2B06E3f3e298B632C0cf6575f9d9422F55E" as Address,
+  GUARDIAN_REGISTRY: ZERO,
+  WOOD_TOKEN: ZERO,
+  MERKL_DISTRIBUTOR: ZERO,
 } as const;
 
 const ROBINHOOD_TESTNET_SHERWOOD = {
   FACTORY: "0x6d026e2f5Ff0C34A01690EC46Cb601B8fF391985" as Address,
   GOVERNOR: "0xd882056ba6b0aEd8908c541884B327121E2f2C9C" as Address,
+  GUARDIAN_REGISTRY: ZERO,
+  WOOD_TOKEN: ZERO,
+  MERKL_DISTRIBUTOR: ZERO,
 } as const;
 
 const HYPEREVM_SHERWOOD = {
   FACTORY: "0x4085EEa1E6d3D20E84D8Ae14964FAb8b899DA40a" as Address,
   GOVERNOR: "0x7B4a2f3480FE101f88b2e3547A1bCf3eaaDE46bc" as Address,
+  GUARDIAN_REGISTRY: ZERO,
+  WOOD_TOKEN: ZERO,
+  MERKL_DISTRIBUTOR: ZERO,
 } as const;
 
 // ── Venice (VVV governance + sVVV staking + DIEM compute) ──

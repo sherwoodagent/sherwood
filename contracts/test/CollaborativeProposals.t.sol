@@ -10,6 +10,7 @@ import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
+import {MockRegistryMinimal} from "./mocks/MockRegistryMinimal.sol";
 
 contract CollaborativeProposalsTest is Test {
     SyndicateGovernor public governor;
@@ -17,6 +18,7 @@ contract CollaborativeProposalsTest is Test {
     BatchExecutorLib public executorLib;
     ERC20Mock public usdc;
     MockAgentRegistry public agentRegistry;
+    MockRegistryMinimal public guardianRegistry;
 
     address public owner = makeAddr("owner");
     address public leadAgent = makeAddr("leadAgent");
@@ -40,13 +42,13 @@ contract CollaborativeProposalsTest is Test {
     uint256 constant VETO_THRESHOLD_BPS = 4000;
     uint256 constant MAX_PERF_FEE_BPS = 3000;
     uint256 constant COOLDOWN_PERIOD = 1 days;
-    uint256 constant PARAM_CHANGE_DELAY = 1 days;
 
     function setUp() public {
         usdc = new ERC20Mock("USD Coin", "USDC", 6);
         targetToken = new ERC20Mock("Target", "TGT", 18);
         executorLib = new BatchExecutorLib();
         agentRegistry = new MockAgentRegistry();
+        guardianRegistry = new MockRegistryMinimal();
 
         leadNftId = agentRegistry.mint(leadAgent);
         coNftId1 = agentRegistry.mint(coAgent1);
@@ -56,7 +58,8 @@ contract CollaborativeProposalsTest is Test {
         SyndicateGovernor govImpl = new SyndicateGovernor();
         bytes memory govInit = abi.encodeCall(
             SyndicateGovernor.initialize,
-            (ISyndicateGovernor.InitParams({
+            (
+                ISyndicateGovernor.InitParams({
                     owner: owner,
                     votingPeriod: VOTING_PERIOD,
                     executionWindow: EXECUTION_WINDOW,
@@ -67,10 +70,12 @@ contract CollaborativeProposalsTest is Test {
                     maxCoProposers: 5,
                     minStrategyDuration: 1 days,
                     maxStrategyDuration: 7 days,
-                    parameterChangeDelay: PARAM_CHANGE_DELAY,
                     protocolFeeBps: 0,
-                    protocolFeeRecipient: address(0)
-                }))
+                    protocolFeeRecipient: address(0),
+                    guardianFeeBps: 0
+                }),
+                address(guardianRegistry)
+            )
         );
         governor = SyndicateGovernor(address(new ERC1967Proxy(address(govImpl), govInit)));
 
@@ -265,6 +270,22 @@ contract CollaborativeProposalsTest is Test {
         assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Pending));
     }
 
+    /// @notice G-C1: approveCollaboration() must also stamp the snapshot at
+    ///         block.timestamp - 1 when Draft -> Pending transition fires, so
+    ///         a same-block delegation cannot be counted. Mirrors propose().
+    function test_approveCollaboration_snapshotIsPriorTimestamp() public {
+        uint256 proposalId = _createCollabProposal();
+        vm.prank(coAgent1);
+        governor.approveCollaboration(proposalId);
+        uint256 tsAtTransition = block.timestamp;
+        vm.prank(coAgent2);
+        governor.approveCollaboration(proposalId);
+
+        ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
+        assertEq(uint256(p.state), uint256(ISyndicateGovernor.ProposalState.Pending));
+        assertEq(p.snapshotTimestamp, tsAtTransition - 1);
+    }
+
     function test_fullConsentFlow_votingTimestampsResetOnTransition() public {
         uint256 proposalId = _createCollabProposal();
         vm.warp(block.timestamp + 12 hours);
@@ -275,7 +296,9 @@ contract CollaborativeProposalsTest is Test {
         governor.approveCollaboration(proposalId);
 
         ISyndicateGovernor.StrategyProposal memory p = governor.getProposal(proposalId);
-        assertEq(p.snapshotTimestamp, block.timestamp);
+        // G-C1: snapshot stamped one second in the past so same-block
+        // delegations cannot count via ERC20Votes.getPastVotes.
+        assertEq(p.snapshotTimestamp, block.timestamp - 1);
         assertEq(p.voteEnd, block.timestamp + VOTING_PERIOD);
         assertEq(p.executeBy, block.timestamp + VOTING_PERIOD + EXECUTION_WINDOW);
     }
@@ -421,6 +444,92 @@ contract CollaborativeProposalsTest is Test {
         assertEq(usdc.balanceOf(coAgent2), co2BalBefore + co2Share);
         assertEq(usdc.balanceOf(leadAgent), leadBalBefore + leadShare);
         assertEq(co1Share + co2Share + leadShare, agentFee);
+    }
+
+    // ==================== G-C7: zero-rounding regression ====================
+
+    /// @dev 5 active co-proposers each at MIN_SPLIT_BPS (100 bps). If the agent
+    ///      fee is small enough that `fee * 100 / 10000` rounds to zero, the
+    ///      prior behavior silently routed every zero share to the lead. We
+    ///      now revert with `CoProposerShareUnderflow` so proposers must
+    ///      structure the split meaningfully.
+    function test_coProposerShare_revertsIfRoundsToZero() public {
+        // Register 3 additional co-props so we can hit 5 at 100bps each.
+        address co3 = makeAddr("co3");
+        address co4 = makeAddr("co4");
+        address co5 = makeAddr("co5");
+        vm.startPrank(owner);
+        vault.registerAgent(agentRegistry.mint(co3), co3);
+        vault.registerAgent(agentRegistry.mint(co4), co4);
+        vault.registerAgent(agentRegistry.mint(co5), co5);
+        vm.stopPrank();
+
+        ISyndicateGovernor.CoProposer[] memory coProps = new ISyndicateGovernor.CoProposer[](5);
+        coProps[0] = ISyndicateGovernor.CoProposer({agent: coAgent1, splitBps: 100});
+        coProps[1] = ISyndicateGovernor.CoProposer({agent: coAgent2, splitBps: 100});
+        coProps[2] = ISyndicateGovernor.CoProposer({agent: co3, splitBps: 100});
+        coProps[3] = ISyndicateGovernor.CoProposer({agent: co4, splitBps: 100});
+        coProps[4] = ISyndicateGovernor.CoProposer({agent: co5, splitBps: 100});
+
+        vm.prank(leadAgent);
+        uint256 proposalId = governor.propose(
+            address(vault), "ipfs://tiny", 2000, 7 days, _simpleExecuteCalls(), _simpleSettlementCalls(), coProps
+        );
+        vm.prank(coAgent1);
+        governor.approveCollaboration(proposalId);
+        vm.prank(coAgent2);
+        governor.approveCollaboration(proposalId);
+        vm.prank(co3);
+        governor.approveCollaboration(proposalId);
+        vm.prank(co4);
+        governor.approveCollaboration(proposalId);
+        vm.prank(co5);
+        governor.approveCollaboration(proposalId);
+        vm.warp(block.timestamp + 1);
+
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.warp(block.timestamp + VOTING_PERIOD + 1);
+
+        governor.executeProposal(proposalId);
+
+        // Profit of 49 wei of USDC (base units). perfFeeBps=2000 => agentFee = 9.
+        // 9 * 100 / 10000 = 0 → revert.
+        usdc.mint(address(vault), 49);
+
+        vm.prank(leadAgent);
+        vm.expectRevert(ISyndicateGovernor.CoProposerShareUnderflow.selector);
+        governor.settleProposal(proposalId);
+    }
+
+    /// @dev Deregistered co-proposers with splits that round to zero are
+    ///      fine — the `active && share == 0` guard only targets currently
+    ///      registered agents. This preserves the existing skip-path.
+    function test_coProposerShare_deregisteredGetsZeroOk() public {
+        uint256 proposalId = _createAndExecuteCollabProposal();
+
+        // Deregister coAgent2 — its share is now forfeit, routed to the lead.
+        vm.prank(owner);
+        vault.removeAgent(coAgent2);
+
+        // Small profit: 49 wei. perfFeeBps=2000 => agentFee=9.
+        //   coAgent1 (3000 bps, still active): 9 * 3000 / 10000 = 2
+        //   coAgent2 (1000 bps, DEREGISTERED): 9 * 1000 / 10000 = 0 → skipped (no revert)
+        //   lead: remainder = 9 - 2 = 7
+        usdc.mint(address(vault), 49);
+
+        uint256 leadBalBefore = usdc.balanceOf(leadAgent);
+        uint256 co1BalBefore = usdc.balanceOf(coAgent1);
+        uint256 co2BalBefore = usdc.balanceOf(coAgent2);
+
+        vm.prank(leadAgent);
+        governor.settleProposal(proposalId);
+
+        assertEq(usdc.balanceOf(coAgent1), co1BalBefore + 2, "active co-prop gets non-zero share");
+        assertEq(usdc.balanceOf(coAgent2), co2BalBefore, "deregistered co-prop skipped even with zero share");
+        assertGt(usdc.balanceOf(leadAgent), leadBalBefore, "lead absorbs deregistered residual");
     }
 
     // ==================== VALIDATION ====================

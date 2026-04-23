@@ -6,6 +6,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../src/SyndicateFactory.sol";
+import {IGuardianRegistry} from "../src/interfaces/IGuardianRegistry.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockL2Registrar} from "./mocks/MockL2Registrar.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
@@ -22,6 +23,7 @@ contract SyndicateFactoryTest is Test {
     address public creator1 = makeAddr("creator1");
     address public creator2 = makeAddr("creator2");
     address public governorAddr = makeAddr("governor");
+    address public guardianRegistryAddr = makeAddr("guardianRegistry");
 
     uint256 public creator1AgentId;
     uint256 public creator2AgentId;
@@ -44,7 +46,8 @@ contract SyndicateFactoryTest is Test {
                     ensRegistrar: address(ensRegistrar),
                     agentRegistry: address(agentRegistry),
                     governor: governorAddr,
-                    managementFeeBps: 50
+                    managementFeeBps: 50,
+                    guardianRegistry: guardianRegistryAddr
                 }))
         );
         factory = SyndicateFactory(address(new ERC1967Proxy(address(factoryImpl), factoryInit)));
@@ -55,6 +58,11 @@ contract SyndicateFactoryTest is Test {
 
         // Mock governor.getActiveProposal() so vault deposits work (no active proposals)
         vm.mockCall(governorAddr, abi.encodeWithSignature("getActiveProposal(address)"), abi.encode(uint256(0)));
+        // Task 26: mock registry to pass the prepared-stake gate + bind path during create.
+        vm.mockCall(
+            guardianRegistryAddr, abi.encodeWithSelector(IGuardianRegistry.canCreateVault.selector), abi.encode(true)
+        );
+        vm.mockCall(guardianRegistryAddr, abi.encodeWithSelector(IGuardianRegistry.bindOwnerStake.selector), "");
     }
 
     function _defaultConfig() internal view returns (SyndicateFactory.SyndicateConfig memory) {
@@ -159,14 +167,14 @@ contract SyndicateFactoryTest is Test {
         vault.deposit(50_000e6, lp);
         vm.stopPrank();
 
-        // Owner executes batch (simple approve call — owner-only in governor model)
+        // Governor executes batch (strategy-style approve — onlyGovernor after V-C3)
         BatchExecutorLib.Call[] memory calls = new BatchExecutorLib.Call[](1);
         calls[0] = BatchExecutorLib.Call({
             target: address(usdc), data: abi.encodeCall(usdc.approve, (makeAddr("protocol"), 1_000e6)), value: 0
         });
 
-        vm.prank(creator1); // vault owner
-        vault.executeBatch(calls);
+        vm.prank(governorAddr);
+        vault.executeGovernorBatch(calls);
 
         // Verify: vault set the approval (delegatecall)
         assertEq(usdc.allowance(vaultAddr, makeAddr("protocol")), 1_000e6);
@@ -403,5 +411,247 @@ contract SyndicateFactoryTest is Test {
         vm.prank(creator1);
         vm.expectRevert();
         factory.setCreationFee(address(usdc), 100e6, owner);
+    }
+
+    // ==================== V-H1: ATOMIC PROXY INITIALIZE ====================
+
+    /// @notice V-H1 regression: deploying the factory proxy with atomic init data
+    ///         (ERC1967Proxy(impl, encodedInitCall)) is the ONLY path our deploy
+    ///         scripts use. This test asserts that once the proxy is deployed
+    ///         atomically, `initialize` can never be called a second time — so
+    ///         no attacker can front-run the owner slot even if they watch the
+    ///         proxy creation tx.
+    /// @dev    Under a non-atomic deploy (empty init data), any caller could
+    ///         initialize the proxy first. Our scripts never do this; see
+    ///         `contracts/script/Deploy.s.sol`, `script/testnet/Deploy.s.sol`,
+    ///         `script/robinhood-testnet/Deploy.s.sol` — each encodes the init
+    ///         call into the proxy constructor as a single tx.
+    function test_factoryInitialize_atomicProxy_cannotBeReinitialized() public {
+        // The `factory` in setUp was deployed via atomic init. Attempt to
+        // re-initialize as an attacker — must revert with OZ's InvalidInitialization.
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert(); // Initializable: contract is already initialized
+        factory.initialize(
+            SyndicateFactory.InitParams({
+                owner: attacker,
+                executorImpl: address(executorLib),
+                vaultImpl: address(vaultImpl),
+                ensRegistrar: address(ensRegistrar),
+                agentRegistry: address(agentRegistry),
+                governor: governorAddr,
+                managementFeeBps: 50,
+                guardianRegistry: guardianRegistryAddr
+            })
+        );
+
+        // Owner slot untouched by the reinit attempt.
+        assertEq(factory.owner(), owner);
+    }
+
+    /// @notice V-H1 regression: the implementation contract itself has
+    ///         `_disableInitializers()` in its constructor, so `initialize`
+    ///         on the raw impl reverts regardless of who calls it.
+    function test_factoryInitialize_implementation_initializersDisabled() public {
+        SyndicateFactory rawImpl = new SyndicateFactory();
+
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        vm.expectRevert(); // InvalidInitialization
+        rawImpl.initialize(
+            SyndicateFactory.InitParams({
+                owner: attacker,
+                executorImpl: address(executorLib),
+                vaultImpl: address(vaultImpl),
+                ensRegistrar: address(ensRegistrar),
+                agentRegistry: address(agentRegistry),
+                governor: governorAddr,
+                managementFeeBps: 50,
+                guardianRegistry: guardianRegistryAddr
+            })
+        );
+    }
+
+    // ==================== V-H3: upgradeVault expectedImpl ====================
+
+    /// @notice V-H3 regression: if the factory owner calls `setVaultImpl`
+    ///         between the creator observing `vaultImpl` and calling
+    ///         `upgradeVault`, the creator must not end up on a different
+    ///         impl than they expected.
+    function test_upgradeVault_revertsIfImplChanged() public {
+        // Create syndicate
+        vm.prank(creator1);
+        (, address vaultAddr) = factory.createSyndicate(creator1AgentId, _defaultConfig());
+
+        // Owner enables upgrades and snapshots the current impl.
+        vm.prank(owner);
+        factory.setUpgradesEnabled(true);
+        address expected = factory.vaultImpl();
+
+        // Owner rotates the vault impl (front-run scenario).
+        SyndicateVault newImpl = new SyndicateVault();
+        vm.prank(owner);
+        factory.setVaultImpl(address(newImpl));
+
+        // Creator calls upgradeVault with the previously-observed impl -> revert.
+        vm.prank(creator1);
+        vm.expectRevert(SyndicateFactory.VaultImplMismatch.selector);
+        factory.upgradeVault(vaultAddr, expected);
+    }
+
+    /// @notice V-H3 positive path: upgradeVault succeeds when expectedImpl
+    ///         matches the factory's current vaultImpl.
+    function test_upgradeVault_succeedsWithCurrentImpl() public {
+        // Create syndicate
+        vm.prank(creator1);
+        (, address vaultAddr) = factory.createSyndicate(creator1AgentId, _defaultConfig());
+
+        // Enable upgrades, rotate to a new impl
+        vm.prank(owner);
+        factory.setUpgradesEnabled(true);
+        SyndicateVault newImpl = new SyndicateVault();
+        vm.prank(owner);
+        factory.setVaultImpl(address(newImpl));
+
+        // Creator passes the now-current impl -> succeeds.
+        vm.prank(creator1);
+        factory.upgradeVault(vaultAddr, address(newImpl));
+    }
+
+    // ==================== V-H2: GOVERNOR IS SET-ONCE ====================
+
+    /// @notice V-H2 regression: `setGovernor` was removed. The selector must
+    ///         not exist on the factory — any low-level call reverts with
+    ///         empty return data. This guarantees the factory owner can
+    ///         never instantly rewire every registered vault's governor.
+    function test_setGovernor_removed() public {
+        // setGovernor(address) selector: keccak256("setGovernor(address)")[:4]
+        bytes4 sel = bytes4(keccak256("setGovernor(address)"));
+
+        address attacker = makeAddr("attacker");
+        vm.prank(attacker);
+        (bool okAttacker, bytes memory retAttacker) =
+            address(factory).call(abi.encodeWithSelector(sel, makeAddr("newGovernor")));
+        assertFalse(okAttacker, "setGovernor must not exist (attacker)");
+        assertEq(retAttacker.length, 0, "expected empty revert data (fn does not exist)");
+
+        // Even the owner cannot call it.
+        vm.prank(owner);
+        (bool okOwner, bytes memory retOwner) =
+            address(factory).call(abi.encodeWithSelector(sel, makeAddr("newGovernor")));
+        assertFalse(okOwner, "setGovernor must not exist (owner)");
+        assertEq(retOwner.length, 0, "expected empty revert data (fn does not exist)");
+
+        // Governor slot is set-once at initialize and unchanged.
+        assertEq(factory.governor(), governorAddr);
+    }
+
+    // ==================== V-M7: SyndicateConfig validation ====================
+
+    /// @notice V-M7 regression: `createSyndicate` must reject a config whose
+    ///         `asset` is zero before any side effects (stake bind, ENS
+    ///         register, vault deploy). Consolidated under
+    ///         `InvalidSyndicateConfig`.
+    function test_createSyndicate_revertsIfAssetZero() public {
+        SyndicateFactory.SyndicateConfig memory cfg = _defaultConfig();
+        cfg.asset = ERC20Mock(address(0));
+
+        vm.prank(creator1);
+        vm.expectRevert(SyndicateFactory.InvalidSyndicateConfig.selector);
+        factory.createSyndicate(creator1AgentId, cfg);
+    }
+
+    /// @notice V-M7: empty vault token name is rejected.
+    function test_createSyndicate_revertsIfNameEmpty() public {
+        SyndicateFactory.SyndicateConfig memory cfg = _defaultConfig();
+        cfg.name = "";
+
+        vm.prank(creator1);
+        vm.expectRevert(SyndicateFactory.InvalidSyndicateConfig.selector);
+        factory.createSyndicate(creator1AgentId, cfg);
+    }
+
+    /// @notice V-M7: empty vault token symbol is rejected.
+    function test_createSyndicate_revertsIfSymbolEmpty() public {
+        SyndicateFactory.SyndicateConfig memory cfg = _defaultConfig();
+        cfg.symbol = "";
+
+        vm.prank(creator1);
+        vm.expectRevert(SyndicateFactory.InvalidSyndicateConfig.selector);
+        factory.createSyndicate(creator1AgentId, cfg);
+    }
+
+    /// @notice V-M7: empty subdomain is rejected with `InvalidSyndicateConfig`
+    ///         (the existing `SubdomainTooShort` guard is checked later; the
+    ///         zero-length case is caught first by the consolidated V-M7
+    ///         check, which is what we want to assert here).
+    function test_createSyndicate_revertsIfSubdomainEmpty() public {
+        SyndicateFactory.SyndicateConfig memory cfg = _defaultConfig();
+        cfg.subdomain = "";
+
+        vm.prank(creator1);
+        vm.expectRevert(SyndicateFactory.InvalidSyndicateConfig.selector);
+        factory.createSyndicate(creator1AgentId, cfg);
+    }
+
+    /// @notice V-M7: empty metadataURI is rejected — a deployed vault with
+    ///         no IPFS pointer is not a real syndicate.
+    function test_createSyndicate_revertsIfMetadataUriEmpty() public {
+        SyndicateFactory.SyndicateConfig memory cfg = _defaultConfig();
+        cfg.metadataURI = "";
+
+        vm.prank(creator1);
+        vm.expectRevert(SyndicateFactory.InvalidSyndicateConfig.selector);
+        factory.createSyndicate(creator1AgentId, cfg);
+    }
+
+    // ==================== V-C4: EnumerableSet pagination ====================
+
+    /// @notice V-C4 regression: getActiveSyndicates is backed by an
+    ///         EnumerableSet so reads are O(limit) instead of O(syndicateCount),
+    ///         the per-call limit is hard-capped at MAX_PAGE_LIMIT, and
+    ///         deactivated syndicates do not appear in the active set.
+    function test_getActiveSyndicates_paginated() public {
+        // Create 150 syndicates with unique subdomains
+        vm.startPrank(creator1);
+        for (uint256 i = 0; i < 150; i++) {
+            factory.createSyndicate(creator1AgentId, _configWithSubdomain(string.concat("fund-", vm.toString(i))));
+        }
+
+        // Deactivate a handful (ids 10, 50, 100 — 1-indexed).
+        factory.deactivate(10);
+        factory.deactivate(50);
+        factory.deactivate(100);
+        vm.stopPrank();
+
+        // 147 active total.
+        (, uint256 total) = factory.getActiveSyndicates(0, 1);
+        assertEq(total, 147, "total should reflect deactivations");
+
+        // Hard cap: request 200, get at most MAX_PAGE_LIMIT (100).
+        (SyndicateFactory.Syndicate[] memory firstPage, uint256 total2) = factory.getActiveSyndicates(0, 200);
+        assertEq(firstPage.length, 100, "limit clamped to MAX_PAGE_LIMIT");
+        assertEq(total2, 147);
+
+        // No deactivated syndicate appears in the page.
+        for (uint256 i = 0; i < firstPage.length; i++) {
+            assertTrue(firstPage[i].active, "only active syndicates should be returned");
+            assertTrue(
+                firstPage[i].id != 10 && firstPage[i].id != 50 && firstPage[i].id != 100,
+                "deactivated id leaked into results"
+            );
+        }
+
+        // Second page (offset 100). 47 remaining.
+        (SyndicateFactory.Syndicate[] memory secondPage,) = factory.getActiveSyndicates(100, 100);
+        assertEq(secondPage.length, 47, "remaining rows after offset");
+
+        // Offset beyond total returns empty.
+        (SyndicateFactory.Syndicate[] memory empty,) = factory.getActiveSyndicates(200, 10);
+        assertEq(empty.length, 0);
+
+        // getAllActiveSyndicates also clamps to MAX_PAGE_LIMIT.
+        SyndicateFactory.Syndicate[] memory all = factory.getAllActiveSyndicates();
+        assertEq(all.length, 100, "getAllActiveSyndicates clamped to MAX_PAGE_LIMIT");
     }
 }
