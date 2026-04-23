@@ -564,6 +564,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     function fundProposalGuardianPool(uint256 proposalId, address asset, uint256 amount) external {
         if (msg.sender != governor) revert NotGovernor();
         if (amount == 0) return;
+        // Defensive: governor's `Executed → Settled` state machine makes this
+        // unreachable today, but guard against a future state-machine change
+        // silently overwriting an already-funded pool (would permanently lock
+        // the first amount and break approver/delegator claims).
+        if (_proposalGuardianPool[proposalId].settledAt != 0) revert PoolAlreadyFunded();
         _proposalGuardianPool[proposalId] =
             ProposalRewardPool({asset: asset, amount: uint128(amount), settledAt: uint64(block.timestamp)});
         emit ProposalGuardianPoolFunded(proposalId, asset, amount);
@@ -750,13 +755,18 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     /// @inheritdoc IGuardianRegistry
-    /// @dev First-vote path. Requires `openReview` to have been called and
-    ///      `voteEnd <= now < reviewEnd`. Snapshots the caller's current
-    ///      `guardianStake` into `_voteStake[proposalId][caller]` and adds it
-    ///      to the chosen side's tally. Approvers are capped at
-    ///      `MAX_APPROVERS_PER_PROPOSAL`; Blockers are uncapped. Vote-change
-    ///      semantics are added in a later task — any existing vote currently
-    ///      reverts.
+    /// @dev First-vote path OR vote-change. Requires `openReview` to have been
+    ///      called and `voteEnd <= now < reviewEnd`. Snapshots the caller's
+    ///      own + delegated-inbound stake at `r.openedAt` into
+    ///      `_voteStake[proposalId][caller]` and adds it to the chosen side's
+    ///      tally. Approvers and Blockers are each capped at
+    ///      `MAX_APPROVERS_PER_PROPOSAL` / `MAX_BLOCKERS_PER_PROPOSAL`
+    ///      (ToB I-2 added the Blocker cap so `_emitBlockerAttribution` stays
+    ///      O(1)). Vote-change is allowed until the final
+    ///      `LATE_VOTE_LOCKOUT_BPS` of the review window; the preserved
+    ///      `_voteStake` snapshot moves with the caller, and the new-side cap
+    ///      is checked BEFORE mutating the old side so a revert leaves the
+    ///      prior vote intact.
     ///
     ///      V1.5: vote weight is read from `_stakeCheckpoints[voter]` at
     ///      `r.openedAt`, so both numerator (each voter's contribution) and
@@ -795,31 +805,37 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
             emit GuardianVoteCast(proposalId, msg.sender, support, weight);
         } else {
             // Vote-change: must be before the late lockout window. The final
-            // `LATE_VOTE_LOCKOUT_BPS` of `reviewPeriod` is locked to prevent
-            // last-minute flips that would make honest early Approvers
-            // strictly worse off than abstainers.
-            uint256 lockoutStart = p.reviewEnd - (reviewPeriod * LATE_VOTE_LOCKOUT_BPS) / 10_000;
+            // `LATE_VOTE_LOCKOUT_BPS` of the review window is locked to
+            // prevent last-minute flips that would make honest early Approvers
+            // strictly worse off than abstainers. Derive the window from the
+            // proposal's stamped `voteEnd`/`reviewEnd` — NOT the live
+            // `reviewPeriod` — so that owner-multisig changes to
+            // `reviewPeriod` after proposal creation cannot shift the lockout
+            // start time.
+            uint256 reviewWindow = uint256(p.reviewEnd) - uint256(p.voteEnd);
+            uint256 lockoutStart = p.reviewEnd - (reviewWindow * LATE_VOTE_LOCKOUT_BPS) / 10_000;
             if (block.timestamp >= lockoutStart) revert VoteChangeLockedOut();
 
             uint128 weight = _voteStake[proposalId][msg.sender]; // preserved snapshot
+            // LOAD-BEARING INVARIANT for weight accounting: the new-side cap
+            // is checked inline BEFORE any `_remove*` / `_push*` call. The
+            // subsequent `_push{Approver,Blocker}` MUST NOT gain a new failure
+            // mode on top of the cap — if it does, the old-side decrement
+            // will have already executed, silently corrupting stake tallies.
+            // See the vote-change fragility finding on PR #229 review.
             if (existing == GuardianVoteType.Approve) {
-                // Approve → Block: check Block cap FIRST without mutating the
-                // old side (ToB I-2: blockers are now capped; preserve the
-                // check-first-then-apply semantics so a full Block side leaves
-                // the caller's Approve vote intact rather than dangling).
+                // Approve → Block (ToB I-2: blockers are now capped).
                 if (_blockers[proposalId].length >= MAX_BLOCKERS_PER_PROPOSAL) revert NewSideFull();
                 _removeApprover(proposalId, msg.sender);
                 r.approveStakeWeight -= weight;
-                _pushBlocker(proposalId, msg.sender); // guaranteed to fit (cap checked above)
+                _pushBlocker(proposalId, msg.sender); // cap pre-checked above — must succeed
                 r.blockStakeWeight += weight;
             } else {
-                // Block → Approve: check Approve cap FIRST without mutating
-                // the old side (check-first-then-apply). If full, revert
-                // NewSideFull; caller retains their Block vote.
+                // Block → Approve.
                 if (_approvers[proposalId].length >= MAX_APPROVERS_PER_PROPOSAL) revert NewSideFull();
                 _removeBlocker(proposalId, msg.sender);
                 r.blockStakeWeight -= weight;
-                _pushApprover(proposalId, msg.sender); // guaranteed to fit (cap checked above)
+                _pushApprover(proposalId, msg.sender); // cap pre-checked above — must succeed
                 r.approveStakeWeight += weight;
             }
             _votes[proposalId][msg.sender] = support;
@@ -988,11 +1004,14 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     /// @dev Reassigns `_ownerStakes[vault]` to `newOwner`'s prepared stake after the
     ///      previous owner's stake has been slashed or fully unstaked (guarded by
     ///      `stakedAmount == 0`). `newOwner` must have called `prepareOwnerStake`
-    ///      with ≥ `requiredOwnerBond(vault)`.
+    ///      with ≥ `requiredOwnerBond(vault)`. Reverts with `PriorStakeNotCleared`
+    ///      if the prior owner still has residual stake (they must first
+    ///      complete `requestUnstakeOwner` → `claimUnstakeOwner`, or be
+    ///      slashed, before the slot can be transferred).
     function transferOwnerStakeSlot(address vault, address newOwner) external onlyFactory nonReentrant {
         OwnerStake storage existing = _ownerStakes[vault];
         address oldOwner = existing.owner;
-        if (existing.stakedAmount != 0) revert VaultHasActiveProposal();
+        if (existing.stakedAmount != 0) revert PriorStakeNotCleared();
 
         PreparedOwnerStake storage p = _prepared[newOwner];
         if (p.amount == 0 || p.bound) revert PreparedStakeNotFound();
@@ -1139,10 +1158,14 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     /// @dev Slash each approver by the snapshotted `_voteStake` weight (NOT their
     ///      live `stakedAmount`) so guardians who topped up after voting don't
     ///      lose the top-up. The snapshot is captured at vote time so
-    ///      `stakedAmount >= snapshot` always holds when the approver is still
-    ///      active; for slashed/unstaked approvers we clamp to the current live
-    ///      amount. Accumulate total, decrement aggregate counters, then attempt
-    ///      one `wood.transfer(BURN, total)`. If the transfer reverts or returns
+    ///      `stakedAmount >= snapshot` USUALLY holds — EXCEPT when the approver
+    ///      has been partially slashed by a concurrent proposal that resolved
+    ///      first, in which case `live < snapshot`. The clamp at the `amt =
+    ///      snapshot <= live ? snapshot : live` line below is LOAD-BEARING for
+    ///      that case — do not remove it as "unreachable." The clamp also
+    ///      covers slashed/unstaked approvers (live == 0 → skipped earlier).
+    ///      Accumulate total, decrement aggregate counters, then attempt one
+    ///      `wood.transfer(BURN, total)`. If the transfer reverts or returns
     ///      false, the amount is queued in `_pendingBurn[address(this)]` for
     ///      retry via `flushBurn`.
     function _slashApprovers(uint256 proposalId) private returns (uint256 total) {
@@ -1220,9 +1243,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
 
     /// @inheritdoc IGuardianRegistry
     /// @dev Permissionless. Idempotent. Requires
-    ///      `block.timestamp >= reviewEnd`. If the cohort was empty at open
-    ///      (`totalStakeAtOpen == 0`), short-circuits to `false`. Otherwise:
-    ///      `blocked = (blockStakeWeight * 10_000 >= blockQuorumBps * totalStakeAtOpen)`.
+    ///      `block.timestamp >= reviewEnd`. V1.5: the quorum denominator is
+    ///      `denomE = totalStakeAtOpen + totalDelegatedAtOpen` (both snapshotted
+    ///      at emergency-review open time); if `denomE == 0` (no votable stake
+    ///      at open) the call short-circuits to `false`. Otherwise:
+    ///      `blocked = (blockStakeWeight * 10_000 >= blockQuorumBps * denomE)`.
     ///      CEI: commits `resolved`/`blocked` flags BEFORE any transfer. On
     ///      block, slashes the vault owner (spec §3.1 emergency path).
     function resolveEmergencyReview(uint256 proposalId) external nonReentrant whenNotPaused returns (bool) {

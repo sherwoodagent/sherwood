@@ -22,9 +22,9 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 ///           - `finalizeEmergencySettle`: once the review period has elapsed and the
 ///             block quorum was not reached, the owner runs the reviewed calls.
 ///
-///         The legacy `emergencySettle(uint256, Call[])` entrypoint is preserved as a
-///         revert stub to keep the ISyndicateGovernor ABI stable; Task 25 owns its
-///         removal.
+///         The legacy single-entrypoint `emergencySettle(uint256, Call[])` was
+///         fully removed in PR #229 (from both the interface and this abstract)
+///         as part of the guardian-review narrowing.
 abstract contract GovernorEmergency is ISyndicateGovernor {
     // ── Virtual accessors (implemented by SyndicateGovernor) ──
 
@@ -101,10 +101,13 @@ abstract contract GovernorEmergency is ISyndicateGovernor {
     ///      in-progress review (zeroes `blockStakeWeight`, bumps the round nonce,
     ///      marks it resolved/not-blocked). Without the registry call a keeper
     ///      could still drive `resolveEmergencyReview` past `reviewEnd` and
-    ///      `_slashOwner` on stale block votes.
+    ///      `_slashOwner` on stale block votes. Reverts with `EmergencyNotProposed`
+    ///      if no emergency settle was opened — prevents spurious
+    ///      `EmergencyReviewCancelled` events on empty review structs.
     function cancelEmergencySettle(uint256 proposalId) external emergencyNonReentrant {
         StrategyProposal storage p = _getProposal(proposalId);
         if (msg.sender != OwnableUpgradeable(p.vault).owner()) revert NotVaultOwner();
+        if (_getEmergencyCallsHash(proposalId) == bytes32(0)) revert EmergencyNotProposed();
         _getRegistry().cancelEmergencyReview(proposalId);
         _clearEmergencyCalls(proposalId);
         emit EmergencySettleCancelled(proposalId, msg.sender);
@@ -131,4 +134,11 @@ abstract contract GovernorEmergency is ISyndicateGovernor {
         _clearEmergencyCalls(proposalId);
         emit EmergencySettleFinalized(proposalId, pnl);
     }
+
+    /// @dev Per-abstract upgrade-hygiene storage gap. No storage variables
+    ///      exist on `GovernorEmergency` today (all state is read via virtual
+    ///      accessors from `SyndicateGovernor`), but reserving slots here
+    ///      parallels `GovernorParameters.__paramsGap` so future additions to
+    ///      this abstract can't collide with the concrete governor's layout.
+    uint256[10] private __emergencyGap;
 }

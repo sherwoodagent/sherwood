@@ -31,6 +31,8 @@ interface IGuardianRegistry {
     error PreparedStakeAlreadyExists();
     error PreparedStakeAlreadyBound();
     error VaultHasActiveProposal();
+    error PriorStakeNotCleared();
+    error PoolAlreadyFunded();
     error OwnerBondInsufficient();
     // V1.5 removed: InvalidEpoch, EpochNotEnded, NothingToClaim, FundEpochLocked,
     // SweepTooEarly — all tied to the on-chain epoch-claim path now in Merkl.

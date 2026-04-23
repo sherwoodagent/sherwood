@@ -516,7 +516,7 @@ contract GuardianRegistryOwnerBindTest is Test {
         registry.prepareOwnerStake(10_000e18);
 
         vm.prank(factory);
-        vm.expectRevert(IGuardianRegistry.VaultHasActiveProposal.selector);
+        vm.expectRevert(IGuardianRegistry.PriorStakeNotCleared.selector);
         registry.transferOwnerStakeSlot(address(vault), newCreator);
     }
 

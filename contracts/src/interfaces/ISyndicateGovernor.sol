@@ -141,6 +141,7 @@ interface ISyndicateGovernor {
     error OwnerBondInsufficient();
     error EmergencySettleBlocked();
     error EmergencySettleMismatch();
+    error EmergencyNotProposed();
 
     // ── Guardian-review lifecycle errors (Task 25) ──
     error NotInGuardianReview();
@@ -251,11 +252,7 @@ interface ISyndicateGovernor {
     ///         Guardian fee is carved from gross PnL and transferred to
     ///         `recipient` (GuardianRegistry in V1.5).
     event GuardianFeeAccrued(
-        uint256 indexed proposalId,
-        address indexed asset,
-        address indexed recipient,
-        uint256 amount,
-        uint64 settledAt
+        uint256 indexed proposalId, address indexed asset, address indexed recipient, uint256 amount, uint64 settledAt
     );
 
     /// @notice V1.5: W-1 regression guard. Emitted when the guardian-fee
