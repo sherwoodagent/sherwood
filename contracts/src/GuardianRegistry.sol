@@ -78,7 +78,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
 
     mapping(address => Guardian) internal _guardians;
     uint256 public totalGuardianStake;
-    uint256 public activeGuardianCount;
 
     struct OwnerStake {
         uint128 stakedAmount;
@@ -132,12 +131,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     // keyed by (proposalId, nonce, guardian) so cancelling + re-opening starts a
     // fresh round; prior-round votes are invisible to the new nonce.
     mapping(uint256 => mapping(uint8 => mapping(address => bool))) internal _emergencyBlockVotes;
-    // Snapshot of the guardian's stake at the moment they cast their block vote.
-    // Mirrors `_voteStake` in the standard-review path for structural parity —
-    // same live-at-first-vote semantics (both paths read `_guardians[g].stakedAmount`
-    // at the call-time of the first vote). Persisted here so future extensions
-    // that support emergency-vote-change can reuse the frozen weight.
-    mapping(uint256 => mapping(uint8 => mapping(address => uint128))) internal _emergencyVoteStake;
 
     // Epoch accounting (V1.5: WOOD epoch block-rewards moved to Merkl; only
     // epochGenesis remains on-chain as the epoch-index anchor used by
@@ -165,7 +158,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     // Privileged addresses
     address public governor;
     address public factory;
-    address public minter;
     IERC20 public wood;
 
     // ── V1.5 vote-weight checkpoints (Task 1.2) ──
@@ -270,9 +262,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     /// @dev Reserved storage for future upgrades.
     ///      Slot accounting since V1: -9 (Phase 1 + Phase 2),
     ///      -4 (commission), -5 (guardian-fee pool + claim flags + escrow),
-    ///      +2 (removed parameter-change timelock: _pendingChanges + parameterChangeDelay)
-    ///      = -16 total.
-    uint256[35] private __gap;
+    ///      +2 (removed parameter-change timelock),
+    ///      +3 (P1-3/4/5: drop activeGuardianCount + _emergencyVoteStake + minter)
+    ///      = -13 total.
+    uint256[38] private __gap;
 
     // ── Initializer ──
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -321,11 +314,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         _;
     }
 
-    modifier onlyMinterOrOwner() {
-        if (msg.sender != minter && msg.sender != owner()) revert NotMinterOrOwner();
-        _;
-    }
-
     modifier whenNotPaused() {
         if (paused) revert ProtocolPaused();
         _;
@@ -355,7 +343,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         if (wasInactive) {
             g.stakedAt = uint64(block.timestamp);
             g.agentId = agentId; // recorded once; ignored on top-ups
-            activeGuardianCount += 1;
         }
         totalGuardianStake += amount;
 
@@ -368,8 +355,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
 
     /// @inheritdoc IGuardianRegistry
     /// @dev Immediately revokes voting power by zeroing the guardian's contribution to
-    ///      `totalGuardianStake` and decrementing `activeGuardianCount`. WOOD stays in
-    ///      the registry until `claimUnstakeGuardian` after `coolDownPeriod`.
+    ///      `totalGuardianStake`. WOOD stays in the registry until
+    ///      `claimUnstakeGuardian` after `coolDownPeriod`.
     function requestUnstakeGuardian() external {
         Guardian storage g = _guardians[msg.sender];
         if (g.stakedAmount == 0) revert NoActiveStake();
@@ -377,7 +364,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
 
         g.unstakeRequestedAt = uint64(block.timestamp);
         totalGuardianStake -= g.stakedAmount;
-        activeGuardianCount -= 1;
 
         // V1.5: unstake-requested stake is not votable. Push 0 so getPastStake
         // reflects the on-cooldown state accurately.
@@ -388,20 +374,18 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     /// @inheritdoc IGuardianRegistry
-    /// @dev Reverses `requestUnstakeGuardian`: restores voting power and active count.
+    /// @dev Reverses `requestUnstakeGuardian`: restores voting power.
     function cancelUnstakeGuardian() external {
         Guardian storage g = _guardians[msg.sender];
         if (g.unstakeRequestedAt == 0) revert UnstakeNotRequested();
         // Bug B fix: if the guardian was slashed between `requestUnstakeGuardian`
         // and now, `stakedAmount == 0` but `unstakeRequestedAt` still points at
-        // the original request. "Cancelling" here would increment
-        // `activeGuardianCount` without restoring any stake, producing a ghost
-        // guardian. Nothing to restore → revert.
+        // the original request. "Cancelling" here would resurrect a ghost
+        // guardian with no stake. Nothing to restore → revert.
         if (g.stakedAmount == 0) revert NoActiveStake();
 
         g.unstakeRequestedAt = 0;
         totalGuardianStake += g.stakedAmount;
-        activeGuardianCount += 1;
 
         // V1.5: stake is votable again.
         _stakeCheckpoints[msg.sender].push(uint32(block.timestamp), uint224(g.stakedAmount));
@@ -540,7 +524,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
                     // checkpoint pushed this epoch. First-set-with-delegators
                     // (no prior checkpoint) yields baseline = 0.
                     uint256 epochStart = epochGenesis + curEpoch * EPOCH_DURATION;
-                    uint256 probe = epochStart == 0 ? 0 : epochStart - 1;
+                    uint256 probe = epochStart - 1;
                     _commissionEpochBaseline[msg.sender] =
                         _commissionCheckpoints[msg.sender].upperLookupRecent(uint32(probe));
                     _lastCommissionRaiseEpoch[msg.sender] = curEpoch;
@@ -1043,7 +1027,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         // cannot inflate the delegate's vote weight via a same-key checkpoint
         // overwrite. Mirrors the governor's G-C1 pattern
         // (`snapshotTimestamp = block.timestamp - 1`).
-        er.openedAt = block.timestamp == 0 ? 0 : uint64(block.timestamp - 1);
+        er.openedAt = uint64(block.timestamp - 1);
         unchecked {
             er.nonce++;
         }
@@ -1097,7 +1081,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         // V1.5 + ToB review C-1: anchor at `block.timestamp - 1`. See
         // openEmergencyReview for rationale. Flash-delegation in the same
         // block as openReview would otherwise inflate vote weight.
-        r.openedAt = block.timestamp == 0 ? 0 : uint64(block.timestamp - 1);
+        r.openedAt = uint64(block.timestamp - 1);
         if (combinedAtOpen < MIN_COHORT_STAKE_AT_OPEN) {
             r.cohortTooSmall = true;
             emit CohortTooSmallToReview(proposalId, uint128(combinedAtOpen));
@@ -1179,16 +1163,12 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
             // forge-lint: disable-next-line(unchecked-cast)
             gs.stakedAmount = uint128(live - amt);
             // If the approver was still active (hadn't requested unstake), the
-            // aggregate counters include their stake → remove the slashed
-            // amount from totalGuardianStake. Only decrement activeGuardianCount
-            // when the approver's stake is fully wiped out. If they'd already
-            // requested unstake, `totalGuardianStake` and `activeGuardianCount`
-            // were already decremented at request time.
+            // aggregate counter includes their stake → remove the slashed
+            // amount from totalGuardianStake. If they'd already requested
+            // unstake, `totalGuardianStake` was already decremented at
+            // request time.
             if (gs.unstakeRequestedAt == 0) {
                 totalGuardianStake -= amt;
-                if (gs.stakedAmount == 0) {
-                    activeGuardianCount -= 1;
-                }
                 // V1.5: checkpoint the post-slash votable stake. Only when the
                 // approver was still active; if unstake was requested they were
                 // already at 0-votable and the checkpoint push already happened
@@ -1291,7 +1271,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         uint256 delegatedE = _delegatedInboundCheckpoints[msg.sender].upperLookupRecent(uint32(er.openedAt));
         uint128 weight = uint128(ownE + delegatedE);
         _emergencyBlockVotes[proposalId][nonce][msg.sender] = true;
-        _emergencyVoteStake[proposalId][nonce][msg.sender] = weight;
         er.blockStakeWeight += weight;
 
         emit EmergencyBlockVoteCast(proposalId, msg.sender, weight);
@@ -1335,7 +1314,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         emit BurnFlushed(amt);
     }
 
-    /// @inheritdoc IGuardianRegistry
     // ── V1.5: WOOD epoch block-rewards moved to Merkl ──
     //
     // Removed V1 on-chain machinery: `fundEpoch`, `claimEpochReward`,
@@ -1343,17 +1321,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     // storage. Merkl campaign attribution is driven by the
     // `BlockerAttributed` event emitted in `_emitBlockerAttribution` during
     // `resolveReview`, plus `CommissionSet` + `DelegationIncreased` /
-    // `DelegationUnstakeClaimed` events already emitted elsewhere.
-
-    /// @notice Minter-or-owner — indexer helper for Merkl's epoch campaign.
-    ///         Caller transfers WOOD to the Merkl distributor separately (not
-    ///         a function of the registry); this emits the event so indexers
-    ///         can correlate the deposit with an epoch ID. Gated to prevent
-    ///         permissionless spam from poisoning the Merkl attribution feed
-    ///         (ToB I-3).
-    function recordEpochBudget(uint256 epochId, uint256 amount) external onlyMinterOrOwner {
-        emit EpochBudgetFunded(epochId, amount);
-    }
+    // `DelegationUnstakeClaimed` events already emitted elsewhere. The
+    // Merkl funding tx is a plain WOOD transfer from the owner multisig
+    // to the Merkl distributor — indexers attribute it without any
+    // registry-side event (ToB P1-5).
 
     // ── Slash appeal ──
     /// @inheritdoc IGuardianRegistry
@@ -1387,10 +1358,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
 
     // ── Pause ──
     /// @inheritdoc IGuardianRegistry
-    /// @dev Owner-only. Freezes review voting, claim, sweep, and flushBurn.
-    ///      Stake/unstake paths and admin ops (fundEpoch, fundSlashAppealReserve,
-    ///      refundSlash, parameter setters) stay callable so guardians can
-    ///      exit and the owner can capitalize the reserve during an incident.
+    /// @dev Owner-only. Freezes review voting, proposal-reward claim, and
+    ///      flushBurn. Stake/unstake paths and admin ops
+    ///      (fundSlashAppealReserve, refundSlash, parameter setters) stay
+    ///      callable so guardians can exit and the owner can capitalize the
+    ///      reserve during an incident.
     function pause() external onlyOwner {
         paused = true;
         pausedAt = uint64(block.timestamp);
@@ -1433,7 +1405,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     /// @inheritdoc IGuardianRegistry
-    function setCoolDownPeriod(uint256 newValue) external onlyOwner {
+    function setCooldownPeriod(uint256 newValue) external onlyOwner {
         if (newValue < 1 days || newValue > 30 days) revert InvalidParameter();
         uint256 old = coolDownPeriod;
         coolDownPeriod = newValue;
@@ -1454,15 +1426,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         uint256 old = blockQuorumBps;
         blockQuorumBps = newValue;
         emit ParameterChangeFinalized(PARAM_BLOCK_QUORUM_BPS, old, newValue);
-    }
-
-    /// @notice Owner-instant minter rotation. Not gated by param validation:
-    ///         minter can only top up the epoch treasury pool, so owner must
-    ///         be free to pick and rotate implementations as the minter evolves.
-    function setMinter(address newMinter) external onlyOwner {
-        address old = minter;
-        minter = newMinter;
-        emit MinterUpdated(old, newMinter);
     }
 
     // ── Views (minimal now; full impl in later tasks) ──

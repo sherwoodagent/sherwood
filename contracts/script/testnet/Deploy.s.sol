@@ -74,8 +74,7 @@ contract DeployTestnet is ScriptBase {
                     maxStrategyDuration: 30 days,
                     protocolFeeBps: 200,
                     protocolFeeRecipient: deployer,
-                    guardianFeeBps: 0,
-                    guardianFeeRecipient: address(0)
+                    guardianFeeBps: 0
                 }),
                 predictedRegistryProxy
             )
@@ -126,10 +125,9 @@ contract DeployTestnet is ScriptBase {
         require(address(factory) == predictedFactoryProxy, "factory addr mismatch");
         console.log("SyndicateFactory:", address(factory));
 
-        // 6. Wire governor → factory + guardian fee recipient. V1.5: setters
-        //    apply immediately.
+        // 6. Wire governor → factory. V1.5: setters apply immediately.
+        //    P1-1: guardian fee recipient pinned at init — no separate wiring.
         SyndicateGovernor(governorProxy).setFactory(address(factory));
-        SyndicateGovernor(governorProxy).setGuardianFeeRecipient(registryProxy);
 
         vm.stopBroadcast();
 

@@ -67,7 +67,7 @@ contract GuardianInvariantsTest is StdInvariant, Test {
 
         // Further restrict to the bounded actions so Foundry doesn't call
         // view helpers on the handler (which would just waste fuzz calls).
-        bytes4[] memory selectors = new bytes4[](11);
+        bytes4[] memory selectors = new bytes4[](10);
         selectors[0] = GuardianHandler.stake.selector;
         selectors[1] = GuardianHandler.requestUnstake.selector;
         selectors[2] = GuardianHandler.cancelUnstake.selector;
@@ -77,8 +77,7 @@ contract GuardianInvariantsTest is StdInvariant, Test {
         selectors[6] = GuardianHandler.resolveReview.selector;
         selectors[7] = GuardianHandler.createProposal.selector;
         selectors[8] = GuardianHandler.warp.selector;
-        selectors[9] = GuardianHandler.recordEpochBudget.selector;
-        selectors[10] = GuardianHandler.fundSlashAppealReserve.selector;
+        selectors[9] = GuardianHandler.fundSlashAppealReserve.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 

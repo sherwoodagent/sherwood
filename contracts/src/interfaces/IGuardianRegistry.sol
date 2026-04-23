@@ -27,7 +27,6 @@ interface IGuardianRegistry {
     error ReviewNotReadyForResolve();
     error NotFactory();
     error NotGovernor();
-    error NotMinterOrOwner();
     error PreparedStakeNotFound();
     error PreparedStakeAlreadyExists();
     error PreparedStakeAlreadyBound();
@@ -55,7 +54,6 @@ interface IGuardianRegistry {
     error NoDelegationAtSettle();
     error DelegatePoolEmpty();
     error NoEscrowedAmount();
-    error InvalidAgentId();
     error InvalidParameter();
 
     // ── Events ──
@@ -87,10 +85,10 @@ interface IGuardianRegistry {
     event EmergencyReviewCancelled(uint256 indexed proposalId);
     event EmergencyBlockVoteCast(uint256 indexed proposalId, address indexed guardian, uint128 weight);
     event EmergencyReviewResolved(uint256 indexed proposalId, bool blocked, uint256 slashedAmount);
-    // V1.5: WOOD epoch rewards moved to Merkl. Indexer event retained:
-    event EpochBudgetFunded(uint256 indexed epochId, uint256 amount);
     // Emitted per blocker when a review resolves blocked = true. Merkl's
     // off-chain bot reads this to build the epoch WOOD campaign's Merkle roots.
+    // (WOOD epoch budgets live in Merkl — the funding tx is a plain ERC20
+    // transfer, no on-chain event needed in this registry.)
     event BlockerAttributed(
         uint256 indexed proposalId, uint256 indexed epochId, address indexed blocker, uint256 weight
     );
@@ -101,7 +99,6 @@ interface IGuardianRegistry {
     event SlashAppealReserveFunded(address indexed by, uint256 amount);
     event SlashAppealRefunded(address indexed recipient, uint256 amount, uint256 epochId);
     event ParameterChangeFinalized(bytes32 indexed paramKey, uint256 oldValue, uint256 newValue);
-    event MinterUpdated(address oldMinter, address newMinter);
 
     // ── Guardian fns ──
     function stakeAsGuardian(uint256 amount, uint256 agentId) external;
@@ -130,7 +127,6 @@ interface IGuardianRegistry {
     function resolveEmergencyReview(uint256 proposalId) external returns (bool blocked);
     function voteBlockEmergencySettle(uint256 proposalId) external;
     function flushBurn() external;
-    function recordEpochBudget(uint256 epochId, uint256 amount) external;
 
     // ── Slash appeal ──
     function fundSlashAppealReserve(uint256 amount) external;
@@ -143,10 +139,9 @@ interface IGuardianRegistry {
     // ── Parameter setters (owner-instant; owner is a multisig with external delay) ──
     function setMinGuardianStake(uint256) external;
     function setMinOwnerStake(uint256) external;
-    function setCoolDownPeriod(uint256) external;
+    function setCooldownPeriod(uint256) external;
     function setReviewPeriod(uint256) external;
     function setBlockQuorumBps(uint256) external;
-    function setMinter(address) external;
 
     // ── Views ──
     /// @notice Returns the cached review state for a proposal (Task 25).

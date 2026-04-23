@@ -40,7 +40,6 @@ interface ISyndicateGovernor {
         uint256 protocolFeeBps;
         address protocolFeeRecipient;
         uint256 guardianFeeBps;
-        address guardianFeeRecipient;
     }
 
     struct GovernorParams {
@@ -176,13 +175,6 @@ interface ISyndicateGovernor {
 
     // V1.5 new parameter errors
     error InvalidGuardianFeeBps();
-    error GuardianFeeRecipientNotSet();
-    /// @notice Guardian fee recipient must equal the bound guardian registry.
-    /// @dev ToB I-1: prevents owner from instantly re-routing guardian fees to
-    ///      an attacker-controlled address. The registry is set once at
-    ///      `initialize` and has no setter, making this effectively immutable
-    ///      unless the owner also performs a UUPS upgrade.
-    error GuardianFeeRecipientNotRegistry();
 
     // ── Events ──
 
@@ -325,7 +317,7 @@ interface ISyndicateGovernor {
     function approveCollaboration(uint256 proposalId) external;
     function rejectCollaboration(uint256 proposalId) external;
 
-    // ── Setters (queue-based with timelock) ──
+    // ── Setters (owner-instant; owner is a multisig with external delay) ──
 
     function addVault(address vault) external;
     function removeVault(address vault) external;
@@ -341,16 +333,8 @@ interface ISyndicateGovernor {
     function setMaxCoProposers(uint256 newMaxCoProposers) external;
     function setProtocolFeeBps(uint256 newProtocolFeeBps) external;
     function setProtocolFeeRecipient(address newRecipient) external;
-
-    // ── Timelock functions ──
-
-    // V1.5: finalizeParameterChange / cancelParameterChange removed. Setters
-    // apply immediately (owner-multisig governs via its own delay).
-
     function setGuardianFeeBps(uint256 newValue) external;
-    function setGuardianFeeRecipient(address newRecipient) external;
     function guardianFeeBps() external view returns (uint256);
-    function guardianFeeRecipient() external view returns (address);
 
     // ── Views ──
 

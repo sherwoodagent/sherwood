@@ -154,15 +154,8 @@ contract ProtocolHandler is Test {
         }
     }
 
-    // V1.5: claimEpochReward removed from on-chain surface. Replaced by
-    // tryRecordEpochBudget below — the one public entrypoint that remains.
-    function tryRecordEpochBudget(uint256 epochSeed, uint256 amount) external {
-        amount = bound(amount, 0, 100_000e18);
-        uint256 ep = bound(epochSeed, 0, 5);
-        // recordEpochBudget is NOT pause-gated (it's a pure event emit),
-        // so no pause tracking.
-        registry.recordEpochBudget(ep, amount);
-    }
+    // V1.5: claimEpochReward + recordEpochBudget removed from on-chain surface.
+    // WOOD epoch rewards live entirely in Merkl post-ToB review.
 
     /// @dev Attempt `voteOnProposal` with pause semantics tracking. Uses a
     ///      proposalId of 1 which has no review opened — the call will revert

@@ -81,7 +81,6 @@ contract GuardianRegistryStakeTest is Test {
         assertEq(registry.guardianStake(alice), 10_000e18);
         assertEq(registry.totalGuardianStake(), 10_000e18);
         assertTrue(registry.isActiveGuardian(alice));
-        assertEq(registry.activeGuardianCount(), 1);
     }
 
     function test_stakeAsGuardian_topUp_accumulates_ignoresAgentIdChange() public {
@@ -91,7 +90,6 @@ contract GuardianRegistryStakeTest is Test {
         registry.stakeAsGuardian(5_000e18, 99); // different agentId should be ignored
         assertEq(registry.guardianStake(alice), 15_000e18);
         assertEq(registry.totalGuardianStake(), 15_000e18);
-        assertEq(registry.activeGuardianCount(), 1); // still one guardian
         // TODO: if an agentId view is added, assert it's still 42
     }
 
@@ -200,7 +198,6 @@ contract GuardianRegistryUnstakeTest is Test {
     function test_requestUnstake_removesVotingPower() public {
         assertTrue(registry.isActiveGuardian(alice));
         assertEq(registry.totalGuardianStake(), 10_000e18);
-        assertEq(registry.activeGuardianCount(), 1);
 
         vm.expectEmit(true, false, false, true);
         emit IGuardianRegistry.GuardianUnstakeRequested(alice, block.timestamp);
@@ -209,7 +206,6 @@ contract GuardianRegistryUnstakeTest is Test {
 
         assertFalse(registry.isActiveGuardian(alice));
         assertEq(registry.totalGuardianStake(), 0);
-        assertEq(registry.activeGuardianCount(), 0);
         // stake itself not yet transferred out
         assertEq(registry.guardianStake(alice), 10_000e18);
     }
@@ -241,7 +237,6 @@ contract GuardianRegistryUnstakeTest is Test {
 
         assertTrue(registry.isActiveGuardian(alice));
         assertEq(registry.totalGuardianStake(), 10_000e18);
-        assertEq(registry.activeGuardianCount(), 1);
     }
 
     function test_cancelUnstake_revertsIfNotRequested() public {
@@ -259,7 +254,6 @@ contract GuardianRegistryUnstakeTest is Test {
         vm.prank(alice);
         registry.requestUnstakeGuardian();
         assertEq(registry.totalGuardianStake(), 0);
-        assertEq(registry.activeGuardianCount(), 0);
 
         vm.prank(alice);
         vm.expectRevert(IGuardianRegistry.UnstakeAlreadyRequested.selector);
@@ -267,7 +261,6 @@ contract GuardianRegistryUnstakeTest is Test {
 
         // Totals untouched.
         assertEq(registry.totalGuardianStake(), 0);
-        assertEq(registry.activeGuardianCount(), 0);
         assertFalse(registry.isActiveGuardian(alice));
     }
 
@@ -315,7 +308,6 @@ contract GuardianRegistryUnstakeTest is Test {
         registry.stakeAsGuardian(10_000e18, 77);
         assertEq(registry.guardianStake(alice), 10_000e18);
         assertTrue(registry.isActiveGuardian(alice));
-        assertEq(registry.activeGuardianCount(), 1);
     }
 
     function test_claimUnstake_revertsIfNotRequested() public {
@@ -1284,7 +1276,6 @@ contract GuardianRegistryResolveTest is Test {
         assertEq(registry.guardianStake(_guardian(3)), 10_000e18);
         // Aggregate totals decremented.
         assertEq(registry.totalGuardianStake(), totalStakeBefore - slashTotal);
-        assertEq(registry.activeGuardianCount(), 3);
         // V1.5: epoch block-weight tracking moved to Merkl. Attribution now
         // lives in the `BlockerAttributed` event — covered in Phase 3 tests.
     }
@@ -1404,7 +1395,6 @@ contract GuardianRegistryResolveTest is Test {
         vm.prank(approver);
         registry.requestUnstakeGuardian();
         assertFalse(registry.isActiveGuardian(approver));
-        assertEq(registry.activeGuardianCount(), 4);
 
         // 4) Resolve → blocked → slashes the approver. Because the unstake
         //    request already decremented totals, `_slashApprovers` must NOT
@@ -1415,17 +1405,13 @@ contract GuardianRegistryResolveTest is Test {
         assertTrue(blocked);
         assertEq(registry.guardianStake(approver), 0);
         // Counters unchanged by the slash (already decremented at request time).
-        assertEq(registry.activeGuardianCount(), 4);
 
         // 5) The ghost-cancel attack: approver tries to cancel the unstake to
-        //    re-enter activeGuardianCount. With the fix in place, this must
-        //    revert. `_slashApprovers` cleared `unstakeRequestedAt`, so the
-        //    first gate hit is `UnstakeNotRequested`.
-        uint256 activeBefore = registry.activeGuardianCount();
+        //    re-enter active status. `_slashApprovers` cleared
+        //    `unstakeRequestedAt`, so the first gate hit is `UnstakeNotRequested`.
         vm.prank(approver);
         vm.expectRevert(IGuardianRegistry.UnstakeNotRequested.selector);
         registry.cancelUnstakeGuardian();
-        assertEq(registry.activeGuardianCount(), activeBefore);
     }
 }
 
@@ -2079,19 +2065,19 @@ contract GuardianRegistryParamTest is Test {
         assertEq(registry.minOwnerStake(), 1_000e18);
     }
 
-    function test_setCoolDownPeriod_boundsEnforced() public {
+    function test_setCooldownPeriod_boundsEnforced() public {
         vm.prank(owner);
         vm.expectRevert(IGuardianRegistry.InvalidParameter.selector);
-        registry.setCoolDownPeriod(1 days - 1);
+        registry.setCooldownPeriod(1 days - 1);
 
         vm.prank(owner);
         vm.expectRevert(IGuardianRegistry.InvalidParameter.selector);
-        registry.setCoolDownPeriod(30 days + 1);
+        registry.setCooldownPeriod(30 days + 1);
 
         vm.startPrank(owner);
-        registry.setCoolDownPeriod(1 days);
+        registry.setCooldownPeriod(1 days);
         assertEq(registry.coolDownPeriod(), 1 days);
-        registry.setCoolDownPeriod(30 days);
+        registry.setCooldownPeriod(30 days);
         assertEq(registry.coolDownPeriod(), 30 days);
         vm.stopPrank();
     }
@@ -2130,22 +2116,6 @@ contract GuardianRegistryParamTest is Test {
         vm.stopPrank();
     }
 
-    // ── Minter (owner-instant) ──
-    function test_setMinter_ownerInstant_emitsEvent() public {
-        address m = address(0x1234);
-        vm.expectEmit(true, true, false, true);
-        emit IGuardianRegistry.MinterUpdated(address(0), m);
-        vm.prank(owner);
-        registry.setMinter(m);
-        assertEq(registry.minter(), m);
-    }
-
-    function test_setMinter_onlyOwner() public {
-        vm.prank(stranger);
-        vm.expectRevert();
-        registry.setMinter(address(0xBEEF));
-    }
-
     // ── Owner-only access on the other setters ──
     function test_setters_onlyOwner() public {
         vm.startPrank(stranger);
@@ -2154,35 +2124,11 @@ contract GuardianRegistryParamTest is Test {
         vm.expectRevert();
         registry.setMinOwnerStake(20_000e18);
         vm.expectRevert();
-        registry.setCoolDownPeriod(2 days);
+        registry.setCooldownPeriod(2 days);
         vm.expectRevert();
         registry.setReviewPeriod(12 hours);
         vm.expectRevert();
         registry.setBlockQuorumBps(2_000);
         vm.stopPrank();
-    }
-
-    // ── ToB I-3: recordEpochBudget gated to minter/owner ──
-    function test_recordEpochBudget_stranger_reverts() public {
-        vm.prank(stranger);
-        vm.expectRevert(IGuardianRegistry.NotMinterOrOwner.selector);
-        registry.recordEpochBudget(1, 1_000e18);
-    }
-
-    function test_recordEpochBudget_owner_emits() public {
-        vm.expectEmit(true, false, false, true);
-        emit IGuardianRegistry.EpochBudgetFunded(7, 123e18);
-        vm.prank(owner);
-        registry.recordEpochBudget(7, 123e18);
-    }
-
-    function test_recordEpochBudget_minter_emits() public {
-        address m = makeAddr("minter");
-        vm.prank(owner);
-        registry.setMinter(m);
-        vm.expectEmit(true, false, false, true);
-        emit IGuardianRegistry.EpochBudgetFunded(9, 42e18);
-        vm.prank(m);
-        registry.recordEpochBudget(9, 42e18);
     }
 }

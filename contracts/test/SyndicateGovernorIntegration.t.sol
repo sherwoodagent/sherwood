@@ -93,8 +93,7 @@ contract SyndicateGovernorIntegrationTest is Test {
                     maxStrategyDuration: MAX_STRATEGY_DURATION,
                     protocolFeeBps: 200,
                     protocolFeeRecipient: owner,
-                    guardianFeeBps: 0,
-                    guardianFeeRecipient: address(0)
+                    guardianFeeBps: 0
                 }),
                 address(guardianRegistry)
             )

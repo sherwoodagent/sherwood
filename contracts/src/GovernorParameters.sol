@@ -61,7 +61,6 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     bytes32 public constant PARAM_PROTOCOL_FEE_RECIPIENT = keccak256("protocolFeeRecipient");
     bytes32 public constant PARAM_FACTORY = keccak256("factory");
     bytes32 public constant PARAM_GUARDIAN_FEE_BPS = keccak256("guardianFeeBps");
-    bytes32 public constant PARAM_GUARDIAN_FEE_RECIPIENT = keccak256("guardianFeeRecipient");
 
     // ── Virtual accessors (implemented by SyndicateGovernor) ──
 
@@ -74,8 +73,6 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     function _setFactory(address newFactory) internal virtual;
     function _getGuardianFeeBps() internal view virtual returns (uint256);
     function _setGuardianFeeBps(uint256 newValue) internal virtual;
-    function _getGuardianFeeRecipient() internal view virtual returns (address);
-    function _setGuardianFeeRecipient(address newRecipient) internal virtual;
 
     // ── Parameter setters (owner-instant) ──
 
@@ -192,20 +189,13 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     }
 
     /// @inheritdoc ISyndicateGovernor
+    /// @dev ToB P1-1: no recipient check — fees always route to the bound
+    ///      `_guardianRegistry`, which is non-zero by initialize.
     function setGuardianFeeBps(uint256 newValue) external onlyOwner {
         if (newValue > MAX_GUARDIAN_FEE_BPS) revert InvalidGuardianFeeBps();
-        if (newValue > 0 && _getGuardianFeeRecipient() == address(0)) revert GuardianFeeRecipientNotSet();
         uint256 old = _getGuardianFeeBps();
         _setGuardianFeeBps(newValue);
         emit ParameterChangeFinalized(PARAM_GUARDIAN_FEE_BPS, old, newValue);
-    }
-
-    /// @inheritdoc ISyndicateGovernor
-    function setGuardianFeeRecipient(address newRecipient) external onlyOwner {
-        if (newRecipient == address(0)) revert GuardianFeeRecipientNotSet();
-        uint256 old = uint256(uint160(_getGuardianFeeRecipient()));
-        _setGuardianFeeRecipient(newRecipient);
-        emit ParameterChangeFinalized(PARAM_GUARDIAN_FEE_RECIPIENT, old, uint256(uint160(newRecipient)));
     }
 
     /// @inheritdoc ISyndicateGovernor

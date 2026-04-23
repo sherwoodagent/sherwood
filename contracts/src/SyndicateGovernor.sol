@@ -26,7 +26,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
  *   - Vote weight from ERC20Votes checkpoints (timestamp-based snapshots)
  *   - Optimistic governance: proposals pass unless AGAINST votes reach veto threshold
  *   - Collaborative proposals: multiple agents co-submit with fee splits
- *   - Parameter changes require timelock delay
+ *   - Parameter setters are owner-instant (owner multisig enforces external delay)
  *   - Protocol fee taken from profit before agent/management fees
  */
 contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgradeable {
@@ -105,15 +105,12 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     address private _protocolFeeRecipient;
 
     /// @notice V1.5: guardian fee in bps (taken from profit after protocol fee,
-    ///         before agent/management fees). Routed to `_guardianFeeRecipient`
-    ///         (typically GuardianRegistry) which pools + exposes claim flow.
+    ///         before agent/management fees). Routed to the bound
+    ///         `_guardianRegistry`, which pools + exposes the claim flow.
     uint256 private _guardianFeeBps;
 
-    /// @notice V1.5: guardian fee recipient (registry in V1.5; generic so a
-    ///         future distributor swap is a single-param change).
-    address private _guardianFeeRecipient;
-
     /// @notice Guardian registry. Set in `initialize`; required (non-zero).
+    ///         Fees always route here (ToB P1-1 — no separate recipient slot).
     address internal _guardianRegistry;
 
     // ── Guardian-review storage (Task 24 / PR #229) ──
@@ -151,8 +148,9 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ///      shrunk by 2 more for _emergencyCallsHashes + _emergencyCalls,
     ///      shrunk by 1 more for openProposalCount,
     ///      shrunk by 1 more for _unclaimedFees,
-    ///      shrunk by 1 more for _approvedCount)
-    uint256[27] private __gap;
+    ///      shrunk by 1 more for _approvedCount,
+    ///      grew by 1 after P1-1: _guardianFeeRecipient reclaimed)
+    uint256[28] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -174,11 +172,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         if (p.protocolFeeBps > MAX_PROTOCOL_FEE_BPS) revert InvalidProtocolFeeBps();
         if (p.protocolFeeBps > 0 && p.protocolFeeRecipient == address(0)) revert InvalidProtocolFeeRecipient();
         if (p.guardianFeeBps > MAX_GUARDIAN_FEE_BPS) revert InvalidGuardianFeeBps();
-        if (p.guardianFeeBps > 0 && p.guardianFeeRecipient == address(0)) revert GuardianFeeRecipientNotSet();
-        // ToB I-1: recipient (when set) must equal the bound registry.
-        if (p.guardianFeeRecipient != address(0) && p.guardianFeeRecipient != guardianRegistry_) {
-            revert GuardianFeeRecipientNotRegistry();
-        }
 
         __Ownable_init(p.owner);
 
@@ -202,7 +195,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _protocolFeeBps = p.protocolFeeBps;
         _protocolFeeRecipient = p.protocolFeeRecipient;
         _guardianFeeBps = p.guardianFeeBps;
-        _guardianFeeRecipient = p.guardianFeeRecipient;
         _guardianRegistry = guardianRegistry_;
         _reentrancyStatus = _NOT_ENTERED;
     }
@@ -210,7 +202,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     modifier nonReentrant() {
         _emergencyReentrancyEnter();
         _;
-        _reentrancyStatus = _NOT_ENTERED;
+        _emergencyReentrancyLeave();
     }
 
     // ── GovernorParameters virtual accessor overrides ──
@@ -249,19 +241,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
 
     function _setGuardianFeeBps(uint256 newValue) internal override {
         _guardianFeeBps = newValue;
-    }
-
-    function _getGuardianFeeRecipient() internal view override returns (address) {
-        return _guardianFeeRecipient;
-    }
-
-    function _setGuardianFeeRecipient(address newRecipient) internal override {
-        // ToB I-1: the guardian fee is consumed by the registry's
-        // `fundProposalGuardianPool` — routing it anywhere else would strand
-        // funds away from guardians. Pin the recipient to the bound registry
-        // so owner-instant rotation cannot redirect fees mid-flight.
-        if (newRecipient != _guardianRegistry) revert GuardianFeeRecipientNotRegistry();
-        _guardianFeeRecipient = newRecipient;
     }
 
     // ── GovernorEmergency virtual accessor overrides ──
@@ -352,8 +331,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
 
         // Review period defaults to zero when registry isn't wired; state machine
         // still works (voteEnd == reviewEnd → immediate transition to Approved).
-        uint256 reviewPeriod_ =
-            _guardianRegistry != address(0) ? IGuardianRegistry(_guardianRegistry).reviewPeriod() : 0;
+        uint256 reviewPeriod_ = IGuardianRegistry(_guardianRegistry).reviewPeriod();
 
         // Sequential storage writes instead of struct literal to avoid Yul
         // stack-too-deep under the coverage config (optimizer/viaIR off).
@@ -567,8 +545,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
             // re-attempt once the blocking proposal terminates.
             if (openProposalCount[proposal.vault] != 0) revert VaultHasOpenProposal();
             // Transition to Pending -- voting begins
-            uint256 reviewPeriod_ =
-                _guardianRegistry != address(0) ? IGuardianRegistry(_guardianRegistry).reviewPeriod() : 0;
+            uint256 reviewPeriod_ = IGuardianRegistry(_guardianRegistry).reviewPeriod();
             proposal.state = ProposalState.Pending;
             // -1: see propose() (G-C1).
             proposal.snapshotTimestamp = block.timestamp - 1;
@@ -730,11 +707,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     }
 
     /// @inheritdoc ISyndicateGovernor
-    function guardianFeeRecipient() external view returns (address) {
-        return _guardianFeeRecipient;
-    }
-
-    /// @inheritdoc ISyndicateGovernor
     function guardianRegistry() external view returns (address) {
         return _guardianRegistry;
     }
@@ -867,10 +839,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         // If the review window ended and the registry hasn't cached a resolution
         // yet, call `resolveReview` once to finalize it. Mirrors the view-path
         // logic but commits the registry-side state.
-        if (
-            resolved == ProposalState.GuardianReview && block.timestamp > proposal.reviewEnd
-                && _guardianRegistry != address(0)
-        ) {
+        if (resolved == ProposalState.GuardianReview && block.timestamp > proposal.reviewEnd) {
             bool blocked = IGuardianRegistry(_guardianRegistry).resolveReview(proposal.id);
             if (blocked) {
                 resolved = ProposalState.Rejected;
@@ -941,21 +910,16 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     function _resolveAfterVote(StrategyProposal storage proposal) internal view returns (ProposalState) {
         if (block.timestamp <= proposal.reviewEnd) return ProposalState.GuardianReview;
 
-        if (_guardianRegistry != address(0)) {
-            (, bool resolved, bool blocked, bool cohortTooSmall) =
-                IGuardianRegistry(_guardianRegistry).getReviewState(proposal.id);
-            if (resolved) {
-                if (blocked && !cohortTooSmall) return ProposalState.Rejected;
-                return block.timestamp > proposal.executeBy ? ProposalState.Expired : ProposalState.Approved;
-            }
-            // Review window ended but registry hasn't resolved yet — remain in
-            // GuardianReview. Mutating callers (`_resolveState`) will trigger
-            // `resolveReview` which maps to Approved / Rejected.
-            return ProposalState.GuardianReview;
+        (, bool resolved, bool blocked, bool cohortTooSmall) =
+            IGuardianRegistry(_guardianRegistry).getReviewState(proposal.id);
+        if (resolved) {
+            if (blocked && !cohortTooSmall) return ProposalState.Rejected;
+            return block.timestamp > proposal.executeBy ? ProposalState.Expired : ProposalState.Approved;
         }
-
-        // No registry wired: review window collapses to zero — treat as Approved.
-        return block.timestamp > proposal.executeBy ? ProposalState.Expired : ProposalState.Approved;
+        // Review window ended but registry hasn't resolved yet — remain in
+        // GuardianReview. Mutating callers (`_resolveState`) will trigger
+        // `resolveReview` which maps to Approved / Rejected.
+        return ProposalState.GuardianReview;
     }
 
     /// @dev Finalize a settled proposal: compute P&L, distribute fees, clear
@@ -1036,8 +1000,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         // registry but unpooled; ops can recover via the registry owner.
         if (_guardianFeeBps > 0) {
             uint256 fee = (profit * _guardianFeeBps) / 10000;
-            address recipient = _guardianFeeRecipient;
-            if (fee > 0 && recipient != address(0)) {
+            address recipient = _guardianRegistry;
+            if (fee > 0) {
                 try ISyndicateVault(vault).transferPerformanceFee(asset, recipient, fee) {
                     try IGuardianRegistry(recipient).fundProposalGuardianPool(proposalId, asset, fee) {
                         guardianFee = fee; // commit waterfall accounting

@@ -92,8 +92,7 @@ contract GovernorReentrancyTest is Test {
                     maxStrategyDuration: 30 days,
                     protocolFeeBps: 0,
                     protocolFeeRecipient: address(0),
-                    guardianFeeBps: 0,
-                    guardianFeeRecipient: address(0)
+                    guardianFeeBps: 0
                 }),
                 address(registry)
             )

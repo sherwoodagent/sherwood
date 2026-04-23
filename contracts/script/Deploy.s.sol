@@ -145,10 +145,8 @@ contract DeploySherwood is ScriptBase {
         SyndicateGovernor(d.governorProxy).setFactory(d.factoryProxy);
         console.log("Governor.setFactory applied");
 
-        // 7. Wire guardian fee recipient to the GuardianRegistry. V1.5: setter
-        //    applies immediately.
-        SyndicateGovernor(d.governorProxy).setGuardianFeeRecipient(d.registryProxy);
-        console.log("Governor.setGuardianFeeRecipient applied");
+        // 7. P1-1: guardian fee recipient pinned to `_guardianRegistry` at
+        //    init — no separate wiring step needed.
 
         // 8. Seed slash appeal reserve + epoch 0 rewards (best-effort; skipped
         //    on zero amounts so testnets don't need a WOOD balance).
@@ -202,8 +200,7 @@ contract DeploySherwood is ScriptBase {
                     maxStrategyDuration: cfg.maxStrategyDays * 1 days,
                     protocolFeeBps: cfg.protocolFeeBps,
                     protocolFeeRecipient: deployer,
-                    guardianFeeBps: 0,
-                    guardianFeeRecipient: address(0)
+                    guardianFeeBps: 0
                 }),
                 registryProxy
             )
@@ -328,9 +325,8 @@ contract DeploySherwood is ScriptBase {
         // until the multisig is ready); recipient is wired to the registry
         // immediately so we can flip bps > 0 later with a single set call.
         _checkUint("gov.guardianFeeBps", governor.guardianFeeBps(), 0);
-        // guardianFeeRecipient is set in the deploy script after the registry
-        // proxy address is known. Validated by _validateRegistry via a
-        // cross-check that guardianFeeRecipient == registry address.
+        // P1-1: recipient is pinned to `_guardianRegistry` — no separate
+        // field to validate (registry validation below asserts the pointer).
     }
 
     function _validateFactory(
@@ -372,12 +368,8 @@ contract DeploySherwood is ScriptBase {
         _checkUint("registry.reviewPeriod", reg.reviewPeriod(), DEFAULT_REVIEW_PERIOD);
         _checkUint("registry.blockQuorumBps", reg.blockQuorumBps(), DEFAULT_BLOCK_QUORUM_BPS);
         // Governor knows about the registry (set at init-time).
+        // P1-1: recipient is pinned to this same pointer — fees route here.
         _checkAddr("gov.guardianRegistry", SyndicateGovernor(governorAddr).guardianRegistry(), registryAddr);
-        // V1.5: guardianFeeRecipient points at the registry (so
-        // fundProposalGuardianPool gets called in _distributeFees).
-        _checkAddr(
-            "gov.guardianFeeRecipient", SyndicateGovernor(governorAddr).guardianFeeRecipient(), registryAddr
-        );
     }
 
     function _chainName() internal view returns (string memory) {

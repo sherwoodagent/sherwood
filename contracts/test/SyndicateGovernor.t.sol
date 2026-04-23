@@ -82,8 +82,7 @@ contract SyndicateGovernorTest is Test {
                     maxStrategyDuration: MAX_STRATEGY_DURATION,
                     protocolFeeBps: 200,
                     protocolFeeRecipient: owner,
-                    guardianFeeBps: 0,
-                    guardianFeeRecipient: address(0)
+                    guardianFeeBps: 0
                 }),
                 address(guardianRegistry)
             )
@@ -892,8 +891,7 @@ contract SyndicateGovernorTest is Test {
                     maxStrategyDuration: MAX_STRATEGY_DURATION,
                     protocolFeeBps: 0,
                     protocolFeeRecipient: address(0),
-                    guardianFeeBps: 0,
-                    guardianFeeRecipient: address(0)
+                    guardianFeeBps: 0
                 }),
                 address(guardianRegistry)
             )
@@ -925,8 +923,7 @@ contract SyndicateGovernorTest is Test {
                     maxStrategyDuration: MAX_STRATEGY_DURATION,
                     protocolFeeBps: 0,
                     protocolFeeRecipient: address(0),
-                    guardianFeeBps: 0,
-                    guardianFeeRecipient: address(0)
+                    guardianFeeBps: 0
                 }),
                 address(guardianRegistry)
             )
@@ -940,23 +937,9 @@ contract SyndicateGovernorTest is Test {
 
     // ==================== RESCUE ERC721 LOCK ====================
 
-    // ==================== ToB I-1: guardian fee recipient pinning ====================
-
-    /// @notice Owner cannot redirect guardian fees away from the bound registry.
-    function test_setGuardianFeeRecipient_nonRegistry_reverts() public {
-        address attacker = makeAddr("attacker");
-        vm.prank(owner);
-        vm.expectRevert(ISyndicateGovernor.GuardianFeeRecipientNotRegistry.selector);
-        governor.setGuardianFeeRecipient(attacker);
-    }
-
-    /// @notice Setting the recipient to the bound registry is a no-op-ish
-    ///         re-confirmation but should succeed (idempotent).
-    function test_setGuardianFeeRecipient_registry_succeeds() public {
-        vm.prank(owner);
-        governor.setGuardianFeeRecipient(address(guardianRegistry));
-        assertEq(governor.guardianFeeRecipient(), address(guardianRegistry));
-    }
+    // P1-1: setGuardianFeeRecipient + guardianFeeRecipient removed — fees
+    //       always route to the bound `_guardianRegistry`, so the recipient
+    //       is no longer a settable parameter.
 
     function test_rescueERC721_blockedDuringActiveProposal() public {
         _createAndExecuteProposal(1500, 7 days);
