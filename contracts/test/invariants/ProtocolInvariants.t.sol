@@ -193,11 +193,10 @@ contract ProtocolInvariantsTest is StdInvariant, Test {
     }
 
     /// @dev `GuardianRegistry.governor` and `GuardianRegistry.factory` live at
-    ///      consecutive storage slots inside the contract (see src layout:
-    ///      after pendingChanges mapping + parameterChangeDelay + pending
-    ///      params). We can't import the layout from source (no test-only
-    ///      view) so compute the slot numerically via `vm.load` probing.
-    ///      The test asserts the probe result before using it.
+    ///      consecutive storage slots inside the contract. We can't import the
+    ///      layout from source (no test-only view) so compute the slot
+    ///      numerically via `vm.load` probing. The test asserts the probe
+    ///      result before using it.
     function _repointRegistry(address newGovernor, address newFactory) internal {
         // Probe each slot for the two 0xdead / 0xbeef placeholders and rewrite.
         // Max probe depth bounded to 200 slots to avoid runaway on future

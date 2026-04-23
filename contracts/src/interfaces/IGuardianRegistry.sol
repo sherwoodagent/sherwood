@@ -41,6 +41,7 @@ interface IGuardianRegistry {
     // V1.5 delegation
     error CannotSelfDelegate();
     error InvalidDelegate();
+    error InactiveDelegate();
     error AmountZero();
     error NoActiveDelegation();
     error NoUnstakeRequest();
@@ -55,9 +56,6 @@ interface IGuardianRegistry {
     error DelegatePoolEmpty();
     error NoEscrowedAmount();
     error InvalidAgentId();
-    error ChangeAlreadyPending();
-    error NoChangePending();
-    error ChangeNotReady();
     error InvalidParameter();
 
     // ── Events ──
@@ -98,9 +96,7 @@ interface IGuardianRegistry {
     event Unpaused(address indexed by, bool deadman);
     event SlashAppealReserveFunded(address indexed by, uint256 amount);
     event SlashAppealRefunded(address indexed recipient, uint256 amount, uint256 epochId);
-    event ParameterChangeQueued(bytes32 indexed paramKey, uint256 newValue, uint256 effectiveAt);
     event ParameterChangeFinalized(bytes32 indexed paramKey, uint256 oldValue, uint256 newValue);
-    event ParameterChangeCancelled(bytes32 indexed paramKey);
     event MinterUpdated(address oldMinter, address newMinter);
 
     // ── Guardian fns ──
@@ -140,7 +136,7 @@ interface IGuardianRegistry {
     function pause() external;
     function unpause() external;
 
-    // ── Parameter setters (timelocked) ──
+    // ── Parameter setters (owner-instant; owner is a multisig with external delay) ──
     function setMinGuardianStake(uint256) external;
     function setMinOwnerStake(uint256) external;
     function setCoolDownPeriod(uint256) external;
@@ -186,10 +182,7 @@ interface IGuardianRegistry {
     function getPastStake(address guardian, uint256 timestamp) external view returns (uint256);
     function getPastTotalStake(uint256 timestamp) external view returns (uint256);
     function getPastDelegated(address delegate, uint256 timestamp) external view returns (uint256);
-    function getPastDelegationTo(address delegator, address delegate, uint256 timestamp)
-        external
-        view
-        returns (uint256);
+    function getPastDelegationTo(address delegator, address delegate, uint256 timestamp) external view returns (uint256);
     function getPastVoteWeight(address delegate, uint256 timestamp) external view returns (uint256);
     function getPastTotalDelegated(uint256 timestamp) external view returns (uint256);
 
@@ -230,17 +223,10 @@ interface IGuardianRegistry {
 
     event ProposalGuardianPoolFunded(uint256 indexed proposalId, address indexed asset, uint256 amount);
     event ApproverRewardClaimed(
-        uint256 indexed proposalId,
-        address indexed approver,
-        uint256 gross,
-        uint256 commission,
-        uint256 remainder
+        uint256 indexed proposalId, address indexed approver, uint256 gross, uint256 commission, uint256 remainder
     );
     event DelegatorProposalRewardClaimed(
-        address indexed delegator,
-        address indexed delegate,
-        uint256 indexed proposalId,
-        uint256 share
+        address indexed delegator, address indexed delegate, uint256 indexed proposalId, uint256 share
     );
     event ApproverFeeEscrowed(
         uint256 indexed proposalId, address indexed recipient, address indexed asset, uint256 amount

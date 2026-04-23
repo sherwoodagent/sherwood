@@ -1938,8 +1938,6 @@ contract GuardianRegistryParamTest is Test {
     address factory = address(0xFAC10);
     address stranger = address(0xBAD);
 
-    uint256 constant PARAM_DELAY = 24 hours;
-
     // Initial values (match the initialize call below).
     uint256 constant INIT_MIN_GUARDIAN_STAKE = 10_000e18;
     uint256 constant INIT_MIN_OWNER_STAKE = 10_000e18;
@@ -1965,26 +1963,17 @@ contract GuardianRegistryParamTest is Test {
             )
         );
         registry = GuardianRegistry(address(new ERC1967Proxy(address(impl), initData)));
-        // parameterChangeDelay defaults to 24h per the initializer.
     }
 
-    function _key(bytes memory label) internal pure returns (bytes32) {
-        return keccak256(label);
-    }
-
-    // ── Queue + finalize happy path ──
-    function test_setMinGuardianStake_queuesAndFinalizes() public {
+    // ── Owner-instant setters happy path ──
+    function test_setMinGuardianStake_ownerInstant() public {
         uint256 target = 20_000e18;
-        bytes32 key = registry.PARAM_MIN_GUARDIAN_STAKE();
+        vm.expectEmit(true, false, false, true);
+        emit IGuardianRegistry.ParameterChangeFinalized(
+            registry.PARAM_MIN_GUARDIAN_STAKE(), INIT_MIN_GUARDIAN_STAKE, target
+        );
         vm.prank(owner);
         registry.setMinGuardianStake(target);
-
-        // Value unchanged before finalize.
-        assertEq(registry.minGuardianStake(), INIT_MIN_GUARDIAN_STAKE);
-
-        vm.warp(block.timestamp + PARAM_DELAY + 1);
-        vm.prank(owner);
-        registry.finalizeParameterChange(key);
         assertEq(registry.minGuardianStake(), target);
     }
 
@@ -2003,6 +1992,7 @@ contract GuardianRegistryParamTest is Test {
         // Exactly 1_000e18 should succeed.
         vm.prank(owner);
         registry.setMinOwnerStake(1_000e18);
+        assertEq(registry.minOwnerStake(), 1_000e18);
     }
 
     function test_setCoolDownPeriod_boundsEnforced() public {
@@ -2016,8 +2006,9 @@ contract GuardianRegistryParamTest is Test {
 
         vm.startPrank(owner);
         registry.setCoolDownPeriod(1 days);
-        registry.cancelParameterChange(registry.PARAM_COOLDOWN());
+        assertEq(registry.coolDownPeriod(), 1 days);
         registry.setCoolDownPeriod(30 days);
+        assertEq(registry.coolDownPeriod(), 30 days);
         vm.stopPrank();
     }
 
@@ -2032,8 +2023,9 @@ contract GuardianRegistryParamTest is Test {
 
         vm.startPrank(owner);
         registry.setReviewPeriod(6 hours);
-        registry.cancelParameterChange(registry.PARAM_REVIEW_PERIOD());
+        assertEq(registry.reviewPeriod(), 6 hours);
         registry.setReviewPeriod(7 days);
+        assertEq(registry.reviewPeriod(), 7 days);
         vm.stopPrank();
     }
 
@@ -2048,46 +2040,10 @@ contract GuardianRegistryParamTest is Test {
 
         vm.startPrank(owner);
         registry.setBlockQuorumBps(1_000);
-        registry.cancelParameterChange(registry.PARAM_BLOCK_QUORUM_BPS());
+        assertEq(registry.blockQuorumBps(), 1_000);
         registry.setBlockQuorumBps(10_000);
+        assertEq(registry.blockQuorumBps(), 10_000);
         vm.stopPrank();
-    }
-
-    // ── Finalize path reverts ──
-    function test_finalizeParameterChange_revertsIfNotReady() public {
-        bytes32 key = registry.PARAM_REVIEW_PERIOD();
-        vm.prank(owner);
-        registry.setReviewPeriod(12 hours);
-        vm.prank(owner);
-        vm.expectRevert(IGuardianRegistry.ChangeNotReady.selector);
-        registry.finalizeParameterChange(key);
-    }
-
-    function test_finalizeParameterChange_revertsIfNoPending() public {
-        bytes32 key = registry.PARAM_REVIEW_PERIOD();
-        vm.prank(owner);
-        vm.expectRevert(IGuardianRegistry.NoChangePending.selector);
-        registry.finalizeParameterChange(key);
-    }
-
-    // ── Cancel path ──
-    function test_cancelParameterChange_clearsPending() public {
-        bytes32 key = registry.PARAM_REVIEW_PERIOD();
-        vm.startPrank(owner);
-        registry.setReviewPeriod(12 hours);
-        registry.cancelParameterChange(key);
-        // Now we can re-queue.
-        registry.setReviewPeriod(18 hours);
-        vm.stopPrank();
-    }
-
-    // ── Double-queue guard ──
-    function test_queueChange_revertsIfAlreadyPending() public {
-        vm.prank(owner);
-        registry.setReviewPeriod(12 hours);
-        vm.prank(owner);
-        vm.expectRevert(IGuardianRegistry.ChangeAlreadyPending.selector);
-        registry.setReviewPeriod(18 hours);
     }
 
     // ── Minter (owner-instant) ──

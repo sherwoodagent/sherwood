@@ -39,18 +39,27 @@ contract GuardianRegistryDelegationTest is Test {
         wood.approve(address(registry), type(uint256).max);
         vm.prank(bob);
         wood.approve(address(registry), type(uint256).max);
+
+        // I-5: delegateStake now rejects an inactive delegate. Stake the
+        // delegate above min so every test below can delegate to them.
+        wood.mint(delegate_, 20_000e18);
+        vm.prank(delegate_);
+        wood.approve(address(registry), type(uint256).max);
+        vm.prank(delegate_);
+        registry.stakeAsGuardian(20_000e18, 99);
     }
 
     // ── delegateStake ──
 
     function test_delegateStake_increasesInboundAndTotal() public {
+        uint256 balBefore = wood.balanceOf(address(registry)); // delegate_'s own stake
         vm.prank(alice);
         registry.delegateStake(delegate_, 50e18);
 
         assertEq(registry.delegationOf(alice, delegate_), 50e18);
         assertEq(registry.delegatedInbound(delegate_), 50e18);
         assertEq(registry.totalDelegatedStake(), 50e18);
-        assertEq(wood.balanceOf(address(registry)), 50e18);
+        assertEq(wood.balanceOf(address(registry)), balBefore + 50e18);
     }
 
     function test_delegateStake_multipleFromSameDelegatorAccumulate() public {
@@ -91,6 +100,27 @@ contract GuardianRegistryDelegationTest is Test {
         vm.expectRevert(IGuardianRegistry.InvalidDelegate.selector);
         vm.prank(alice);
         registry.delegateStake(address(0), 10e18);
+    }
+
+    /// @notice I-5: delegating to an address that isn't an active guardian
+    ///         traps the delegator's WOOD behind a 7d cooldown pointing at a
+    ///         vote-inert address. Reject early.
+    function test_delegateStake_inactiveDelegateReverts() public {
+        address noStaker = makeAddr("noStaker");
+        vm.expectRevert(IGuardianRegistry.InactiveDelegate.selector);
+        vm.prank(alice);
+        registry.delegateStake(noStaker, 10e18);
+    }
+
+    /// @notice I-5: a delegate who has requested unstake (still has stake but
+    ///         is not active) also rejects delegation.
+    function test_delegateStake_delegateMidUnstakeReverts() public {
+        vm.prank(delegate_);
+        registry.requestUnstakeGuardian();
+
+        vm.expectRevert(IGuardianRegistry.InactiveDelegate.selector);
+        vm.prank(alice);
+        registry.delegateStake(delegate_, 50e18);
     }
 
     // ── unstake lifecycle ──
@@ -190,21 +220,14 @@ contract GuardianRegistryDelegationTest is Test {
     }
 
     function test_getPastVoteWeight_combinesOwnAndDelegated() public {
-        // Delegate stakes own 15k as guardian
-        wood.mint(delegate_, 20_000e18);
-        vm.prank(delegate_);
-        wood.approve(address(registry), type(uint256).max);
-        vm.prank(delegate_);
-        registry.stakeAsGuardian(15_000e18, 1);
-
-        // Alice delegates 5k to delegate_
+        // setUp stakes delegate_ with 20_000e18 own stake. Alice delegates 5k on top.
         vm.prank(alice);
         registry.delegateStake(delegate_, 5_000e18);
 
         uint256 t1 = vm.getBlockTimestamp();
         vm.warp(vm.getBlockTimestamp() + 1);
 
-        assertEq(registry.getPastVoteWeight(delegate_, t1), 20_000e18, "own 15k + delegated 5k");
+        assertEq(registry.getPastVoteWeight(delegate_, t1), 25_000e18, "own 20k + delegated 5k");
     }
 
     function test_getPastTotalDelegated_tracksGlobal() public {

@@ -31,14 +31,30 @@ jobs:
 
       - name: Enforce bytecode size budget
         run: |
-          SIZE=$(forge build --sizes --json | jq -r '.SyndicateGovernor.runtime_size // empty')
-          echo "SyndicateGovernor runtime size: $SIZE bytes"
-          if [ -z "$SIZE" ]; then
+          SIZES_JSON=$(forge build --sizes --json)
+
+          GOV_SIZE=$(echo "$SIZES_JSON" | jq -r '.SyndicateGovernor.runtime_size // empty')
+          echo "SyndicateGovernor runtime size: $GOV_SIZE bytes"
+          if [ -z "$GOV_SIZE" ]; then
             echo "::error::could not read SyndicateGovernor runtime size"
             exit 1
           fi
-          if [ "$SIZE" -gt 24550 ]; then
-            echo "::error::SyndicateGovernor $SIZE > 24550 byte budget"
+          if [ "$GOV_SIZE" -gt 24550 ]; then
+            echo "::error::SyndicateGovernor $GOV_SIZE > 24550 byte budget"
+            exit 1
+          fi
+
+          # I-3 (V1.5): registry bytecode gate. Registry approached EIP-170
+          # (24,576) during V1.5 claim-path additions — gate at 24,550 matches
+          # the governor's pattern and provides a 26-byte headroom alarm.
+          REG_SIZE=$(echo "$SIZES_JSON" | jq -r '.GuardianRegistry.runtime_size // empty')
+          echo "GuardianRegistry runtime size: $REG_SIZE bytes"
+          if [ -z "$REG_SIZE" ]; then
+            echo "::error::could not read GuardianRegistry runtime size"
+            exit 1
+          fi
+          if [ "$REG_SIZE" -gt 24550 ]; then
+            echo "::error::GuardianRegistry $REG_SIZE > 24550 byte budget"
             exit 1
           fi
 

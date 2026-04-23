@@ -55,15 +55,12 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     uint256 public constant DEADMAN_UNPAUSE_DELAY = 7 days;
     address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
-    // ── Parameter timelock ──
+    // ── Parameter keys (used as event topic discriminators) ──
     bytes32 public constant PARAM_MIN_GUARDIAN_STAKE = keccak256("minGuardianStake");
     bytes32 public constant PARAM_MIN_OWNER_STAKE = keccak256("minOwnerStake");
     bytes32 public constant PARAM_COOLDOWN = keccak256("coolDownPeriod");
     bytes32 public constant PARAM_REVIEW_PERIOD = keccak256("reviewPeriod");
     bytes32 public constant PARAM_BLOCK_QUORUM_BPS = keccak256("blockQuorumBps");
-
-    uint256 public constant MIN_PARAM_CHANGE_DELAY = 6 hours;
-    uint256 public constant MAX_PARAM_CHANGE_DELAY = 7 days;
 
     // ── Storage — see spec §3.1 for layout ──
     struct Guardian {
@@ -158,16 +155,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     uint256 public coolDownPeriod;
     uint256 public reviewPeriod;
     uint256 public blockQuorumBps;
-
-    // Pending parameter changes (timelocked — Task 24)
-    struct PendingChange {
-        uint256 newValue;
-        uint64 effectiveAt;
-        bool exists;
-    }
-
-    mapping(bytes32 => PendingChange) internal _pendingChanges;
-    uint256 public parameterChangeDelay;
 
     // Privileged addresses
     address public governor;
@@ -276,9 +263,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
 
     /// @dev Reserved storage for future upgrades.
     ///      Slot accounting since V1: -9 (Phase 1 + Phase 2),
-    ///      -4 (commission), -5 (guardian-fee pool + claim flags + escrow)
-    ///      = -18 total.
-    uint256[33] private __gap;
+    ///      -4 (commission), -5 (guardian-fee pool + claim flags + escrow),
+    ///      +2 (removed parameter-change timelock: _pendingChanges + parameterChangeDelay)
+    ///      = -16 total.
+    uint256[35] private __gap;
 
     // ── Initializer ──
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -311,7 +299,6 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         coolDownPeriod = coolDownPeriod_;
         reviewPeriod = reviewPeriod_;
         blockQuorumBps = blockQuorumBps_;
-        parameterChangeDelay = 24 hours; // default; timelocked setter in Task 24
         epochGenesis = block.timestamp;
     }
 
@@ -440,6 +427,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         if (delegate == msg.sender) revert CannotSelfDelegate();
         if (delegate == address(0)) revert InvalidDelegate();
         if (amount == 0) revert AmountZero();
+        // I-5: delegating to a guardian that has 0 active stake (never staked,
+        // fully slashed, or mid-unstake) traps the delegator's WOOD behind the
+        // 7-day cooldown pointing at a vote-inert address. Reject early so the
+        // UX surface + accounting both reflect reality.
+        if (!_isActiveGuardian(delegate)) revert InactiveDelegate();
 
         // Re-delegation implicitly cancels any in-flight unstake request.
         _unstakeDelegationRequestedAt[msg.sender][delegate] = 0;
@@ -452,8 +444,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         totalDelegatedStake += amount;
 
         _delegationCheckpoints[msg.sender][delegate].push(uint32(block.timestamp), uint224(newBalance));
-        _delegatedInboundCheckpoints[delegate]
-            .push(uint32(block.timestamp), uint224(_delegatedInbound[delegate]));
+        _delegatedInboundCheckpoints[delegate].push(uint32(block.timestamp), uint224(_delegatedInbound[delegate]));
         _totalDelegatedCheckpoint.push(uint32(block.timestamp), uint224(totalDelegatedStake));
 
         emit DelegationIncreased(msg.sender, delegate, amount);
@@ -495,8 +486,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         totalDelegatedStake -= amount;
 
         _delegationCheckpoints[msg.sender][delegate].push(uint32(block.timestamp), 0);
-        _delegatedInboundCheckpoints[delegate]
-            .push(uint32(block.timestamp), uint224(_delegatedInbound[delegate]));
+        _delegatedInboundCheckpoints[delegate].push(uint32(block.timestamp), uint224(_delegatedInbound[delegate]));
         _totalDelegatedCheckpoint.push(uint32(block.timestamp), uint224(totalDelegatedStake));
 
         wood.safeTransfer(msg.sender, amount);
@@ -577,11 +567,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     function fundProposalGuardianPool(uint256 proposalId, address asset, uint256 amount) external {
         if (msg.sender != governor) revert NotGovernor();
         if (amount == 0) return;
-        _proposalGuardianPool[proposalId] = ProposalRewardPool({
-            asset: asset,
-            amount: uint128(amount),
-            settledAt: uint64(block.timestamp)
-        });
+        _proposalGuardianPool[proposalId] =
+            ProposalRewardPool({asset: asset, amount: uint128(amount), settledAt: uint64(block.timestamp)});
         emit ProposalGuardianPoolFunded(proposalId, asset, amount);
     }
 
@@ -698,6 +685,15 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      recipient. Keyed by (proposalId, recipient, asset) so a malicious
     ///      flush cannot redirect to an unrelated recipient — CEI pattern from
     ///      PR #229 review cross-vault-drain fix.
+    ///
+    ///      M-6 note on pause semantics: `flushBurn` (WOOD slashing path) is
+    ///      `nonReentrant whenNotPaused` because it interacts with slashing
+    ///      accounting that might need to freeze during incident review.
+    ///      `flushUnclaimedApproverFee` is neither: the escrow is already
+    ///      earmarked for a specific recipient (value is committed outside the
+    ///      settlement flow) and reentry can't corrupt state (CEI: slot
+    ///      cleared before transfer). Honoring a pause here would strand
+    ///      already-earned rewards behind an outage for no security benefit.
     function flushUnclaimedApproverFee(uint256 proposalId, address recipient, address asset) external {
         bytes32 key = keccak256(abi.encode(proposalId, recipient, asset));
         uint256 amount = unclaimedApproverFees[key];
@@ -1383,102 +1379,56 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         emit Unpaused(msg.sender, deadman);
     }
 
-    // ── Parameter setters (timelocked) ──
+    // ── Parameter setters (owner-instant; registry owner is a multisig with
+    //    external delay, so an on-chain timelock would double-count the delay) ──
 
     /// @inheritdoc IGuardianRegistry
-    /// @dev Validates bound at queue time; re-validation is implicit since
-    ///      only owner can finalize and the bound check is stateless.
     function setMinGuardianStake(uint256 newValue) external onlyOwner {
         if (newValue < 1e18) revert InvalidParameter();
-        _queueChange(PARAM_MIN_GUARDIAN_STAKE, newValue);
+        uint256 old = minGuardianStake;
+        minGuardianStake = newValue;
+        emit ParameterChangeFinalized(PARAM_MIN_GUARDIAN_STAKE, old, newValue);
     }
 
     /// @inheritdoc IGuardianRegistry
     function setMinOwnerStake(uint256 newValue) external onlyOwner {
         if (newValue < 1_000 * 1e18) revert InvalidParameter();
-        _queueChange(PARAM_MIN_OWNER_STAKE, newValue);
+        uint256 old = minOwnerStake;
+        minOwnerStake = newValue;
+        emit ParameterChangeFinalized(PARAM_MIN_OWNER_STAKE, old, newValue);
     }
 
     /// @inheritdoc IGuardianRegistry
     function setCoolDownPeriod(uint256 newValue) external onlyOwner {
         if (newValue < 1 days || newValue > 30 days) revert InvalidParameter();
-        _queueChange(PARAM_COOLDOWN, newValue);
+        uint256 old = coolDownPeriod;
+        coolDownPeriod = newValue;
+        emit ParameterChangeFinalized(PARAM_COOLDOWN, old, newValue);
     }
 
     /// @inheritdoc IGuardianRegistry
     function setReviewPeriod(uint256 newValue) external onlyOwner {
         if (newValue < 6 hours || newValue > 7 days) revert InvalidParameter();
-        _queueChange(PARAM_REVIEW_PERIOD, newValue);
+        uint256 old = reviewPeriod;
+        reviewPeriod = newValue;
+        emit ParameterChangeFinalized(PARAM_REVIEW_PERIOD, old, newValue);
     }
 
     /// @inheritdoc IGuardianRegistry
     function setBlockQuorumBps(uint256 newValue) external onlyOwner {
         if (newValue < 1_000 || newValue > 10_000) revert InvalidParameter();
-        _queueChange(PARAM_BLOCK_QUORUM_BPS, newValue);
+        uint256 old = blockQuorumBps;
+        blockQuorumBps = newValue;
+        emit ParameterChangeFinalized(PARAM_BLOCK_QUORUM_BPS, old, newValue);
     }
 
-    /// @notice Finalize a queued parameter change once `effectiveAt` has passed.
-    /// @dev Owner-only. Writes the pending value into the target storage var,
-    ///      clears the pending slot, emits `ParameterChangeFinalized`.
-    function finalizeParameterChange(bytes32 paramKey) external onlyOwner {
-        PendingChange storage change = _pendingChanges[paramKey];
-        if (!change.exists) revert NoChangePending();
-        if (block.timestamp < change.effectiveAt) revert ChangeNotReady();
-
-        uint256 newValue = change.newValue;
-        uint256 oldValue = _applyChange(paramKey, newValue);
-
-        delete _pendingChanges[paramKey];
-        emit ParameterChangeFinalized(paramKey, oldValue, newValue);
-    }
-
-    /// @notice Cancel a queued parameter change.
-    function cancelParameterChange(bytes32 paramKey) external onlyOwner {
-        if (!_pendingChanges[paramKey].exists) revert NoChangePending();
-        delete _pendingChanges[paramKey];
-        emit ParameterChangeCancelled(paramKey);
-    }
-
-    /// @notice Owner-instant minter rotation. Not timelocked: minter can only
-    ///         top up the epoch treasury pool, so owner must be free to pick
-    ///         and rotate implementations as the minter evolves.
+    /// @notice Owner-instant minter rotation. Not gated by param validation:
+    ///         minter can only top up the epoch treasury pool, so owner must
+    ///         be free to pick and rotate implementations as the minter evolves.
     function setMinter(address newMinter) external onlyOwner {
         address old = minter;
         minter = newMinter;
         emit MinterUpdated(old, newMinter);
-    }
-
-    /// @notice View helper mirroring the governor-param pattern.
-    function getPendingChange(bytes32 paramKey) external view returns (PendingChange memory) {
-        return _pendingChanges[paramKey];
-    }
-
-    function _queueChange(bytes32 paramKey, uint256 newValue) private {
-        if (_pendingChanges[paramKey].exists) revert ChangeAlreadyPending();
-        uint64 effectiveAt = uint64(block.timestamp + parameterChangeDelay);
-        _pendingChanges[paramKey] = PendingChange({newValue: newValue, effectiveAt: effectiveAt, exists: true});
-        emit ParameterChangeQueued(paramKey, newValue, effectiveAt);
-    }
-
-    function _applyChange(bytes32 paramKey, uint256 newValue) private returns (uint256 old) {
-        if (paramKey == PARAM_MIN_GUARDIAN_STAKE) {
-            old = minGuardianStake;
-            minGuardianStake = newValue;
-        } else if (paramKey == PARAM_MIN_OWNER_STAKE) {
-            old = minOwnerStake;
-            minOwnerStake = newValue;
-        } else if (paramKey == PARAM_COOLDOWN) {
-            old = coolDownPeriod;
-            coolDownPeriod = newValue;
-        } else if (paramKey == PARAM_REVIEW_PERIOD) {
-            old = reviewPeriod;
-            reviewPeriod = newValue;
-        } else if (paramKey == PARAM_BLOCK_QUORUM_BPS) {
-            old = blockQuorumBps;
-            blockQuorumBps = newValue;
-        } else {
-            revert InvalidParameter();
-        }
     }
 
     // ── Views (minimal now; full impl in later tasks) ──
