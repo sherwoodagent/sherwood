@@ -131,7 +131,7 @@ export interface RiskConfig {
  */
 export const DEFAULT_RISK_CONFIG: RiskConfig = {
   maxPortfolioRisk: 0.15,
-  maxSinglePosition: 0.15,
+  maxSinglePosition: 0.50,    // 50% notional (with 3x leverage: 17% margin)
   maxCorrelatedExposure: 0.25,
   maxConcurrentTrades: 8,
   hardStopPercent: 0.10,          // 10% hard stop (was 5% — wider to match 3.5x ATR stops)
