@@ -206,10 +206,11 @@ export class GridManager {
     if (spacing <= 0) return { fills: 0, roundTrips: 0, pnlUsd: 0 };
 
     // Step 1: Fill unfilled grid levels (buy when price drops, sell is just accounting)
-    // In trending regime (skipNewFills=true), don't open new positions — only let
-    // Step 2 close existing fills to complete round trips.
+    // In trending regime (skipNewFills=true), skip new BUY entries but still process
+    // SELL levels — sell fills are needed to complete round trips on existing positions.
     for (const level of grid.levels) {
-      if (level.filled || skipNewFills) continue;
+      if (level.filled) continue;
+      if (skipNewFills && level.side === 'buy') continue;
 
       if (level.side === 'buy' && currentPrice <= level.price) {
         level.filled = true;
