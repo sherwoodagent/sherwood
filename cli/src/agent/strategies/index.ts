@@ -16,6 +16,8 @@ import { BtcNetworkHealthStrategy } from './btc-network-health.js';
 import { PredictionMarketStrategy } from './prediction-market.js';
 import { SocialVolumeStrategy } from './social-volume.js';
 import { KronosVolForecastStrategy } from './kronos-vol-forecast.js';
+import { NarrativeVacuumStrategy } from './narrative-vacuum.js';
+import { WhaleIntentStrategy } from './whale-intent.js';
 
 export type { Strategy, StrategyContext, StrategyConfig };
 export { SentimentContrarianStrategy, BreakoutOnChainStrategy, FundingRateStrategy };
@@ -25,6 +27,7 @@ export { TradingViewSignalStrategy };
 export { BtcNetworkHealthStrategy };
 export { PredictionMarketStrategy, SocialVolumeStrategy };
 export { KronosVolForecastStrategy };
+export { NarrativeVacuumStrategy, WhaleIntentStrategy };
 
 export const DEFAULT_STRATEGIES: Strategy[] = [
   // SentimentContrarianStrategy removed from default list — fires only at F&G
@@ -42,6 +45,8 @@ export const DEFAULT_STRATEGIES: Strategy[] = [
   new PredictionMarketStrategy(),       // event — prediction market catalysts
   new SocialVolumeStrategy(),           // sentiment — social volume contrarian
   new KronosVolForecastStrategy(),      // technical — ML volatility forecast
+  new NarrativeVacuumStrategy(),        // onchain — whale flow vs narrative vacuum
+  new WhaleIntentStrategy(),            // smartMoney — whale intent classifier
 ];
 
 /**

@@ -270,6 +270,9 @@ export class TradingAgent {
     // Shared research data — captured in phase 2, reused in phase 3 strategies
     let nansenData: any = undefined;
     let messariData: any = undefined;
+    // Nansen flow data for NarrativeVacuum + WhaleIntent strategies
+    let nansenFlowData: StrategyContext['nansenFlowData'] = undefined;
+    let nansenHlPerps: StrategyContext['nansenHlPerps'] = undefined;
 
     // Check x402 wallet USDC balance once per scan cycle.
     // If wallet is unfunded, skip x402 calls entirely to avoid diluting scores.
@@ -285,14 +288,15 @@ export class TradingAgent {
       }
     }
 
-    // Phase 2: Nansen x402 research data (Messari dropped — low value for majors)
+    // Phase 2: Nansen smart-money data
     //
-    // Two Nansen calls in parallel:
-    //   1. Smart-money netflows (multi-chain: ethereum, solana, base, L2s)
-    //      — was previously Base-only, returning empty for BTC/ETH/SOL
-    //   2. Hyperliquid smart-money perp trades — same venue we trade on,
-    //      shows what Funds/Smart Traders are doing right now
-    if (x402Enabled && x402Available) {
+    // Fires when NANSEN_API_KEY is set (direct Pro API, ~$0.005/call) OR
+    // when x402 is enabled + funded (micropayment, ~$0.06/call).
+    // Two calls in parallel:
+    //   1. Smart-money netflows → feeds NarrativeVacuum + WhaleIntent strategies
+    //   2. HL perp trades → cross-venue confirmation for WhaleIntent
+    const nansenAvailable = !!process.env.NANSEN_API_KEY || (x402Enabled && x402Available);
+    if (nansenAvailable) {
       // Map tokenId to HL symbol for perp-trades query
       const hlSymbolMap: Record<string, string> = {
         bitcoin: "BTC", ethereum: "ETH", solana: "SOL",
@@ -343,9 +347,11 @@ export class TradingAgent {
             source: 'Nansen HL Smart Money',
             details: `${trades.length} trades: $${(longValueUsd / 1e6).toFixed(1)}M long / $${(shortValueUsd / 1e6).toFixed(1)}M short (${(longRatio * 100).toFixed(0)}% long)`,
           });
-          console.error(chalk.dim(`  x402 Nansen HL perps: ${trades.length} trades, ${(longRatio * 100).toFixed(0)}% long bias, cost ${hlResult.costUsdc} USDC`));
+          console.error(chalk.dim(`  Nansen HL perps: ${trades.length} trades, ${(longRatio * 100).toFixed(0)}% long bias, cost ${hlResult.costUsdc}`));
+          // Capture for WhaleIntent strategy
+          nansenHlPerps = { longRatio, tradeCount: trades.length, longValueUsd, shortValueUsd };
         } else {
-          console.error(chalk.dim(`  x402 Nansen HL perps: no recent trades for ${hlSymbol}`));
+          console.error(chalk.dim(`  Nansen HL perps: no recent trades for ${hlSymbol}`));
         }
       } else {
         console.error(chalk.dim(`  x402 Nansen HL perps unavailable: ${hlPerpResult.reason}`));
@@ -369,6 +375,9 @@ export class TradingAgent {
             details: `Smart money 24h net flow: $${(netFlow / 1_000_000).toFixed(2)}M ${netFlow > 0 ? '(accumulating)' : '(distributing)'}`,
           });
           console.error(chalk.dim(`  Nansen flow-intelligence: $${(netFlow / 1_000_000).toFixed(2)}M net flow, cost ${flowResult.value.costUsdc}`));
+          // Capture for NarrativeVacuum + WhaleIntent strategies
+          const traderCount = Number(flowData.trader_count ?? flowData.active_wallets ?? 0);
+          nansenFlowData = { netFlow24hUsd: netFlow, traderCount };
         }
       }
 
@@ -492,6 +501,8 @@ export class TradingAgent {
         predictionData,
         socialData,
         kronosData,
+        nansenFlowData,
+        nansenHlPerps,
       };
 
       let strategySignals = await runStrategies(stratCtx, this.config.strategyConfigs);

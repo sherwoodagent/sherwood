@@ -99,6 +99,18 @@ export interface StrategyContext {
     meanPredictedClose: number;
     inferenceTimeMs: number;
   };
+  /** Nansen smart-money netflow (aggregate across chains). */
+  nansenFlowData?: {
+    netFlow24hUsd: number;
+    traderCount: number;
+  };
+  /** Nansen HL perp smart-money trades (same venue we trade on). */
+  nansenHlPerps?: {
+    longRatio: number;       // 0-1, fraction of smart money going long
+    tradeCount: number;
+    longValueUsd: number;
+    shortValueUsd: number;
+  };
 }
 
 export interface Strategy {

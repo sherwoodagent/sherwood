@@ -508,6 +508,8 @@ const SIGNAL_CATEGORY_MAP: Record<string, keyof ScoringWeights> = {
   predictionMarket: "event",
   socialVolume: "sentiment",
   kronosVolForecast: "technical",
+  narrativeVacuum: "onchain",
+  whaleIntent: "smartMoney",
 };
 
 /** Categories that rely on x402 paid data (Nansen, Messari). */
