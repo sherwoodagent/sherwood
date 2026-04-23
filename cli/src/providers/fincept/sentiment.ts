@@ -55,8 +55,11 @@ export async function getSocialData(tokenId: string): Promise<SocialData | null>
     );
 
     const rawData = newsResult.ok ? (newsResult.data as Record<string, unknown>) : undefined;
+    // Script returns { articles: [...] } (lowercase), raw API returns { Data: [...] } (uppercase)
     const articles: Array<{ title?: string; categories?: string; tags?: string }> =
-      (rawData?.Data as Array<{ title?: string; categories?: string; tags?: string }>) ?? [];
+      (rawData?.articles as Array<{ title?: string; categories?: string; tags?: string }>)
+      ?? (rawData?.Data as Array<{ title?: string; categories?: string; tags?: string }>)
+      ?? [];
 
     const lowerSymbol = symbol.toLowerCase();
     const lowerTokenId = tokenId.toLowerCase();
