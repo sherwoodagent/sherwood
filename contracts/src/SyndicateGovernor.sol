@@ -33,9 +33,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     using EnumerableSet for EnumerableSet.AddressSet;
 
     // ── Storage (existing -- DO NOT reorder) ──
-
-    /// @notice Governor parameters
-    GovernorParams private _params;
+    // P2-1: `_params`, `_protocolFeeBps`, `_protocolFeeRecipient`,
+    //       `_guardianFeeBps`, `factory` live in `GovernorParameters`.
 
     /// @notice Proposal ID counter (1-indexed)
     uint256 private _proposalCount;
@@ -69,9 +68,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     /// @notice Proposal ID -> deadline for co-proposer consent
     mapping(uint256 => uint256) public collaborationDeadline;
 
-    /// @notice Authorized factory that can register vaults
-    address public factory;
-
     /// @notice Simple reentrancy lock for execute/settle entrypoints
     uint256 private _reentrancyStatus;
 
@@ -97,17 +93,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
 
     // V1.5: _parameterChangeDelay + _pendingChanges removed (timelock
     // eliminated in favor of owner-multisig delay).
-
-    /// @notice Protocol fee in basis points (taken from profit before agent/management fees)
-    uint256 private _protocolFeeBps;
-
-    /// @notice Recipient of protocol fees
-    address private _protocolFeeRecipient;
-
-    /// @notice V1.5: guardian fee in bps (taken from profit after protocol fee,
-    ///         before agent/management fees). Routed to the bound
-    ///         `_guardianRegistry`, which pools + exposes the claim flow.
-    uint256 private _guardianFeeBps;
+    // P2-1: _protocolFeeBps / _protocolFeeRecipient / _guardianFeeBps live
+    //       in `GovernorParameters`.
 
     /// @notice Guardian registry. Set in `initialize`; required (non-zero).
     ///         Fees always route here (ToB P1-1 — no separate recipient slot).
@@ -149,8 +136,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ///      shrunk by 1 more for openProposalCount,
     ///      shrunk by 1 more for _unclaimedFees,
     ///      shrunk by 1 more for _approvedCount,
-    ///      grew by 1 after P1-1: _guardianFeeRecipient reclaimed)
-    uint256[28] private __gap;
+    ///      grew by 1 after P1-1: _guardianFeeRecipient reclaimed,
+    ///      grew by 5 after P2-1: _params + _protocolFeeBps +
+    ///      _protocolFeeRecipient + _guardianFeeBps + factory moved to
+    ///      GovernorParameters)
+    uint256[33] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -203,44 +193,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _emergencyReentrancyEnter();
         _;
         _emergencyReentrancyLeave();
-    }
-
-    // ── GovernorParameters virtual accessor overrides ──
-
-    function _getParams() internal view override returns (GovernorParams storage) {
-        return _params;
-    }
-
-    function _getProtocolFeeRecipient() internal view override returns (address) {
-        return _protocolFeeRecipient;
-    }
-
-    function _setProtocolFeeRecipient(address newRecipient) internal override {
-        _protocolFeeRecipient = newRecipient;
-    }
-
-    function _getProtocolFeeBps() internal view override returns (uint256) {
-        return _protocolFeeBps;
-    }
-
-    function _setProtocolFeeBps(uint256 newValue) internal override {
-        _protocolFeeBps = newValue;
-    }
-
-    function _getFactory() internal view override returns (address) {
-        return factory;
-    }
-
-    function _setFactory(address newFactory) internal override {
-        factory = newFactory;
-    }
-
-    function _getGuardianFeeBps() internal view override returns (uint256) {
-        return _guardianFeeBps;
-    }
-
-    function _setGuardianFeeBps(uint256 newValue) internal override {
-        _guardianFeeBps = newValue;
     }
 
     // ── GovernorEmergency virtual accessor overrides ──
