@@ -137,7 +137,7 @@ export const DEFAULT_RISK_CONFIG: RiskConfig = {
   hardStopPercent: 0.10,          // 10% hard stop (was 5% — wider to match 3.5x ATR stops)
   trailingStopAtr: 3.5,           // match executor ATR multiplier (was 1.5x — autoresearch: wider = better)
   trailingStopPct: 0.04,               // 4% fallback trail (was 2.5% — gives winners more room)
-  breakevenTriggerPct: 0.03,           // move to breakeven after +3% gain (was 1.5% — wider stops need later breakeven)
+  breakevenTriggerPct: 0.02,           // move to breakeven after +2% gain (lowered to match partial profit trigger)
   // Orca-inspired HWM profit-lock (see README / PR #223): each entry locks a
   // percentage of the peak-to-date move. Tiers cascade — the highest
   // triggered tier wins — and stops never ratchet down.
@@ -168,7 +168,7 @@ export const DEFAULT_RISK_CONFIG: RiskConfig = {
  */
 export const RECOMMENDED_TRAILING_CONFIG = {
   trailingStopPct: 0.04,                 // 4% trail (autoresearch: wider stops let winners run)
-  breakevenTriggerPct: 0.03,             // move to breakeven after +3% gain (wider stops = later breakeven)
+  breakevenTriggerPct: 0.02,             // move to breakeven after +2% gain (matches partial profit trigger)
   // HWM tiers: lock a growing fraction of the peak move from entry.
   profitLockSteps: [
     { trigger: 0.05, lockPct: 0.30 },   // +5% gain  → lock 30% of peak move

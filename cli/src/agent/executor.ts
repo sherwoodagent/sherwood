@@ -34,6 +34,11 @@ export interface OrderParams {
   takeProfit: number;
 }
 
+/** Directional trade leverage. Grid uses 4x; directional uses 3x for
+ *  tighter stops. Risk is controlled via riskPerTrade (2%) — leverage
+ *  amplifies returns without increasing the sizing formula's risk budget. */
+const DIRECTIONAL_LEVERAGE = 3;
+
 /** Score-based position sizing multiplier.
  *  Nunchi autoresearch (103 experiments): removing strength/volume scaling
  *  improved Sharpe by +1.7. Uniform position sizing beats conviction-weighted
@@ -184,13 +189,14 @@ export class TradeExecutor {
     this.riskManager.updatePortfolio(state);
 
     // Calculate stop loss and take profit from current price.
-    // Calibrated for SHORT-TERM trades (1-2 day hold):
-    //   Stop: 3% — tight enough that a failed trade exits quickly
-    //   Take profit: 6% (2:1 R:R) — achievable in 1-2 days on crypto vol
-    //   Time stop: 48h (see risk.ts) — if it hasn't moved, it's dead money
+    // Calibrated for SHORT-TERM trades (1-2 day hold) with leverage:
+    //   Stop: 4% price move × 3x leverage = 12% capital risk (capped by riskPerTrade)
+    //   Take profit: 1.5:1 R:R = 6% price move × 3x = 18% capital gain
+    //   Partial exit at 2% move × 3x = 6% capital gain (locks half)
+    //   Time stop: 96h (see risk.ts) — if it hasn't moved, it's dead money
     const isShort = decision.action === 'SELL' || decision.action === 'STRONG_SELL';
     const direction: 'long' | 'short' = isShort ? 'short' : 'long';
-    const RR_RATIO = 2.0;
+    const RR_RATIO = 1.5;  // was 2.0 — 9.4% TP was unrealistic, 1.5:1 hits more often
     // Nunchi autoresearch (103 experiments): wider ATR stops let winners run.
     // Their optimal was 5.5x ATR; we use 3.5x as a compromise between letting
     // winners breathe and controlling loss on stopped trades. Prior 1.5x was
@@ -254,9 +260,12 @@ export class TradeExecutor {
       this.riskManager.getRiskPerTrade() * conviction,
     );
 
-    // Pyramid haircut shrinks size for each subsequent add (base 1.0x → 0.5x → 0.25x).
-    const pyramidQuantity = sizing.quantity * sizeMultiplier;
-    const pyramidSizeUsd = sizing.sizeUsd * sizeMultiplier;
+    // Apply leverage: multiply position size (not risk). A 3x leveraged position
+    // on a $500 risk budget buys $1500 notional — the stop loss distance stays the
+    // same in price terms, so the dollar risk per trade stays at riskPerTrade × portfolio.
+    // Pyramid haircut then shrinks for each subsequent add (base 1.0x → 0.5x → 0.25x).
+    const pyramidQuantity = sizing.quantity * sizeMultiplier * DIRECTIONAL_LEVERAGE;
+    const pyramidSizeUsd = sizing.sizeUsd * sizeMultiplier * DIRECTIONAL_LEVERAGE;
 
     if (pyramidQuantity <= 0 || pyramidSizeUsd <= 0) {
       return {
@@ -369,7 +378,7 @@ export class TradeExecutor {
 
     // --- Partial profit exits (50% at +3%) ---
     // Reload state after each partial close to avoid iterating stale positions.
-    const PARTIAL_PROFIT_TRIGGER = 0.03; // +3% unrealized gain
+    const PARTIAL_PROFIT_TRIGGER = 0.02; // +2% unrealized gain (was 3% — too high with leverage, missed exits)
     const PARTIAL_FRACTION = 0.5;
 
     // First pass: identify candidates from a fresh load
@@ -435,7 +444,7 @@ export class TradeExecutor {
       ? (direction === 'short' ? 'PYRAMID SHORT' : 'PYRAMID BUY')
       : (direction === 'short' ? 'SHORT' : 'BUY');
 
-    console.error(chalk.cyan(`[DRY RUN] Paper trade: ${sideLabel} ${quantity.toFixed(6)} ${order.tokenId} @ $${currentPrice.toFixed(4)}`));
+    console.error(chalk.cyan(`[DRY RUN] Paper trade: ${sideLabel} ${quantity.toFixed(6)} ${order.tokenId} @ $${currentPrice.toFixed(4)} (${DIRECTIONAL_LEVERAGE}x)`));
     console.error(chalk.cyan(`  Size: $${order.amountUsd.toFixed(2)} | SL: $${order.stopLoss.toFixed(4)} | TP: $${order.takeProfit.toFixed(4)}`));
 
     if (isPyramid) {
