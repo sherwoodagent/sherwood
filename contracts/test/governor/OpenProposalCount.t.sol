@@ -314,16 +314,92 @@ contract OpenProposalCountTest is Test {
         registry.requestUnstakeOwner(address(vault)); // must not revert
     }
 
-    // NOTE: a vote-driven Rejected or deadline-driven Expired transition only
-    // persists to storage when a NON-reverting mutating call lands inside
-    // `_resolveState`. Every post-transition entrypoint (`executeProposal`,
-    // `settleProposal`, `vote`) reverts before returning — so the commit is
-    // rolled back and `openProposalCount` stays stale. In practice the owner
-    // exits via `cancelProposal` (proposer) or `emergencyCancel` / `vetoProposal`
-    // (vault owner) BEFORE the state goes stale; those paths are covered by the
-    // dedicated tests above. A permissionless `commitProposalState(pid)` helper
-    // would close the gap for stuck stale proposals, but is out of scope for
-    // Fix 2 — tracked as a follow-up.
+    // NOTE (closed): a vote-driven Rejected or deadline-driven Expired
+    // transition only persists to storage when a NON-reverting mutating call
+    // lands inside `_resolveState`. Since every allow-listed entrypoint
+    // (`executeProposal`, `settleProposal`, `vote`, etc.) reverts when the
+    // resolved state isn't the one it expects, the dec of
+    // `openProposalCount` was rolled back and the counter stayed pinned at 1.
+    // `resolveProposalState(pid)` is the permissionless flush path — it runs
+    // `_resolveState` and returns, so the lazy transition (and its dec)
+    // commit. Regression tests: `test_resolveProposalState_*` below.
+
+    function test_resolveProposalState_flushesVetoRejection() public {
+        uint256 pid = _propose();
+        assertEq(governor.openProposalCount(address(vault)), 1, "counter == 1 in Pending");
+
+        // Both LPs vote Against → crosses 40% vetoThresholdBps with 100%.
+        vm.warp(vm.getBlockTimestamp() + 1);
+        vm.prank(lp1);
+        governor.vote(pid, ISyndicateGovernor.VoteType.Against);
+        vm.prank(lp2);
+        governor.vote(pid, ISyndicateGovernor.VoteType.Against);
+
+        // Warp past voting period — proposal is lazily Rejected but the
+        // counter hasn't flushed because no non-reverting mutating call has
+        // landed in `_resolveState`.
+        vm.warp(vm.getBlockTimestamp() + VOTING_PERIOD + 1);
+        assertEq(
+            uint256(governor.getProposalState(pid)),
+            uint256(ISyndicateGovernor.ProposalState.Rejected),
+            "state is lazily Rejected"
+        );
+        assertEq(governor.openProposalCount(address(vault)), 1, "counter still stuck at 1 pre-flush");
+
+        // Permissionless flush — anyone can call.
+        governor.resolveProposalState(pid);
+        assertEq(governor.openProposalCount(address(vault)), 0, "counter == 0 after flush");
+
+        // Owner can now rage-quit.
+        vm.prank(owner);
+        registry.requestUnstakeOwner(address(vault));
+    }
+
+    function test_resolveProposalState_flushesExpiredApproved() public {
+        uint256 pid = _propose();
+        _voteFor(pid);
+
+        // Past voteEnd → GuardianReview, past reviewEnd with no blockers
+        // would be Approved, past executeBy with no executeProposal call
+        // would be Expired. The VIEW remains at GuardianReview until a
+        // mutating `_resolveState` calls `resolveReview` on the registry.
+        vm.warp(vm.getBlockTimestamp() + VOTING_PERIOD + REVIEW_PERIOD + EXECUTION_WINDOW + 1);
+        assertEq(
+            uint256(governor.getProposalState(pid)),
+            uint256(ISyndicateGovernor.ProposalState.GuardianReview),
+            "view pins at GuardianReview until registry resolves"
+        );
+        assertEq(governor.openProposalCount(address(vault)), 1, "counter stuck at 1 pre-flush");
+
+        // Permissionless flush resolves the registry review AND commits the
+        // state transition, decrementing the counter.
+        governor.resolveProposalState(pid);
+        assertEq(
+            uint256(governor.getProposalState(pid)),
+            uint256(ISyndicateGovernor.ProposalState.Expired),
+            "state is Expired after flush"
+        );
+        assertEq(governor.openProposalCount(address(vault)), 0, "counter == 0 after flush");
+
+        vm.prank(owner);
+        registry.requestUnstakeOwner(address(vault));
+    }
+
+    function test_resolveProposalState_idempotent() public {
+        uint256 pid = _propose();
+        vm.prank(owner);
+        governor.vetoProposal(pid); // already flushes counter via non-reverting path
+        assertEq(governor.openProposalCount(address(vault)), 0);
+
+        // Re-calling resolve is a no-op.
+        governor.resolveProposalState(pid);
+        assertEq(governor.openProposalCount(address(vault)), 0, "counter remains 0 on re-resolve");
+    }
+
+    function test_resolveProposalState_revertsIfProposalDoesNotExist() public {
+        vm.expectRevert(ISyndicateGovernor.ProposalNotFound.selector);
+        governor.resolveProposalState(99_999);
+    }
 
     function test_requestUnstakeOwner_succeedsAfterVeto() public {
         uint256 pid = _propose();

@@ -1114,7 +1114,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      `blocked` flag without re-slashing. Requires
     ///      `block.timestamp >= reviewEnd`. Short-circuits to `false` when
     ///      `!opened` (no activity) or `cohortTooSmall` (cold-start fallback).
-    ///      Otherwise: `blocked = (blockStakeWeight * 10_000 >= blockQuorumBps * totalStakeAtOpen)`.
+    ///      Otherwise: `denom = totalStakeAtOpen + totalDelegatedAtOpen` (V1.5
+    ///      includes delegated weight) and
+    ///      `blocked = (blockStakeWeight * 10_000 >= blockQuorumBps * denom)`.
     ///      CEI: sets `resolved`/`blocked` flags BEFORE any token transfer.
     ///      When blocked, slashes all approvers' stake to BURN_ADDRESS and
     ///      credits blockers' weights to the current epoch's block-weight

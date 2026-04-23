@@ -553,6 +553,27 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         emit VaultRemoved(vault);
     }
 
+    /// @notice Permissionless: flushes a proposal's lazy terminal-state
+    ///         transition (Rejected / Expired) so that
+    ///         `openProposalCount[vault]` dec commits.
+    /// @dev `_resolveState` dec's the counter when it transitions the proposal
+    ///      into a terminal state, but each mutating caller (`vote`,
+    ///      `executeProposal`, `settleProposal`, `cancelProposal`,
+    ///      `emergencyCancel`, `vetoProposal`, collaborative approve/reject)
+    ///      reverts if the resolved state isn't in its allow-list, rolling
+    ///      back the dec. Without this flush, a vote that pushes
+    ///      `votesAgainst` past `vetoThresholdBps` or an approved-but-
+    ///      unexecuted proposal past `executeBy` would pin the counter at 1,
+    ///      bricking future `propose()` (VaultHasOpenProposal) and owner
+    ///      `requestUnstakeOwner` (which also OR-checks `openProposalCount`).
+    ///      Idempotent: re-calling after the transition has already committed
+    ///      is a no-op.
+    function resolveProposalState(uint256 proposalId) external {
+        StrategyProposal storage proposal = _proposals[proposalId];
+        if (proposal.id == 0) revert ProposalNotFound();
+        _resolveState(proposal);
+    }
+
     // ==================== VIEWS ====================
 
     /// @inheritdoc ISyndicateGovernor
