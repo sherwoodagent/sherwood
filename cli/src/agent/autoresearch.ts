@@ -52,13 +52,13 @@ const DEFAULT_PARAMS: StrategyParams = {
     fundamental: 0.15,
     event: 0.15,
   },
-  buyThreshold: 0.17,
-  sellThreshold: -0.22,
-  stopLossPct: 0.04,    // 4% price move (matches executor STOP_FLOOR)
-  takeProfitRR: 1.5,    // 1.5:1 R:R (matches executor)
-  trailPct: 0.04,
-  timeStopHours: 96,    // matches risk.ts time stop
-  leverage: 3,           // matches DIRECTIONAL_LEVERAGE
+  buyThreshold: 0.12,     // autoresearch-optimized
+  sellThreshold: -0.13,   // autoresearch-optimized
+  stopLossPct: 0.05,    // 5% price move (widened from 4%)
+  takeProfitRR: 1.5,
+  trailPct: 0.03,       // tighter trail (from 4%)
+  timeStopHours: 84,    // shorter (from 96h)
+  leverage: 1,           // no leverage until WR > 60%
 };
 
 // ── Scoring ──

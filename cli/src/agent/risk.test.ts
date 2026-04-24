@@ -62,9 +62,10 @@ describe("RiskManager", () => {
       expect(result.reason).toMatch(/exceeds max/);
     });
 
-    it("rejects when insufficient cash", () => {
-      rm.updatePortfolio({ totalValue: 10000, cash: 200, positions: [] });
-      const result = rm.canOpenPosition("bitcoin", 500);
+    it("rejects when insufficient cash (margin)", () => {
+      rm.updatePortfolio({ totalValue: 10000, cash: 100, positions: [] });
+      // $1000 × 33% margin = $330, but only $100 cash
+      const result = rm.canOpenPosition("bitcoin", 1000);
       expect(result.allowed).toBe(false);
       expect(result.reason).toMatch(/Insufficient cash/);
     });
@@ -502,19 +503,19 @@ describe("RiskManager", () => {
       });
       // rm uses DEFAULT_RISK_CONFIG — trailing is now ON by default.
       // HWM: peak=150, highest-triggered tier (+20%) → 100 + (150-100)*0.85 = 142.50.
-      // Percent-trail: 150 × (1 - 0.04) = 144.00. Trail wins (higher stop).
+      // Percent-trail: 150 × (1 - 0.03) = 145.50. Trail wins (higher stop).
       const [updated] = rm.updateTrailingStops([pos]);
-      expect(updated!.stopLoss).toBe(144);
+      expect(updated!.stopLoss).toBe(145.5);
     });
 
-    it("moves stop to breakeven after +3% gain", () => {
+    it("moves stop to breakeven after +1.5% gain", () => {
       const pos = makePosition({
         entryPrice: 100,
-        currentPrice: 103.5, // +3.5% triggers breakeven (3%) but no HWM tier (first is +5%)
+        currentPrice: 102, // +2% triggers breakeven (1.5%) but no HWM tier (first is +5%)
         stopLoss: 97,
       });
       const [updated] = trailingRm.updateTrailingStops([pos]);
-      // breakeven → 100; percent-trail 4% → 103.5*0.96=99.36; max = 100
+      // breakeven → 100; percent-trail 3% → 102*0.97=98.94; max = 100
       expect(updated!.stopLoss).toBe(100);
     });
 
@@ -525,6 +526,7 @@ describe("RiskManager", () => {
         stopLoss: 97,
       });
       const [updated] = trailingRm.updateTrailingStops([pos]);
+      // This test uses trailingRm with RECOMMENDED_TRAILING_CONFIG (4% trail, 2% breakeven).
       // peak=105, lock = 100 + (105-100)*0.30 = 101.50
       // breakeven → 100; percent-trail 105*0.96 = 100.80
       // max(97, 100, 101.50, 100.80) = 101.50 (HWM lock wins)
@@ -876,8 +878,8 @@ describe("RiskManager", () => {
       const pos1 = makePosition({ entryPrice: 100, currentPrice: 110, stopLoss: 97 });
       const [c1] = hwmRm.updateTrailingStops([pos1]);
       const lockAfterC1 = c1!.stopLoss;
-      // 100 + 10*0.50 = 105 vs trail 110*0.96 = 105.6 → 105.6 (trail wins by tiny margin)
-      expect(lockAfterC1).toBeCloseTo(105.6, 2);
+      // 100 + 10*0.50 = 105 vs trail 110*0.97 = 106.7 → 106.7 (trail wins with 3%)
+      expect(lockAfterC1).toBeCloseTo(106.7, 2);
 
       // Cycle 2: retrace to 108 (still +8%). stopLoss must NOT decrease.
       const pos2 = { ...c1!, currentPrice: 108 };
@@ -885,7 +887,7 @@ describe("RiskManager", () => {
       expect(c2!.stopLoss).toBeGreaterThanOrEqual(lockAfterC1);
 
       // Cycle 3: new peak at 120 (+20%) — tier 0.85 applies on peak=120.
-      // 100 + 20*0.85 = 117. Trail = 120*0.96 = 115.2. Lock wins → 117.
+      // 100 + 20*0.85 = 117. Trail = 120*0.97 = 116.4. Lock wins → 117.
       const pos3 = { ...c2!, currentPrice: 120 };
       const [c3] = hwmRm.updateTrailingStops([pos3]);
       expect(c3!.stopLoss).toBeCloseTo(117, 2);

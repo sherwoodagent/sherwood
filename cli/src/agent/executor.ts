@@ -43,7 +43,10 @@ export interface OrderParams {
  *  margin (~20-33%). This means paper cash depletes faster than reality
  *  for leveraged longs — intentionally conservative to avoid overestimating
  *  available capital. Live mode (hyperliquid-perp) uses venue margin. */
-const DIRECTIONAL_LEVERAGE = 3;
+// Autoresearch (80 exp, 4 days): 3x→2x→1x each reduced DD dramatically.
+// At 54% WR with avg loss > avg win, leverage amplifies the problem.
+// Revert to 1x until WR > 60% and avg win > avg loss.
+const DIRECTIONAL_LEVERAGE = 1;
 
 /** Score-based position sizing multiplier.
  *  Nunchi autoresearch (103 experiments): removing strength/volume scaling
@@ -116,6 +119,17 @@ export class TradeExecutor {
     error?: string;
     dryRun: boolean;
   }> {
+    // Token blacklist — serial losers identified from trade analysis.
+    // AAVE: 4 trades, 1W, -$145. FARTCOIN: 2 trades, 0W, -$118.
+    const BLACKLISTED_TOKENS = new Set(['aave', 'fartcoin']);
+    if (BLACKLISTED_TOKENS.has(tokenId)) {
+      return {
+        success: false,
+        error: `Token ${tokenId} is blacklisted (serial loser)`,
+        dryRun: this.config.dryRun,
+      };
+    }
+
     // Handle SELL/STRONG_SELL outside hyperliquid-perp mode.
     //   • If an existing LONG exists → close it (signal flip / take-profit-by-signal).
     //   • Otherwise (no position OR existing SHORT) → fall through to the
@@ -212,7 +226,7 @@ export class TradeExecutor {
     // after. Widened floor from 3% → 4% to give trades more room to breathe
     // in crypto's noisy price action. ATR-based stops still dominate on
     // higher-vol tokens where ATR × 3.5 > 4%.
-    const STOP_FLOOR = 0.04;   // minimum 4% (was 3% — too tight, noise-stopped)
+    const STOP_FLOOR = 0.05;   // minimum 5% (was 4% — still noise-stopping, 63% of exits are stops)
     const STOP_CAP = 0.12;     // maximum 12% (tightened from 15%)
     const FALLBACK_STOP = 0.05; // when no ATR available (was 4%)
 
@@ -384,7 +398,7 @@ export class TradeExecutor {
 
     // --- Partial profit exits (50% at +3%) ---
     // Reload state after each partial close to avoid iterating stale positions.
-    const PARTIAL_PROFIT_TRIGGER = 0.02; // +2% unrealized gain (was 3% — too high with leverage, missed exits)
+    const PARTIAL_PROFIT_TRIGGER = 0.015; // +1.5% unrealized gain — lock profits earlier at 1x leverage
     const PARTIAL_FRACTION = 0.5;
 
     // First pass: identify candidates from a fresh load

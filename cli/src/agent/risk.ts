@@ -136,8 +136,8 @@ export const DEFAULT_RISK_CONFIG: RiskConfig = {
   maxConcurrentTrades: 8,
   hardStopPercent: 0.10,          // 10% hard stop (was 5% — wider to match 3.5x ATR stops)
   trailingStopAtr: 3.5,           // match executor ATR multiplier (was 1.5x — autoresearch: wider = better)
-  trailingStopPct: 0.04,               // 4% fallback trail (was 2.5% — gives winners more room)
-  breakevenTriggerPct: 0.02,           // move to breakeven after +2% gain (lowered to match partial profit trigger)
+  trailingStopPct: 0.03,               // 3% trail (autoresearch: tighter trail locks profits faster)
+  breakevenTriggerPct: 0.015,          // move to breakeven after +1.5% gain
   // Orca-inspired HWM profit-lock (see README / PR #223): each entry locks a
   // percentage of the peak-to-date move. Tiers cascade — the highest
   // triggered tier wins — and stops never ratchet down.
@@ -728,8 +728,8 @@ export class RiskManager {
 
       // Time-based exit: close after 48h if PnL is flat (<1%)
       const holdingHours = (Date.now() - pos.entryTimestamp) / (1000 * 60 * 60);
-      // Autoresearch: 96h outperformed 48h — let positions run longer.
-      if (holdingHours > 96 && pnlPercent < 0.01 && pnlPercent > -0.01) {
+      // Autoresearch (Apr 24): 96h→84h — kill dead positions sooner for capital recycling.
+      if (holdingHours > 84 && pnlPercent < 0.01 && pnlPercent > -0.01) {
         toClose.push(updatedPos);
         reasons[pos.tokenId] = `Time stop: held ${(holdingHours / 24).toFixed(1)} days with only ${(pnlPercent * 100).toFixed(1)}% PnL`;
         continue;

@@ -46,8 +46,8 @@ export interface ScoringWeights {
 // categories that actually fire and produce directional opinions).
 export const DEFAULT_WEIGHTS: ScoringWeights = {
   smartMoney: 0.05,
-  technical: 0.35,
-  sentiment: 0.10,    // reduced — only socialVolume active (needs CC API key)
+  technical: 0.40,    // +5% from sentiment reduction
+  sentiment: 0.05,    // autoresearch: 0.10→0.05 — socialVolume is mostly noise
   onchain: 0.20,
   fundamental: 0.15,
   event: 0.15,         // boosted — predictionMarket is the only forward-looking signal
@@ -138,8 +138,9 @@ export const REGIME_THRESHOLDS: Record<MarketRegime, ActionThresholds> = {
   // signals, scores compress to -0.15 to +0.15 range. Max score in last 6h was
   // 0.147 — threshold at 0.20 was unreachable. At 0.10, ~3% of signals fire
   // (~4-5 trades/day). The regime gate + stop management handle risk.
-  "trending-up": { strongBuy: 0.30, buy: 0.10, sell: -0.30, strongSell: -0.60 },
-  "trending-down": { strongBuy: 0.50, buy: 0.30, sell: -0.10, strongSell: -0.30 },
+  // Autoresearch (Apr 24): buy 0.10→0.12 (more selective), sell -0.30→-0.13
+  "trending-up": { strongBuy: 0.25, buy: 0.12, sell: -0.13, strongSell: -0.25 },
+  "trending-down": { strongBuy: 0.25, buy: 0.13, sell: -0.12, strongSell: -0.25 },
   // Apr 2026 recalibration: with dead-weight strategies removed (event,
   // tokenUnlock, tvlMomentum, meanReversion — all 0% fire rate), only 6
   // strategies remain active. The prior 0.30 BUY threshold was never reached

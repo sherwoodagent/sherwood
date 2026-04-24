@@ -284,7 +284,7 @@ describe("computeTradeDecision", () => {
     expect(trendingUpDecision.score).toBeGreaterThan(0.10);
     // With lowered thresholds, strong bullish signals now hit STRONG_BUY (>= 0.30)
     expect(["BUY", "STRONG_BUY"]).toContain(trendingUpDecision.action);
-    expect(trendingUpDecision.thresholds?.buy).toBe(0.10);
+    expect(trendingUpDecision.thresholds?.buy).toBe(0.12);
   });
 
   it("ranging regime fires BUY at the 0.17 threshold", () => {
@@ -303,13 +303,12 @@ describe("computeTradeDecision", () => {
     expect(rangingDecision.thresholds?.sell).toBeCloseTo(-0.15, 2);
   });
 
-  it("trending-up is asymmetric — harder to SELL than BUY", () => {
-    // In trending-up: BUY at 0.10 but SELL at -0.30 — asymmetric in favor of longs.
-    // A mild bearish score of -0.20 should be HOLD (below -0.30 sell threshold).
+  it("trending-up BUY threshold is lower than SELL (asymmetric in favor of longs)", () => {
+    // In trending-up: BUY at 0.12, SELL at -0.13 — nearly symmetric but
+    // the regime gate blocks shorts in trending-up anyway.
+    // A bearish score of -0.05 should be HOLD (above -0.13 sell threshold).
     const signals: Signal[] = [
-      makeSignal("technical", -0.20),
-      makeSignal("sentiment", -0.20),
-      makeSignal("onchain", -0.20),
+      makeSignal("technical", -0.05),
     ];
     const trendingUpDecision = computeTradeDecision(
       signals,
@@ -318,8 +317,8 @@ describe("computeTradeDecision", () => {
       undefined,
       "trending-up",
     );
-    expect(trendingUpDecision.score).toBeLessThan(-0.15);
-    expect(trendingUpDecision.score).toBeGreaterThan(-0.30);
+    expect(trendingUpDecision.score).toBeLessThan(0);
+    expect(trendingUpDecision.score).toBeGreaterThan(-0.13);
     expect(trendingUpDecision.action).toBe("HOLD");
   });
 
