@@ -615,6 +615,35 @@ describe("PortfolioTracker.closePartial", () => {
     expect(pos!.partialTaken).toBe(true);
   });
 
+  it("keeps totalValue on margin-equity accounting after partial close", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (path: any, data: any) => {
+      const content = typeof data === "string" ? data : data.toString();
+      if (String(path).includes("trades")) {
+        backing.trades = content;
+      } else {
+        backing.state = content;
+      }
+    });
+    const tracker = new PortfolioTracker();
+
+    await tracker.openPosition({
+      tokenId: "bitcoin", symbol: "BTC", side: "long",
+      entryPrice: 100, currentPrice: 120, quantity: 10,
+      entryTimestamp: Date.now(),
+      stopLoss: 95, takeProfit: 130, strategy: "test",
+    });
+
+    await tracker.closePartial("bitcoin", 0.5, 120, "Partial profit");
+
+    const state = await tracker.load();
+    expect(state.cash).toBeCloseTo(9935, 2);
+    expect(state.positions[0]!.quantity).toBeCloseTo(5, 4);
+    // cash + remaining margin (5*100*0.33) + remaining unrealized PnL (5*20)
+    expect(state.totalValue).toBeCloseTo(10200, 2);
+  });
+
   it("rejects invalid fraction", async () => {
     const tracker = new PortfolioTracker();
     await expect(tracker.closePartial("bitcoin", 0, 100, "test")).rejects.toThrow(/Invalid fraction/);

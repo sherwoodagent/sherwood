@@ -431,4 +431,41 @@ describe("computeTradeDecision", () => {
     // Technical should dominate due to weight override
     expect(decision.score).toBeGreaterThan(0.5);
   });
+
+  it("ignores harmful/noisy signals in composite scoring", () => {
+    const decision = computeTradeDecision(
+      [
+        makeSignal("tradingviewSignal", 1.0),
+        makeSignal("momentum", 1.0),
+        makeSignal("fundingRate", 1.0),
+        makeSignal("hyperliquidFlow", 1.0),
+        makeSignal("event", 1.0),
+      ],
+      undefined,
+      undefined,
+      undefined,
+      "ranging",
+    );
+
+    expect(decision.score).toBe(0);
+    expect(decision.action).toBe("HOLD");
+  });
+
+  it("keeps high-quality signals active after noisy signals are ignored", () => {
+    const decision = computeTradeDecision(
+      [
+        makeSignal("smartMoney", 0.4),
+        makeSignal("fundamental", 0.3),
+        makeSignal("tradingviewSignal", -1.0),
+        makeSignal("momentum", -1.0),
+      ],
+      undefined,
+      undefined,
+      undefined,
+      "ranging",
+    );
+
+    expect(decision.score).toBeGreaterThan(0.25);
+    expect(["BUY", "STRONG_BUY"]).toContain(decision.action);
+  });
 });

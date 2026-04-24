@@ -103,6 +103,16 @@ const DEFAULT_PORTFOLIO: PortfolioState = {
   initialValue: 10000,
 };
 
+function createDefaultPortfolio(): PortfolioState {
+  return {
+    ...DEFAULT_PORTFOLIO,
+    positions: [],
+    stopCooldowns: {},
+    tokenConsecLosses: {},
+    tokenLossCooldowns: {},
+  };
+}
+
 export class PortfolioTracker {
   private statePath: string;
   private historyPath: string;
@@ -115,7 +125,7 @@ export class PortfolioTracker {
     const base = join(homedir(), '.sherwood', 'agent');
     this.statePath = join(base, 'portfolio.json');
     this.historyPath = join(base, 'trades.json');
-    this.state = { ...DEFAULT_PORTFOLIO };
+    this.state = createDefaultPortfolio();
   }
 
   /** Acquire the in-process lock. Callers that perform load→modify→save
@@ -184,7 +194,7 @@ export class PortfolioTracker {
 
       if (vaultValueUsd > 0) {
         this.state = {
-          ...DEFAULT_PORTFOLIO,
+          ...createDefaultPortfolio(),
           totalValue: vaultValueUsd,
           cash: vaultValueUsd,
           initialValue: vaultValueUsd, // anchor cumulative PnL% to the on-chain starting balance
@@ -226,7 +236,7 @@ export class PortfolioTracker {
         || !Array.isArray(parsed.positions)
       ) {
         console.error('Portfolio file has invalid data — resetting to defaults');
-        this.state = { ...DEFAULT_PORTFOLIO };
+        this.state = createDefaultPortfolio();
         return this.state;
       }
 
@@ -240,7 +250,7 @@ export class PortfolioTracker {
           || !Number.isFinite(p.takeProfit) || p.takeProfit <= 0
         ) {
           console.error(`Invalid position data for ${p.tokenId} — resetting portfolio`);
-          this.state = { ...DEFAULT_PORTFOLIO };
+          this.state = createDefaultPortfolio();
           return this.state;
         }
       }
@@ -255,7 +265,7 @@ export class PortfolioTracker {
       this.state = parsed;
     } catch {
       // File doesn't exist or is invalid — start fresh
-      this.state = { ...DEFAULT_PORTFOLIO };
+      this.state = createDefaultPortfolio();
     }
     return this.state;
   }
@@ -506,9 +516,7 @@ export class PortfolioTracker {
     this.state.dailyPnl += pnlUsd;
     this.state.weeklyPnl += pnlUsd;
     this.state.monthlyPnl += pnlUsd;
-    this.state.totalValue = this.state.cash + this.state.positions.reduce(
-      (sum, p) => sum + p.quantity * p.currentPrice, 0,
-    );
+    this.state.totalValue = computeTotalValue(this.state.cash, this.state.positions);
 
     await this.save(this.state);
     return { pnl: pnlUsd, pnlPercent, quantityClosed };

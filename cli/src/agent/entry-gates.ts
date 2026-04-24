@@ -51,6 +51,9 @@ export interface EntryGateConfig {
   /** When true, SELL/STRONG_SELL signals are blocked in non-bearish regimes
    *  (trending-up, ranging, low-volatility). Default true. */
   regimeGateEnabled: boolean;
+  /** When true, actionable entries must be backed by at least one aligned
+   *  high-quality signal, not just noisy/lagging components. Default true. */
+  realAlphaGateEnabled: boolean;
 }
 
 export const DEFAULT_ENTRY_GATE_CONFIG: EntryGateConfig = {
@@ -58,7 +61,28 @@ export const DEFAULT_ENTRY_GATE_CONFIG: EntryGateConfig = {
   velocityGateBuyMinPct: VELOCITY_GATE_BUY_MIN_PCT,   // -1.0%
   velocityGateSellMaxPct: VELOCITY_GATE_SELL_MAX_PCT,  // +1.0%
   regimeGateEnabled: true,
+  realAlphaGateEnabled: true,
 };
+
+/** Signals allowed to justify an entry after the noisy-signal score filter. */
+const REAL_ALPHA_THRESHOLDS: Record<string, number> = {
+  smartMoney: 0.15,
+  whaleIntent: 0.15,
+  fundamental: 0.15,
+  dexFlow: 0.25,
+  meanReversion: 0.25,
+  narrativeVacuum: 0.25,
+};
+
+function hasAlignedRealAlpha(result: TokenAnalysis, direction: 1 | -1): boolean {
+  for (const signal of result.decision.signals) {
+    const threshold = REAL_ALPHA_THRESHOLDS[signal.name];
+    if (threshold === undefined) continue;
+    if (direction > 0 && signal.value >= threshold) return true;
+    if (direction < 0 && signal.value <= -threshold) return true;
+  }
+  return false;
+}
 
 /**
  * Derive a short-term velocity (fractional change) from candles.
@@ -189,6 +213,38 @@ export function applyRegimeGate(
   return {
     ...result,
     preRegime: { action: result.decision.action, score: result.decision.score },
+    decision: { ...result.decision, action: "HOLD" },
+  };
+}
+
+/**
+ * Blocks entries whose score is created only by noisy/lagging signals. Recent
+ * signal analysis showed momentum, TradingView, funding, and HL flow were
+ * negative-edge inputs; this gate requires a separate aligned alpha source.
+ */
+export function applyRealAlphaGate(
+  result: TokenAnalysis,
+  config: EntryGateConfig = DEFAULT_ENTRY_GATE_CONFIG,
+  logger: (msg: string) => void = () => {},
+): TokenAnalysis {
+  if (!config.realAlphaGateEnabled) return result;
+
+  const action = result.decision.action;
+  const isBuy = action === "BUY" || action === "STRONG_BUY";
+  const isSell = action === "SELL" || action === "STRONG_SELL";
+  if (!isBuy && !isSell) return result;
+
+  const direction = isBuy ? 1 : -1;
+  if (hasAlignedRealAlpha(result, direction)) return result;
+
+  logger(
+    `  [alpha] DOWNGRADE ${result.token}: ${action} blocked — no aligned real-alpha ` +
+      `signal (requires smartMoney, fundamental, dexFlow, meanReversion, narrativeVacuum, or whaleIntent)`,
+  );
+
+  return {
+    ...result,
+    preAlpha: { action: result.decision.action, score: result.decision.score },
     decision: { ...result.decision, action: "HOLD" },
   };
 }

@@ -39,7 +39,7 @@ import type { JudgeLogData } from "./signal-logger.js";
 import { judge, selectJudgeCandidates, DEFAULT_JUDGE_CONFIG } from "./judge.js";
 import type { JudgeConfig, JudgeVerdict, JudgeContext } from "./judge.js";
 import { SignalSmoother, FileSmootherStorage, DEFAULT_SMOOTHER_CONFIG } from "./signal-smoother.js";
-import { applyVelocityGate, applyRegimeGate, resolveVelocity, DEFAULT_ENTRY_GATE_CONFIG } from "./entry-gates.js";
+import { applyVelocityGate, applyRegimeGate, applyRealAlphaGate, resolveVelocity, DEFAULT_ENTRY_GATE_CONFIG } from "./entry-gates.js";
 import type { EntryGateConfig } from "./entry-gates.js";
 import { join as joinPath } from "node:path";
 import { homedir as getHomedir } from "node:os";
@@ -108,6 +108,8 @@ export interface TokenAnalysis {
   preVelocity?: { action: string; score: number };
   /** Original action/score before regime gate blocked a short in non-bearish regime. */
   preRegime?: { action: string; score: number };
+  /** Original action/score before real-alpha gate blocked a noisy-only entry. */
+  preAlpha?: { action: string; score: number };
   /** Kronos ML-predicted per-candle volatility (fraction). Used by executor
    *  for dynamic stop-loss width when available. */
   kronosVol4h?: number;
@@ -627,7 +629,12 @@ export class TradingAgent {
     // Regime gate — block shorts in non-bearish regimes (trending-up, ranging,
     // low-volatility). Trade log analysis: 25% short WR (-$194) vs 67% long WR
     // (+$279). Most short losses were counter-trend fades.
-    const gatedResult = applyRegimeGate(velocityGated, regimeAnalysis?.regime, gateConfig, (msg) =>
+    const regimeGated = applyRegimeGate(velocityGated, regimeAnalysis?.regime, gateConfig, (msg) =>
+      console.error(chalk.yellow(msg)),
+    );
+
+    // Real-alpha gate — block entries that are only supported by noisy inputs.
+    const gatedResult = applyRealAlphaGate(regimeGated, gateConfig, (msg) =>
       console.error(chalk.yellow(msg)),
     );
 

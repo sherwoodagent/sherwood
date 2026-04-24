@@ -25,32 +25,17 @@ export interface ScoringWeights {
   event: number;
 }
 
-// Replay calibration over 5 days × 15 tokens / 1817 production observations
-// ranked the `contrarian` profile (sentiment 0.40) #1 with Sharpe 1.354,
-// while the prior `default` (sentiment 0.20) ranked 21st with Sharpe 0.296.
-// Rebalanced to lift sentiment, cut the most-lagging signals (technical),
-// and reduce smartMoney since x402 Nansen is often unfunded in practice.
-// `onchain` slightly boosted — HL flow + fundingRate are the highest-firing
-// live categories. Sums to 1.00.
-// Apr 23 2026: removed dead signals from default strategy list:
-// - sentimentContrarian: fires only at F&G extremes (<25 or >75), zero 85% of time
-// - dexFlow: our tokens trade on CEXes, DEXScreener returns 0 txns for most
-// Active signals:
-// - technical (7): scoreTechnical, momentum, breakout, MTF, XS momentum, BTC network, Kronos vol
-// - onchain (2): HL flow, funding rate
-// - sentiment (1): socialVolume (CryptoCompare — needs API key)
-// - fundamental (1): scoreFundamental (Messari + DefiLlama TVL)
-// - event (1): predictionMarket (Polymarket/Manifold)
-// - smartMoney (1): Nansen x402 (when funded)
-// Freed weight from dead signals redistributed to technical + onchain (the
-// categories that actually fire and produce directional opinions).
+// Apr 24 2026 signal review over 23k live observations:
+// - Upweight smartMoney/fundamental; both had the best 12h-24h forward edge.
+// - Keep technical/onchain categories, but exclude harmful child signals below.
+// - Event is set to 0 until it produces non-zero, testable observations.
 export const DEFAULT_WEIGHTS: ScoringWeights = {
-  smartMoney: 0.05,
-  technical: 0.40,    // +5% from sentiment reduction
-  sentiment: 0.05,    // autoresearch: 0.10→0.05 — socialVolume is mostly noise
+  smartMoney: 0.30,
+  technical: 0.25,
+  sentiment: 0.10,
   onchain: 0.20,
   fundamental: 0.15,
-  event: 0.15,         // boosted — predictionMarket is the only forward-looking signal
+  event: 0.00,
 };
 
 /**
@@ -68,16 +53,10 @@ export const DEFAULT_WEIGHTS: ScoringWeights = {
  */
 export const WEIGHT_PROFILES: Record<string, ScoringWeights> = {
   default: DEFAULT_WEIGHTS,
-  // Majors (BTC/ETH/SOL): no TVL/event data. 4 active categories.
-  // Same rebalance rationale as DEFAULT_WEIGHTS — replay calibration showed
-  // sentiment-heavy profiles dominating production-stack data; this profile
-  // concentrates the freed-up weight into sentiment + onchain (the two
-  // categories that produce directional opinions on majors). Technical and
-  // smartMoney shrink because both are lagging or unfunded in practice.
-  // Majors: technical + onchain dominate (HL data is richest for BTC/ETH/SOL).
-  majors:    { smartMoney: 0.05, technical: 0.35, sentiment: 0.10, onchain: 0.25, fundamental: 0.10, event: 0.15 },
+  // Majors: smartMoney + technical + onchain dominate; event remains disabled.
+  majors:    { smartMoney: 0.30, technical: 0.30, sentiment: 0.10, onchain: 0.20, fundamental: 0.10, event: 0.00 },
   // Altcoins: fundamentals matter more (TVL, Messari supply data).
-  altcoin:   { smartMoney: 0.05, technical: 0.30, sentiment: 0.10, onchain: 0.10, fundamental: 0.30, event: 0.15 },
+  altcoin:   { smartMoney: 0.25, technical: 0.20, sentiment: 0.10, onchain: 0.15, fundamental: 0.30, event: 0.00 },
   // sentHeavy/techHeavy removed — unvalidated, added parameter complexity without evidence of benefit
 };
 
@@ -498,6 +477,18 @@ const COUNTER_TREND_DAMPENED = new Set(['kronosVolForecast', 'socialVolume', 'wh
 /** Minimum absolute signal value to trigger counter-trend dampening. */
 const COUNTER_TREND_THRESHOLD = 0.05;
 
+/** Signals that recent forward-return analysis showed as harmful or dead.
+ *  They are still logged for audit, but they no longer affect action scoring. */
+const EXCLUDED_SCORING_SIGNALS = new Set([
+  'tradingviewSignal',
+  'momentum',
+  'fundingRate',
+  'hyperliquidFlow',
+  'event',
+  'tokenUnlock',
+  'tvlMomentum',
+]);
+
 /** Signal name → weight category mapping. */
 const SIGNAL_CATEGORY_MAP: Record<string, keyof ScoringWeights> = {
   technical: "technical",
@@ -556,6 +547,7 @@ export function computeTradeDecision(
   // Count how many signals fire per category, then split category weight among them.
   const categoryCounts: Record<string, number> = {};
   for (const signal of signals) {
+    if (EXCLUDED_SCORING_SIGNALS.has(signal.name)) continue;
     if (signal._weightOverride !== undefined) continue; // manual overrides skip normalization
     const category = SIGNAL_CATEGORY_MAP[signal.name];
     if (!category || excludedCategories.has(category)) continue;
@@ -568,6 +560,7 @@ export function computeTradeDecision(
   let weightedConfidence = 0;
 
   for (const signal of signals) {
+    if (EXCLUDED_SCORING_SIGNALS.has(signal.name)) continue;
     // Determine signal weight
     let signalWeight: number;
 
@@ -663,6 +656,7 @@ export function computeTradeDecision(
     // inflate convergence count when voting against the momentum direction.
     const categoryNetDirection = new Map<string, number>();
     for (const signal of signals) {
+      if (EXCLUDED_SCORING_SIGNALS.has(signal.name)) continue;
       const category = SIGNAL_CATEGORY_MAP[signal.name];
       if (!category || excludedCategories.has(category)) continue;
       if (signal._weightOverride !== undefined) continue;

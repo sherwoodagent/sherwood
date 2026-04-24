@@ -7,6 +7,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   applyVelocityGate,
   applyRegimeGate,
+  applyRealAlphaGate,
   deriveVelocityFromCandles,
   resolveVelocity,
   DEFAULT_ENTRY_GATE_CONFIG,
@@ -17,18 +18,20 @@ import {
 import type { MarketRegime } from "./regime.js";
 import type { TokenAnalysis } from "./index.js";
 import type { Candle } from "./technical.js";
+import type { Signal } from "./scoring.js";
 
 function makeAnalysis(
   token: string,
   action: TokenAnalysis["decision"]["action"],
   score: number,
+  signals: Signal[] = [],
 ): TokenAnalysis {
   return {
     token,
     decision: {
       action,
       score,
-      signals: [],
+      signals,
       reasoning: "test",
       confidence: 0.6,
       timestamp: Date.now(),
@@ -287,6 +290,10 @@ describe("exported defaults", () => {
   it("DEFAULT_ENTRY_GATE_CONFIG has regime gate enabled", () => {
     expect(DEFAULT_ENTRY_GATE_CONFIG.regimeGateEnabled).toBe(true);
   });
+
+  it("DEFAULT_ENTRY_GATE_CONFIG has real-alpha gate enabled", () => {
+    expect(DEFAULT_ENTRY_GATE_CONFIG.realAlphaGateEnabled).toBe(true);
+  });
 });
 
 describe("applyRegimeGate", () => {
@@ -396,5 +403,60 @@ describe("applyRegimeGate", () => {
     expect(SHORT_ALLOWED_REGIMES.has("trending-down")).toBe(true);
     expect(SHORT_ALLOWED_REGIMES.has("high-volatility")).toBe(true);
     expect(SHORT_ALLOWED_REGIMES.size).toBe(2);
+  });
+});
+
+describe("applyRealAlphaGate", () => {
+  function signal(name: string, value: number): Signal {
+    return {
+      name,
+      value,
+      confidence: 0.8,
+      source: name,
+      details: `${name}=${value}`,
+    };
+  }
+
+  it("blocks BUY when only noisy signals support the entry", () => {
+    const input = makeAnalysis("bitcoin", "BUY", 0.18, [
+      signal("momentum", 0.9),
+      signal("tradingviewSignal", 0.7),
+      signal("fundingRate", 0.5),
+    ]);
+    const result = applyRealAlphaGate(input);
+    expect(result.decision.action).toBe("HOLD");
+    expect(result.preAlpha).toEqual({ action: "BUY", score: 0.18 });
+  });
+
+  it("allows BUY when smartMoney is aligned", () => {
+    const input = makeAnalysis("ethereum", "BUY", 0.20, [
+      signal("smartMoney", 0.16),
+      signal("momentum", 0.9),
+    ]);
+    const result = applyRealAlphaGate(input);
+    expect(result.decision.action).toBe("BUY");
+    expect(result.preAlpha).toBeUndefined();
+  });
+
+  it("allows SELL when a real-alpha signal is bearish", () => {
+    const input = makeAnalysis("zcash", "SELL", -0.25, [
+      signal("dexFlow", -0.3),
+      signal("fundingRate", -0.5),
+    ]);
+    const result = applyRealAlphaGate(input);
+    expect(result.decision.action).toBe("SELL");
+    expect(result.preAlpha).toBeUndefined();
+  });
+
+  it("skips gate when disabled", () => {
+    const input = makeAnalysis("solana", "BUY", 0.18, [
+      signal("momentum", 1),
+    ]);
+    const result = applyRealAlphaGate(input, {
+      ...DEFAULT_ENTRY_GATE_CONFIG,
+      realAlphaGateEnabled: false,
+    });
+    expect(result.decision.action).toBe("BUY");
+    expect(result.preAlpha).toBeUndefined();
   });
 });
