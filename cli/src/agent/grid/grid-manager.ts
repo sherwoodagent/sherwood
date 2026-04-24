@@ -76,19 +76,12 @@ export class GridManager {
       return { fills: 0, roundTrips: 0, pnlUsd: 0, paused: state?.paused ?? false };
     }
 
-    // Regime-aware grid control: pause new fills during strong directional moves.
-    // Grid profits from mean reversion — trending markets sweep all levels in one
-    // direction, creating underwater positions. High-volatility regimes are also
-    // dangerous (wide swings can blow past the grid range).
-    //
-    // Behavior by regime:
-    //   ranging / low-volatility → full grid active (best conditions)
-    //   trending-up / trending-down → skip new BUY/SELL fills, only process
-    //     existing open fills (let round trips complete, don't open new ones)
-    //   high-volatility → pause entirely (too dangerous)
-    //   unknown → treat as ranging (no data = don't block)
-    const gridFriendlyRegime = !regime || regime === 'ranging' || regime === 'low-volatility' || regime === 'unknown';
-    const trendingRegime = regime === 'trending-up' || regime === 'trending-down';
+    // Regime-aware grid control: only pause in high-volatility (dangerous swings).
+    // Previously also paused buys in trending regimes, but the global regime
+    // detector lags — BTC can be ranging $76-78k for a day while EMA(21,50)
+    // still says "trending-up". The grid's own rebalance drift check is a
+    // better signal: if price hasn't triggered a rebalance, it's range-bound
+    // within the grid regardless of what the macro regime says.
     if (regime === 'high-volatility') {
       console.error(chalk.dim(`  [grid] Paused: high-volatility regime — too risky for grid`));
       return { fills: 0, roundTrips: 0, pnlUsd: 0, paused: false };
@@ -110,9 +103,9 @@ export class GridManager {
         await this.buildGrid(grid, price);
       }
 
-      // Simulate fills — in trending regime, only close existing fills (complete RTs),
-      // don't open new positions that will get swept by the trend.
-      const { fills, roundTrips, pnlUsd } = this.simulateFills(grid, price, trendingRegime);
+      // Simulate fills — both buys and sells. The grid's own rebalance drift
+      // handles directional moves (rebuilds when price drifts 40% toward edge).
+      const { fills, roundTrips, pnlUsd } = this.simulateFills(grid, price);
       totalFills += fills;
       totalRoundTrips += roundTrips;
       totalPnl += pnlUsd;
@@ -193,7 +186,6 @@ export class GridManager {
   private simulateFills(
     grid: GridTokenState,
     currentPrice: number,
-    skipNewFills: boolean = false,
   ): { fills: number; roundTrips: number; pnlUsd: number } {
     let fills = 0;
     let roundTrips = 0;
@@ -206,11 +198,8 @@ export class GridManager {
     if (spacing <= 0) return { fills: 0, roundTrips: 0, pnlUsd: 0 };
 
     // Step 1: Fill unfilled grid levels (buy when price drops, sell is just accounting)
-    // In trending regime (skipNewFills=true), skip new BUY entries but still process
-    // SELL levels — sell fills are needed to complete round trips on existing positions.
     for (const level of grid.levels) {
       if (level.filled) continue;
-      if (skipNewFills && level.side === 'buy') continue;
 
       if (level.side === 'buy' && currentPrice <= level.price) {
         level.filled = true;
