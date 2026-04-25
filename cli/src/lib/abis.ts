@@ -778,6 +778,20 @@ export const VENICE_STAKING_ABI = [
     inputs: [],
     outputs: [],
   },
+  {
+    name: "burnDiem",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "diemAmountToBurn", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    name: "balanceOfUnlocked",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "user", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
 ] as const;
 
 // ── EAS (Ethereum Attestation Service) ──

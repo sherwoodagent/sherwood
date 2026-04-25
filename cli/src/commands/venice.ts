@@ -181,10 +181,12 @@ export function registerVeniceCommands(program: Command): void {
         console.log(chalk.dim("     more sVVV first, or use x402 USDC pay-per-request."));
       }
 
-      // 4. Cooldown warning + confirmation
+      // 4. Lockup warning + confirmation
       console.log();
-      console.log(chalk.yellow("  ⚠  sVVV locked via mintDiem has a ~1 day cooldown before it can"));
-      console.log(chalk.yellow("     be unstaked. This action is effectively one-way for 24h."));
+      console.log(chalk.yellow("  ⚠  Locked sVVV cannot be unstaked directly. To recover it you must"));
+      console.log(chalk.yellow("     first call `staking.burnDiem(amount)` (burns DIEM, unlocks sVVV"));
+      console.log(chalk.yellow("     at your average mint rate), then `initiateUnstake` + wait the"));
+      console.log(chalk.yellow("     7-day staking cooldown, then `finalizeUnstake`."));
       console.log(chalk.dim("     x402 alternative (pay-per-request in USDC, no DIEM lock):"));
       console.log(chalk.dim("     https://docs.venice.ai/overview/guides/generating-api-key-agent#paying-for-inference"));
       console.log();
