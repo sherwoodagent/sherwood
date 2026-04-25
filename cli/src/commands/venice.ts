@@ -83,6 +83,89 @@ export function registerVeniceCommands(program: Command): void {
       }
     });
 
+  // ── venice stake ──
+
+  venice
+    .command("stake")
+    .description("Stake VVV tokens to receive sVVV (required for API key provisioning)")
+    .requiredOption("--amount <n>", "Amount of VVV to stake (human-readable, e.g. 13)")
+    .action(async (opts) => {
+      const account = getAccount();
+      const client = getPublicClient();
+      const chain = getChain();
+      const veniceAddrs = VENICE();
+      const amount = parseUnits(opts.amount, 18);
+
+      // Check VVV balance
+      const balSpinner = ora("Checking VVV balance...").start();
+      try {
+        const vvvBalance = await client.readContract({
+          address: veniceAddrs.VVV,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [account.address],
+        }) as bigint;
+
+        if (vvvBalance < amount) {
+          balSpinner.fail(`Insufficient VVV: have ${formatUnits(vvvBalance, 18)}, need ${opts.amount}`);
+          process.exit(1);
+        }
+        balSpinner.succeed(`VVV balance: ${formatUnits(vvvBalance, 18)}`);
+      } catch (err) {
+        balSpinner.fail("Failed to check VVV balance");
+        console.error(chalk.red(formatContractError(err)));
+        process.exit(1);
+      }
+
+      // Approve VVV spend
+      const approveSpinner = ora("Approving VVV for staking contract...").start();
+      try {
+        const approveHash = await writeContractWithRetry({
+          account,
+          chain,
+          address: veniceAddrs.VVV,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [veniceAddrs.STAKING, amount],
+        });
+        await waitForReceipt(approveHash);
+        approveSpinner.succeed("VVV approved");
+      } catch (err) {
+        approveSpinner.fail("Approve failed");
+        console.error(chalk.red(formatContractError(err)));
+        process.exit(1);
+      }
+
+      // Stake VVV → sVVV
+      const stakeSpinner = ora(`Staking ${opts.amount} VVV...`).start();
+      try {
+        const stakeHash = await writeContractWithRetry({
+          account,
+          chain,
+          address: veniceAddrs.STAKING,
+          abi: VENICE_STAKING_ABI,
+          functionName: "stake",
+          args: [account.address, amount],
+        });
+        await waitForReceipt(stakeHash);
+
+        // Read new sVVV balance
+        const sVvvBalance = await client.readContract({
+          address: veniceAddrs.STAKING,
+          abi: VENICE_STAKING_ABI,
+          functionName: "balanceOf",
+          args: [account.address],
+        }) as bigint;
+
+        stakeSpinner.succeed(`Staked ${opts.amount} VVV → ${formatUnits(sVvvBalance, 18)} sVVV`);
+        console.log(chalk.dim("  You can now run: sherwood venice provision"));
+      } catch (err) {
+        stakeSpinner.fail("Stake failed");
+        console.error(chalk.red(formatContractError(err)));
+        process.exit(1);
+      }
+    });
+
   // ── venice mint-diem ──
 
   venice
