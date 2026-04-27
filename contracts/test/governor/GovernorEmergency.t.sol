@@ -592,12 +592,41 @@ contract GovernorEmergencyTest is Test {
         BatchExecutorLib.Call[] memory tooMany = new BatchExecutorLib.Call[](65);
         for (uint256 i = 0; i < 65; i++) {
             tooMany[i] = BatchExecutorLib.Call({
-                target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
+                target: address(usdc),
+                data: abi.encodeCall(usdc.approve, (address(targetToken), 0)),
+                value: 0
             });
         }
 
         vm.prank(owner);
         vm.expectRevert(ISyndicateGovernor.TooManyCalls.selector);
         governor.emergencySettleWithCalls(pid, tooMany);
+    }
+
+    function test_emergencySettle_reopenWithoutCancel_reverts() public {
+        uint256 pid = _createExecutedProposal(7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+
+        vm.prank(owner);
+        governor.emergencySettleWithCalls(pid, _customCalls());
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.EmergencyAlreadyOpen.selector);
+        governor.emergencySettleWithCalls(pid, _customCalls());
+    }
+
+    function test_cancelEmergencySettle_afterStandardSettle_reverts() public {
+        uint256 pid = _createExecutedProposal(7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+
+        vm.prank(owner);
+        governor.emergencySettleWithCalls(pid, _customCalls());
+
+        vm.warp(vm.getBlockTimestamp() + REVIEW_PERIOD + 1);
+        governor.settleProposal(pid);
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotExecuted.selector);
+        governor.cancelEmergencySettle(pid);
     }
 }

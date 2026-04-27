@@ -142,6 +142,7 @@ interface ISyndicateGovernor {
     error EmergencySettleBlocked();
     error EmergencySettleMismatch();
     error EmergencyNotProposed();
+    error EmergencyAlreadyOpen();
 
     // ── Guardian-review lifecycle errors (Task 25) ──
     error NotInGuardianReview();

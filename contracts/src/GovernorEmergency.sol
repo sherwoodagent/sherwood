@@ -85,6 +85,7 @@ abstract contract GovernorEmergency is ISyndicateGovernor {
         if (msg.sender != OwnableUpgradeable(p.vault).owner()) revert NotVaultOwner();
         if (p.state != ProposalState.Executed) revert ProposalNotExecuted();
         if (block.timestamp < p.executedAt + p.strategyDuration) revert StrategyDurationNotElapsed();
+        if (_getEmergencyCallsHash(proposalId) != bytes32(0)) revert EmergencyAlreadyOpen();
 
         IGuardianRegistry reg = _getRegistry();
         if (reg.ownerStake(p.vault) < reg.requiredOwnerBond(p.vault)) revert OwnerBondInsufficient();
@@ -107,6 +108,7 @@ abstract contract GovernorEmergency is ISyndicateGovernor {
     function cancelEmergencySettle(uint256 proposalId) external emergencyNonReentrant {
         StrategyProposal storage p = _getProposal(proposalId);
         if (msg.sender != OwnableUpgradeable(p.vault).owner()) revert NotVaultOwner();
+        if (p.state != ProposalState.Executed) revert ProposalNotExecuted();
         if (_getEmergencyCallsHash(proposalId) == bytes32(0)) revert EmergencyNotProposed();
         _getRegistry().cancelEmergencyReview(proposalId);
         _clearEmergencyCalls(proposalId);

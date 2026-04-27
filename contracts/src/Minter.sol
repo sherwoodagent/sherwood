@@ -255,14 +255,14 @@ contract Minter is Ownable, Pausable, ReentrancyGuard {
         _unpause();
     }
 
-    function triggerCircuitBreaker() external {
-        // TODO: Implement price/lock rate checks for circuit breaker
-        // For now, allow owner to manually trigger
-        if (msg.sender != owner()) revert NotAuthorized();
-
+    /// @notice Owner-only manual circuit breaker. Halves emissions for the
+    ///         current and subsequent epochs until cleared.
+    /// @dev V1: manual-only. Automated price / lock-ratio triggers require a
+    ///      WOOD Chainlink feed which does not yet exist; the protocol
+    ///      multisig is responsible for monitoring and pulling this lever.
+    function triggerCircuitBreaker() external onlyOwner {
         _circuitBreakerActive = true;
-        _emissionReductionPercent = 5000; // 50% reduction in basis points
-
+        _emissionReductionPercent = 5000;
         emit CircuitBreakerTriggered(voter.currentEpoch(), _emissionReductionPercent, "Manual trigger");
     }
 

@@ -1018,29 +1018,27 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     function _distributeAgentFee(uint256 proposalId, address vault, address asset, address proposer, uint256 agentFee)
         internal
     {
+        if (agentFee == 0) return;
         CoProposer[] storage coProps = _coProposers[proposalId];
         if (coProps.length > 0) {
-            // Distribute to co-proposers first, lead gets remainder
-            // Deregistered co-proposers are skipped -- their share goes to the lead
-            // G-C7: active co-props with share == 0 revert to prevent silently
-            // routing their rounded-to-zero share to the lead.
             uint256 distributed = 0;
             for (uint256 i = 0; i < coProps.length; i++) {
-                uint256 share = (agentFee * coProps[i].splitBps) / 10000;
                 bool active = ISyndicateVault(vault).isAgent(coProps[i].agent);
-                if (active && share == 0) revert CoProposerShareUnderflow();
-                if (share > 0 && active) {
-                    _payFee(vault, asset, coProps[i].agent, share);
-                    distributed += share;
+                if (!active) continue;
+                uint256 share = (agentFee * coProps[i].splitBps) / 10000;
+                if (share == 0) {
+                    if (distributed >= agentFee) continue;
+                    share = 1;
                 }
+                _payFee(vault, asset, coProps[i].agent, share);
+                distributed += share;
             }
-            // Lead proposer gets remainder (handles rounding)
+            if (distributed > agentFee) distributed = agentFee;
             uint256 leadShare = agentFee - distributed;
             if (leadShare > 0) {
                 _payFee(vault, asset, proposer, leadShare);
             }
         } else {
-            // Solo proposal -- all to proposer
             _payFee(vault, asset, proposer, agentFee);
         }
     }

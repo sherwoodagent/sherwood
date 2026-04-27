@@ -18,6 +18,12 @@ contract WoodToken is OFT, ERC20Permit, ERC20Votes {
 
     address public immutable minter;
 
+    /// @notice Cumulative WOOD ever minted on this chain. Independent of
+    ///         `totalSupply()` (which OFT bridges decrement via `_burn`)
+    ///         so the 1B cap stays load-bearing across cross-chain
+    ///         round-trips.
+    uint256 private _totalEverMinted;
+
     error OnlyMinter();
 
     modifier onlyMinter() {
@@ -46,12 +52,19 @@ contract WoodToken is OFT, ERC20Permit, ERC20Votes {
         if (remaining == 0) return 0;
 
         minted = amount > remaining ? remaining : amount;
+        _totalEverMinted += minted;
         _mint(to, minted);
     }
 
     /// @notice Returns how many tokens can still be minted before hitting the cap.
     function totalMintable() public view returns (uint256) {
-        return MAX_SUPPLY - totalSupply();
+        return MAX_SUPPLY - _totalEverMinted;
+    }
+
+    /// @notice Cumulative WOOD ever minted on this chain (does not decrement
+    ///         on OFT bridge-out / `_burn`). Cap reference for `mint`.
+    function totalEverMinted() external view returns (uint256) {
+        return _totalEverMinted;
     }
 
     // ─────────────────────────────────────────────────────────────────
