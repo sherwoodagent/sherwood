@@ -29,6 +29,9 @@ export interface LoopConfig {
   reportToTelegram?: boolean;
   logPath?: string;
   autoDynamicSelection?: boolean;
+  /** When true, skip directional signal analysis and trade execution.
+   *  Grid strategy still runs. Used to run grid-only mode. */
+  gridOnly?: boolean;
 }
 
 export interface CycleResult {
@@ -311,6 +314,34 @@ export class AgentLoop {
       } catch (err) {
         errors.push(`Grid tick failed: ${(err as Error).message}`);
       }
+    }
+
+    // Grid-only mode: skip directional analysis + execution, only run grid
+    if (this.config.gridOnly) {
+      const updatedState = await this.portfolio.load();
+      const iv = Number.isFinite(updatedState.initialValue) && (updatedState.initialValue ?? 0) > 0
+        ? updatedState.initialValue! : 10_000;
+      const totalPnlUsd = updatedState.totalValue - iv;
+
+      return {
+        cycleNumber: this.cycleCount,
+        timestamp: Date.now(),
+        duration: Date.now() - startTime,
+        tokensAnalyzed: 0,
+        signals: [],
+        tradesExecuted: 0,
+        exitsProcessed: 0,
+        portfolioValue: updatedState.totalValue,
+        dailyRealizedPnl: updatedState.dailyPnl,
+        unrealizedPnl: 0,
+        dailyPnl: updatedState.dailyPnl,
+        totalPnlUsd,
+        totalPnlPct: totalPnlUsd / iv,
+        gridFills: gridResult.fills,
+        gridRoundTrips: gridResult.roundTrips,
+        gridPnlUsd: gridResult.pnlUsd,
+        errors: [],
+      } satisfies CycleResult;
     }
 
     // 3. Update token list if using dynamic selection
