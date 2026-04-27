@@ -331,8 +331,7 @@ export function registerAgentCommands(program: Command): void {
     .option("--use-judge", "Enable LLM judge to confirm/veto borderline trades (requires Anthropic API key)")
     .option("--judge-model <model>", "Judge model ID (default: claude-haiku-4-5-20251001)")
     .option("--judge-top-n <n>", "Max tokens to judge per cycle (default: 3)", parseInt)
-    .option("--grid-only", "Run grid strategy only, skip directional signal analysis and trade execution")
-    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; auto?: boolean; log?: string; mode?: string; strategyClone?: string; chain?: string; assetIndex?: string; x402: boolean; weightProfile?: string; scaledSizing?: boolean; smooth?: boolean; useJudge?: boolean; judgeModel?: string; judgeTopN?: number; gridOnly?: boolean }) => {
+    .action(async (options: { cycle?: string; dryRun?: boolean; tokens?: string; auto?: boolean; log?: string; mode?: string; strategyClone?: string; chain?: string; assetIndex?: string; x402: boolean; weightProfile?: string; scaledSizing?: boolean; smooth?: boolean; useJudge?: boolean; judgeModel?: string; judgeTopN?: number }) => {
       let tokenList: string[];
 
       if (options.auto) {
@@ -412,7 +411,6 @@ export function registerAgentCommands(program: Command): void {
         riskConfig: savedRiskConfig,
         logPath: options.log,
         autoDynamicSelection: options.auto ?? false,
-        gridOnly: options.gridOnly ?? false,
       };
 
       const loop = new AgentLoop(loopConfig);

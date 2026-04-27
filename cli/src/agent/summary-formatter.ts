@@ -132,8 +132,7 @@ export function formatSummary(input: SummaryInput): string {
   const initVal = portfolio.initialValue ?? 10_000;
   const positionValue = cycle.portfolioValue - portfolio.cash;
 
-  // Grid stats
-  const gf = cycle.gridFills ?? 0;
+  // Grid stats (read from grid-portfolio.json, independent of agent loop)
   const gs = input.gridStats;
   const gridAlloc = gs && !gs.paused ? gs.allocation : 0;
   const gridPnl = gs && !gs.paused ? gs.totalPnlUsd : 0;
@@ -179,8 +178,8 @@ export function formatSummary(input: SummaryInput): string {
   if (hasEntries || hasExits) {
     parts.push(`${cycle.tradesExecuted} entr${cycle.tradesExecuted === 1 ? "y" : "ies"} | ${cycle.exitsProcessed} exit${cycle.exitsProcessed === 1 ? "" : "s"}`);
   }
-  if (gf > 0) {
-    parts.push(`Grid: ${gf} fills`);
+  if (gs && gs.todayFills > 0) {
+    parts.push(`Grid: ${gs.todayFills} fills`);
   }
   if (parts.length === 0) {
     lines.push("\u26A1 No entries. No exits. Watching.");
