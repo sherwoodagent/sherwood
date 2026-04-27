@@ -224,7 +224,8 @@ export async function printSummary(): Promise<void> {
   // Read grid stats (optional — absent if grid never initialized)
   let gridStats: GridSummaryStats | undefined;
   try {
-    const gridRaw = JSON.parse(await readFile(join(base, "grid-portfolio.json"), "utf-8"));
+    const gridBase = join(homedir(), ".sherwood", "grid");
+    const gridRaw = JSON.parse(await readFile(join(gridBase, "portfolio.json"), "utf-8"));
     const grids = gridRaw.grids as Array<{ allocation: number; stats: { totalPnlUsd: number; todayPnlUsd: number; todayFills: number; totalRoundTrips: number } }>;
     gridStats = {
       totalPnlUsd: grids.reduce((s, g) => s + g.stats.totalPnlUsd, 0),
