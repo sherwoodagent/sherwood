@@ -1471,6 +1471,10 @@ registerAgentCommands(program);
 const { registerTradeCommands } = await import("./commands/trade.js");
 registerTradeCommands(program);
 
+// ── Grid commands ──
+import { registerGridCommand } from './commands/grid.js';
+registerGridCommand(program);
+
 // ── Config commands ──
 const configCmd = program.command("config");
 
