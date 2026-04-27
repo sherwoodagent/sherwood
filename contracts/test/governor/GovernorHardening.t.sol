@@ -186,12 +186,21 @@ contract GovernorHardeningTest is Test {
     /// @dev Scenario:
     ///     - Vault TVL: 100k (lp1=60k, lp2=40k)
     ///     - Snapshotted bps: 4000 (40% AGAINST to reject)
-    ///     - Raised mid-vote to:    8000 (80% AGAINST to reject)
-    ///     - AGAINST votes cast: lp1's 60k = 60% of supply
-    ///     - Under snapshot → 60% >= 40% → Rejected. (correct, OLD bps used)
-    ///     - Under live     → 60%  < 80% → Approved. (would be wrong)
+    ///     - Raised mid-vote to:    5000 (50% AGAINST to reject — MAX)
+    ///     - AGAINST votes cast: lp1's 45k = 45% of supply (partial deposit)
+    ///     - Under snapshot → 45% >= 40% → Rejected. (correct, OLD bps used)
+    ///     - Under live     → 45%  < 50% → Approved. (would be wrong)
     function test_vetoThresholdBps_snapshotAtPropose() public {
-        _depositLps();
+        // Custom deposits: lp1=45k, lp2=55k → AGAINST 45% of 100k supply.
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 45_000e6);
+        vault.deposit(45_000e6, lp1);
+        vm.stopPrank();
+        vm.startPrank(lp2);
+        usdc.approve(address(vault), 55_000e6);
+        vault.deposit(55_000e6, lp2);
+        vm.stopPrank();
+        vm.warp(vm.getBlockTimestamp() + 1);
 
         // Propose under the current VETO_THRESHOLD_BPS = 4000.
         vm.prank(leadAgent);
@@ -210,16 +219,16 @@ contract GovernorHardeningTest is Test {
         vm.prank(lp1);
         governor.vote(proposalId, ISyndicateGovernor.VoteType.Against);
 
-        // Owner raises vetoThresholdBps to 8000 (applies immediately in V1.5).
+        // Owner raises vetoThresholdBps to 5000 (the new MAX, applies immediately in V1.5).
         vm.prank(owner);
-        governor.setVetoThresholdBps(8000);
-        assertEq(governor.getGovernorParams().vetoThresholdBps, 8000);
+        governor.setVetoThresholdBps(5000);
+        assertEq(governor.getGovernorParams().vetoThresholdBps, 5000);
 
         // Warp past voting window so state resolution fires on the next call.
         vm.warp(vm.getBlockTimestamp() + VOTING_PERIOD + 1);
 
-        // Under the snapshotted bps (4000): 60k / 100k = 60% >= 40% → Rejected.
-        // Under live (8000): 60% < 80% → Approved.
+        // Under the snapshotted bps (4000): 45k / 100k = 45% >= 40% → Rejected.
+        // Under live (5000): 45% < 50% → Approved.
         ISyndicateGovernor.ProposalState state = governor.getProposalState(proposalId);
         assertEq(uint256(state), uint256(ISyndicateGovernor.ProposalState.Rejected));
 

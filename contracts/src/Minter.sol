@@ -291,7 +291,7 @@ contract Minter is Ownable, Pausable, ReentrancyGuard {
     function calculateRebase() public view returns (uint256) {
         uint256 weeklyEmissions = calculateEpochEmission();
         uint256 totalSupply = wood.totalSupply();
-        uint256 veSupply = votingEscrow.totalSupply();
+        uint256 veSupply = votingEscrow.totalLockedAmount();
 
         if (totalSupply == 0) return 0;
 

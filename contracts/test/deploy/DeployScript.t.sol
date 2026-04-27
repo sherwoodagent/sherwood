@@ -34,7 +34,7 @@ contract DeployScriptTest is Test {
         address deployer = address(this);
         ERC20Mock wood = new ERC20Mock("WOOD", "WOOD", 18);
 
-        Create3Factory c3 = new Create3Factory();
+        Create3Factory c3 = new Create3Factory(deployer);
 
         // Irrelevant pre-steps (executor, vault impl) for this test — skip to
         // the governor+registry+factory triangle.

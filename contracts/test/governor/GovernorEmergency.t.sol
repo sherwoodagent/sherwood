@@ -563,4 +563,41 @@ contract GovernorEmergencyTest is Test {
         assertEq(registry.ownerStake(address(vault)), MIN_OWNER_STAKE, "owner stake preserved");
         assertFalse(vault.redemptionsLocked(), "vault unlocked post-settle");
     }
+
+    function test_finalize_afterStandardSettle_reverts() public {
+        uint256 pid = _createExecutedProposal(7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+
+        BatchExecutorLib.Call[] memory customCalls = _customCalls();
+        vm.prank(owner);
+        governor.emergencySettleWithCalls(pid, customCalls);
+
+        vm.warp(vm.getBlockTimestamp() + REVIEW_PERIOD + 1);
+
+        governor.settleProposal(pid);
+        assertEq(uint256(governor.getProposal(pid).state), uint256(ISyndicateGovernor.ProposalState.Settled));
+        assertEq(governor.openProposalCount(address(vault)), 0);
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.ProposalNotExecuted.selector);
+        governor.finalizeEmergencySettle(pid, customCalls);
+
+        assertEq(governor.openProposalCount(address(vault)), 0);
+    }
+
+    function test_emergencySettleWithCalls_callsLengthExceeds_reverts() public {
+        uint256 pid = _createExecutedProposal(7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+
+        BatchExecutorLib.Call[] memory tooMany = new BatchExecutorLib.Call[](65);
+        for (uint256 i = 0; i < 65; i++) {
+            tooMany[i] = BatchExecutorLib.Call({
+                target: address(usdc), data: abi.encodeCall(usdc.approve, (address(targetToken), 0)), value: 0
+            });
+        }
+
+        vm.prank(owner);
+        vm.expectRevert(ISyndicateGovernor.TooManyCalls.selector);
+        governor.emergencySettleWithCalls(pid, tooMany);
+    }
 }

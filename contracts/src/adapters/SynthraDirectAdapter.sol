@@ -40,10 +40,13 @@ contract SynthraDirectAdapter is ISwapAdapter {
     error ZeroAddress();
     error PoolNotFound();
     error SwapFailed();
+    error UnauthorizedCallback();
+    error SlippageExceeded();
 
-    /// @dev Transient storage for the callback — which token to pay and how much
-    address private _callbackToken;
-    uint256 private _callbackAmount;
+    // EIP-1153 transient storage slots — set during swap(), read in the callback.
+    bytes32 private constant _TS_CALLBACK_TOKEN = keccak256("synthra.adapter.callback.token");
+    bytes32 private constant _TS_CALLBACK_AMOUNT = keccak256("synthra.adapter.callback.amount");
+    bytes32 private constant _TS_EXPECTED_POOL = keccak256("synthra.adapter.expected.pool");
 
     // Min/max sqrtPriceX96 limits (from Uniswap V3 TickMath)
     uint160 internal constant MIN_SQRT_RATIO = 4295128739;
@@ -72,9 +75,15 @@ contract SynthraDirectAdapter is ISwapAdapter {
         address token0 = ISynthraPool(pool).token0();
         bool zeroForOne = (tokenIn == token0);
 
-        // Set callback state
-        _callbackToken = tokenIn;
-        _callbackAmount = amountIn;
+        // Set callback transient state
+        bytes32 tokenSlot = _TS_CALLBACK_TOKEN;
+        bytes32 amountSlot = _TS_CALLBACK_AMOUNT;
+        bytes32 poolSlot = _TS_EXPECTED_POOL;
+        assembly {
+            tstore(tokenSlot, tokenIn)
+            tstore(amountSlot, amountIn)
+            tstore(poolSlot, pool)
+        }
 
         // Execute swap — positive amountSpecified = exact input
         (int256 amount0, int256 amount1) = ISynthraPool(pool)
@@ -89,16 +98,31 @@ contract SynthraDirectAdapter is ISwapAdapter {
         // Calculate output amount (the negative delta is the output)
         amountOut = zeroForOne ? uint256(-amount1) : uint256(-amount0);
 
-        // Clear callback state
-        _callbackToken = address(0);
-        _callbackAmount = 0;
+        if (amountOut < amountOutMin) revert SlippageExceeded();
+
+        // Clear callback transient state
+        assembly {
+            tstore(tokenSlot, 0)
+            tstore(amountSlot, 0)
+            tstore(poolSlot, 0)
+        }
     }
 
     /// @notice Synthra V3 swap callback — pool calls this to pull input tokens
     function synthraV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata) external {
-        // Pay the pool the input tokens it requested
+        bytes32 tokenSlot = _TS_CALLBACK_TOKEN;
+        bytes32 amountSlot = _TS_CALLBACK_AMOUNT;
+        bytes32 poolSlot = _TS_EXPECTED_POOL;
+        address expectedPool;
+        address callbackToken;
+        assembly {
+            expectedPool := tload(poolSlot)
+            callbackToken := tload(tokenSlot)
+        }
+        if (expectedPool == address(0) || msg.sender != expectedPool) revert UnauthorizedCallback();
+
         uint256 amountOwed = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
-        IERC20(_callbackToken).safeTransfer(msg.sender, amountOwed);
+        IERC20(callbackToken).safeTransfer(msg.sender, amountOwed);
     }
 
     /// @inheritdoc ISwapAdapter

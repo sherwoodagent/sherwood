@@ -123,6 +123,7 @@ abstract contract GovernorEmergency is ISyndicateGovernor {
     {
         StrategyProposal storage p = _getProposal(proposalId);
         if (msg.sender != OwnableUpgradeable(p.vault).owner()) revert NotVaultOwner();
+        if (p.state != ProposalState.Executed) revert ProposalNotExecuted();
         if (keccak256(abi.encode(calls)) != _getEmergencyCallsHash(proposalId)) revert EmergencySettleMismatch();
 
         IGuardianRegistry reg = _getRegistry();

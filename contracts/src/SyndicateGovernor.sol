@@ -221,6 +221,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     // ── Task 24: emergency-call storage overrides ──
 
     function _storeEmergencyCalls(uint256 id, BatchExecutorLib.Call[] calldata calls) internal override {
+        if (calls.length > MAX_CALLS_PER_PROPOSAL) revert TooManyCalls();
         _emergencyCallsHashes[id] = keccak256(abi.encode(calls));
         delete _emergencyCalls[id];
         for (uint256 i = 0; i < calls.length; i++) {
@@ -443,14 +444,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         emit ProposalCancelled(proposalId, msg.sender);
     }
 
-    /// @dev Single-site decrement for the open-proposal counter (PR #229 Fix 2).
-    ///      Unchecked to save bytecode; the caller guarantees the counter is > 0
-    ///      (each dec is matched by a prior inc on Draft -> Pending in
-    ///      `propose` / `approveCollaboration`).
     function _decOpen(address vault) private {
-        unchecked {
-            --openProposalCount[vault];
-        }
+        --openProposalCount[vault];
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -924,10 +919,10 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _activeProposal[vault] = 0;
         _lastSettledAt[vault] = block.timestamp;
         proposal.state = ProposalState.Settled;
-        // PR #229 Fix 2: single dec for the happy-path lifecycle
-        // (Pending -> GuardianReview? -> Approved -> Executed -> Settled).
-        // `_activeProposal` also covers Executed so `requestUnstakeOwner`'s
-        // OR-check blocks rage-quit even before this dec fires.
+        delete _capitalSnapshots[proposalId];
+        if (_emergencyCallsHashes[proposalId] != bytes32(0)) {
+            _clearEmergencyCalls(proposalId);
+        }
         _decOpen(vault);
 
         uint256 totalFee = 0;
