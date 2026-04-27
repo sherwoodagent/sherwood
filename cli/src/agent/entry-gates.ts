@@ -44,9 +44,9 @@ export const SHORT_ALLOWED_REGIMES: Set<MarketRegime> = new Set([
 export interface EntryGateConfig {
   /** Master toggle. When false, the gate is skipped entirely. Default true. */
   velocityGateEnabled: boolean;
-  /** BUY is rejected when 1h velocity is strictly less than this. Default -0.003. */
+  /** BUY is rejected when 1h velocity is strictly less than this. Default -0.01 (-1%). */
   velocityGateBuyMinPct: number;
-  /** SELL is rejected when 1h velocity is strictly greater than this. Default +0.003. */
+  /** SELL is rejected when 1h velocity is strictly greater than this. Default +0.01 (+1%). */
   velocityGateSellMaxPct: number;
   /** When true, SELL/STRONG_SELL signals are blocked in non-bearish regimes
    *  (trending-up, ranging, low-volatility). Default true. */
@@ -64,13 +64,14 @@ export const DEFAULT_ENTRY_GATE_CONFIG: EntryGateConfig = {
   realAlphaGateEnabled: true,
 };
 
-/** Signals allowed to justify an entry after the noisy-signal score filter. */
+/** Signals allowed to justify an entry after the noisy-signal score filter.
+ *  Only includes signals that are actually populated by active strategies —
+ *  dexFlow / meanReversion / sentimentContrarian were removed when their
+ *  strategies were disabled. */
 const REAL_ALPHA_THRESHOLDS: Record<string, number> = {
   smartMoney: 0.15,
   whaleIntent: 0.15,
   fundamental: 0.15,
-  dexFlow: 0.25,
-  meanReversion: 0.25,
   narrativeVacuum: 0.25,
 };
 
@@ -239,7 +240,7 @@ export function applyRealAlphaGate(
 
   logger(
     `  [alpha] DOWNGRADE ${result.token}: ${action} blocked — no aligned real-alpha ` +
-      `signal (requires smartMoney, fundamental, dexFlow, meanReversion, narrativeVacuum, or whaleIntent)`,
+      `signal (requires smartMoney, fundamental, narrativeVacuum, or whaleIntent)`,
   );
 
   return {

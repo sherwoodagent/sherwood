@@ -41,23 +41,18 @@ export const DEFAULT_WEIGHTS: ScoringWeights = {
 /**
  * Named weight profiles for `--weight-profile <name>` and per-asset auto-selection.
  *
- * - default:    balanced — used when no profile selected
- * - majors:     BTC/ETH/SOL — drops fundamental (no meaningful TVL on BTC),
- *               drops event (token unlocks rare on majors). Mass redistributed
- *               to technical + sentiment + smartMoney + onchain (the 4 that
- *               actually fire on majors per signal-audit data).
- * - altcoin:    smaller caps — keeps fundamental + event because TVL deltas
- *               and unlocks meaningfully drive price action on altcoins.
- * - sentHeavy:  contrarian setups (extreme F&G), bias toward sentiment signal.
- * - techHeavy:  trend continuation setups, bias toward technical confirmation.
+ * - default: balanced — used when no profile selected
+ * - majors:  BTC/ETH/SOL — smartMoney + technical + onchain dominate; event
+ *            disabled (unlocks rare on majors), fundamental reduced (no
+ *            meaningful TVL on BTC).
+ * - altcoin: smaller caps — fundamental upweighted because TVL deltas drive
+ *            price action on altcoins. event remains disabled until it
+ *            produces non-zero, testable observations (see DEFAULT_WEIGHTS).
  */
 export const WEIGHT_PROFILES: Record<string, ScoringWeights> = {
   default: DEFAULT_WEIGHTS,
-  // Majors: smartMoney + technical + onchain dominate; event remains disabled.
   majors:    { smartMoney: 0.30, technical: 0.30, sentiment: 0.10, onchain: 0.20, fundamental: 0.10, event: 0.00 },
-  // Altcoins: fundamentals matter more (TVL, Messari supply data).
   altcoin:   { smartMoney: 0.25, technical: 0.20, sentiment: 0.10, onchain: 0.15, fundamental: 0.30, event: 0.00 },
-  // sentHeavy/techHeavy removed — unvalidated, added parameter complexity without evidence of benefit
 };
 
 /** Tokens that get the "majors" profile when auto-selection is enabled. */
@@ -133,10 +128,12 @@ export const REGIME_THRESHOLDS: Record<MarketRegime, ActionThresholds> = {
   // positive. Empirical distribution: min -0.18, p3 ≈ -0.10, p50 ≈ +0.15.
   // Apr 21 recalibration: shorts are 0/3 win rate, all stopped out. The sell
   // thresholds at -0.08/-0.15 were too easy to trigger with marginal signals
-  // in a ranging/slightly-bullish market. Tightened to require much higher
+  // in a ranging/slightly-bullish market. Tightened to require higher
   // conviction for shorts while keeping longs at the working 0.15 level.
-  // Autoresearch-optimized (50 exp, Sharpe 1.77→4.79): buy 0.15→0.17, sell -0.20→-0.22.
-  // Slightly more selective on entries; the 3 extra % improved win rate 47→53%.
+  // Apr 27 autoresearch follow-up replayed against signal-history with the
+  // post-Fincept signal stack and converged on symmetric ±0.14 — shorts now
+  // qualify at parity with longs because the smartMoney/perp signals carry
+  // their own bearish edge that the prior asymmetry double-counted.
   "ranging":        { strongBuy: 0.30, buy: 0.14, sell: -0.14, strongSell: -0.30 },
   "high-volatility":{ strongBuy: 0.50, buy: 0.30, sell: -0.30, strongSell: -0.50 },
   "low-volatility": { strongBuy: 0.40, buy: 0.20, sell: -0.20, strongSell: -0.40 },
@@ -470,10 +467,10 @@ export function scoreEvent(data: {
 const LAGGING_TECHNICAL_SIGNALS = new Set(['technical']);
 
 /** Signals whose weight is dampened when they oppose the regime direction.
- *  Kronos, socialVolume, and whaleIntent can stay bearish for extended periods
- *  during a trending-up regime — dampening prevents them from suppressing
- *  all long entries. They keep full weight when aligned with the trend. */
-const COUNTER_TREND_DAMPENED = new Set(['kronosVolForecast', 'socialVolume', 'whaleIntent']);
+ *  Kronos and whaleIntent can stay bearish for extended periods during a
+ *  trending-up regime — dampening prevents them from suppressing all long
+ *  entries. They keep full weight when aligned with the trend. */
+const COUNTER_TREND_DAMPENED = new Set(['kronosVolForecast', 'whaleIntent']);
 /** Minimum absolute signal value to trigger counter-trend dampening. */
 const COUNTER_TREND_THRESHOLD = 0.05;
 
@@ -676,6 +673,15 @@ export function computeTradeDecision(
       if (regime && (regime === 'trending-up' || regime === 'trending-down')
           && LAGGING_TECHNICAL_SIGNALS.has(signal.name)) {
         voteValue *= 0.5;
+      }
+      // Counter-trend signals: mirror the 0.3x dampening applied in the
+      // weighted score so a signal that contributes 30% of its weight does
+      // not get to vote at full strength in the convergence count.
+      if (regime && COUNTER_TREND_DAMPENED.has(signal.name)) {
+        const isCounterTrend =
+          (regime === 'trending-up' && voteValue < -COUNTER_TREND_THRESHOLD) ||
+          (regime === 'trending-down' && voteValue > COUNTER_TREND_THRESHOLD);
+        if (isCounterTrend) voteValue *= 0.3;
       }
       const current = categoryNetDirection.get(category) ?? 0;
       categoryNetDirection.set(category, current + voteValue);

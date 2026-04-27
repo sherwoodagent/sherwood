@@ -102,60 +102,25 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 ### CLI Operational Notes
 
 - `which sherwood` → `~/.linuxbrew/bin/sherwood` → symlinks into the **local `cli/dist/index.js`**. `npm run build` is enough to deploy changes — no `npm install -g` needed. Cron picks up rebuilds immediately.
-- `sherwood agent start --auto --cycle 1` — runs ONE dry-run cycle, then exits. Used by the hermes trade-scanner cron. For continuous runs use `--cycle 15m`.
-- `sherwood agent start --auto --cycle 5m --use-judge` — persistent agent loop via systemd. Manage: `systemctl --user {start|stop|restart|status} sherwood-agent`. Logs: `journalctl --user -u sherwood-agent -f`.
-- `sherwood agent summary` — deterministic formatted message for XMTP/Telegram. Pipe to `chat send --stdin`.
 - `sherwood chat <name> send --stdin` — pipe via stdin to avoid bash `$`-expansion (`$10,000` → `0,000`). Required for any dynamic message containing `$`. Added in 0.40.2.
-- CoinGecko free tier: 30 calls/min, circuit breaker trips on 429 (5-min cooldown). HL candles are the PRIMARY candle source since 0.44.0 — CG OHLC is fallback only.
-- BTC correlation uses Hyperliquid-native data (markPrice, funding, OI, flow) since 0.43.5 — no CG dependency.
 - **Hermes skill sync**: cron reads skills from `~/.hermes/skills/sherwood/*/SKILL.md`, NOT from the repo. After editing `cron/skills/*/SKILL.md`, copy to hermes: `cp cron/skills/<name>/SKILL.md ~/.hermes/skills/sherwood/<name>/SKILL.md`.
 - **Hermes cron prompt**: the job's `--prompt` text overrides SKILL.md instructions. After changing a skill's behavior, also update the prompt via `hermes cron edit <id> --prompt "..."`. The cron for trade-scanner is `c51a4fe8314e`.
-- `sherwood agent autoresearch [--experiments N] [--last D]` — autonomous parameter optimization against signal-history.jsonl. Mutates weights/thresholds/stops, replays, keeps improvements. Results in `autoresearch-best-params.json`.
-- Default weights (Apr 23 2026, post-Fincept): technical=0.35, sentiment=0.10, onchain=0.20, fundamental=0.15, event=0.15, smartMoney=0.05. Dead signals (sentimentContrarian, dexFlow) disabled — they diluted scores with zeros. Re-run `sherwood agent autoresearch` after accumulating new signal data.
 
-### Calibrator
+### Trading Strategies
 
-- **Candle path** (`sherwood agent calibrate`) — re-fetches OHLC from CoinGecko and recomputes signals from candles only. **Cannot replay HL flow / fundingRate / smartMoney** (those need live data). Output is a lower bound on production performance; many configs show 0 trades because the candle-only signal stack rarely fires.
-- **Replay path** (`sherwood agent calibrate --from-history`) — replays captured production signals from `signal-history.jsonl`. Far truer to live behavior. Add `--last <days>` after a scoring change to ignore stale rows captured under the prior code.
-- Backtester is direction-aware: `Position.side` + SHORT entries on SELL signals; exit math (stop/TP/trail) flips for shorts. Ranging-regime BUY threshold currently `0.17`, SELL `-0.22` (autoresearch-optimized). Minimum conviction gate: |score| >= 0.12 in executor.
+The directional agent and grid strategy each have a dedicated SKILL.md
+that owns their config, runtime, signal stack, and tuning notes:
 
-### Agent State Files (`~/.sherwood/agent/`)
+- **Directional agent** — `cli/src/agent/SKILL.md`
+  Signal weights, regime thresholds, entry gates, calibrator, autoresearch,
+  state files (`~/.sherwood/agent/`), data providers, Kronos forecaster.
+- **Grid strategy** — `cli/src/grid/SKILL.md`
+  Standalone ATR-based grid loop, allocation, leverage, rebalancing,
+  state file (`~/.sherwood/grid/portfolio.json`).
 
-- `cycles.jsonl` — per-cycle summary: `{cycleNumber, timestamp, signals: [{token, score, action, regime}], tradesExecuted, exitsProcessed, portfolioValue, dailyRealizedPnl, unrealizedPnl, dailyPnl (deprecated alias of dailyRealizedPnl), totalPnlUsd, totalPnlPct, errors}`. Append-only. `dailyRealizedPnl` moves only on closed trades (drives the drawdown gate); `unrealizedPnl` is mark-to-market across open positions; `totalPnlUsd`/`totalPnlPct` are cumulative vs. `portfolio.initialValue` (10k default for paper, on-chain vault balance for live syndicates).
-- `signal-history.jsonl` — per-token full signal stack including HL/funding/dexFlow values + regime + weights used. The richer log; what `sherwood agent calibrate --from-history` replays.
-- `portfolio.json` — positions, cash, PnL counters. Atomic write via `.tmp` rename.
-- `trades.json` — closed-trade history (entry/exit/PnL/reason).
-- `calibration-results.json` / `replay-calibration-results.json` — last calibrator run output.
-- `grid-portfolio.json` — grid strategy state: per-token levels, open fills, cumulative PnL, allocation. Isolated from directional `portfolio.json`.
-- **Portfolio accounting**: `portfolio.totalValue` only tracks directional cash + positions. Grid allocation (`grid-portfolio.json`) is separate. To get true total capital: `portfolio.totalValue + gridAllocation`. The summary formatter (`summary-formatter.ts`) combines both for the headline number.
-
-### Fincept Data Bridge
-
-External data providers use vendored Python scripts from FinceptTerminal, called via subprocess bridge (`cli/src/providers/fincept/bridge.ts`). Scripts live in `cli/scripts/fincept/`, output JSON to stdout.
-- **Active**: Messari (fundamentals), Blockchain.com (BTC network), Polymarket (predictions), CryptoCompare (candles fallback + social), DefiLlama (TVL/yields), DexScreener (DEX pairs)
-- **Kept in-house**: Hyperliquid (native exchange), TradingView (MCP subprocess)
-- **Removed**: Glassnode (requires $999/mo API), CoinGecko OHLCV (replaced by CryptoCompare fallback)
-- Bridge path resolution: tries source layout, then dist layout, then cwd — handles both `tsc` and bundled builds
-- `CRYPTOCOMPARE_API_KEY` env var needed for news/social endpoints (price/OHLCV is free)
-
-### Kronos Volatility Forecaster
-
-Kronos-mini (4.1M param foundation model) predicts future OHLCV via Monte Carlo paths. Used for dynamic stop-loss width and directional bias signal.
-- Venv at `~/.sherwood/kronos-venv/` with CPU-only PyTorch (~200MB). Model code vendored at `cli/scripts/fincept/kronos_model/`.
-- Inference: ~2.3s per token for 5 paths on CPU. Results cached 1 hour per token.
-- If venv missing, Kronos signals gracefully return null (agent runs without it).
-- Model weights auto-download from HuggingFace (`NeoQuasar/Kronos-mini`, `NeoQuasar/Kronos-Tokenizer-base`) on first run, cached in `~/.cache/huggingface/`.
-
-### Grid Strategy
-
-- Config in `grid-config.ts`: BTC 45% / ETH 30% / SOL 25% split, 15 levels/side, 4x leverage, 55% rebalance drift.
-- Runs parallel to directional strategy with isolated capital (50% of portfolio). Grid PnL tracked in `grid-portfolio.json`.
-
-### Regime Gate & Short Protection
-
-- Shorts blocked in non-bearish regimes (trending-up, ranging, low-volatility). Only allowed in trending-down and high-volatility.
-- Per-token consecutive loss cooldown: 24h ban after 2 losses on same token.
-- Short position sizing halved (0.5x multiplier).
+Treat the SKILL.md files as the source of truth for signal stack and grid
+config — do not duplicate values into this file. Update the SKILL.md when
+behavior changes.
 
 ## Chat (XMTP)
 

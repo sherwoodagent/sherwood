@@ -34,18 +34,16 @@ export interface OrderParams {
   takeProfit: number;
 }
 
-/** Directional trade leverage. Grid uses 4x; directional uses 3x for
- *  tighter stops. Risk is controlled via riskPerTrade (2%) — leverage
- *  amplifies returns without increasing the sizing formula's risk budget.
+/** Directional trade leverage (notional multiplier on order quantity).
  *
- *  Cash model note: paper trading debits full notional (qty × price) for
- *  longs and 20% margin for shorts. On a real perp venue, both sides use
- *  margin (~20-33%). This means paper cash depletes faster than reality
- *  for leveraged longs — intentionally conservative to avoid overestimating
- *  available capital. Live mode (hyperliquid-perp) uses venue margin. */
-// Autoresearch (80 exp, 4 days): 3x→2x→1x each reduced DD dramatically.
-// At 54% WR with avg loss > avg win, leverage amplifies the problem.
-// Revert to 1x until WR > 60% and avg win > avg loss.
+ *  Cash model: PortfolioTracker debits the same `MARGIN_FRACTION = 0.33`
+ *  (33%) of notional for both longs and shorts on every open / pyramid add,
+ *  and credits margin + PnL on close. Live mode (hyperliquid-perp) uses
+ *  the venue's own margin schedule. See `cli/src/agent/portfolio.ts`.
+ *
+ *  Autoresearch (80 exp, 4 days): 3x→2x→1x each reduced DD dramatically.
+ *  At 54% WR with avg loss > avg win, leverage amplifies the problem.
+ *  Revert to 1x until WR > 60% and avg win > avg loss. */
 const DIRECTIONAL_LEVERAGE = 1;
 
 /** Score-based position sizing multiplier.

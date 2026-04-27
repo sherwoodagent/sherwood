@@ -440,7 +440,7 @@ describe("applyRealAlphaGate", () => {
 
   it("allows SELL when a real-alpha signal is bearish", () => {
     const input = makeAnalysis("zcash", "SELL", -0.25, [
-      signal("dexFlow", -0.3),
+      signal("smartMoney", -0.3),
       signal("fundingRate", -0.5),
     ]);
     const result = applyRealAlphaGate(input);
