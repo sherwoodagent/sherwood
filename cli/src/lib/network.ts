@@ -176,6 +176,30 @@ export function getNetwork(): Network {
   return _network;
 }
 
+/**
+ * Run `fn` with the network singleton temporarily switched to `network`,
+ * restoring the previous network in `finally`. Bypasses the ENABLE_TESTNET
+ * gate that `setNetwork` enforces — the caller is already running on some
+ * chain that passed the gate at startup, so swapping should not be re-gated.
+ *
+ * The viem clients (`getPublicClient`, `getWalletClient`) auto-invalidate on
+ * chain change, so callers get fresh per-chain RPC + chain context inside the
+ * block. Used for cross-chain syndicate resolution and for routing EAS
+ * attestations to Base regardless of the active chain.
+ */
+export async function withNetwork<T>(
+  network: Network,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const previous = _network;
+  _network = network;
+  try {
+    return await fn();
+  } finally {
+    _network = previous;
+  }
+}
+
 export function getChainConfig(): ChainConfig {
   return CHAIN_REGISTRY[_network];
 }

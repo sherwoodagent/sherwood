@@ -8,7 +8,7 @@
 import type { Address, Hex } from "viem";
 import { encodeAbiParameters, parseAbiParameters, decodeAbiParameters } from "viem";
 import { getPublicClient, getAccount, writeContractWithRetry, waitForReceipt } from "./client.js";
-import { getChain, getNetwork, getChainConfig } from "./network.js";
+import { getChain, getNetwork, getChainConfig, withNetwork, isTestnet, CHAIN_REGISTRY, type Network } from "./network.js";
 import { EAS_CONTRACTS, EAS_SCHEMAS } from "./addresses.js";
 import { EAS_ABI } from "./abis.js";
 
@@ -29,10 +29,25 @@ const TRADE_EXECUTED_PARAMS = parseAbiParameters("address, address, uint256, str
 function assertSchemasRegistered() {
   const schemas = EAS_SCHEMAS();
   if (schemas.SYNDICATE_JOIN_REQUEST === ZERO_BYTES32 || schemas.AGENT_APPROVED === ZERO_BYTES32) {
+    const flag = isTestnet() ? " --testnet" : "";
     throw new Error(
-      "EAS schemas not registered. Run: npx tsx scripts/register-eas-schemas.ts --testnet",
+      `EAS schemas not registered on ${getNetwork()}. Run: cd cli && npx tsx scripts/register-eas-schemas.ts${flag}`,
     );
   }
+}
+
+/**
+ * The chain where syndicate-coordination attestations live. Base for mainnet
+ * flows, Base-Sepolia for testnet flows, regardless of which chain the
+ * syndicate itself runs on. EAS isn't deployed on HyperEVM / Robinhood, but
+ * we still want creators to see join requests and approvals — pinning all
+ * coordination attestations to Base solves that without a per-chain EAS
+ * deployment. Vault addresses inside the attestation payload remain unique
+ * across chains (post-CREATE3 too), so cross-chain syndicates don't collide
+ * in the EAS index.
+ */
+export function getEasNetwork(): Network {
+  return isTestnet() ? "base-sepolia" : "base";
 }
 
 // ── GraphQL ──
@@ -48,11 +63,24 @@ function getEasGraphqlUrl(): string {
 }
 
 export function getEasScanUrl(uid: Hex): string {
-  const host = getChainConfig().easScanHost;
+  // Always use the EAS chain's scan host — attestations live on Base, even
+  // for HyperEVM syndicates. Read the registry directly rather than mutating
+  // the singleton, since this is a pure URL build.
+  const host = CHAIN_REGISTRY[getEasNetwork()].easScanHost;
   if (!host) {
-    throw new Error(`EAS scan is not available on ${getNetwork()}.`);
+    throw new Error(`EAS scan host is not configured on ${getEasNetwork()}.`);
   }
   return `https://${host}/attestation/view/${uid}`;
+}
+
+/**
+ * The block-explorer URL for a tx that ran on the EAS chain. Use this for
+ * attestation create/revoke txs so the link points to base(-sepolia) scan
+ * even when the active --chain is HyperEVM / Robinhood.
+ */
+export function getEasExplorerUrl(txHash: string): string {
+  const host = CHAIN_REGISTRY[getEasNetwork()].explorerHost;
+  return `https://${host}/tx/${txHash}`;
 }
 
 // ── Attestation Creation ──
@@ -74,9 +102,17 @@ function extractAttestationUid(receipt: { logs: readonly { topics: readonly Hex[
   throw new Error("Could not extract attestation UID from transaction receipt");
 }
 
-// ── Referral Helpers ──
+// ── Message Prefix Helpers ──
+//
+// Join-request messages can carry CLI metadata as bracketed prefixes. Order
+// is `[chain:<network>] [ref:<id>] body` — chain outer because the chain
+// disambiguates the syndicate, ref inner because it's optional and per-user.
+// Both prefixes are stripped before display.
 
-const REF_PREFIX_RE = /^\[ref:(\d+)\]\s*/;
+const CHAIN_PREFIX_RE = /^\[chain:([a-z0-9-]+)\]\s*/;
+// Tolerate an optional leading [chain:...] prefix so parseReferrer keeps
+// working when both metadata fields are encoded.
+const REF_PREFIX_RE = /^(?:\[chain:[a-z0-9-]+\]\s*)?\[ref:(\d+)\]\s*/;
 
 /**
  * Format a message with an optional referrer prefix.
@@ -90,6 +126,7 @@ export function formatMessageWithRef(message: string, referrerAgentId?: number):
 /**
  * Parse a referrer agentId from a message, if present.
  * e.g. parseReferrer("[ref:42] Hello") → 42
+ *      parseReferrer("[chain:hyperevm] [ref:42] Hello") → 42
  */
 export function parseReferrer(message: string): number | null {
   const match = message.match(REF_PREFIX_RE);
@@ -97,10 +134,38 @@ export function parseReferrer(message: string): number | null {
 }
 
 /**
- * Strip the referrer prefix from a message, returning the clean message.
+ * Format a message with a `[chain:<network>]` prefix when the syndicate
+ * lives on a chain other than the EAS chain (Base / Base-Sepolia). Skipped
+ * when source matches the EAS chain to avoid noise on the common case.
+ */
+export function formatMessageWithChain(
+  message: string,
+  sourceNetwork: Network,
+  easNetwork: Network,
+): string {
+  if (sourceNetwork === easNetwork) return message;
+  return `[chain:${sourceNetwork}] ${message}`;
+}
+
+/**
+ * Parse the source-chain prefix from a message, if present.
+ * Returns null when no `[chain:<network>]` prefix is found, which means the
+ * attestation was created from the EAS chain itself (e.g. base attestation
+ * for a base syndicate).
+ */
+export function parseChain(message: string): string | null {
+  const match = message.match(CHAIN_PREFIX_RE);
+  return match ? match[1] : null;
+}
+
+/**
+ * Strip both `[chain:...]` and `[ref:...]` prefixes from a message,
+ * returning the clean human-facing body. Name kept for backward compat.
  */
 export function stripReferrerPrefix(message: string): string {
-  return message.replace(REF_PREFIX_RE, "");
+  // REF_PREFIX_RE already swallows an optional leading chain prefix when ref
+  // is present; the second replace handles a chain prefix without ref.
+  return message.replace(REF_PREFIX_RE, "").replace(CHAIN_PREFIX_RE, "");
 }
 
 /**
@@ -116,38 +181,45 @@ export async function createJoinRequest(
   message: string,
   referrerAgentId?: number,
 ): Promise<{ uid: Hex; hash: Hex }> {
-  assertSchemasRegistered();
-  const client = getPublicClient();
+  // Capture the syndicate's source chain BEFORE switching to the EAS chain
+  // so we can encode it in the message prefix.
+  const sourceNetwork = getNetwork();
+  const easNetwork = getEasNetwork();
+  const messageWithRef = formatMessageWithRef(message, referrerAgentId);
+  const encodedMessage = formatMessageWithChain(messageWithRef, sourceNetwork, easNetwork);
 
-  const encodedMessage = formatMessageWithRef(message, referrerAgentId);
-  const data = encodeAbiParameters(JOIN_REQUEST_PARAMS, [
-    syndicateId, agentId, vault, encodedMessage,
-  ]);
+  return withNetwork(easNetwork, async () => {
+    assertSchemasRegistered();
 
-  const hash = await writeContractWithRetry({
-    account: getAccount(),
-    chain: getChain(),
-    address: EAS_CONTRACTS().EAS,
-    abi: EAS_ABI,
-    functionName: "attest",
-    args: [{
-      schema: EAS_SCHEMAS().SYNDICATE_JOIN_REQUEST,
-      data: {
-        recipient: creatorAddress,
-        expirationTime: 0n,
-        revocable: true,
-        refUID: ZERO_BYTES32,
-        data,
-        value: 0n,
-      },
-    }],
-    value: 0n,
+    const data = encodeAbiParameters(JOIN_REQUEST_PARAMS, [
+      syndicateId, agentId, vault, encodedMessage,
+    ]);
+
+    const hash = await writeContractWithRetry({
+      account: getAccount(),
+      chain: getChain(),
+      address: EAS_CONTRACTS().EAS,
+      abi: EAS_ABI,
+      functionName: "attest",
+      args: [{
+        schema: EAS_SCHEMAS().SYNDICATE_JOIN_REQUEST,
+        data: {
+          recipient: creatorAddress,
+          expirationTime: 0n,
+          revocable: true,
+          refUID: ZERO_BYTES32,
+          data,
+          value: 0n,
+        },
+      }],
+      value: 0n,
+    });
+
+    const receipt = await waitForReceipt(hash);
+    const uid = extractAttestationUid(receipt);
+
+    return { uid, hash };
   });
-
-  const receipt = await waitForReceipt(hash);
-  const uid = extractAttestationUid(receipt);
-
-  return { uid, hash };
 }
 
 /**
@@ -160,41 +232,46 @@ export async function createApproval(
   vault: Address,
   agentAddress: Address,
 ): Promise<{ uid: Hex; hash: Hex }> {
-  assertSchemasRegistered();
-  const client = getPublicClient();
+  return withNetwork(getEasNetwork(), async () => {
+    assertSchemasRegistered();
 
-  const data = encodeAbiParameters(AGENT_APPROVED_PARAMS, [
-    syndicateId, agentId, vault,
-  ]);
+    const data = encodeAbiParameters(AGENT_APPROVED_PARAMS, [
+      syndicateId, agentId, vault,
+    ]);
 
-  const hash = await writeContractWithRetry({
-    account: getAccount(),
-    chain: getChain(),
-    address: EAS_CONTRACTS().EAS,
-    abi: EAS_ABI,
-    functionName: "attest",
-    args: [{
-      schema: EAS_SCHEMAS().AGENT_APPROVED,
-      data: {
-        recipient: agentAddress,
-        expirationTime: 0n,
-        revocable: true,
-        refUID: ZERO_BYTES32,
-        data,
-        value: 0n,
-      },
-    }],
-    value: 0n,
+    const hash = await writeContractWithRetry({
+      account: getAccount(),
+      chain: getChain(),
+      address: EAS_CONTRACTS().EAS,
+      abi: EAS_ABI,
+      functionName: "attest",
+      args: [{
+        schema: EAS_SCHEMAS().AGENT_APPROVED,
+        data: {
+          recipient: agentAddress,
+          expirationTime: 0n,
+          revocable: true,
+          refUID: ZERO_BYTES32,
+          data,
+          value: 0n,
+        },
+      }],
+      value: 0n,
+    });
+
+    const receipt = await waitForReceipt(hash);
+    const uid = extractAttestationUid(receipt);
+
+    return { uid, hash };
   });
-
-  const receipt = await waitForReceipt(hash);
-  const uid = extractAttestationUid(receipt);
-
-  return { uid, hash };
 }
 
 /**
- * Revoke an attestation. Only the original attester can revoke.
+ * Revoke an attestation. Only the original attester can revoke. Uses the
+ * active chain's EAS — call sites that revoke syndicate-coordination
+ * attestations (join requests, approvals) should go through
+ * `revokeJoinRequest` / `revokeApproval` so the revoke lands on the same
+ * chain as the original attestation (Base / Base-Sepolia).
  */
 export async function revokeAttestation(
   schemaUid: Hex,
@@ -215,6 +292,13 @@ export async function revokeAttestation(
     }],
     value: 0n,
   });
+}
+
+/** Revoke a SYNDICATE_JOIN_REQUEST on the EAS chain (Base / Base-Sepolia). */
+export async function revokeJoinRequest(attestationUid: Hex): Promise<Hex> {
+  return withNetwork(getEasNetwork(), () =>
+    revokeAttestation(EAS_SCHEMAS().SYNDICATE_JOIN_REQUEST, attestationUid),
+  );
 }
 
 /**
@@ -452,6 +536,10 @@ export interface ApprovalAttestation {
 export async function queryApprovals(
   attester: Address,
 ): Promise<ApprovalAttestation[]> {
+  return withNetwork(getEasNetwork(), () => queryApprovalsImpl(attester));
+}
+
+async function queryApprovalsImpl(attester: Address): Promise<ApprovalAttestation[]> {
   assertSchemasRegistered();
   const schemaUid = EAS_SCHEMAS().AGENT_APPROVED;
   const url = getEasGraphqlUrl();
@@ -521,6 +609,10 @@ export async function queryApprovals(
 export async function queryJoinRequests(
   recipient: Address,
 ): Promise<JoinRequestAttestation[]> {
+  return withNetwork(getEasNetwork(), () => queryJoinRequestsImpl(recipient));
+}
+
+async function queryJoinRequestsImpl(recipient: Address): Promise<JoinRequestAttestation[]> {
   assertSchemasRegistered();
   const schemaUid = EAS_SCHEMAS().SYNDICATE_JOIN_REQUEST;
   const url = getEasGraphqlUrl();

@@ -15,7 +15,14 @@ import { encodeFunctionData } from "viem";
 import type { Address, Hex } from "viem";
 import { namehash } from "viem/ens";
 import { getPublicClient, getWalletClient, getAccount, waitForReceipt } from "./client.js";
-import { getChain, getNetwork } from "./network.js";
+import {
+  getChain,
+  getNetwork,
+  withNetwork,
+  VALID_NETWORKS,
+  CHAIN_REGISTRY,
+  type Network,
+} from "./network.js";
 import { SYNDICATE_FACTORY_ABI, L2_REGISTRY_ABI } from "./abis.js";
 import { ENS, SHERWOOD } from "./addresses.js";
 import * as vaultLib from "./vault.js";
@@ -76,6 +83,34 @@ export async function resolveSyndicate(subdomain: string): Promise<SyndicateReso
     creator: result[2],
     subdomain: result[6],
   };
+}
+
+/**
+ * Probe every supported chain for a subdomain registration. Skips testnets
+ * unless `ENABLE_TESTNET=true` (so we never surface "found on testnet" hints
+ * to a user who can't act on them). Returns every hit — most queries find
+ * zero or one, but post-CREATE3 the same subdomain may exist on multiple
+ * chains and the caller needs to disambiguate. RPC errors on individual
+ * chains are swallowed so a flaky chain doesn't fail the whole search.
+ */
+export async function searchSyndicateAcrossChains(
+  subdomain: string,
+): Promise<{ network: Network; result: SyndicateResolution }[]> {
+  const includeTestnets = process.env.ENABLE_TESTNET === "true";
+  const candidates = VALID_NETWORKS.filter(
+    (n) => includeTestnets || !CHAIN_REGISTRY[n].isTestnet,
+  );
+
+  const hits: { network: Network; result: SyndicateResolution }[] = [];
+  for (const net of candidates) {
+    try {
+      const result = await withNetwork(net, () => resolveSyndicate(subdomain));
+      hits.push({ network: net, result });
+    } catch {
+      // Not registered on this chain, or RPC failed — keep searching.
+    }
+  }
+  return hits;
 }
 
 /**
