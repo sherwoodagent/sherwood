@@ -1,6 +1,6 @@
 ---
 name: sherwood-grid-monitor
-description: Monitor the Sherwood grid trading strategy — check performance, fills, round trips, and alert on anomalies.
+description: Monitor and report Sherwood grid strategy performance. Posts formatted status with PnL, round trips, fills, and per-token breakdown.
 tags: [sherwood, grid, trading, paper-trading, hyperliquid, cron]
 triggers:
   - run sherwood grid monitor
@@ -10,73 +10,80 @@ triggers:
 
 # Sherwood Grid Monitor
 
-Monitor the ATR-based grid trading strategy running on BTC/ETH/SOL perps.
+Post a formatted grid performance report to the user. The grid runs as an independent service (`sherwood-grid.service`) on 1-minute cycles.
 
-## What the Grid Does
+## Step 1: Check service health
 
-The grid places buy levels below price and sell levels above. When price oscillates, each buy→sell pair completes a "round trip" for profit. It profits from mean reversion in ranging markets.
+```bash
+systemctl --user is-active sherwood-grid
+```
 
-## Config (current production)
+If not active, ALERT immediately and try to restart:
+```bash
+systemctl --user restart sherwood-grid
+```
 
-- **Tokens**: BTC (45%), ETH (30%), SOL (25%)
-- **Levels**: 15 per side (30 total per token)
-- **Leverage**: 5x
-- **Spacing**: ATR-based (adapts to volatility)
-- **Rebalance**: rebuilds when price drifts 40% toward grid edge
-- **Allocation**: 50% of portfolio (~$5,200)
-- **Pause**: only in high-volatility regime
+## Step 2: Get grid status
 
-## Data Files
+```bash
+sherwood grid status
+```
 
-- Grid state: `~/.sherwood/agent/grid-portfolio.json`
-- Cycle logs: `~/.sherwood/agent/cycles.jsonl`
-- Agent service: `systemctl --user status sherwood-agent`
+This prints a formatted table. Use its output as the base.
 
-## Monitoring Procedure
+## Step 3: Get detailed stats for the report
 
-1. **Check service is running**:
-   ```bash
-   systemctl --user is-active sherwood-agent
-   ```
+```bash
+python3 -c "
+import json
+from datetime import datetime
 
-2. **Read grid stats**:
-   ```bash
-   python3 -c "
-   import json
-   g = json.load(open('/home/ana/.sherwood/agent/grid-portfolio.json'))
-   for grid in g['grids']:
-       s = grid['stats']
-       print(f\"{grid['token'].upper():10s} RTs={s['totalRoundTrips']} PnL=\${s['totalPnlUsd']:+.2f} todayFills={s['todayFills']} todayPnL=\${s['todayPnlUsd']:+.2f}\")
-   "
-   ```
+g = json.load(open('/home/ana/.sherwood/grid/portfolio.json'))
+grids = g.get('grids', [])
+init_ts = g.get('initializedAt', 0)
+age_days = max(1, (datetime.now().timestamp() * 1000 - init_ts) / 86400000) if init_ts else 1
 
-3. **Check last cycle for grid fills**:
-   ```bash
-   tail -1 ~/.sherwood/agent/cycles.jsonl | python3 -c "
-   import json,sys
-   c = json.loads(sys.stdin.readline())
-   print(f\"Grid: {c.get('gridFills',0)} fills, {c.get('gridRoundTrips',0)} RTs, \${c.get('gridPnlUsd',0):+.2f}\")
-   "
-   ```
+total_pnl = sum(grid['stats']['totalPnlUsd'] for grid in grids)
+total_rts = sum(grid['stats']['totalRoundTrips'] for grid in grids)
+total_alloc = sum(grid['allocation'] for grid in grids)
+today_pnl = sum(grid['stats']['todayPnlUsd'] for grid in grids)
+today_fills = sum(grid['stats']['todayFills'] for grid in grids)
+daily_avg = total_pnl / age_days
+monthly = daily_avg * 30
 
-4. **Check for anomalies**:
-   - If `todayFills == 0` for >2h during market hours → grid may be stale or paused
-   - If `totalPnlUsd` decreased significantly → check if grid was rebuilt during a trend
-   - If service is not active → restart: `systemctl --user restart sherwood-agent`
+print(f'GRID STRATEGY REPORT')
+print(f'━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+print()
+print(f'💰 Total PnL: +\${total_pnl:.2f} ({total_rts} round trips)')
+print(f'📊 Today: +\${today_pnl:.2f} ({today_fills} fills)')
+print(f'📈 Daily avg: \${daily_avg:.2f}/day')
+print(f'📅 Monthly projection: \${monthly:.0f}/month ({monthly/total_alloc*100:.0f}% ROI)')
+print(f'💼 Allocation: \${total_alloc:,.0f}')
+print(f'⏱️ Running: {age_days:.1f} days')
+print()
+for grid in grids:
+    tok = grid['token'].upper()
+    s = grid['stats']
+    alloc = grid['allocation']
+    daily_tok = s['totalPnlUsd'] / age_days
+    print(f'{tok:6s}  PnL: +\${s[\"totalPnlUsd\"]:>7.2f}  RTs: {s[\"totalRoundTrips\"]:>3d}  Today: +\${s[\"todayPnlUsd\"]:>6.2f} ({s[\"todayFills\"]} fills)  \${daily_tok:.0f}/day')
+print()
+print(f'Status: {\"PAUSED\" if g.get(\"paused\") else \"ACTIVE\"}')
+"
+```
 
-## Alert Criteria
+## Step 4: Post the report
 
-Report ONLY if:
-- Service is DOWN (not active)
-- Grid has 0 fills for >2 hours during active market
-- Any token grid has negative PnL today (unusual — grid should be net positive)
-- Grid is paused (check `paused` field in grid-portfolio.json)
+Take the output from Step 3 and post it. Always include:
+- Total PnL and round trips
+- Today's PnL and fills
+- Daily average and monthly projection
+- Per-token breakdown
+- Service status
 
-If everything is healthy, respond with: `[SILENT]`
+## Output Policy
 
-## Performance Benchmarks
-
-- Normal: 20-30 round trips/day across all tokens
-- Good day: $150-250/day grid PnL
-- Expected monthly: ~$3,600 (69% monthly ROI on $5,200 allocation)
-- Weekly minimum: $500 (if below, investigate)
+- ALWAYS post a report (this is a reporting cron, not anomaly-only)
+- If service is DOWN, include 🚨 ALERT at the top
+- If grid is PAUSED, include ⚠️ PAUSED warning
+- If today's fills are 0 for >2 hours during market hours, note it as unusual
