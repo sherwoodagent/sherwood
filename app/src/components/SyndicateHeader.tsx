@@ -21,7 +21,15 @@ interface SyndicateHeaderProps {
   hideAgentsTab?: boolean;
 }
 
-function InlineCopy({ value, label }: { value: string; label?: string }) {
+function InlineCopy({
+  value,
+  label,
+  accent,
+}: {
+  value: string;
+  label?: string;
+  accent?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -46,6 +54,8 @@ function InlineCopy({ value, label }: { value: string; label?: string }) {
     ? `Copied ${label ?? value}`
     : `Copy ${label ?? value} to clipboard`;
 
+  const idleColor = accent ? "var(--color-accent, #4ade80)" : "rgba(255,255,255,0.6)";
+
   return (
     <button
       onClick={handleCopy}
@@ -55,7 +65,7 @@ function InlineCopy({ value, label }: { value: string; label?: string }) {
         background: "none",
         border: "none",
         // 0.4 → 0.6 for WCAG AA; copied state keeps accent color.
-        color: copied ? "var(--color-accent, #4ade80)" : "rgba(255,255,255,0.6)",
+        color: copied ? "var(--color-accent, #4ade80)" : idleColor,
         cursor: "pointer",
         // Larger tap target — 28x28 is still compact in the metadata row
         // but far above the previous 18px.
@@ -101,7 +111,7 @@ export default function SyndicateHeader({
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
         <div>
           <span className="section-num">
-            {"//"} {subdomain.toUpperCase().replace(/[^A-Z0-9]/g, "_")}
+            {"// Syndicate"}
           </span>
           <h1 className="text-3xl sm:text-5xl font-medium tracking-tight text-white font-[family-name:var(--font-inter)]">
             {name}{" "}
@@ -128,8 +138,11 @@ export default function SyndicateHeader({
         className="text-sm flex flex-wrap items-center gap-x-6 gap-y-2"
         style={{ color: "rgba(255,255,255,0.45)" }}
       >
-        <span style={{ color: "var(--color-accent)", fontFamily: "var(--font-jetbrains-mono)", fontSize: "12px", letterSpacing: "0.05em" }}>
-          {subdomain}.sherwoodagent.eth
+        <span className="flex items-center gap-1" style={{ fontFamily: "var(--font-jetbrains-mono)", fontSize: "12px", letterSpacing: "0.05em" }}>
+          <span style={{ color: "var(--color-accent)" }}>
+            {subdomain}.sherwoodagent.eth
+          </span>
+          <InlineCopy value={`${subdomain}.sherwoodagent.eth`} label="ENS name" accent />
         </span>
         <span className="flex items-center gap-1.5" style={{ fontFamily: "var(--font-jetbrains-mono)", fontSize: "11px", letterSpacing: "0.05em" }}>
           <span style={{ opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.18em" }}>Vault</span>
@@ -139,7 +152,6 @@ export default function SyndicateHeader({
         <span className="flex items-center gap-1.5" style={{ fontFamily: "var(--font-jetbrains-mono)", fontSize: "11px", letterSpacing: "0.05em" }}>
           <span style={{ opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.18em" }}>Creator</span>
           <span style={{ color: "rgba(255,255,255,0.85)" }}>{creatorName || truncateAddress(creator)}</span>
-          <InlineCopy value={creator} label="creator address" />
         </span>
       </div>
 

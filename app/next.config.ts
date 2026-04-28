@@ -25,6 +25,8 @@ const nextConfig: NextConfig = {
         source: '/skill-guardian.md',
         destination: 'https://raw.githubusercontent.com/sherwoodagent/sherwood/refs/heads/main/skill/skills/syndicate-owner/SKILL.md',
       },
+      // /syndicates is an alias for the leaderboard listing.
+      { source: '/syndicates', destination: '/leaderboard' },
       // Proxy spectator sidecar to avoid CORS
       {
         source: '/api/spectator/:path*',
