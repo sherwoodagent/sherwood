@@ -8,11 +8,16 @@
  */
 
 import chalk from 'chalk';
+import { appendFile, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { GridManager } from './manager.js';
 import { GridPortfolio } from './portfolio.js';
 import { DEFAULT_GRID_CONFIG } from './config.js';
 import type { GridConfig } from './config.js';
 import { HyperliquidProvider } from '../providers/data/hyperliquid.js';
+
+const GRID_CYCLES_PATH = join(homedir(), '.sherwood', 'grid', 'cycles.jsonl');
 
 export interface GridLoopConfig {
   /** Starting capital in USD. */
@@ -125,6 +130,25 @@ export class GridLoop {
         `  [grid-loop] #${this.cycleCount} — ${result.fills} fill(s), 0 RTs [${elapsed}ms]`
       ));
     }
+
+    // Write cycle log for cron monitor
+    const stats = this.manager.getStats();
+    const cycleEntry = {
+      cycleNumber: this.cycleCount,
+      timestamp: Date.now(),
+      gridFills: result.fills,
+      gridRoundTrips: result.roundTrips,
+      gridPnlUsd: result.pnlUsd,
+      totalPnlUsd: stats?.totalPnlUsd ?? 0,
+      todayPnlUsd: stats?.todayPnlUsd ?? 0,
+      totalRoundTrips: stats?.totalRoundTrips ?? 0,
+      allocation: stats?.allocation ?? 0,
+      paused: stats?.paused ?? false,
+    };
+    try {
+      await mkdir(join(homedir(), '.sherwood', 'grid'), { recursive: true });
+      await appendFile(GRID_CYCLES_PATH, JSON.stringify(cycleEntry) + '\n');
+    } catch { /* non-critical */ }
 
     // Periodic status every ~60 cycles
     if (this.cycleCount % 60 === 0) {
