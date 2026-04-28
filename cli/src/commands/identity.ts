@@ -157,6 +157,65 @@ export function registerIdentityCommands(program: Command): void {
       }
     });
 
+  // ── identity find ──
+
+  identity
+    .command("find")
+    .description("Search ERC-8004 agents by wallet address or name (recover a lost agent ID)")
+    .option("--wallet <address>", "Filter by owner / wallet address")
+    .option("--name <text>", "Filter by agent name (exact or substring match, depending on registry)")
+    .option("--all-chains", "Search across all chains, not just the active one")
+    .action(async (opts) => {
+      if (!opts.wallet && !opts.name) {
+        console.error(chalk.red("Pass --wallet <address> or --name <text> (or both)."));
+        process.exit(1);
+      }
+
+      const spinner = ora("Searching ERC-8004 registry...").start();
+      try {
+        const sdk = getAgent0SDK();
+        const filters: Record<string, unknown> = {};
+        if (opts.wallet) filters.walletAddress = opts.wallet;
+        if (opts.name) filters.name = opts.name;
+        // SearchFilters['chains']: explicit list per-chain or 'all'
+        filters.chains = opts.allChains ? "all" : [getChain().id];
+
+        const results = await sdk.searchAgents(filters);
+        spinner.stop();
+
+        if (results.length === 0) {
+          console.log(chalk.dim("No agents found matching those filters."));
+          console.log(chalk.dim("If you minted on a different chain, retry with --all-chains."));
+          return;
+        }
+
+        console.log();
+        console.log(chalk.bold(`Found ${results.length} agent${results.length === 1 ? "" : "s"}`));
+        console.log(chalk.dim("─".repeat(50)));
+        for (const a of results) {
+          // Agent0 agentId format is "chainId:tokenId" — split for display
+          const idStr = String(a.agentId);
+          const tokenId = idStr.includes(":") ? idStr.split(":")[1] : idStr;
+          console.log(`  ${chalk.bold(`#${tokenId}`)}  ${a.name || chalk.dim("(no name)")}`);
+          console.log(chalk.dim(`    Chain:  ${a.chainId}`));
+          console.log(chalk.dim(`    Full:   ${idStr}`));
+          if (a.owners?.length) {
+            console.log(chalk.dim(`    Owner:  ${a.owners[0]}`));
+          }
+          if (a.walletAddress) {
+            console.log(chalk.dim(`    Wallet: ${a.walletAddress}`));
+          }
+        }
+        console.log();
+        console.log(chalk.green("To bind one of these to this machine:"));
+        console.log(chalk.dim(`  sherwood identity load --id <tokenId>`));
+      } catch (err) {
+        spinner.fail("Search failed");
+        console.error(chalk.red(formatContractError(err)));
+        process.exit(1);
+      }
+    });
+
   // ── identity status ──
 
   identity

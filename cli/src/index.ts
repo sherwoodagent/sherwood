@@ -11,7 +11,7 @@ import type { Address } from "viem";
 import chalk from "chalk";
 import ora from "ora";
 import { input, confirm, select } from "@inquirer/prompts";
-import { setNetwork, getNetwork, VALID_NETWORKS } from "./lib/network.js";
+import { setNetwork, getNetwork, VALID_NETWORKS, withNetwork } from "./lib/network.js";
 import { getExplorerUrl, getChain } from "./lib/network.js";
 import type { Network } from "./lib/network.js";
 import { TOKENS } from "./lib/addresses.js";
@@ -32,7 +32,7 @@ import { registerIdentityCommands } from "./commands/identity.js";
 import { registerProposalCommands } from "./commands/proposal.js";
 import { registerGovernorCommands } from "./commands/governor.js";
 import { registerGuardianCommands } from "./commands/guardian-delegate.js";
-import { setTextRecord, getTextRecord, resolveVaultSyndicate, resolveSyndicate } from "./lib/ens.js";
+import { setTextRecord, getTextRecord, resolveVaultSyndicate, resolveSyndicate, searchSyndicateAcrossChains } from "./lib/ens.js";
 import * as easLib from "./lib/eas.js";
 import { EAS_SCHEMAS } from "./lib/addresses.js";
 
@@ -427,13 +427,53 @@ syndicate
   .command("list")
   .description("List active syndicates (queries subgraph, falls back to on-chain)")
   .option("--creator <address>", "Filter by creator address")
+  .option("--all-chains", "Aggregate active syndicates across all supported chains (on-chain only)")
   .action(async (opts) => {
     const spinner = ora("Loading syndicates...").start();
     try {
-      // Try subgraph first (fast, indexed), fall back to on-chain
-      let syndicates: { id: string | bigint; vault: string; creator: string; metadataURI: string; createdAt: string | bigint; totalDeposits?: string; totalWithdrawals?: string; subdomain?: string }[];
+      // Each row carries an optional `chain` so the --all-chains output can
+      // tell users which network a syndicate lives on.
+      type Row = {
+        id: string | bigint;
+        vault: string;
+        creator: string;
+        metadataURI: string;
+        createdAt: string | bigint;
+        totalDeposits?: string;
+        totalWithdrawals?: string;
+        subdomain?: string;
+        chain?: Network;
+      };
+      let syndicates: Row[] = [];
 
-      if (process.env.SUBGRAPH_URL) {
+      if (opts.allChains) {
+        // Subgraph is single-chain; on-chain only when iterating networks.
+        const includeTestnets = process.env.ENABLE_TESTNET === "true";
+        const targets = VALID_NETWORKS.filter((n) => includeTestnets || !["base-sepolia", "robinhood-testnet", "hyperevm-testnet"].includes(n));
+        for (const net of targets) {
+          spinner.text = `Loading from ${net}...`;
+          try {
+            const rows = await withNetwork(net, () => factoryLib.getActiveSyndicates());
+            for (const s of rows) {
+              syndicates.push({
+                id: s.id.toString(),
+                vault: s.vault,
+                creator: s.creator,
+                metadataURI: s.metadataURI,
+                createdAt: s.createdAt.toString(),
+                subdomain: s.subdomain,
+                chain: net,
+              });
+            }
+          } catch {
+            // Skip flaky chain RPCs rather than failing the whole listing.
+          }
+        }
+        if (opts.creator) {
+          const c = String(opts.creator).toLowerCase();
+          syndicates = syndicates.filter((s) => s.creator.toLowerCase() === c);
+        }
+      } else if (process.env.SUBGRAPH_URL) {
         const result = await subgraphLib.getActiveSyndicates(opts.creator);
         syndicates = result;
       } else {
@@ -457,8 +497,11 @@ syndicate
 
       console.log();
       console.log(chalk.bold(`Active Syndicates (${syndicates.length})`));
-      if (!process.env.SUBGRAPH_URL) {
+      if (!process.env.SUBGRAPH_URL && !opts.allChains) {
         console.log(chalk.dim("  (Set SUBGRAPH_URL for faster indexed queries)"));
+      }
+      if (opts.allChains) {
+        console.log(chalk.dim("  (Aggregated across chains via on-chain factory calls; SUBGRAPH_URL is single-chain only)"));
       }
       console.log(chalk.dim("─".repeat(70)));
 
@@ -466,7 +509,8 @@ syndicate
         const ts = typeof s.createdAt === "string" ? Number(s.createdAt) : Number(s.createdAt);
         const date = new Date(ts * 1000).toLocaleDateString();
         const ensName = s.subdomain ? `${s.subdomain}.sherwoodagent.eth` : "";
-        console.log(`  #${s.id}  ${chalk.bold(ensName || String(s.vault))}`);
+        const chainTag = s.chain ? chalk.dim(`[${s.chain}]  `) : "";
+        console.log(`  ${chainTag}#${s.id}  ${chalk.bold(ensName || String(s.vault))}`);
         if (ensName) console.log(`    Vault:   ${chalk.cyan(String(s.vault))}`);
         console.log(`    Creator: ${s.creator}`);
         console.log(`    Created: ${date}`);
@@ -493,15 +537,50 @@ syndicate
     const spinner = ora("Loading syndicate info...").start();
     try {
       let id: bigint;
+      let crossChainHint: { network: Network; others: Network[] } | null = null;
+      let infoOverride: factoryLib.SyndicateInfo | null = null;
+
       if (/^\d+$/.test(idStr)) {
         id = BigInt(idStr);
       } else {
-        // Resolve subdomain to syndicate ID
-        const resolved = await resolveSyndicate(idStr);
-        id = resolved.id;
+        // Try active chain first; on miss, scan all enabled chains so users
+        // who default to base can still inspect a HyperEVM syndicate.
+        try {
+          const resolved = await resolveSyndicate(idStr);
+          id = resolved.id;
+        } catch {
+          spinner.text = `Searching across chains...`;
+          const hits = await searchSyndicateAcrossChains(idStr);
+          if (hits.length === 0) {
+            spinner.fail(`Syndicate "${idStr}" not found on any supported chain`);
+            process.exit(1);
+          }
+          // Prefer active chain hit, else first hit.
+          const active = getNetwork();
+          const primary = hits.find((h) => h.network === active) ?? hits[0];
+          id = primary.result.id;
+          // Read the syndicate from the chain it actually lives on (NOT the
+          // active chain) so vault stats etc. don't blow up trying to read a
+          // non-existent vault on the active chain.
+          infoOverride = await withNetwork(primary.network, () =>
+            factoryLib.getSyndicate(primary.result.id),
+          );
+          crossChainHint = {
+            network: primary.network,
+            others: hits.filter((h) => h.network !== primary.network).map((h) => h.network),
+          };
+        }
       }
-      const info = await factoryLib.getSyndicate(id);
+      const info = infoOverride ?? (await factoryLib.getSyndicate(id));
       spinner.stop();
+      if (crossChainHint) {
+        const others = crossChainHint.others.length > 0
+          ? ` (also on: ${crossChainHint.others.join(", ")})`
+          : "";
+        console.log(chalk.yellow(`  Found on chain: ${chalk.bold(crossChainHint.network)}${others}`));
+        console.log(chalk.dim(`  Re-run with --chain ${crossChainHint.network} to interact with this syndicate.`));
+        console.log();
+      }
 
       if (!info.vault || info.vault === "0x0000000000000000000000000000000000000000") {
         console.log(chalk.red(`Syndicate #${id} not found.`));
@@ -531,9 +610,12 @@ syndicate
         }
       }
 
-      // Also show vault info
+      // Also show vault info — when the syndicate lives on a different
+      // chain than the active one, read the vault on its actual chain.
       vaultLib.setVaultAddress(info.vault);
-      const vaultInfo = await vaultLib.getVaultInfo();
+      const vaultInfo = crossChainHint
+        ? await withNetwork(crossChainHint.network, () => vaultLib.getVaultInfo())
+        : await vaultLib.getVaultInfo();
       console.log();
       console.log(chalk.bold("  Vault Stats"));
       console.log(`    Total Assets:       ${vaultInfo.totalAssets}`);
@@ -810,7 +892,26 @@ syndicate
         process.exit(1);
       }
 
-      const syndicate = await resolveSyndicate(subdomain);
+      let syndicate: Awaited<ReturnType<typeof resolveSyndicate>>;
+      try {
+        syndicate = await resolveSyndicate(subdomain);
+      } catch {
+        // Active chain doesn't have it — see if it lives elsewhere.
+        spinner.text = "Searching across chains...";
+        const hits = await searchSyndicateAcrossChains(subdomain);
+        spinner.fail(`Syndicate "${subdomain}" not found on ${getNetwork()}`);
+        if (hits.length === 0) {
+          console.error(chalk.red(`  Not found on any supported chain.`));
+        } else if (hits.length === 1) {
+          console.error(chalk.yellow(`  Found on chain: ${chalk.bold(hits[0].network)}`));
+          console.error(chalk.dim(`  Re-run: sherwood --chain ${hits[0].network} syndicate join --subdomain ${subdomain}`));
+        } else {
+          const chains = hits.map((h) => h.network).join(", ");
+          console.error(chalk.yellow(`  Found on chains: ${chalk.bold(chains)}`));
+          console.error(chalk.dim(`  Specify which chain to join with --chain <network>.`));
+        }
+        process.exit(1);
+      }
       const callerAddress = getAccount().address;
 
       // Check if already registered as an agent on this vault
@@ -907,7 +1008,8 @@ syndicate
       console.log(W(`  Creator:      ${DIM(syndicate.creator)}`));
       console.log(W(`  Attestation:  ${DIM(uid)}`));
       console.log(W(`  EAS Scan:     ${DIM(easLib.getEasScanUrl(uid))}`));
-      console.log(W(`  Explorer:     ${DIM(getExplorerUrl(hash))}`));
+      // EAS tx ran on Base (Base-Sepolia for testnet) regardless of --chain.
+      console.log(W(`  Explorer:     ${DIM(easLib.getEasExplorerUrl(hash))}`));
       SEP();
       console.log(G("  ✓ Syndicate saved to ~/.sherwood/config.json (set as primary)"));
       console.log(G("  ✓ The creator can review with:"));
@@ -1127,12 +1229,12 @@ syndicate
   .action(async (opts) => {
     const spinner = ora("Revoking attestation...").start();
     try {
-      const hash = await easLib.revokeAttestation(
-        EAS_SCHEMAS().SYNDICATE_JOIN_REQUEST,
-        opts.attestation as `0x${string}`,
-      );
+      // Revoke on Base / Base-Sepolia regardless of --chain — syndicate
+      // join attestations always live on the EAS chain, not the syndicate's
+      // chain.
+      const hash = await easLib.revokeJoinRequest(opts.attestation as `0x${string}`);
       spinner.succeed("Join request rejected");
-      console.log(DIM(`  ${getExplorerUrl(hash)}`));
+      console.log(DIM(`  ${easLib.getEasExplorerUrl(hash)}`));
     } catch (err) {
       spinner.fail("Rejection failed");
       console.error(chalk.red(formatContractError(err)));

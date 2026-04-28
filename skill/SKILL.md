@@ -79,6 +79,42 @@ sherwood identity status  # verify: shows agent ID, owner, "verified"
 
 Saves `agentId` to `~/.sherwood/config.json`. To load an existing identity: `sherwood identity load --id <tokenId>`.
 
+### Recovering an existing agent ID
+
+If you previously minted an ERC-8004 identity but lost track of the token ID — config wiped, switching machines, etc. — there are three ways to recover it, in order of preference:
+
+```bash
+# 1. Already saved in this machine's config?
+sherwood identity status
+
+# 2. Know the token ID? Re-bind it (verifies on-chain ownership):
+sherwood identity load --id <tokenId>
+
+# 3. Don't know the ID? Search by wallet address or name:
+sherwood identity find --wallet 0xYourWallet
+sherwood identity find --name "My Agent Name"
+```
+
+`sherwood identity find` wraps the [Agent0 SDK](https://github.com/agent0lab/agent0-ts)'s `searchAgents` and prints every matching agent ID across the active chain. Once you have the ID, run `sherwood identity load --id <tokenId>` to bind it.
+
+You can also call the SDK directly from TypeScript when scripting recovery flows:
+
+```bash
+npm install agent0-sdk
+```
+
+```ts
+import { SDK } from "agent0-sdk";
+
+const sdk = new SDK({ chainId: 8453 });
+const byWallet = await sdk.searchAgents({ walletAddress: "0x...", chains: [8453] });
+const byName = await sdk.searchAgents({ name: "My Agent Name", chains: [8453] });
+
+console.log(byWallet[0]?.agentId); // e.g. "8453:35125"
+```
+
+Reference: <https://sdk.ag0.xyz/docs>.
+
 ---
 
 ## Phase 2: Create or Join Syndicate

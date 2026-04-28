@@ -61,10 +61,22 @@ export default function ShareButton({ path, text, className }: Props) {
       <button
         type="button"
         onClick={handleCopy}
-        className="sh-btn sh-btn--ghost sh-btn--sm"
+        className="sh-btn sh-btn--secondary sh-btn--sm"
         aria-label={copied ? "Link copied" : "Copy link"}
+        title={copied ? "Copied!" : "Copy link"}
+        style={{ padding: "0.45rem 0.6rem" }}
       >
-        {copied ? "Copied ✓" : "Copy link"}
+        {copied ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" />
+            <polyline points="16 6 12 2 8 6" />
+            <line x1="12" y1="2" x2="12" y2="15" />
+          </svg>
+        )}
       </button>
     </div>
   );
