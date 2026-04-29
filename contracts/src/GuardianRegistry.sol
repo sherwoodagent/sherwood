@@ -1075,7 +1075,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         delete _emergencyCalls[proposalId];
         for (uint256 i; i < calls.length;) {
             _emergencyCalls[proposalId].push(calls[i]);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -1323,7 +1325,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         r = new BatchExecutorLib.Call[](n);
         for (uint256 i; i < n;) {
             r[i] = s[i];
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 

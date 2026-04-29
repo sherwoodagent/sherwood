@@ -90,10 +90,7 @@ abstract contract GovernorEmergency is ISyndicateGovernor {
 
     /// @notice Resolves a reviewed emergency settle and executes the approved calls.
     ///         Registry returns the stored calls; governor executes them on the vault.
-    function finalizeEmergencySettle(uint256 proposalId)
-        external
-        emergencyNonReentrant
-    {
+    function finalizeEmergencySettle(uint256 proposalId) external emergencyNonReentrant {
         StrategyProposal storage p = _getProposal(proposalId);
         if (msg.sender != OwnableUpgradeable(p.vault).owner()) revert NotVaultOwner();
         if (p.state != ProposalState.Executed) revert ProposalNotExecuted();
