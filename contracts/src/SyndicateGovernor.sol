@@ -921,6 +921,14 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         proposal.state = ProposalState.Settled;
         delete _capitalSnapshots[proposalId];
         if (_emergencyCallsHashes[proposalId] != bytes32(0)) {
+            // PR #247 follow-up: H-G-01 hardened cancelEmergencySettle /
+            // finalizeEmergencySettle to require state == Executed. If a
+            // standard settleProposal / unstick races ahead of an open
+            // registry review, those entrypoints can never invalidate the
+            // review afterwards. Cancel it here so the permissionless
+            // resolveEmergencyReview can no longer slash the owner for a
+            // proposal that already settled normally.
+            _getRegistry().cancelEmergencyReview(proposalId);
             _clearEmergencyCalls(proposalId);
         }
         _decOpen(vault);

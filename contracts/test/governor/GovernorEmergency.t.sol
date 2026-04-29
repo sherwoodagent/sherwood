@@ -585,6 +585,48 @@ contract GovernorEmergencyTest is Test {
         assertEq(governor.openProposalCount(address(vault)), 0);
     }
 
+    /// @notice Regression for PR #247 follow-up review:
+    ///         If `settleProposal` (or `unstick`) races ahead of an open
+    ///         emergency review, the H-G-01 hardening makes both
+    ///         `cancelEmergencySettle` and `finalizeEmergencySettle` revert with
+    ///         `ProposalNotExecuted`, so the owner can no longer invalidate the
+    ///         registry review. Without the `_finishSettlement` registry-side
+    ///         cleanup the permissionless `resolveEmergencyReview` would later
+    ///         slash the owner's WOOD bond despite normal settlement. This test
+    ///         pins down that `_finishSettlement` cancels the registry review.
+    function test_settleProposal_cancelsOpenEmergencyReview() public {
+        uint256 pid = _createExecutedProposal(7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+
+        // Owner opens emergency settle with custom calls.
+        vm.prank(owner);
+        governor.emergencySettleWithCalls(pid, _customCalls());
+
+        // Both guardians vote block (60k/60k = 100% — would slash if resolved).
+        vm.prank(guardianA);
+        registry.voteBlockEmergencySettle(pid);
+        vm.prank(guardianB);
+        registry.voteBlockEmergencySettle(pid);
+
+        uint256 stakeBefore = registry.ownerStake(address(vault));
+        assertEq(stakeBefore, MIN_OWNER_STAKE, "precondition: owner stake bonded");
+
+        // Race: standard settleProposal fires before reviewEnd.
+        // (proposer can settle anytime; here the test contract is the proposer)
+        governor.settleProposal(pid);
+        assertEq(uint256(governor.getProposal(pid).state), uint256(ISyndicateGovernor.ProposalState.Settled));
+
+        // Warp past the original reviewEnd and try to resolve permissionlessly.
+        // Must revert — _finishSettlement cancelled the review (zeroed reviewEnd
+        // + bumped nonce), so the keeper can't slash on stale block votes.
+        vm.warp(vm.getBlockTimestamp() + REVIEW_PERIOD + 1);
+        vm.expectRevert(IGuardianRegistry.ReviewNotReadyForResolve.selector);
+        registry.resolveEmergencyReview(pid);
+
+        // Owner stake untouched.
+        assertEq(registry.ownerStake(address(vault)), stakeBefore, "owner stake NOT slashed");
+    }
+
     function test_emergencySettleWithCalls_callsLengthExceeds_reverts() public {
         uint256 pid = _createExecutedProposal(7 days);
         vm.warp(vm.getBlockTimestamp() + 7 days);
