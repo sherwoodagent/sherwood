@@ -34,6 +34,26 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    // RFC 8288 Link relations advertised on every page so AI agents can
+    // discover the markdown-first surfaces, the API catalog (RFC 9727),
+    // and the agent-skills discovery index without crawling the HTML.
+    const linkHeader = [
+      '</llms.txt>; rel="alternate"; type="text/markdown"; title="LLM-friendly index"',
+      '</skill.md>; rel="describedby"; type="text/markdown"; title="Sherwood agent skill"',
+      '</.well-known/api-catalog>; rel="api-catalog"',
+      '</.well-known/agent-skills/index.json>; rel="service-meta"; type="application/json"',
+      '<https://docs.sherwood.sh/llms-full.txt>; rel="describedby"; type="text/markdown"; title="Full Sherwood docs"',
+    ].join(", ");
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "Link", value: linkHeader },
+        ],
+      },
+    ];
+  },
 };
 
 export default withBundleAnalyzer(nextConfig);
