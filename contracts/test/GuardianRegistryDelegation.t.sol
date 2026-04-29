@@ -185,30 +185,6 @@ contract GuardianRegistryDelegationTest is Test {
         assertEq(registry.delegationOf(alice, delegate_), 70e18);
     }
 
-    // ── historical views ──
-
-    function test_getPastDelegated_tracksInbound() public {
-        vm.prank(alice);
-        registry.delegateStake(delegate_, 30e18);
-        uint256 t1 = vm.getBlockTimestamp();
-
-        vm.warp(vm.getBlockTimestamp() + 1 hours);
-        vm.prank(bob);
-        registry.delegateStake(delegate_, 70e18);
-        uint256 t2 = vm.getBlockTimestamp();
-
-        vm.warp(vm.getBlockTimestamp() + 1);
-
-        assertEq(registry.getPastDelegated(delegate_, t1), 30e18);
-        assertEq(registry.getPastDelegated(delegate_, t2), 100e18);
-    }
-
-    function test_getPastTotalDelegated_tracksGlobal() public {
-        vm.prank(alice);
-        registry.delegateStake(delegate_, 30e18);
-        uint256 t1 = vm.getBlockTimestamp();
-
-        vm.warp(vm.getBlockTimestamp() + 1);
-        assertEq(registry.getPastTotalDelegated(t1), 30e18);
-    }
+    // V2: getPastDelegated / getPastTotalDelegated views removed to reclaim
+    // bytecode. Checkpoints still work internally for vote-weight snapshots.
 }

@@ -902,10 +902,14 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         proposal.state = ProposalState.Settled;
         delete _capitalSnapshots[proposalId];
         // V2: emergency state lives on registry. If a standard settle races
-        // ahead of an open emergency review, cancel it so the registry can't
-        // slash the owner for a normally-settled proposal.
-        if (_getRegistry().isEmergencyOpen(proposalId)) {
-            _getRegistry().cancelEmergency(proposalId);
+        // ahead of an open emergency review DURING the review window, cancel
+        // it so the registry can't slash the owner for a normally-settled
+        // proposal. After reviewEnd, cancelEmergency reverts (by design —
+        // the owner must face resolution), so we use try/catch to avoid
+        // bricking the standard settle path.
+        IGuardianRegistry reg = _getRegistry();
+        if (reg.isEmergencyOpen(proposalId)) {
+            try reg.cancelEmergency(proposalId) {} catch {}
         }
         _decOpen(vault);
 

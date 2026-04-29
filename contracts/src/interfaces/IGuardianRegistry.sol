@@ -35,6 +35,7 @@ interface IGuardianRegistry {
     error PoolAlreadyFunded();
     error OwnerBondInsufficient();
     error EmergencyTooManyCalls();
+    error EmergencyHashMismatch();
     error EmergencyAlreadyOpen();
     // V1.5 removed: InvalidEpoch, EpochNotEnded, NothingToClaim, FundEpochLocked,
     // SweepTooEarly — all tied to the on-chain epoch-claim path now in Merkl.
@@ -133,6 +134,7 @@ interface IGuardianRegistry {
     // ── Permissionless ──
     function openReview(uint256 proposalId) external;
     function resolveReview(uint256 proposalId) external returns (bool blocked);
+    function resolveEmergencyReview(uint256 proposalId) external;
     function voteBlockEmergencySettle(uint256 proposalId) external;
     function flushBurn() external;
 
@@ -186,11 +188,8 @@ interface IGuardianRegistry {
     function delegatedInbound(address delegate) external view returns (uint256);
     function totalDelegatedStake() external view returns (uint256);
 
-    function getPastStake(address guardian, uint256 timestamp) external view returns (uint256);
-    function getPastTotalStake(uint256 timestamp) external view returns (uint256);
-    function getPastDelegated(address delegate, uint256 timestamp) external view returns (uint256);
-    // V2: getPastDelegationTo + getPastVoteWeight removed to reclaim bytecode.
-    function getPastTotalDelegated(uint256 timestamp) external view returns (uint256);
+    // V2: getPast* views removed to reclaim bytecode — off-chain callers
+    // read checkpoints via eth_getStorageAt or events.
 
     event DelegationIncreased(address indexed delegator, address indexed delegate, uint256 amount);
     event DelegationUnstakeRequested(address indexed delegator, address indexed delegate, uint256 at);

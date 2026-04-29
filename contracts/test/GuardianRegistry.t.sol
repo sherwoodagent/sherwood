@@ -120,53 +120,8 @@ contract GuardianRegistryStakeTest is Test {
         assertEq(wood.balanceOf(address(registry)), 10_000e18);
     }
 
-    // ── V1.5: checkpoint + getPastStake ──
-
-    /// @notice Stake → top-up → partial state ops all push checkpoints that
-    ///         `getPastStake` resolves historically. Closes the top-up-bias
-    ///         vector: a guardian topping up after review-open reads the
-    ///         pre-topup amount at the earlier timestamp.
-    function test_getPastStake_returnsHistoricalValue() public {
-        vm.prank(alice);
-        registry.stakeAsGuardian(10_000e18, 42);
-        uint256 t1 = vm.getBlockTimestamp();
-
-        vm.warp(vm.getBlockTimestamp() + 1 days);
-        vm.prank(alice);
-        registry.stakeAsGuardian(5_000e18, 42);
-        uint256 t2 = vm.getBlockTimestamp();
-
-        vm.warp(vm.getBlockTimestamp() + 1);
-
-        assertEq(registry.getPastStake(alice, t1), 10_000e18, "at t1: first stake only");
-        assertEq(registry.getPastStake(alice, t2), 15_000e18, "at t2: after top-up");
-    }
-
-    function test_getPastStake_zeroAfterRequestUnstake() public {
-        vm.prank(alice);
-        registry.stakeAsGuardian(10_000e18, 42);
-        uint256 t1 = vm.getBlockTimestamp();
-
-        vm.warp(vm.getBlockTimestamp() + 1 hours);
-        vm.prank(alice);
-        registry.requestUnstakeGuardian();
-        uint256 t2 = vm.getBlockTimestamp();
-
-        vm.warp(vm.getBlockTimestamp() + 1);
-
-        assertEq(registry.getPastStake(alice, t1), 10_000e18, "active at t1");
-        assertEq(registry.getPastStake(alice, t2), 0, "0 at unstake-request time (not votable)");
-    }
-
-    function test_getPastTotalStake_tracksAggregate() public {
-        vm.prank(alice);
-        registry.stakeAsGuardian(10_000e18, 42);
-        uint256 t1 = vm.getBlockTimestamp();
-
-        vm.warp(vm.getBlockTimestamp() + 1);
-
-        assertEq(registry.getPastTotalStake(t1), 10_000e18, "aggregate matches total after first stake");
-    }
+    // V2: getPast* views removed to reclaim bytecode — checkpoints still
+    // work internally (voteOnProposal / voteBlockEmergencySettle read them).
 }
 
 contract GuardianRegistryUnstakeTest is Test {
@@ -1592,18 +1547,26 @@ contract GuardianRegistryEmergencyTest is Test {
         return address(uint160(0xAA00 + i + 1));
     }
 
+    function _emptyCalls() internal pure returns (BatchExecutorLib.Call[] memory) {
+        return new BatchExecutorLib.Call[](0);
+    }
+
+    function _emptyCallsHash() internal pure returns (bytes32) {
+        return keccak256(abi.encode(_emptyCalls()));
+    }
+
     function _openEmergency() internal returns (uint64 reviewEnd_) {
         // Wire up the governor's ProposalView so _slashOwner can resolve vault.
         reviewEnd_ = uint64(vm.getBlockTimestamp() + REVIEW_PERIOD);
         governor.setProposalWithVault(PROPOSAL_ID, vm.getBlockTimestamp(), reviewEnd_, address(vault));
         vm.prank(address(governor));
-        registry.openEmergency(PROPOSAL_ID, keccak256("calls"), new BatchExecutorLib.Call[](0));
+        registry.openEmergency(PROPOSAL_ID, _emptyCallsHash(), _emptyCalls());
     }
 
     function test_openEmergency_onlyGovernor() public {
         vm.prank(stranger);
         vm.expectRevert(IGuardianRegistry.NotGovernor.selector);
-        registry.openEmergency(PROPOSAL_ID, keccak256("calls"), new BatchExecutorLib.Call[](0));
+        registry.openEmergency(PROPOSAL_ID, _emptyCallsHash(), _emptyCalls());
     }
 
     function test_openEmergency_snapshotsTotalStakeAtOpen() public {
@@ -1617,12 +1580,12 @@ contract GuardianRegistryEmergencyTest is Test {
         // total at resolve time would return `false`. This asserts the
         // snapshot semantics.
         uint64 expectedEnd = uint64(block.timestamp + REVIEW_PERIOD);
-        bytes32 h = keccak256("calls");
+        bytes32 h = _emptyCallsHash();
         governor.setProposalWithVault(PROPOSAL_ID, block.timestamp, expectedEnd, address(vault));
         vm.expectEmit(true, false, false, true);
         emit IGuardianRegistry.EmergencyReviewOpened(PROPOSAL_ID, h, expectedEnd);
         vm.prank(address(governor));
-        registry.openEmergency(PROPOSAL_ID, h, new BatchExecutorLib.Call[](0));
+        registry.openEmergency(PROPOSAL_ID, h, _emptyCalls());
 
         // Stake 5 additional guardians post-open → live total jumps to 100_000e18.
         for (uint256 i = 5; i < 10; i++) {
