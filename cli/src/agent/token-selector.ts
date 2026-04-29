@@ -6,6 +6,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { safeNumber } from '../providers/data/hyperliquid.js';
 
 const HYPERLIQUID_BASE = 'https://api.hyperliquid.xyz/info';
 
@@ -240,10 +241,15 @@ export class DynamicTokenSelector {
         const ctx = assetCtxs[i]!;
 
         const name = coin.name;
-        const volume24h = parseFloat(ctx.dayNtlVlm);
-        const funding = parseFloat(ctx.funding);
-        const openInterest = parseFloat(ctx.openInterest);
-        const markPrice = parseFloat(ctx.markPx);
+        // Reject rows with any non-finite field — a single NaN would otherwise
+        // corrupt selection criteria downstream (volume filters, funding sort).
+        const volume24h = safeNumber(ctx.dayNtlVlm);
+        const funding = safeNumber(ctx.funding);
+        const openInterest = safeNumber(ctx.openInterest);
+        const markPrice = safeNumber(ctx.markPx);
+        if (volume24h === null || funding === null || openInterest === null || markPrice === null) {
+          continue;
+        }
         const coingeckoId = HYPERLIQUID_TO_COINGECKO[name];
 
         markets.push({

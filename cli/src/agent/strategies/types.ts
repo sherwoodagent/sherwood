@@ -55,7 +55,62 @@ export interface StrategyContext {
     orderBookImbalance: number;
     largeTradesBias: number;
   };
+  /** Fincept: Blockchain.com BTC network stats. */
+  btcNetworkData?: {
+    hashRate: number;
+    difficulty: number;
+    mempoolSize: number;
+    minerRevenueBtc: number;
+    marketPriceUsd: number;
+    transactionCount: number;
+  };
+  /** Fincept: Messari fundamentals (supply, revenue, developer activity). */
+  messariFundamentals?: {
+    marketCap: number;
+    supply: { circulating: number; max: number; percentCirculating: number };
+    revenueUsd24h: number;
+    revenueGrowth7d: number;
+    developerActivity: number;
+  };
+  /** Fincept: CryptoCompare social volume + news sentiment. */
+  socialData?: {
+    socialVolume24h: number;
+    socialVolumeSpike: number;
+    newsCount24h: number;
+    topNewsSentiment: number;
+  };
   tokenSymbol?: string;       // resolved symbol (e.g. "ETH" for "ethereum")
+  groupReturns?: Record<string, number>;  // cross-sectional: 7-day returns for all tokens in cycle
+  /** Fincept: Polymarket/Manifold prediction market probabilities. */
+  predictionData?: {
+    markets: Array<{
+      question: string;
+      probability: number;
+      volume: number;
+    }>;
+  };
+  /** Kronos ML volatility forecast — predicted vol and directional bias. */
+  kronosData?: {
+    predictedVolatility: number;
+    predictedVol4h: number;
+    directionalBias: number;
+    pathSpreadPct: number;
+    lastClose: number;
+    meanPredictedClose: number;
+    inferenceTimeMs: number;
+  };
+  /** Nansen smart-money netflow (aggregate across chains). */
+  nansenFlowData?: {
+    netFlow24hUsd: number;
+    traderCount: number;
+  };
+  /** Nansen HL perp smart-money trades (same venue we trade on). */
+  nansenHlPerps?: {
+    longRatio: number;       // 0-1, fraction of smart money going long
+    tradeCount: number;
+    longValueUsd: number;
+    shortValueUsd: number;
+  };
 }
 
 export interface Strategy {

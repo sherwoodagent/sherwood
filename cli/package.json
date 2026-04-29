@@ -1,6 +1,6 @@
 {
   "name": "@sherwoodagent/cli",
-  "version": "0.42.0",
+  "version": "0.47.1",
   "description": "CLI for agent-managed investment syndicates — onchain DeFi syndicates with XMTP chat",
   "type": "module",
   "bin": {
@@ -32,6 +32,7 @@
     "postinstall": "node scripts/pin-xmtp-bindings.cjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0",
     "@inquirer/prompts": "^8.3.2",
     "@x402/evm": "^2.7.0",
     "@x402/fetch": "^2.7.0",
@@ -41,7 +42,8 @@
     "commander": "^12.1.0",
     "dotenv": "^16.4.0",
     "ora": "^8.1.0",
-    "viem": "^2.21.0"
+    "viem": "^2.21.0",
+    "ws": "^8.20.0"
   },
   "overrides": {
     "@xmtp/node-bindings": "1.10.0-dev.97e86c6"
@@ -50,6 +52,7 @@
     "@scure/bip32": "^1.6.2",
     "@scure/bip39": "^1.5.4",
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
     "tsup": "^8.3.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

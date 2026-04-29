@@ -13,7 +13,7 @@ import type { SignalLogEntry } from "./signal-logger.js";
 
 const FIRE_EPSILON = 0.05; // |value| below this counts as "silent"
 
-/** Category each strategy signal maps to (mirrors scoring.ts weightMap). */
+/** Category each strategy signal maps to (mirrors scoring.ts SIGNAL_CATEGORY_MAP). */
 const SIGNAL_TO_CATEGORY: Record<string, string> = {
   // Direct categories
   technical: "technical",
@@ -23,17 +23,22 @@ const SIGNAL_TO_CATEGORY: Record<string, string> = {
   event: "event",
   smartMoney: "smartMoney",
 
-  // Strategy-level signals mapped to their category
+  // Active strategy signals
   breakoutOnChain: "technical",
-  meanReversion: "technical",
   multiTimeframe: "technical",
+  crossSectionalMomentum: "technical",
+  tradingviewSignal: "technical",
+  btcNetworkHealth: "technical",
+  kronosVolForecast: "technical",
   dexFlow: "onchain",
-  fundingRate: "fundamental",
-  tvlMomentum: "fundamental",
-  sentimentContrarian: "sentiment",
-  twitterSentiment: "sentiment",
-  tokenUnlock: "event",
+  fundingRate: "onchain",
   hyperliquidFlow: "onchain",
+  narrativeVacuum: "onchain",
+  sentimentContrarian: "sentiment",
+  socialVolume: "sentiment",
+  predictionMarket: "event",
+  whaleIntent: "smartMoney",
+  flowIntelligence: "smartMoney",
 };
 
 export interface SignalStats {

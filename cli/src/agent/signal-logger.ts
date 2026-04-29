@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { TokenAnalysis } from './index.js';
 import type { ScoringWeights } from './scoring.js';
+import type { JudgeVerdict } from './judge.js';
 
 const SIGNAL_DIR = join(homedir(), '.sherwood', 'agent');
 const SIGNAL_FILE = join(SIGNAL_DIR, 'signal-history.jsonl');
@@ -25,6 +26,22 @@ export interface SignalLogEntry {
   regime: string;
   btcCorrelation: number;
   weights: { smartMoney: number; technical: number; sentiment: number; onchain: number; fundamental: number; event: number };
+  // LLM judge fields (v1 — additive, ignored by older consumers)
+  judgeVerdict?: "confirm" | "veto";
+  judgeReasoning?: string;
+  judgeConfidence?: number;
+  preJudgeAction?: string;
+  preJudgeScore?: number;
+  judgeLatencyMs?: number;
+  judgeCached?: boolean;
+}
+
+export interface JudgeLogData {
+  verdict: JudgeVerdict;
+  preJudgeAction: string;
+  preJudgeScore: number;
+  latencyMs: number;
+  cached: boolean;
 }
 
 /**
@@ -35,9 +52,10 @@ export function logSignal(
   analysis: TokenAnalysis,
   price: number,
   weights: ScoringWeights,
+  judgeData?: JudgeLogData,
 ): void {
   // Fire-and-forget — do not await
-  _writeSignal(analysis, price, weights).catch((err) => {
+  _writeSignal(analysis, price, weights, judgeData).catch((err) => {
     console.error(`[signal-logger] Warning: failed to log signal: ${(err as Error).message}`);
   });
 }
@@ -46,6 +64,7 @@ async function _writeSignal(
   analysis: TokenAnalysis,
   price: number,
   weights: ScoringWeights,
+  judgeData?: JudgeLogData,
 ): Promise<void> {
   await mkdir(SIGNAL_DIR, { recursive: true });
 
@@ -84,6 +103,16 @@ async function _writeSignal(
       fundamental: weights.fundamental,
       event: weights.event,
     },
+    // Judge fields (additive — omitted when judge is off)
+    ...(judgeData ? {
+      judgeVerdict: judgeData.verdict.verdict,
+      judgeReasoning: judgeData.verdict.reasoning,
+      judgeConfidence: judgeData.verdict.confidence,
+      preJudgeAction: judgeData.preJudgeAction,
+      preJudgeScore: judgeData.preJudgeScore,
+      judgeLatencyMs: judgeData.latencyMs,
+      judgeCached: judgeData.cached,
+    } : {}),
   };
 
   const line = JSON.stringify(entry) + '\n';

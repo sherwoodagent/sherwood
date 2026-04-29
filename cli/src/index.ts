@@ -45,7 +45,7 @@ async function loadXmtp() {
 async function loadCron() {
   return import("./lib/cron.js");
 }
-import { cacheGroupId, getCachedGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey, getAgentId, setConfigRpcUrl, getNotifyTo, setNotifyTo, setUniswapApiKey, getUniswapApiKey, setVeniceApiKey, getVeniceApiKey, addSyndicate, getSyndicates, setPrimarySyndicate, getPrimarySyndicate } from "./lib/config.js";
+import { cacheGroupId, getCachedGroupId, setChainContract, getChainContracts, loadConfig, setPrivateKey, getAgentId, setConfigRpcUrl, getNotifyTo, setNotifyTo, setUniswapApiKey, getUniswapApiKey, setVeniceApiKey, getVeniceApiKey, setAnthropicApiKey, addSyndicate, getSyndicates, setPrimarySyndicate, getPrimarySyndicate } from "./lib/config.js";
 import { isTestnet } from "./lib/network.js";
 
 // ── Theme ──
@@ -1577,6 +1577,10 @@ registerAgentCommands(program);
 const { registerTradeCommands } = await import("./commands/trade.js");
 registerTradeCommands(program);
 
+// ── Grid commands ──
+import { registerGridCommand } from './commands/grid.js';
+registerGridCommand(program);
+
 // ── Config commands ──
 const configCmd = program.command("config");
 
@@ -1589,6 +1593,7 @@ configCmd
   .option("--notify-to <id>", "Destination for cron summaries (Telegram chat ID, phone, etc.)")
   .option("--uniswap-api-key <key>", "Uniswap Trading API key (from developers.uniswap.org)")
   .option("--venice-api-key <key>", "Venice AI inference API key")
+  .option("--anthropic-api-key <key>", "Anthropic Claude API key (for LLM judge)")
   .option("--xmtp-group <subdomain:groupId>", "Cache an XMTP group ID for a syndicate (e.g. my-fund:abc123)")
   .action((opts) => {
     let saved = false;
@@ -1636,6 +1641,12 @@ configCmd
       saved = true;
     }
 
+    if (opts.anthropicApiKey) {
+      setAnthropicApiKey(opts.anthropicApiKey);
+      console.log(chalk.green("Anthropic API key saved to ~/.sherwood/config.json"));
+      saved = true;
+    }
+
     if (opts.xmtpGroup) {
       const parts = opts.xmtpGroup.split(":");
       if (parts.length !== 2 || !parts[0] || !parts[1]) {
@@ -1649,7 +1660,7 @@ configCmd
     }
 
     if (!saved) {
-      console.log(chalk.red("Provide at least one of: --private-key, --vault, --rpc, --notify-to, --uniswap-api-key, --venice-api-key, --xmtp-group"));
+      console.log(chalk.red("Provide at least one of: --private-key, --vault, --rpc, --notify-to, --uniswap-api-key, --venice-api-key, --anthropic-api-key, --xmtp-group"));
       process.exit(1);
     }
   });

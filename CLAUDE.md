@@ -171,22 +171,25 @@ Full spec: `docs/superpowers/specs/2026-04-21-guardian-delegation-v1.5-design.md
 ### CLI Operational Notes
 
 - `which sherwood` → `~/.linuxbrew/bin/sherwood` → symlinks into the **local `cli/dist/index.js`**. `npm run build` is enough to deploy changes — no `npm install -g` needed. Cron picks up rebuilds immediately.
-- `sherwood agent start --auto --cycle 1` — runs ONE dry-run cycle, then exits. Used by the hermes trade-scanner cron. For continuous runs use `--cycle 15m`.
 - `sherwood chat <name> send --stdin` — pipe via stdin to avoid bash `$`-expansion (`$10,000` → `0,000`). Required for any dynamic message containing `$`. Added in 0.40.2.
+- **Hermes skill sync**: cron reads skills from `~/.hermes/skills/sherwood/*/SKILL.md`, NOT from the repo. After editing `cron/skills/*/SKILL.md`, copy to hermes: `cp cron/skills/<name>/SKILL.md ~/.hermes/skills/sherwood/<name>/SKILL.md`.
+- **Hermes cron prompt**: the job's `--prompt` text overrides SKILL.md instructions. After changing a skill's behavior, also update the prompt via `hermes cron edit <id> --prompt "..."`. The cron for trade-scanner is `c51a4fe8314e`.
 
-### Calibrator
+### Trading Strategies
 
-- **Candle path** (`sherwood agent calibrate`) — re-fetches OHLC from CoinGecko and recomputes signals from candles only. **Cannot replay HL flow / fundingRate / smartMoney** (those need live data). Output is a lower bound on production performance; many configs show 0 trades because the candle-only signal stack rarely fires.
-- **Replay path** (`sherwood agent calibrate --from-history`) — replays captured production signals from `signal-history.jsonl`. Far truer to live behavior. Add `--last <days>` after a scoring change to ignore stale rows captured under the prior code.
-- Backtester is direction-aware: `Position.side` + SHORT entries on SELL signals; exit math (stop/TP/trail) flips for shorts. Ranging-regime BUY threshold currently `0.25`, SELL `-0.25`.
+The directional agent and grid strategy each have a dedicated SKILL.md
+that owns their config, runtime, signal stack, and tuning notes:
 
-### Agent State Files (`~/.sherwood/agent/`)
+- **Directional agent** — `cli/src/agent/SKILL.md`
+  Signal weights, regime thresholds, entry gates, calibrator, autoresearch,
+  state files (`~/.sherwood/agent/`), data providers, Kronos forecaster.
+- **Grid strategy** — `cli/src/grid/SKILL.md`
+  Standalone ATR-based grid loop, allocation, leverage, rebalancing,
+  state file (`~/.sherwood/grid/portfolio.json`).
 
-- `cycles.jsonl` — per-cycle summary: `{cycleNumber, timestamp, signals: [{token, score, action, regime}], tradesExecuted, exitsProcessed, portfolioValue, dailyPnl, errors}`. Append-only.
-- `signal-history.jsonl` — per-token full signal stack including HL/funding/dexFlow values + regime + weights used. The richer log; what `sherwood agent calibrate --from-history` replays.
-- `portfolio.json` — positions, cash, PnL counters. Atomic write via `.tmp` rename.
-- `trades.json` — closed-trade history (entry/exit/PnL/reason).
-- `calibration-results.json` / `replay-calibration-results.json` — last calibrator run output.
+Treat the SKILL.md files as the source of truth for signal stack and grid
+config — do not duplicate values into this file. Update the SKILL.md when
+behavior changes.
 
 ## Chat (XMTP)
 
@@ -262,6 +265,7 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 - CLI: vitest (when wired up)
 - Always include test results in PR description
 - `cli/src/lib/network.test.ts` has 4 pre-existing failures from `BASE_RPC_URL` env-var leak (Moonwell RPC override). Always verify with `git stash && npm test` before assuming new test failures are from your changes.
+- **systemd services** need `Environment="NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"` — linuxbrew Node.js can't find CA certs without it. All HTTPS fetch calls fail silently with `TypeError: fetch failed`.
 - `forge coverage` runs again as of PR #229 (struct-literal refactor in `SyndicateGovernor.propose`). Prior stack-too-deep workaround no longer needed.
 - First invariant harness shipped in PR #229 at `test/invariants/` using `StdInvariant` + a handler contract (guardian WOOD conservation, stake accounting). 4 more priority invariants (#226 INV-2 / -3 / -11 / -15) still outstanding.
 - Pre-mainnet punch list: issues **#225 (bugs)** and **#226 (process/design)**. Canonical consolidated tracker: **`docs/pre-mainnet-punchlist.md`** — every fix PR should reference the ref code (e.g. `fixes V-C1`, `closes G-C4`) and mark the punch list row closed. New findings go into the issues first, then propagate to the tracker.

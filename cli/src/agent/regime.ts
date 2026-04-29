@@ -25,12 +25,6 @@ interface RegimeCache {
   analysis: RegimeAnalysis;
 }
 
-interface BtcDominanceData {
-  market_cap_percentage: {
-    btc: number;
-  };
-}
-
 export class MarketRegimeDetector {
   private cacheDir: string;
   private cacheFile: string;
@@ -86,7 +80,7 @@ export class MarketRegimeDetector {
 
   /** Synchronous candle-only analysis — same logic as analyzeBtc minus dominance/IO. */
   classifySync(candles: Candle[]): RegimeAnalysis {
-    if (candles.length < 200) {
+    if (candles.length < 60) {
       return this.fallbackAnalysis("Insufficient BTC data for regime analysis");
     }
 
@@ -98,10 +92,13 @@ export class MarketRegimeDetector {
     if (momentumResult) return momentumResult;
 
     // ── Standard EMA/ADX regime classification ──
+    // Apr 2026 audit: switched from EMA(50,200) + ADX(14) to EMA(21,50) + ADX(7).
+    // On 4h candles EMA(50,200) lagged 200+ hours — missed the Apr 13-14 BTC rally
+    // entirely. Faster EMAs + ADX(7) respond in ~28-50 hours instead.
+    const ema21 = calculateEMA(closes, 21);
     const ema50 = calculateEMA(closes, 50);
-    const ema200 = calculateEMA(closes, 200);
+    const currentEma21 = this.getLastValidValue(ema21);
     const currentEma50 = this.getLastValidValue(ema50);
-    const currentEma200 = this.getLastValidValue(ema200);
 
     const bb = calculateBollingerBands(candles, 20, 2.0);
     const currentBbWidth = this.getLastValidValue(bb.width);
@@ -110,14 +107,14 @@ export class MarketRegimeDetector {
     const currentAtr = this.getLastValidValue(atr);
     const atrRatio = currentAtr / currentPrice;
 
-    const adx = this.calculateADX(candles, 14);
+    const adx = this.calculateADX(candles, 7);
     const currentAdx = this.getLastValidValue(adx);
 
     let btcTrend: RegimeAnalysis["btcTrend"] = "neutral";
-    if (!isNaN(currentEma50) && !isNaN(currentEma200)) {
-      if (currentPrice > currentEma50 && currentEma50 > currentEma200) {
+    if (!isNaN(currentEma21) && !isNaN(currentEma50)) {
+      if (currentPrice > currentEma21 && currentEma21 > currentEma50) {
         btcTrend = "up";
-      } else if (currentPrice < currentEma50 && currentEma50 < currentEma200) {
+      } else if (currentPrice < currentEma21 && currentEma21 < currentEma50) {
         btcTrend = "down";
       }
     }
@@ -137,24 +134,24 @@ export class MarketRegimeDetector {
       regime = "high-volatility";
       confidence = 0.9;
       details = `Extreme volatility (BB ${currentBbWidth.toFixed(3)}, ATR ${atrRatio.toFixed(3)})`;
-    } else if (volatilityLevel === "low" && currentAdx < 20) {
+    } else if (volatilityLevel === "low" && currentAdx < 15) {
       regime = "low-volatility";
       confidence = 0.8;
       details = `Low volatility (BB ${currentBbWidth.toFixed(3)}, ADX ${currentAdx.toFixed(1)})`;
     } else {
-      if (currentAdx > 25 && btcTrend !== "neutral") {
+      if (currentAdx > 20 && btcTrend !== "neutral") {
         if (btcTrend === "up") {
           regime = "trending-up";
-          confidence = Math.min(0.9, 0.6 + (currentAdx - 25) * 0.01);
+          confidence = Math.min(0.9, 0.6 + (currentAdx - 20) * 0.01);
           details = `Strong uptrend (ADX ${currentAdx.toFixed(1)})`;
         } else {
           regime = "trending-down";
-          confidence = Math.min(0.9, 0.6 + (currentAdx - 25) * 0.01);
+          confidence = Math.min(0.9, 0.6 + (currentAdx - 20) * 0.01);
           details = `Strong downtrend (ADX ${currentAdx.toFixed(1)})`;
         }
       } else {
         regime = "ranging";
-        confidence = currentAdx < 20 ? 0.7 : 0.5;
+        confidence = currentAdx < 15 ? 0.7 : 0.5;
         details = `Ranging (ADX ${currentAdx.toFixed(1)})`;
       }
     }
@@ -170,116 +167,10 @@ export class MarketRegimeDetector {
   }
 
   private async analyzeBtc(candles: Candle[]): Promise<RegimeAnalysis> {
-    if (candles.length < 200) {
-      return this.fallbackAnalysis("Insufficient BTC data for regime analysis");
-    }
-
-    const closes = candles.map(c => c.close);
-    const currentPrice = closes[closes.length - 1]!;
-
-    // ── Fast momentum override — shared with classifySync ──
-    const momentumResult = this.checkMomentumOverride(candles, currentPrice);
-    if (momentumResult) return momentumResult;
-
-    // ── Standard EMA/ADX regime classification ──
-    // Calculate EMAs for trend detection
-    const ema50 = calculateEMA(closes, 50);
-    const ema200 = calculateEMA(closes, 200);
-    const currentEma50 = this.getLastValidValue(ema50);
-    const currentEma200 = this.getLastValidValue(ema200);
-
-    // Calculate Bollinger Bands for volatility
-    const bb = calculateBollingerBands(candles, 20, 2.0);
-    const currentBbWidth = this.getLastValidValue(bb.width);
-
-    // Calculate ATR for additional volatility measure
-    const atr = calculateATR(candles, 14);
-    const currentAtr = this.getLastValidValue(atr);
-    const atrRatio = currentAtr / currentPrice;
-
-    // Calculate ADX for trend strength
-    const adx = this.calculateADX(candles, 14);
-    const currentAdx = this.getLastValidValue(adx);
-
-    // Fetch BTC dominance (async, with fallback)
-    let btcDominanceTrend: "rising" | "falling" | "neutral" = "neutral";
-    try {
-      btcDominanceTrend = await this.getBtcDominanceTrend();
-    } catch {
-      // Use default if fetch fails
-    }
-
-    // Determine BTC trend
-    let btcTrend: RegimeAnalysis["btcTrend"] = "neutral";
-    if (!isNaN(currentEma50) && !isNaN(currentEma200)) {
-      if (currentPrice > currentEma50 && currentEma50 > currentEma200) {
-        btcTrend = "up";
-      } else if (currentPrice < currentEma50 && currentEma50 < currentEma200) {
-        btcTrend = "down";
-      }
-    }
-
-    // Determine volatility level
-    let volatilityLevel: RegimeAnalysis["volatilityLevel"] = "normal";
-    if (!isNaN(currentBbWidth)) {
-      if (currentBbWidth < 0.04) {
-        volatilityLevel = "low";
-      } else if (currentBbWidth > 0.20) {
-        volatilityLevel = "extreme";
-      } else if (currentBbWidth > 0.10) {
-        volatilityLevel = "high";
-      }
-    }
-
-    // Determine primary regime and confidence
-    let regime: MarketRegime;
-    let confidence: number;
-    let details: string;
-
-    // Volatility regimes take precedence if extreme
-    if (volatilityLevel === "extreme") {
-      regime = "high-volatility";
-      confidence = 0.9;
-      details = `Extreme volatility detected (BB width: ${currentBbWidth.toFixed(3)}, ATR: ${atrRatio.toFixed(3)})`;
-    } else if (volatilityLevel === "low" && currentAdx < 20) {
-      regime = "low-volatility";
-      confidence = 0.8;
-      details = `Low volatility detected (BB width: ${currentBbWidth.toFixed(3)}, ADX: ${currentAdx.toFixed(1)})`;
-    } else {
-      // Trend-based regimes
-      if (currentAdx > 25 && btcTrend !== "neutral") {
-        if (btcTrend === "up") {
-          regime = "trending-up";
-          confidence = Math.min(0.9, 0.6 + (currentAdx - 25) * 0.01);
-          details = `Strong uptrend (ADX: ${currentAdx.toFixed(1)}, EMAs aligned bullish)`;
-        } else {
-          regime = "trending-down";
-          confidence = Math.min(0.9, 0.6 + (currentAdx - 25) * 0.01);
-          details = `Strong downtrend (ADX: ${currentAdx.toFixed(1)}, EMAs aligned bearish)`;
-        }
-      } else {
-        regime = "ranging";
-        confidence = currentAdx < 20 ? 0.7 : 0.5;
-        details = `Ranging market (ADX: ${currentAdx.toFixed(1)}, no clear trend)`;
-      }
-    }
-
-    // Add BTC dominance context to details
-    if (btcDominanceTrend !== "neutral") {
-      details += `, BTC dominance ${btcDominanceTrend}`;
-    }
-
-    // Generate strategy adjustments based on regime
-    const strategyAdjustments = this.getStrategyAdjustments(regime);
-
-    return {
-      regime,
-      confidence,
-      btcTrend,
-      volatilityLevel,
-      details,
-      strategyAdjustments,
-    };
+    // Delegate to the synchronous classifier — the async BTC dominance
+    // fetch was dead code (checked absolute level, not trend; result
+    // only appended to details string, never used in classification).
+    return this.classifySync(candles);
   }
 
   private calculateADX(candles: Candle[], period: number): number[] {
@@ -366,24 +257,6 @@ export class MarketRegimeDetector {
     return result;
   }
 
-  private async getBtcDominanceTrend(): Promise<"rising" | "falling" | "neutral"> {
-    try {
-      const response = await fetch("https://api.coingecko.com/api/v3/global");
-      if (!response.ok) throw new Error("Failed to fetch global data");
-
-      const data = await response.json() as BtcDominanceData;
-      const currentDominance = data.market_cap_percentage.btc;
-
-      // This is a simplified trend detection - in production you'd want historical data
-      // For now, just use the current value as a neutral baseline
-      if (currentDominance > 50) return "rising";
-      if (currentDominance < 40) return "falling";
-      return "neutral";
-    } catch {
-      return "neutral";
-    }
-  }
-
   /**
    * Fast momentum check — catches intraday trends that EMA/ADX miss.
    * Returns a RegimeAnalysis if momentum override fires, or null to fall
@@ -457,56 +330,58 @@ export class MarketRegimeDetector {
   }
 
   private getStrategyAdjustments(regime: MarketRegime): Record<string, number> {
+    // Only active strategies. Trend-aligned signals boosted during trends,
+    // contrarian signals boosted during ranging.
     const baseMultipliers: Record<MarketRegime, Record<string, number>> = {
       "trending-up": {
         breakoutOnChain: 1.3,
-        meanReversion: 0.3,
         fundingRate: 1.0,
         dexFlow: 1.2,
-        twitterSentiment: 1.0,
         sentimentContrarian: 0.7,
-        tvlMomentum: 1.2,
         hyperliquidFlow: 1.2,
+        multiTimeframe: 1.2,
+        crossSectionalMomentum: 1.2,
+        tradingviewSignal: 1.0,
       },
       "trending-down": {
         breakoutOnChain: 1.3,
-        meanReversion: 0.3,
         fundingRate: 1.2,
         dexFlow: 1.2,
-        twitterSentiment: 1.0,
         sentimentContrarian: 0.8,
-        tvlMomentum: 0.5,
         hyperliquidFlow: 1.3,
+        multiTimeframe: 1.2,
+        crossSectionalMomentum: 1.2,
+        tradingviewSignal: 1.0,
       },
       "ranging": {
         breakoutOnChain: 0.5,
-        meanReversion: 1.5,
         fundingRate: 1.0,
         dexFlow: 0.8,
-        twitterSentiment: 0.8,
         sentimentContrarian: 1.3,
-        tvlMomentum: 1.0,
         hyperliquidFlow: 1.0,
+        multiTimeframe: 0.8,
+        crossSectionalMomentum: 1.0,
+        tradingviewSignal: 1.0,
       },
       "high-volatility": {
         breakoutOnChain: 1.0,
-        meanReversion: 0.3,
         fundingRate: 1.0,
         dexFlow: 0.7,
-        twitterSentiment: 0.7,
         sentimentContrarian: 0.7,
-        tvlMomentum: 0.7,
         hyperliquidFlow: 0.7,
+        multiTimeframe: 0.7,
+        crossSectionalMomentum: 0.8,
+        tradingviewSignal: 0.8,
       },
       "low-volatility": {
         breakoutOnChain: 1.3,
-        meanReversion: 1.2,
         fundingRate: 0.8,
         dexFlow: 0.8,
-        twitterSentiment: 0.8,
         sentimentContrarian: 0.8,
-        tvlMomentum: 0.8,
         hyperliquidFlow: 0.8,
+        multiTimeframe: 1.2,
+        crossSectionalMomentum: 1.0,
+        tradingviewSignal: 1.0,
       },
     };
 
@@ -529,13 +404,13 @@ export class MarketRegimeDetector {
       details: reason,
       strategyAdjustments: {
         breakoutOnChain: 1.0,
-        meanReversion: 1.0,
         fundingRate: 1.0,
         dexFlow: 1.0,
-        twitterSentiment: 1.0,
         sentimentContrarian: 1.0,
-        tvlMomentum: 1.0,
         hyperliquidFlow: 1.0,
+        multiTimeframe: 1.0,
+        crossSectionalMomentum: 1.0,
+        tradingviewSignal: 1.0,
       },
     };
   }

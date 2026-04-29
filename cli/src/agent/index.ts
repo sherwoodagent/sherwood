@@ -13,7 +13,6 @@ import { getLatestSignals } from "./technical.js";
 import {
   scoreTechnical,
   scoreSentiment,
-  scoreOnChain,
   scoreFundamental,
   scoreEvent,
   computeTradeDecision,
@@ -26,8 +25,22 @@ import { DexScreenerProvider } from "../providers/data/dexscreener.js";
 import { FundingRateProvider } from "../providers/data/funding-rate.js";
 import { TokenUnlocksProvider } from "../providers/data/token-unlocks.js";
 import { TwitterSentimentProvider } from "../providers/data/twitter.js";
+import {
+  getMessariFundamentals,
+  getBtcNetworkStats,
+  getCryptoPredictions,
+  getSocialData,
+  getCryptoCompareCandles,
+  getProtocolTvl,
+  getKronosVolForecast,
+} from '../providers/fincept/index.js';
 import { logSignal } from "./signal-logger.js";
+import type { JudgeLogData } from "./signal-logger.js";
+import { judge, selectJudgeCandidates, DEFAULT_JUDGE_CONFIG } from "./judge.js";
+import type { JudgeConfig, JudgeVerdict, JudgeContext } from "./judge.js";
 import { SignalSmoother, FileSmootherStorage, DEFAULT_SMOOTHER_CONFIG } from "./signal-smoother.js";
+import { applyVelocityGate, applyRegimeGate, applyRealAlphaGate, resolveVelocity, DEFAULT_ENTRY_GATE_CONFIG } from "./entry-gates.js";
+import type { EntryGateConfig } from "./entry-gates.js";
 import { join as joinPath } from "node:path";
 import { homedir as getHomedir } from "node:os";
 import { HyperliquidProvider } from "../providers/data/hyperliquid.js";
@@ -38,6 +51,7 @@ import { CorrelationGuard } from "./correlation.js";
 import type { CorrelationCheck } from "./correlation.js";
 import { AlertSystem } from "./alerts.js";
 import type { Alert } from "./alerts.js";
+import type { PortfolioState } from "./risk.js";
 import { isX402WalletFunded } from "../lib/x402.js";
 
 export type { Signal, ScoringWeights, TradeDecision, Alert, TechnicalSignals };
@@ -66,6 +80,13 @@ export interface AgentConfig {
   smoothFastSignals?: boolean;
   /** Per-strategy configuration overrides. */
   strategyConfigs?: Record<string, StrategyConfig>;
+  /** LLM judge configuration — confirms or vetoes borderline trade decisions. */
+  judge?: Partial<JudgeConfig>;
+  /** Entry-gate configuration — velocity/freshness checks applied post-scoring. */
+  entryGates?: Partial<EntryGateConfig>;
+  /** Backwards-compat opt-out: skip the velocity gate entirely. Equivalent to
+   *  `entryGates: { velocityGateEnabled: false }`. Default false (gate active). */
+  disableVelocityGate?: boolean;
 }
 
 export interface TokenAnalysis {
@@ -75,9 +96,23 @@ export interface TokenAnalysis {
     technicalSignals?: TechnicalSignals;
     fearAndGreed?: number;
     tvl?: number;
+    price?: number;
   };
   regime?: RegimeAnalysis;
   correlation?: CorrelationCheck;
+  /** LLM judge verdict (present only when judge is enabled and token was judged). */
+  judgeResult?: { verdict: JudgeVerdict; cached: boolean; latencyMs: number };
+  /** Original action/score before judge veto (present only when judge vetoed). */
+  preJudge?: { action: string; score: number };
+  /** Original action/score before velocity gate downgraded to HOLD. */
+  preVelocity?: { action: string; score: number };
+  /** Original action/score before regime gate blocked a short in non-bearish regime. */
+  preRegime?: { action: string; score: number };
+  /** Original action/score before real-alpha gate blocked a noisy-only entry. */
+  preAlpha?: { action: string; score: number };
+  /** Kronos ML-predicted per-candle volatility (fraction). Used by executor
+   *  for dynamic stop-loss width when available. */
+  kronosVol4h?: number;
 }
 
 export class TradingAgent {
@@ -94,6 +129,13 @@ export class TradingAgent {
   private correlationGuard: CorrelationGuard;
   private alertSystem: AlertSystem;
   private smoother: SignalSmoother | null = null;
+  /** Optional getter for current portfolio state. When set, judge receives
+   *  real portfolio context (openCount, cashPct, etc.); otherwise judge falls
+   *  back to neutral defaults and its portfolio-veto branch is effectively
+   *  disabled. Wired in by AgentLoop via setPortfolioStateGetter(). */
+  private portfolioStateGetter: (() => PortfolioState | undefined) | undefined;
+  /** Warn-once flag when portfolio getter is missing at judge time. */
+  private warnedNoPortfolioGetter = false;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -111,7 +153,7 @@ export class TradingAgent {
   }
 
   /** Analyze a single token — gather all data and score. */
-  async analyzeToken(tokenId: string, opts?: { skipX402?: boolean }): Promise<TokenAnalysis> {
+  async analyzeToken(tokenId: string, opts?: { skipX402?: boolean; groupReturns?: Record<string, number> }): Promise<TokenAnalysis> {
     const signals: Signal[] = [];
     let technicalSignals: TechnicalSignals | undefined;
     let fearAndGreedValue: number | undefined;
@@ -119,53 +161,24 @@ export class TradingAgent {
     let candles: Candle[] | undefined;
     let sentimentZScore: number | undefined;
 
-    // Phase 1: Parallel basic data fetching (OHLC, Fear & Greed, TVL, Hyperliquid)
-    const [ohlcResult, fearGreedResult, tvlResult, hyperliquidResult] = await Promise.allSettled([
-      // 1. Fetch OHLC data from CoinGecko
-      this.coingecko.getOHLC(tokenId, 30).then(async (ohlcRaw) => {
-        if (!ohlcRaw || ohlcRaw.length <= 10) return null;
+    // Phase 1: Parallel basic data fetching
+    // PRIMARY candle source is Hyperliquid (free, no rate limits, includes volume).
+    // CoinGecko OHLC is FALLBACK only — the free tier 429s after ~5 tokens and the
+    // circuit breaker kills the remaining 9+, leaving them with zero technical data.
+    const [hlCandleResult, ohlcResult, fearGreedResult, tvlResult, hyperliquidResult] = await Promise.allSettled([
+      // 1a. PRIMARY: Hyperliquid candles (4h over 30 days ≈ 180 bars — more than enough for EMA/RSI/MACD)
+      this.hyperliquid.getCandles(tokenId, '4h', 30 * 24 * 60 * 60 * 1000),
 
-        const rawCandles = ohlcRaw.map((c: number[]) => ({
-          timestamp: c[0]!,
-          open: c[1]!,
-          high: c[2]!,
-          low: c[3]!,
-          close: c[4] ?? c[3]!, // CoinGecko OHLC: [ts, o, h, l, c]
-          volume: 0, // OHLC endpoint doesn't include volume
-        }));
-
-        // Fetch volume data in parallel
-        try {
-          const marketData = await this.coingecko.getMarketData(tokenId, 30);
-          if (marketData?.total_volumes) {
-            // Map volumes to nearest candle by timestamp
-            for (const candle of rawCandles) {
-              const nearest = marketData.total_volumes.reduce(
-                (best: number[], v: number[]) =>
-                  Math.abs(v[0]! - candle.timestamp) < Math.abs(best[0]! - candle.timestamp)
-                    ? v
-                    : best,
-                marketData.total_volumes[0]!,
-              );
-              candle.volume = nearest[1] ?? 0;
-            }
-          }
-        } catch {
-          // Volume data optional
-        }
-
-        return rawCandles;
-      }),
+      // 1b. FALLBACK: CryptoCompare candles via Fincept (replaces CoinGecko OHLC)
+      getCryptoCompareCandles(tokenId, 180),
 
       // 2. Fetch Fear & Greed
       this.sentiment.getFearAndGreed(),
 
-      // 3. Fetch TVL data (if DeFi protocol)
-      this.defillama.getProtocolTvl(tokenId).then(async (tvlValue) => {
+      // 3. Fetch TVL data (if DeFi protocol) — Fincept DefiLlama wrapper
+      getProtocolTvl(tokenId).then((tvlValue) => {
         if (typeof tvlValue === "number" && tvlValue > 0) {
-          const priceData = await this.coingecko.getPrice([tokenId], ["usd"]);
-          const mcap = priceData?.[tokenId]?.usd_market_cap;
-          return { tvl: tvlValue, mcapToTvl: mcap && tvlValue > 0 ? mcap / tvlValue : undefined };
+          return { tvl: tvlValue, mcapToTvl: undefined }; // mcapToTvl computed in Phase 2b via Messari
         }
         return null;
       }),
@@ -174,9 +187,13 @@ export class TradingAgent {
       this.hyperliquid.getHyperliquidData(tokenId)
     ]);
 
-    // Process OHLC results
-    if (ohlcResult.status === 'fulfilled' && ohlcResult.value) {
-      candles = ohlcResult.value;
+    // Process candle results — prefer Hyperliquid (free, unlimited) over CoinGecko (rate-limited)
+    const hlCandles = hlCandleResult.status === 'fulfilled' ? hlCandleResult.value : null;
+    const cgCandles = ohlcResult.status === 'fulfilled' ? ohlcResult.value : null;
+    const resolvedCandles = (hlCandles && hlCandles.length > 10) ? hlCandles : cgCandles;
+
+    if (resolvedCandles && resolvedCandles.length > 10) {
+      candles = resolvedCandles;
       technicalSignals = getLatestSignals(candles);
       signals.push(scoreTechnical(technicalSignals));
 
@@ -246,44 +263,18 @@ export class TradingAgent {
       hyperliquidData = hyperliquidResult.value;
     }
 
-    // Process TVL results — use Hyperliquid price if available instead of calling CoinGecko
+    // Process TVL results — mcapToTvl is now computed in Phase 2b via Messari
     if (tvlResult.status === 'fulfilled' && tvlResult.value) {
-      const { tvl: tvlValue } = tvlResult.value;
-      tvl = tvlValue;
-
-      // Calculate mcapToTvl ratio using Hyperliquid price if available
-      let mcapToTvl: number | undefined;
-      if (hyperliquidData?.markPrice) {
-        // Use Hyperliquid mark price instead of CoinGecko
-        try {
-          const coinDetails = await this.coingecko.getCoinDetails(tokenId);
-          const circSupply = coinDetails?.market_data?.circulating_supply;
-          if (circSupply) {
-            const mcap = hyperliquidData.markPrice * circSupply;
-            mcapToTvl = tvlValue > 0 ? mcap / tvlValue : undefined;
-          }
-        } catch {
-          // Fall back to original CoinGecko approach if coin details fail
-          const priceData = await this.coingecko.getPrice([tokenId], ["usd"]);
-          const mcap = priceData?.[tokenId]?.usd_market_cap;
-          mcapToTvl = mcap && tvlValue > 0 ? mcap / tvlValue : undefined;
-        }
-      } else {
-        // Fall back to CoinGecko price
-        const priceData = await this.coingecko.getPrice([tokenId], ["usd"]);
-        const mcap = priceData?.[tokenId]?.usd_market_cap;
-        mcapToTvl = mcap && tvlValue > 0 ? mcap / tvlValue : undefined;
-      }
-
-      signals.push(scoreFundamental({ mcapToTvl }));
-    } else {
-      // Not all tokens have TVL data, that's fine
-      signals.push(scoreFundamental({}));
+      tvl = tvlResult.value.tvl;
     }
+    // scoreFundamental is called in Phase 2b after Messari data is available
 
     // Shared research data — captured in phase 2, reused in phase 3 strategies
     let nansenData: any = undefined;
     let messariData: any = undefined;
+    // Nansen flow data for NarrativeVacuum + WhaleIntent strategies
+    let nansenFlowData: StrategyContext['nansenFlowData'] = undefined;
+    let nansenHlPerps: StrategyContext['nansenHlPerps'] = undefined;
 
     // Check x402 wallet USDC balance once per scan cycle.
     // If wallet is unfunded, skip x402 calls entirely to avoid diluting scores.
@@ -299,14 +290,15 @@ export class TradingAgent {
       }
     }
 
-    // Phase 2: Nansen x402 research data (Messari dropped — low value for majors)
+    // Phase 2: Nansen smart-money data
     //
-    // Two Nansen calls in parallel:
-    //   1. Smart-money netflows (multi-chain: ethereum, solana, base, L2s)
-    //      — was previously Base-only, returning empty for BTC/ETH/SOL
-    //   2. Hyperliquid smart-money perp trades — same venue we trade on,
-    //      shows what Funds/Smart Traders are doing right now
-    if (x402Enabled && x402Available) {
+    // Fires when NANSEN_API_KEY is set (direct Pro API, ~$0.005/call) OR
+    // when x402 is enabled + funded (micropayment, ~$0.06/call).
+    // Two calls in parallel:
+    //   1. Smart-money netflows → feeds NarrativeVacuum + WhaleIntent strategies
+    //   2. HL perp trades → cross-venue confirmation for WhaleIntent
+    const nansenAvailable = !!process.env.NANSEN_API_KEY || (x402Enabled && x402Available);
+    if (nansenAvailable) {
       // Map tokenId to HL symbol for perp-trades query
       const hlSymbolMap: Record<string, string> = {
         bitcoin: "BTC", ethereum: "ETH", solana: "SOL",
@@ -319,10 +311,12 @@ export class TradingAgent {
 
       const nansenProvider = getResearchProvider("nansen") as import("../providers/research/nansen.js").NansenProvider;
 
-      // Nansen netflow dropped — returns 422 for token_symbol filter.
-      // HL perp-trades is the higher-value signal (same venue we trade).
-      const [hlPerpResult] = await Promise.allSettled([
+      // Two Nansen calls in parallel:
+      //   1. HL perp trades — cross-venue smart money positioning
+      //   2. Smart money netflow — aggregate on-chain accumulation/distribution
+      const [hlPerpResult, flowResult] = await Promise.allSettled([
         nansenProvider.queryHyperliquidSmartMoney(hlSymbol),
+        nansenProvider.query({ type: 'smart-money', target: hlSymbol }),
       ]);
 
       // Process HL perp trades — derive a smartMoney signal from recent trade direction
@@ -356,12 +350,52 @@ export class TradingAgent {
             source: 'Nansen HL Smart Money',
             details: `${trades.length} trades: $${(longValueUsd / 1e6).toFixed(1)}M long / $${(shortValueUsd / 1e6).toFixed(1)}M short (${(longRatio * 100).toFixed(0)}% long)`,
           });
-          console.error(chalk.dim(`  x402 Nansen HL perps: ${trades.length} trades, ${(longRatio * 100).toFixed(0)}% long bias, cost ${hlResult.costUsdc} USDC`));
+          console.error(chalk.dim(`  Nansen HL perps: ${trades.length} trades, ${(longRatio * 100).toFixed(0)}% long bias, cost ${hlResult.costUsdc}`));
+          // Capture for WhaleIntent strategy
+          nansenHlPerps = { longRatio, tradeCount: trades.length, longValueUsd, shortValueUsd };
+          // Derive flow data from HL perps when netflow endpoint fails (422 on token_symbol)
+          if (!nansenFlowData) {
+            const netFlowFromPerps = longValueUsd - shortValueUsd;
+            nansenFlowData = { netFlow24hUsd: netFlowFromPerps, traderCount: trades.length };
+          }
         } else {
-          console.error(chalk.dim(`  x402 Nansen HL perps: no recent trades for ${hlSymbol}`));
+          console.error(chalk.dim(`  Nansen HL perps: no recent trades for ${hlSymbol}`));
         }
       } else {
         console.error(chalk.dim(`  x402 Nansen HL perps unavailable: ${hlPerpResult.reason}`));
+      }
+
+      // Smart Money Netflow — aggregate accumulation/distribution across chains
+      if (flowResult.status === 'fulfilled' && flowResult.value?.data) {
+        const flowData = flowResult.value.data as Record<string, unknown>;
+        const flows = flowData.flows as Array<Record<string, unknown>> | undefined;
+        // Sum net_flow_24h_usd across all chains for this token
+        let netFlow = 0;
+        let traderCount = 0;
+        if (flows && flows.length > 0) {
+          for (const f of flows) {
+            netFlow += Number(f.net_flow_24h_usd ?? 0);
+            traderCount += Number(f.trader_count ?? 0);
+          }
+        } else {
+          // Single-row response format
+          netFlow = Number(flowData.net_flow_24h_usd ?? 0);
+          traderCount = Number(flowData.trader_count ?? 0);
+        }
+
+        if (netFlow !== 0 && !isNaN(netFlow)) {
+          const normalizedFlow = Math.max(-0.5, Math.min(0.5, netFlow / 2_000_000));
+          signals.push({
+            name: 'flowIntelligence',
+            value: normalizedFlow,
+            confidence: Math.min(0.7, 0.3 + Math.abs(normalizedFlow)),
+            source: 'Nansen Smart Money Netflow',
+            details: `Smart money 24h net flow: $${(netFlow / 1_000_000).toFixed(2)}M ${netFlow > 0 ? '(accumulating)' : '(distributing)'} (${traderCount} wallets)`,
+          });
+          console.error(chalk.dim(`  Nansen netflow: $${(netFlow / 1_000_000).toFixed(2)}M, ${traderCount} wallets, cost ${flowResult.value.costUsdc}`));
+        }
+        // Capture for NarrativeVacuum + WhaleIntent strategies
+        nansenFlowData = { netFlow24hUsd: netFlow, traderCount };
       }
 
       // Push event signal (no Messari — use free path)
@@ -372,13 +406,46 @@ export class TradingAgent {
     // signals that actually fire. Only push when there's real data (TVL from
     // phase 1, or Nansen/Messari from x402).
 
+    // Phase 2b: Fincept data (parallel, all fault-tolerant)
+    const [messariResult, btcNetResult, predictionResult, socialResult, kronosResult] =
+      await Promise.allSettled([
+        getMessariFundamentals(tokenId),
+        tokenId === 'bitcoin' ? getBtcNetworkStats() : Promise.resolve(null),
+        getCryptoPredictions(),
+        getSocialData(tokenId),
+        // Kronos vol forecast — uses existing candles (1h cache, ~2.3s on CPU)
+        candles && candles.length >= 30 ? getKronosVolForecast(tokenId, candles) : Promise.resolve(null),
+      ]);
+
+    const messariFundamentals = messariResult.status === 'fulfilled' ? messariResult.value ?? undefined : undefined;
+    const btcNetworkData = btcNetResult.status === 'fulfilled' ? btcNetResult.value ?? undefined : undefined;
+    const predictionData = predictionResult.status === 'fulfilled' && predictionResult.value?.length
+      ? { markets: predictionResult.value }
+      : undefined;
+    const socialData = socialResult.status === 'fulfilled' ? socialResult.value ?? undefined : undefined;
+    const kronosData = kronosResult.status === 'fulfilled' ? kronosResult.value ?? undefined : undefined;
+
+    // Feed Messari fundamentals into scoreFundamental if available
+    if (messariFundamentals && messariFundamentals.marketCap > 0) {
+      const mcapToTvl = tvl && tvl > 0 ? messariFundamentals.marketCap / tvl : undefined;
+      const existingFundIdx = signals.findIndex((s) => s.name === 'fundamental');
+      const fundSignal = scoreFundamental({
+        mcapToTvl,
+        revenueGrowth: messariFundamentals.revenueGrowth7d,
+      });
+      if (existingFundIdx >= 0) {
+        signals[existingFundIdx] = fundSignal;
+      } else {
+        signals.push(fundSignal);
+      }
+    }
+
     // Phase 3: Parallel strategy data fetching (symbol, funding rate, unlocks)
     let marketData: any = undefined;
 
     try {
-      // Twitter sentiment fetch removed — API returns 402 (paid tier required)
-      // for most token queries and was spamming logs without producing usable
-      // signal. TwitterSentimentStrategy is also disabled in DEFAULT_STRATEGIES.
+      // Dead strategies removed in Apr 2026 audit (twitter, meanReversion,
+      // tvlMomentum, tokenUnlock, smartMoney strategy).
       const [symbolResult, fundingRateResult, unlockResult] = await Promise.allSettled([
         // Resolve token symbol + get market data for strategies
         this.coingecko.getCoinDetails(tokenId).then(async (coinDetails) => {
@@ -445,6 +512,14 @@ export class TradingAgent {
         twitterData, // from phase 3
         hyperliquidData, // from phase 3
         tokenSymbol, // from phase 3
+        groupReturns: opts?.groupReturns, // cross-sectional momentum
+        messariFundamentals,
+        btcNetworkData,
+        predictionData,
+        socialData,
+        kronosData,
+        nansenFlowData,
+        nansenHlPerps,
       };
 
       let strategySignals = await runStrategies(stratCtx, this.config.strategyConfigs);
@@ -481,22 +556,16 @@ export class TradingAgent {
     try {
       let btcCandles: Candle[] = candles || [];
 
-      // If analyzing a non-BTC token, fetch BTC candles for regime analysis
-      if (tokenId !== "bitcoin" && (!candles || candles.length < 100)) {
-        const btcOhlc = await this.coingecko.getOHLC("bitcoin", 200);
-        if (btcOhlc && btcOhlc.length > 100) {
-          btcCandles = btcOhlc.map((c: number[]) => ({
-            timestamp: c[0]!,
-            open: c[1]!,
-            high: c[2]!,
-            low: c[3]!,
-            close: c[4] ?? c[3]!,
-            volume: 0, // Volume not needed for regime detection
-          }));
+      // If analyzing a non-BTC token, fetch BTC candles for regime analysis.
+      // Use Hyperliquid (free, no rate limits) instead of CoinGecko (429s, 400s).
+      if (tokenId !== "bitcoin" && (!candles || candles.length < 60)) {
+        const hlBtcCandles = await this.hyperliquid.getCandles("bitcoin", "4h", 30 * 24 * 60 * 60 * 1000);
+        if (hlBtcCandles && hlBtcCandles.length > 60) {
+          btcCandles = hlBtcCandles;
         }
       }
 
-      if (btcCandles.length > 100) {
+      if (btcCandles.length > 60) {
         regimeAnalysis = await this.regimeDetector.detect(btcCandles);
       }
     } catch (err) {
@@ -525,27 +594,67 @@ export class TradingAgent {
       x402Available,
     );
 
+    const currentPrice = hyperliquidData?.markPrice
+      ?? (candles && candles.length > 0 ? candles[candles.length - 1]!.close : 0);
+
     const result: TokenAnalysis = {
       token: tokenId,
       decision,
-      data: { technicalSignals, fearAndGreed: fearAndGreedValue, tvl },
+      data: { technicalSignals, fearAndGreed: fearAndGreedValue, tvl, price: currentPrice },
       regime: regimeAnalysis,
       correlation: correlationCheck,
+      kronosVol4h: kronosData?.predictedVol4h,
     };
 
-    // Persist analysis to ~/.sherwood/agent/signal-history.jsonl so the
-    // signal-audit tool can measure fire rates over time. Fire-and-forget —
-    // never blocks scoring, never crashes on disk failure.
-    const currentPrice = hyperliquidData?.markPrice
-      ?? (candles && candles.length > 0 ? candles[candles.length - 1]!.close : 0);
-    logSignal(result, currentPrice, resolvedWeights);
+    // ── Velocity freshness gate (Orca-inspired) ──
+    // Refuse BUY/SELL if the most recent short-term price move is flat or
+    // opposed to the signal direction — prevents "buying local tops" and
+    // "shorting local bottoms" when the composite score fires late.
+    const gateConfig: EntryGateConfig = {
+      ...DEFAULT_ENTRY_GATE_CONFIG,
+      ...this.config.entryGates,
+      // Legacy opt-out flag wins if set explicitly.
+      ...(this.config.disableVelocityGate ? { velocityGateEnabled: false } : {}),
+    };
+    // Hyperliquid does not currently expose a `priceChg1h` field; resolveVelocity
+    // is written to accept one in case the provider adds it later. For now we
+    // always fall through to the candle-based derivation (4h cadence with
+    // days=30 OHLC — tightest proxy available).
+    const priceChg1h = (hyperliquidData as { priceChg1h?: number } | undefined)?.priceChg1h;
+    const velocity = resolveVelocity(priceChg1h, candles);
+    const velocityGated = applyVelocityGate(result, velocity, gateConfig, (msg) =>
+      console.error(chalk.yellow(msg)),
+    );
 
-    return result;
+    // Regime gate — block shorts in non-bearish regimes (trending-up, ranging,
+    // low-volatility). Trade log analysis: 25% short WR (-$194) vs 67% long WR
+    // (+$279). Most short losses were counter-trend fades.
+    const regimeGated = applyRegimeGate(velocityGated, regimeAnalysis?.regime, gateConfig, (msg) =>
+      console.error(chalk.yellow(msg)),
+    );
+
+    // Real-alpha gate — block entries that are only supported by noisy inputs.
+    const gatedResult = applyRealAlphaGate(regimeGated, gateConfig, (msg) =>
+      console.error(chalk.yellow(msg)),
+    );
+
+    // Note: logSignal() is intentionally NOT called here. It runs in
+    // analyzeAll() AFTER the judge pass, so judge verdicts can be included
+    // in signal-history.jsonl. See analyzeAll() below.
+
+    return gatedResult;
   }
 
   /** Update the token watchlist without recreating the agent (preserves caches). */
   updateTokens(tokens: string[]): void {
     this.config.tokens = tokens;
+  }
+
+  /** Register a getter for current portfolio state. Called by AgentLoop so
+   *  the judge can see real openCount / cashPct / daily PnL / cooldowns when
+   *  building its veto decisions. If not set, judge uses neutral defaults. */
+  setPortfolioStateGetter(fn: () => PortfolioState | undefined): void {
+    this.portfolioStateGetter = fn;
   }
 
   /** Analyze all watchlist tokens.
@@ -561,40 +670,172 @@ export class TradingAgent {
     const topN = this.config.x402TopN;
     const shouldTwoPass = this.config.useX402 && topN && topN > 0 && topN < this.config.tokens.length;
 
+    // ── Cross-sectional momentum: pre-compute 7-day returns for all tokens ──
+    // Fetches 1d candles (8 days lookback) from Hyperliquid for each token.
+    // These are lightweight requests (8 data points each) and Hyperliquid has
+    // no rate limit, so the overhead is minimal (~50-100ms total, parallelized).
+    const groupReturns: Record<string, number> = {};
+    try {
+      const returnFetches = this.config.tokens.map(async (token) => {
+        const candles = await this.hyperliquid.getCandles(token, '1d', 8 * 24 * 60 * 60 * 1000);
+        if (candles && candles.length >= 2) {
+          const firstClose = candles[0]!.close;
+          const lastClose = candles[candles.length - 1]!.close;
+          if (firstClose > 0) {
+            groupReturns[token] = (lastClose / firstClose) - 1;
+          }
+        }
+      });
+      await Promise.all(returnFetches);
+    } catch (err) {
+      console.error(chalk.dim(`  Cross-sectional group returns failed: ${(err as Error).message}`));
+    }
+    const hasGroupReturns = Object.keys(groupReturns).length >= 3;
+
+    let results: TokenAnalysis[];
+
     if (!shouldTwoPass) {
       // Original single-pass: analyze all tokens with whatever x402 config says
-      const results: TokenAnalysis[] = [];
+      results = [];
       for (const token of this.config.tokens) {
-        const result = await this.analyzeToken(token);
+        const result = await this.analyzeToken(token, {
+          groupReturns: hasGroupReturns ? groupReturns : undefined,
+        });
         results.push(result);
       }
-      return results;
+    } else {
+      // Pass 1: all tokens with free signals only
+      console.error(chalk.dim(`  x402 top-${topN} mode: scoring all ${this.config.tokens.length} tokens with free signals first...`));
+      const freeResults: TokenAnalysis[] = [];
+      for (const token of this.config.tokens) {
+        const result = await this.analyzeToken(token, {
+          skipX402: true,
+          groupReturns: hasGroupReturns ? groupReturns : undefined,
+        });
+        freeResults.push(result);
+      }
+
+      // Sort by absolute score descending — top N get the x402 enrichment
+      const ranked = [...freeResults].sort(
+        (a, b) => Math.abs(b.decision.score) - Math.abs(a.decision.score),
+      );
+      const topTokens = new Set(ranked.slice(0, topN).map((r) => r.token));
+      console.error(chalk.dim(`  x402 enriching top ${topN}: ${[...topTokens].join(', ')}`));
+
+      // Pass 2: re-analyze top N with x402 enabled
+      const enrichedMap = new Map<string, TokenAnalysis>();
+      for (const token of topTokens) {
+        const enriched = await this.analyzeToken(token, {
+          groupReturns: hasGroupReturns ? groupReturns : undefined,
+        });
+        enrichedMap.set(token, enriched);
+      }
+
+      // Merge: use enriched results for top N, free results for the rest
+      results = freeResults.map((r) => enrichedMap.get(r.token) ?? r);
     }
 
-    // Pass 1: all tokens with free signals only
-    console.error(chalk.dim(`  x402 top-${topN} mode: scoring all ${this.config.tokens.length} tokens with free signals first...`));
-    const freeResults: TokenAnalysis[] = [];
-    for (const token of this.config.tokens) {
-      const result = await this.analyzeToken(token, { skipX402: true });
-      freeResults.push(result);
+    // ── LLM Judge pass ──
+    // After all tokens scored, apply the judge to borderline actionable decisions.
+    // Budget-gated: only the top-N borderline candidates are judged per cycle.
+    const judgeConfig: JudgeConfig = { ...DEFAULT_JUDGE_CONFIG, ...this.config.judge };
+    if (judgeConfig.enabled) {
+      const candidates = selectJudgeCandidates(
+        results.map((r) => ({ token: r.token, score: r.decision.score, action: r.decision.action })),
+        judgeConfig,
+      );
+
+      if (candidates.size > 0) {
+        console.error(chalk.dim(`  [judge] Reviewing ${candidates.size} borderline decision(s): ${[...candidates].join(', ')}`));
+      }
+
+      // Snapshot portfolio state once for the judge pass — all tokens in this
+      // cycle see the same portfolio view. Cheaper than a per-token load and
+      // avoids races with any concurrent mutation.
+      const pstate = this.portfolioStateGetter?.();
+      if (!pstate && candidates.size > 0 && !this.warnedNoPortfolioGetter) {
+        console.warn(chalk.yellow(
+          `  [judge] Warning: portfolio state getter not wired. Judge portfolio-veto branch disabled — using neutral defaults.`,
+        ));
+        this.warnedNoPortfolioGetter = true;
+      }
+
+      for (const result of results) {
+        if (!candidates.has(result.token)) continue;
+
+        // Build real portfolio snapshot for the judge. Falls back to neutral
+        // defaults when the getter isn't wired (e.g. one-shot analyzeAll callers).
+        let portfolio: JudgeContext["portfolio"] = {
+          openCount: 0, cashPct: 1, hasPositionThisToken: false, inStopCooldown: false, dailyPnlPct: 0,
+        };
+        if (pstate) {
+          const totalValue = pstate.totalValue || pstate.cash || 0;
+          const cooldowns = pstate.stopCooldowns ?? {};
+          const cooldownAt = cooldowns[result.token];
+          // Match RiskManager's STOP_COOLDOWN_MS (4h). We only need to know
+          // whether a cooldown is currently active, not the exact deadline.
+          const STOP_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+          const inStopCooldown = cooldownAt !== undefined &&
+            (Date.now() - cooldownAt) < STOP_COOLDOWN_MS;
+          // dailyPnlPct ≈ dailyPnl / (totalValue − dailyPnl), reconstructing
+          // the start-of-day value from current total minus today's delta.
+          const startOfDayValue = totalValue - pstate.dailyPnl;
+          portfolio = {
+            openCount: pstate.positions.length,
+            cashPct: totalValue > 0 ? pstate.cash / totalValue : 1,
+            hasPositionThisToken: !!pstate.positions.find((p) => p.tokenId === result.token),
+            inStopCooldown,
+            dailyPnlPct: startOfDayValue > 0 ? pstate.dailyPnl / startOfDayValue : 0,
+          };
+        }
+
+        const ctx: JudgeContext = {
+          tokenId: result.token,
+          currentPrice: result.data.price ?? 0,
+          decision: result.decision,
+          technicalSignals: result.data.technicalSignals,
+          fearAndGreed: result.data.fearAndGreed,
+          regime: result.regime?.regime,
+          btcBias: result.correlation?.btcBias,
+          suppressionFactor: result.correlation?.suppressionFactor,
+          portfolio,
+        };
+
+        const judgeResult = await judge(ctx, judgeConfig);
+        result.judgeResult = judgeResult;
+
+        if (judgeResult.verdict.verdict === "veto") {
+          result.preJudge = { action: result.decision.action, score: result.decision.score };
+          result.decision = { ...result.decision, action: "HOLD" };
+          console.error(chalk.yellow(`  [judge] VETO ${result.token}: ${judgeResult.verdict.reasoning}`));
+        } else if (judgeResult.verdict.verdict === "confirm" && judgeResult.verdict.reasoning !== "fallback") {
+          console.error(chalk.dim(`  [judge] Confirmed ${result.token} (${judgeResult.cached ? "cached" : `${judgeResult.latencyMs}ms`})`));
+        }
+      }
     }
 
-    // Sort by absolute score descending — top N get the x402 enrichment
-    const ranked = [...freeResults].sort(
-      (a, b) => Math.abs(b.decision.score) - Math.abs(a.decision.score),
-    );
-    const topTokens = new Set(ranked.slice(0, topN).map((r) => r.token));
-    console.error(chalk.dim(`  x402 enriching top ${topN}: ${[...topTokens].join(', ')}`));
-
-    // Pass 2: re-analyze top N with x402 enabled
-    const enrichedMap = new Map<string, TokenAnalysis>();
-    for (const token of topTokens) {
-      const enriched = await this.analyzeToken(token);
-      enrichedMap.set(token, enriched);
+    // Persist analysis to ~/.sherwood/agent/signal-history.jsonl. Runs AFTER
+    // the judge pass so judgeVerdict fields land in signal-history.jsonl.
+    // Fire-and-forget — never blocks scoring, never crashes on disk failure.
+    for (const result of results) {
+      const resolvedWeights = this.config.weights
+        ?? profileForToken(result.token, this.config.weightProfile);
+      const price = result.data.price ?? 0;
+      const judgeData: JudgeLogData | undefined = result.judgeResult
+        ? {
+            verdict: result.judgeResult.verdict,
+            // Prefer pre-veto action/score when judge vetoed; otherwise log
+            // current (post-judge) action/score — they're identical on confirm.
+            preJudgeAction: result.preJudge?.action ?? result.decision.action,
+            preJudgeScore: result.preJudge?.score ?? result.decision.score,
+            latencyMs: result.judgeResult.latencyMs,
+            cached: result.judgeResult.cached,
+          }
+        : undefined;
+      logSignal(result, price, resolvedWeights, judgeData);
     }
 
-    // Merge: use enriched results for top N, free results for the rest
-    return freeResults.map((r) => enrichedMap.get(r.token) ?? r);
+    return results;
   }
 
   /** Analyze all tokens and generate alerts for state changes. */

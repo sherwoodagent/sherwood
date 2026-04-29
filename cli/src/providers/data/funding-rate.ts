@@ -57,6 +57,7 @@ export class FundingRateProvider {
       if (!data || data.length === 0) return null;
 
       const rate8h = parseFloat(data[0]!.fundingRate);
+      if (!Number.isFinite(rate8h)) return null;
       // Annualize: 3 funding periods per day × 365 days
       const annualizedRate = rate8h * 3 * 365;
 

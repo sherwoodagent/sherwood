@@ -165,48 +165,58 @@ export class DexFlowStrategy implements Strategy {
 
     details.push(`Pair: ${pair.baseToken.symbol}/${pair.quoteToken.symbol} on ${pair.dexId}`);
 
-    // 1h transaction ratio analysis (more reactive, weighted higher)
+    // 1h transaction ratio analysis (more reactive, weighted higher).
+    // Guard: require two-sided activity. Thin-liquidity tokens with 5 buys / 0 sells
+    // would otherwise fire BULLISH on absence of selling (5 / max(0,1) = 5), not on
+    // genuine buy-pressure. Symmetric guard prevents the reverse false-bearish signal.
+    // 10 trades/hr on a tracked DEX pair is already low activity — keep as floor.
     const h1Buys = pair.txns.h1?.buys ?? 0;
     const h1Sells = pair.txns.h1?.sells ?? 0;
     const h1Total = h1Buys + h1Sells;
 
     let h1Signal = 0;
-    if (h1Total > 10) { // need minimum activity
-      const h1Ratio = h1Buys / Math.max(h1Sells, 1);
+    if (h1Total >= 10 && h1Buys > 0 && h1Sells > 0) {
+      const h1Ratio = h1Buys / h1Sells;
       if (h1Ratio > 1.5) {
         // Bullish: scale from +0.3 (ratio=1.5) to +0.6 (ratio=3.0+)
         h1Signal = 0.3 + Math.min((h1Ratio - 1.5) / 1.5, 1.0) * 0.3;
         details.push(`1h: ${h1Buys} buys / ${h1Sells} sells (ratio ${h1Ratio.toFixed(2)}, bullish)`);
       } else if (h1Ratio < 1 / 1.5) {
         // Bearish: inverse ratio
-        const invRatio = h1Sells / Math.max(h1Buys, 1);
+        const invRatio = h1Sells / h1Buys;
         h1Signal = -(0.3 + Math.min((invRatio - 1.5) / 1.5, 1.0) * 0.3);
         details.push(`1h: ${h1Buys} buys / ${h1Sells} sells (ratio ${h1Ratio.toFixed(2)}, bearish)`);
       } else {
         details.push(`1h: ${h1Buys} buys / ${h1Sells} sells (balanced)`);
       }
       confidence += 0.1;
+    } else if (h1Total > 0) {
+      details.push(`1h: ${h1Buys} buys / ${h1Sells} sells (insufficient two-sided activity)`);
     }
 
-    // 24h transaction ratio analysis (trend confirmation)
+    // 24h transaction ratio analysis (trend confirmation). Same guard applies:
+    // one-sided flow is not a signal — require both buys and sells to avoid
+    // false bullish/bearish on absence-of-counter-flow.
     const h24Buys = pair.txns.h24?.buys ?? 0;
     const h24Sells = pair.txns.h24?.sells ?? 0;
     const h24Total = h24Buys + h24Sells;
 
     let h24Signal = 0;
-    if (h24Total > 50) { // need minimum activity
-      const h24Ratio = h24Buys / Math.max(h24Sells, 1);
+    if (h24Total >= 50 && h24Buys > 0 && h24Sells > 0) {
+      const h24Ratio = h24Buys / h24Sells;
       if (h24Ratio > 1.5) {
         h24Signal = 0.3 + Math.min((h24Ratio - 1.5) / 1.5, 1.0) * 0.3;
         details.push(`24h: ${h24Buys} buys / ${h24Sells} sells (ratio ${h24Ratio.toFixed(2)}, bullish)`);
       } else if (h24Ratio < 1 / 1.5) {
-        const invRatio = h24Sells / Math.max(h24Buys, 1);
+        const invRatio = h24Sells / h24Buys;
         h24Signal = -(0.3 + Math.min((invRatio - 1.5) / 1.5, 1.0) * 0.3);
         details.push(`24h: ${h24Buys} buys / ${h24Sells} sells (ratio ${h24Ratio.toFixed(2)}, bearish)`);
       } else {
         details.push(`24h: ${h24Buys} buys / ${h24Sells} sells (balanced)`);
       }
       confidence += 0.1;
+    } else if (h24Total > 0) {
+      details.push(`24h: ${h24Buys} buys / ${h24Sells} sells (insufficient two-sided activity)`);
     }
 
     // Combine: 60% weight on 1h (reactive), 40% on 24h (trend)

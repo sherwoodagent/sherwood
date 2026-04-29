@@ -4,14 +4,11 @@
 
 import chalk from 'chalk';
 import type { Address, Hex } from 'viem';
-import { createWalletClient, http, encodeFunctionData, encodeAbiParameters } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
 import type { TradeDecision } from './scoring.js';
 import type { Position } from './risk.js';
 import { RiskManager } from './risk.js';
 import { PortfolioTracker } from './portfolio.js';
-import { BASE_STRATEGY_ABI } from '../lib/abis.js';
-import { hyperevm, hyperevmTestnet } from '../lib/network.js';
+import { hlMarketBuy, hlMarketSell, resolveHLCoin, validateHLEnv } from '../lib/hyperliquid-executor.js';
 
 export interface ExecutionConfig {
   dryRun: boolean;
@@ -37,10 +34,34 @@ export interface OrderParams {
   takeProfit: number;
 }
 
+/** Directional trade leverage (notional multiplier on order quantity).
+ *
+ *  Cash model: PortfolioTracker debits the same `MARGIN_FRACTION = 0.33`
+ *  (33%) of notional for both longs and shorts on every open / pyramid add,
+ *  and credits margin + PnL on close. Live mode (hyperliquid-perp) uses
+ *  the venue's own margin schedule. See `cli/src/agent/portfolio.ts`.
+ *
+ *  Autoresearch (80 exp, 4 days): 3x→2x→1x each reduced DD dramatically.
+ *  At 54% WR with avg loss > avg win, leverage amplifies the problem.
+ *  Revert to 1x until WR > 60% and avg win > avg loss. */
+const DIRECTIONAL_LEVERAGE = 1;
+
+/** Score-based position sizing multiplier.
+ *  Nunchi autoresearch (103 experiments): removing strength/volume scaling
+ *  improved Sharpe by +1.7. Uniform position sizing beats conviction-weighted
+ *  because the score predicts DIRECTION, not MAGNITUDE. A high-score entry
+ *  isn't more likely to be a BIG winner — it's just more likely to be RIGHT.
+ *  Oversizing on high scores amplifies losses on the 40% that still stop out.
+ *  Kept as a function for easy revert if calibration proves otherwise. */
+function convictionMultiplier(_score: number): number {
+  return 1.0; // uniform sizing — autoresearch-proven
+}
+
 export class TradeExecutor {
   private config: ExecutionConfig;
   private riskManager: RiskManager;
   private portfolio: PortfolioTracker;
+  private lastAtr?: number;
 
   constructor(config: ExecutionConfig, riskManager: RiskManager, portfolio: PortfolioTracker) {
     this.config = config;
@@ -81,17 +102,32 @@ export class TradeExecutor {
     return TradeExecutor.TOKEN_TO_ASSET_INDEX[tokenId];
   }
 
-  /** Execute a trade based on a decision */
+  /** Execute a trade based on a decision.
+   *  @param predictedVol - Kronos ML-predicted per-candle volatility (fraction).
+   *    When provided, overrides ATR-based stop distance for more forward-looking risk. */
   async execute(
     decision: TradeDecision,
     tokenId: string,
     currentPrice: number,
+    atr?: number,
+    predictedVol?: number,
   ): Promise<{
     success: boolean;
     position?: Position;
     error?: string;
     dryRun: boolean;
   }> {
+    // Token blacklist — serial losers identified from trade analysis.
+    // AAVE: 4 trades, 1W, -$145. FARTCOIN: 2 trades, 0W, -$118.
+    const BLACKLISTED_TOKENS = new Set(['aave', 'fartcoin', 'dogecoin']);
+    if (BLACKLISTED_TOKENS.has(tokenId)) {
+      return {
+        success: false,
+        error: `Token ${tokenId} is blacklisted (serial loser)`,
+        dryRun: this.config.dryRun,
+      };
+    }
+
     // Handle SELL/STRONG_SELL outside hyperliquid-perp mode.
     //   • If an existing LONG exists → close it (signal flip / take-profit-by-signal).
     //   • Otherwise (no position OR existing SHORT) → fall through to the
@@ -136,6 +172,23 @@ export class TradeExecutor {
       };
     }
 
+    // Minimum conviction gate — filter out marginal "just barely crossed the
+    // threshold" entries. Trade log review (25 trades): the 3 losing shorts
+    // scored -0.10 to -0.15, winning longs scored 0.20-0.40+. Entries below
+    // 0.18 absolute score have a much higher stop-out rate because they
+    // represent weak signal consensus rather than genuine directional edge.
+    // Minimum conviction — set below the lowest regime BUY threshold (ranging 0.17)
+    // to avoid a dead zone where scores pass the threshold but fail conviction.
+    // Prior value 0.12 created a [0.12, 0.17) dead zone.
+    const MIN_CONVICTION_SCORE = 0.08;
+    if (Math.abs(decision.score) < MIN_CONVICTION_SCORE) {
+      return {
+        success: false,
+        error: `Score ${decision.score.toFixed(3)} below minimum conviction (${MIN_CONVICTION_SCORE})`,
+        dryRun: this.config.dryRun,
+      };
+    }
+
     // Resolve token → HL asset index for multi-asset execution.
     // If the token doesn't have a known HL perp, skip execution.
     if (this.config.mode === 'hyperliquid-perp') {
@@ -154,21 +207,47 @@ export class TradeExecutor {
     this.riskManager.updatePortfolio(state);
 
     // Calculate stop loss and take profit from current price.
-    // Calibrated for SHORT-TERM trades (1-2 day hold):
-    //   Stop: 3% — tight enough that a failed trade exits quickly
-    //   Take profit: 6% (2:1 R:R) — achievable in 1-2 days on crypto vol
-    //   Time stop: 48h (see risk.ts) — if it hasn't moved, it's dead money
+    // Calibrated for SHORT-TERM trades (1-2 day hold) with leverage:
+    //   Stop: 4% price move × 3x leverage = 12% capital risk (capped by riskPerTrade)
+    //   Take profit: 1.5:1 R:R = 6% price move × 3x = 18% capital gain
+    //   Partial exit at 2% move × 3x = 6% capital gain (locks half)
+    //   Time stop: 96h (see risk.ts) — if it hasn't moved, it's dead money
     const isShort = decision.action === 'SELL' || decision.action === 'STRONG_SELL';
     const direction: 'long' | 'short' = isShort ? 'short' : 'long';
-    const STOP_LOSS_PCT = 0.03;   // 3% stop
-    const RR_RATIO = 2.0;         // 2:1 reward/risk → 6% take profit
-    const stopLossDistance = currentPrice * STOP_LOSS_PCT;
+    const RR_RATIO = 2.0;  // autoresearch (Apr 27): 1.5→2.0 captures more upside from winners
+    // Nunchi autoresearch (103 experiments): wider ATR stops let winners run.
+    // Their optimal was 5.5x ATR; we use 3.5x as a compromise between letting
+    // winners breathe and controlling loss on stopped trades. Prior 1.5x was
+    // too tight — 64% of trades hit the stop, many of which reversed after.
+    const ATR_STOP_MULTIPLIER = 3.5;
+    // Trade log analysis (32 trades): 62.5% of exits were stops, many reversed
+    // after. Widened floor from 3% → 4% to give trades more room to breathe
+    // in crypto's noisy price action. ATR-based stops still dominate on
+    // higher-vol tokens where ATR × 3.5 > 4%.
+    const STOP_FLOOR = 0.05;   // minimum 5% (was 4% — still noise-stopping, 63% of exits are stops)
+    const STOP_CAP = 0.12;     // maximum 12% (tightened from 15%)
+    const FALLBACK_STOP = 0.05; // when no ATR available (was 4%)
+
+    // Kronos ML-predicted vol overrides ATR when available.
+    // predictedVol4h is the per-candle (4h) volatility from Monte Carlo paths.
+    // Use 2.5× predicted vol as stop distance (captures ~95% of expected move).
+    // Falls back to ATR×3.5 when Kronos is unavailable.
+    const KRONOS_STOP_MULTIPLIER = 2.5;
+    const useKronos = predictedVol && Number.isFinite(predictedVol) && predictedVol > 0;
+    const atrPct = (atr && currentPrice > 0 && !isNaN(atr))
+      ? atr / currentPrice
+      : FALLBACK_STOP / ATR_STOP_MULTIPLIER;
+    const kronosPct = useKronos ? predictedVol! * KRONOS_STOP_MULTIPLIER : 0;
+    const rawStopPct = useKronos ? kronosPct : atrPct * ATR_STOP_MULTIPLIER;
+    const stopPct = Math.min(STOP_CAP, Math.max(STOP_FLOOR, rawStopPct));
+    this.lastAtr = atr;
+    const stopLossDistance = currentPrice * stopPct;
     const stopLossPrice = isShort
       ? currentPrice + stopLossDistance      // stop above for shorts
       : currentPrice - stopLossDistance;     // stop below for longs
     const takeProfitPrice = isShort
-      ? currentPrice * (1 - STOP_LOSS_PCT * RR_RATIO)    // profit below for shorts
-      : currentPrice * (1 + STOP_LOSS_PCT * RR_RATIO);   // profit above for longs
+      ? currentPrice * (1 - stopPct * RR_RATIO)    // profit below for shorts
+      : currentPrice * (1 + stopPct * RR_RATIO);   // profit above for longs
 
     // Detect a pyramid (same-direction add to an existing position) and halve
     // the size for each add. Geometric decay (1.0x → 0.5x → 0.25x) caps total
@@ -177,21 +256,34 @@ export class TradeExecutor {
       (p) => p.tokenId === tokenId && (p.side ?? 'long') === direction,
     );
     const isPyramid = existingSameSide !== undefined;
-    const sizeMultiplier = isPyramid
+    // Short sizing reduction: trade log analysis showed 25% short WR vs 67%
+    // long WR. Halve short exposure until the regime gate + higher conviction
+    // thresholds improve short performance.
+    const SHORT_SIZE_MULTIPLIER = 0.5;
+    const directionMultiplier = isShort ? SHORT_SIZE_MULTIPLIER : 1.0;
+    const sizeMultiplier = (isPyramid
       ? 0.5 ** ((existingSameSide!.addCount ?? 0) + 1)
-      : 1.0;
+      : 1.0) * directionMultiplier;
 
-    // Size the position using risk management
+    // Size the position using risk management. Conviction is fed in via the
+    // risk budget — the sizer then clamps at maxSinglePosition, so a
+    // high-conviction entry cannot blow past the hard cap (previous bug:
+    // sizing was clamped, then multiplied by conviction after, yielding 30%
+    // sizes on score ≥ 0.35 and 40% on score ≥ 0.45 against a 20% cap).
+    const conviction = convictionMultiplier(decision.score);
     const sizing = this.riskManager.calculatePositionSize(
       currentPrice,
       stopLossPrice,
       state.totalValue,
+      this.riskManager.getRiskPerTrade() * conviction,
     );
 
-    // Apply the pyramid haircut after sizing — the calculator picks a
-    // risk-appropriate base size, then we shrink it for each subsequent add.
-    const pyramidQuantity = sizing.quantity * sizeMultiplier;
-    const pyramidSizeUsd = sizing.sizeUsd * sizeMultiplier;
+    // Apply leverage: multiply position size (not risk). A 3x leveraged position
+    // on a $500 risk budget buys $1500 notional — the stop loss distance stays the
+    // same in price terms, so the dollar risk per trade stays at riskPerTrade × portfolio.
+    // Pyramid haircut then shrinks for each subsequent add (base 1.0x → 0.5x → 0.25x).
+    const pyramidQuantity = sizing.quantity * sizeMultiplier * DIRECTIONAL_LEVERAGE;
+    const pyramidSizeUsd = sizing.sizeUsd * sizeMultiplier * DIRECTIONAL_LEVERAGE;
 
     if (pyramidQuantity <= 0 || pyramidSizeUsd <= 0) {
       return {
@@ -262,6 +354,7 @@ export class TradeExecutor {
               stopLoss: order.stopLoss,
               takeProfit: order.takeProfit,
               strategy: decision.signals[0]?.source ?? 'agent',
+              atrAtEntry: this.lastAtr,
             });
         return { success: true, position, dryRun: false };
       } catch (err) {
@@ -301,6 +394,63 @@ export class TradeExecutor {
       }
     }
 
+    // --- Partial profit exits (50% at +3%) ---
+    // Reload state after each partial close to avoid iterating stale positions.
+    const PARTIAL_PROFIT_TRIGGER = 0.015; // +1.5% unrealized gain — lock profits earlier at 1x leverage
+    const PARTIAL_FRACTION = 0.5;
+
+    // First pass: identify candidates from a fresh load
+    const partialCandidates: string[] = [];
+    {
+      const refreshedState = await this.portfolio.load();
+      for (const pos of refreshedState.positions) {
+        if (pos.partialTaken) continue;
+        const price = currentPrices[pos.tokenId];
+        if (price === undefined) continue;
+        const isShort = pos.side === 'short';
+        const pnlPercent = isShort
+          ? (pos.entryPrice - price) / (pos.entryPrice || 1)
+          : (price - pos.entryPrice) / (pos.entryPrice || 1);
+        if (pnlPercent >= PARTIAL_PROFIT_TRIGGER) {
+          partialCandidates.push(pos.tokenId);
+        }
+      }
+    }
+
+    // Second pass: execute each partial close with a fresh state reload
+    for (const tokenId of partialCandidates) {
+      const freshState = await this.portfolio.load();
+      const pos = freshState.positions.find((p) => p.tokenId === tokenId);
+      if (!pos || pos.partialTaken) continue; // re-check after reload
+
+      const price = currentPrices[tokenId];
+      if (price === undefined) continue;
+
+      const isShort = pos.side === 'short';
+      const pnlPercent = isShort
+        ? (pos.entryPrice - price) / (pos.entryPrice || 1)
+        : (price - pos.entryPrice) / (pos.entryPrice || 1);
+
+      if (pnlPercent >= PARTIAL_PROFIT_TRIGGER) {
+        try {
+          const partial = await this.portfolio.closePartial(
+            tokenId, PARTIAL_FRACTION, price, `Partial profit at ${(pnlPercent * 100).toFixed(1)}%`,
+          );
+          results.push({
+            position: { ...pos, currentPrice: price },
+            exitPrice: price,
+            reason: `PARTIAL_PROFIT (${(pnlPercent * 100).toFixed(1)}%, closed ${(PARTIAL_FRACTION * 100).toFixed(0)}%)`,
+            pnl: partial.pnl,
+          });
+          console.error(
+            chalk.cyan(`  Partial exit: ${pos.symbol} ${(PARTIAL_FRACTION * 100).toFixed(0)}% @ $${price.toFixed(4)} — locked $${partial.pnl.toFixed(2)}`),
+          );
+        } catch (err) {
+          console.error(chalk.red(`Failed partial close ${pos.symbol}: ${(err as Error).message}`));
+        }
+      }
+    }
+
     return results;
   }
 
@@ -312,7 +462,7 @@ export class TradeExecutor {
       ? (direction === 'short' ? 'PYRAMID SHORT' : 'PYRAMID BUY')
       : (direction === 'short' ? 'SHORT' : 'BUY');
 
-    console.error(chalk.cyan(`[DRY RUN] Paper trade: ${sideLabel} ${quantity.toFixed(6)} ${order.tokenId} @ $${currentPrice.toFixed(4)}`));
+    console.error(chalk.cyan(`[DRY RUN] Paper trade: ${sideLabel} ${quantity.toFixed(6)} ${order.tokenId} @ $${currentPrice.toFixed(4)} (${DIRECTIONAL_LEVERAGE}x)`));
     console.error(chalk.cyan(`  Size: $${order.amountUsd.toFixed(2)} | SL: $${order.stopLoss.toFixed(4)} | TP: $${order.takeProfit.toFixed(4)}`));
 
     if (isPyramid) {
@@ -330,6 +480,7 @@ export class TradeExecutor {
       stopLoss: order.stopLoss,
       takeProfit: order.takeProfit,
       strategy: 'paper',
+      atrAtEntry: this.lastAtr,
     });
 
     return position;
@@ -346,60 +497,37 @@ export class TradeExecutor {
     );
   }
 
-  /** Execute a trade on HyperEVM via the HyperliquidPerpStrategy contract */
+  /** Execute a trade on Hyperliquid perps via the hermes HL skill script. */
   private async executeHyperliquidPerp(order: OrderParams, currentPrice?: number): Promise<{ txHash: string; executedPrice: number }> {
-    if (!this.config.strategyClone) throw new Error('--strategy-clone is required for hyperliquid-perp mode');
-    if (!this.config.proposerPrivateKey) throw new Error('SHERWOOD_PROPOSER_KEY env var is required for live execution');
+    validateHLEnv();
     if (!currentPrice || currentPrice <= 0) throw new Error('currentPrice is required for live execution');
 
-    const account = privateKeyToAccount(this.config.proposerPrivateKey);
-    const chain = this.config.chain === 'hyperevm-testnet' ? hyperevmTestnet : hyperevm;
-    const client = createWalletClient({
-      account,
-      chain,
-      transport: http(),
-    });
+    const hlCoin = resolveHLCoin(order.tokenId);
+    if (!hlCoin) {
+      throw new Error(`Token ${order.tokenId} has no known Hyperliquid ticker — cannot execute live`);
+    }
 
-    // Resolve token → HL asset index for multi-asset execution
-    const assetIndex = TradeExecutor.resolveAssetIndex(order.tokenId)
-      ?? this.config.assetIndex ?? 3; // fallback to config or ETH
-
-    // limitPx: slightly above/below market for IOC (1% slippage buffer)
-    const isShort = order.side === 'sell';
-    const limitPx = isShort
-      ? priceToUint64(currentPrice * 0.99)   // below market for sell IOC
-      : priceToUint64(currentPrice * 1.01);  // above market for buy IOC
-    // sz: token quantity — fetch asset-specific szDecimals from Hyperliquid meta API
     const quantity = order.amountUsd / currentPrice;
-    const szDec = await getSzDecimals(assetIndex);
-    const sz = sizeToUint64(quantity, szDec);
-    const stopLossPx = priceToUint64(order.stopLoss);
-    const stopLossSz = sz;
+    const isShort = order.side === 'sell';
 
-    // Use multi-asset actions (6/7) that include assetIndex in calldata.
-    // One strategy clone can now trade any HL perp asset.
-    const action = isShort ? 7 : 6; // ACTION_OPEN_SHORT_MULTI / ACTION_OPEN_LONG_MULTI
-    const actionData = encodeAbiParameters(
-      [{ type: 'uint8' }, { type: 'uint32' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint64' }],
-      [action, assetIndex, limitPx, sz, stopLossPx, stopLossSz],
-    );
+    console.error(chalk.yellow(`[LIVE] Submitting ${isShort ? 'SELL' : 'BUY'} ${quantity.toFixed(6)} ${hlCoin} ($${order.amountUsd.toFixed(2)}) via HL SDK...`));
 
-    const txData = encodeFunctionData({
-      abi: BASE_STRATEGY_ABI,
-      functionName: 'updateParams',
-      args: [actionData],
-    });
+    const result = isShort
+      ? await hlMarketSell(hlCoin, quantity)
+      : await hlMarketBuy(hlCoin, quantity);
 
-    const txHash = await client.sendTransaction({
-      to: this.config.strategyClone,
-      data: txData,
-    });
+    if (!result.success) {
+      throw new Error(`Hyperliquid order failed: ${result.error}`);
+    }
 
-    console.error(chalk.green(`[LIVE] Transaction sent: ${txHash}`));
+    const executedPrice = result.executedPrice ?? currentPrice;
+    const orderId = result.orderId ?? 'unknown';
+
+    console.error(chalk.green(`[LIVE] Order filled: ${hlCoin} ${isShort ? 'SHORT' : 'LONG'} @ $${executedPrice.toFixed(4)} (oid: ${orderId})`));
 
     return {
-      txHash,
-      executedPrice: currentPrice,
+      txHash: orderId, // HL order ID serves as the "tx hash" identifier
+      executedPrice,
     };
   }
 
@@ -437,45 +565,3 @@ export class TradeExecutor {
   }
 }
 
-// ── HyperCore conversion helpers ──
-
-/** Convert a USD price (e.g. 3000.50) to HyperCore uint64 format (6-decimal fixed point). */
-function priceToUint64(priceUsd: number): bigint {
-  return BigInt(Math.round(priceUsd * 1e6));
-}
-
-/** Convert a token quantity to HyperCore uint64 format using the asset's szDecimals.
- *  HyperCore szDecimals varies per asset — MUST be fetched from the meta API. */
-function sizeToUint64(quantity: number, szDecimals: number): bigint {
-  return BigInt(Math.round(quantity * 10 ** szDecimals));
-}
-
-/** Fetch szDecimals for an asset index from Hyperliquid's meta API.
- *  Caches per session to avoid repeated calls. */
-const szDecimalsCache = new Map<number, number>();
-
-async function getSzDecimals(assetIndex: number): Promise<number> {
-  if (szDecimalsCache.has(assetIndex)) return szDecimalsCache.get(assetIndex)!;
-
-  try {
-    const res = await fetch('https://api.hyperliquid.xyz/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'meta' }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const meta = await res.json() as { universe: Array<{ szDecimals: number }> };
-    // Cache all assets from the response
-    for (let i = 0; i < meta.universe.length; i++) {
-      szDecimalsCache.set(i, meta.universe[i]!.szDecimals);
-    }
-  } catch (err) {
-    console.error(`Failed to fetch szDecimals from Hyperliquid meta API: ${err}`);
-  }
-
-  const dec = szDecimalsCache.get(assetIndex);
-  if (dec === undefined) {
-    throw new Error(`Unknown asset index ${assetIndex} — cannot determine szDecimals. Check Hyperliquid meta API.`);
-  }
-  return dec;
-}

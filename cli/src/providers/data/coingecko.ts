@@ -16,6 +16,14 @@ let requestQueue: Promise<void> = Promise.resolve();
 let sharedLastCallTime = 0;
 let MIN_INTERVAL = 2500; // 2.5s between calls (CG free tier: 30/min = 1 every 2s)
 
+// Circuit breaker: when we observe a 429, freeze all CG requests for this window.
+// Previous behavior retried 10s → 30s → 60s per call; because the queue is global
+// serial, a single rate-limit window ballooned one cycle from ~60s to ~15 min
+// (18 tokens × up to 100s per 429). Now we fail fast, let callers use cache/null,
+// and resume after the window. Break resets once a successful call lands.
+const CIRCUIT_BREAK_MS = 5 * 60 * 1000; // 5 minutes
+let circuitOpenUntil = 0;
+
 // Cache TTLs by endpoint (in milliseconds)
 const CACHE_TTLS = {
   ohlc: 2 * 60 * 60 * 1000,        // 2 hours - historical candles don't change
@@ -120,8 +128,24 @@ export class CoinGeckoProvider implements Provider {
       return cached;
     }
 
+    // Circuit breaker: if a recent 429 tripped the breaker, fail fast instead of
+    // queueing up more doomed calls. A cycle scanning 18 tokens was observed to
+    // take 14-18 minutes during rate-limit windows because every serialized call
+    // exhausted its 10s/30s/60s retry budget. Fail-fast lets each call burn
+    // ~0ms instead of ~100s and returns control to the caller immediately.
+    if (Date.now() < circuitOpenUntil) {
+      throw new Error(`CoinGecko circuit breaker open — rate-limited, retrying after ${new Date(circuitOpenUntil).toISOString()}`);
+    }
+
     // Cache miss — make API call with rate limiting
     const job = requestQueue.then(async () => {
+      // Re-check breaker inside the serialized job: callers that queued behind
+      // the 429-triggering call should also fail fast rather than replay 10-60s
+      // backoffs one-by-one.
+      if (Date.now() < circuitOpenUntil) {
+        throw new Error(`CoinGecko circuit breaker open — rate-limited, retrying after ${new Date(circuitOpenUntil).toISOString()}`);
+      }
+
       const now = Date.now();
       const elapsed = now - sharedLastCallTime;
       if (elapsed < MIN_INTERVAL) {
@@ -137,27 +161,19 @@ export class CoinGeckoProvider implements Provider {
 
       const res = await fetch(url, { headers });
       if (res.status === 429) {
-        // Rate limited — exponential backoff: 10s, 30s, 60s
-        let retryDelay = 10_000;
-        for (let attempt = 0; attempt < 3; attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-          sharedLastCallTime = Date.now();
-
-          const retry = await fetch(url, { headers });
-          if (retry.ok) {
-            const data = await retry.json();
-            await this.writeCache(cacheKey, data);
-            return data;
-          }
-
-          retryDelay *= 3; // 10s -> 30s -> 90s (but we cap at 60s)
-          if (retryDelay > 60_000) retryDelay = 60_000;
-        }
-        throw new Error(`CoinGecko rate limit exceeded after retries — ${url}`);
+        // Rate limited — trip the circuit breaker and fail fast. Do NOT retry
+        // inline: the 10s/30s/60s per-call backoff made cycles balloon to
+        // 15+ minutes when CG was cranky. Caller gets a clean failure, can
+        // fall back to cached/null, and subsequent CG calls in this cycle
+        // skip the API entirely until the window closes.
+        circuitOpenUntil = Date.now() + CIRCUIT_BREAK_MS;
+        throw new Error(`CoinGecko 429 — circuit breaker opened for ${CIRCUIT_BREAK_MS / 1000}s — ${url}`);
       }
       if (!res.ok) throw new Error(`CoinGecko error: ${res.status} ${res.statusText} — ${url}`);
 
       const data = await res.json();
+      // Success closes the breaker (we got through, so the rate window passed).
+      circuitOpenUntil = 0;
       await this.writeCache(cacheKey, data);
       return data;
     });

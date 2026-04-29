@@ -65,6 +65,7 @@ export const NANSEN_COST_ESTIMATE: Record<string, string> = {
   "smart-money": "~$0.06",
   "hl-perp-trades": "~$0.06",
   wallet: "~$0.01",
+  "flow-intelligence": "~$0.005",  // 1 credit — cheapest premium endpoint
 };
 
 export class NansenProvider implements ResearchProvider {
@@ -300,6 +301,48 @@ export class NansenProvider implements ResearchProvider {
       queryType: "hl-perp-trades",
       target: tokenSymbol,
       data: { trades: json.data ?? [], count: (json.data ?? []).length },
+      costUsdc,
+      timestamp: Math.floor(Date.now() / 1000),
+    };
+  }
+
+  /**
+   * Flow Intelligence — net inflows/outflows by investor category.
+   * Endpoint: POST /api/v1/tgm/flow-intelligence
+   * Cost: 1 credit (~$0.005 at Pro pricing)
+   *
+   * Returns aggregated flow data by investor type (Smart Traders, Whales,
+   * Exchanges, Top PnL). More stable than individual trade data — shows
+   * accumulation/distribution trends rather than noisy per-trade signals.
+   */
+  async queryFlowIntelligence(
+    tokenSymbol: string,
+  ): Promise<ResearchResult> {
+    const fetchWithPay = await getNansenFetch();
+
+    const body = {
+      token_symbol: tokenSymbol,
+      timeframe: "24h",
+    };
+
+    const res = await fetchWithPay(`${BASE_URL}/api/v1/tgm/flow-intelligence`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Nansen flow-intelligence query failed: ${res.status} ${res.statusText}`);
+    }
+
+    const json = (await res.json()) as { data?: unknown };
+    const costUsdc = this.extractCost(res, "flow-intelligence");
+
+    return {
+      provider: "nansen",
+      queryType: "flow-intelligence",
+      target: tokenSymbol,
+      data: (json.data ?? {}) as Record<string, unknown>,
       costUsdc,
       timestamp: Math.floor(Date.now() / 1000),
     };

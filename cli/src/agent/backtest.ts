@@ -5,7 +5,7 @@
 import chalk from 'chalk';
 import { CoinGeckoProvider } from '../providers/data/coingecko.js';
 import { SentimentProvider } from '../providers/data/sentiment.js';
-import { getLatestSignals } from './technical.js';
+import { getLatestSignals, calculateATR } from './technical.js';
 import type { Candle } from './technical.js';
 import { runStrategies } from './strategies/index.js';
 import type { StrategyContext } from './strategies/types.js';
@@ -530,10 +530,16 @@ export class Backtester {
       // Matches the live system: stop-loss, take-profit, time stop, trailing,
       // AND signal-based exits. Previously only checked SELL signals, so
       // positions rode forever without stops.
-      const STOP_LOSS_PCT = 0.03;    // 3% stop — matches executor.ts
-      const TAKE_PROFIT_PCT = 0.06;  // 6% TP (2:1 R:R)
-      const TIME_STOP_HOURS = 48;    // 48h dead-money exit
-      const TRAIL_PCT = this.config.trailingStopPct ?? 0.025; // 2.5% trail
+      // ATR-adaptive exits — match executor's 3.5×ATR with 3-15% clamp (autoresearch-tuned)
+      const atrValues = calculateATR(windowCandles, 14);
+      const currentAtr = atrValues.length > 0 ? atrValues[atrValues.length - 1]! : 0;
+      const atrPct = currentPrice > 0 && !isNaN(currentAtr) && currentAtr > 0
+        ? currentAtr / currentPrice
+        : 0.03; // fallback to 3% (floor) when no ATR data
+      const STOP_LOSS_PCT = Math.min(0.15, Math.max(0.03, atrPct * 3.5));
+      const TAKE_PROFIT_PCT = STOP_LOSS_PCT * 2.0; // maintain 2:1 R:R
+      const TIME_STOP_HOURS = 96;    // 96h dead-money exit (autoresearch: patience pays)
+      const TRAIL_PCT = this.config.trailingStopPct ?? 0.04; // 4% trail (wider)
 
       // Open a long on BUY/STRONG_BUY or a short on SELL/STRONG_SELL
       // (only when flat — pyramid logic lives in the live executor).

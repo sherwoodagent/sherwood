@@ -100,6 +100,56 @@ describe("resetPnlCounters", () => {
     expect(result.lastWeeklyReset).toBeGreaterThan(tenDaysAgo);
   });
 
+  it("resets dailyEntries when crossing UTC midnight (Orca-inspired daily cap)", () => {
+    const yesterdayMs = Date.now() - 48 * 60 * 60 * 1000;
+    const state: PortfolioState = {
+      totalValue: 10000,
+      positions: [],
+      cash: 10000,
+      dailyPnl: 0,
+      weeklyPnl: 0,
+      monthlyPnl: 0,
+      dailyEntries: 7,
+      lastDailyEntriesReset: yesterdayMs,
+      lastDailyReset: Date.now(),
+    };
+    const result = resetPnlCounters(state);
+    expect(result.dailyEntries).toBe(0);
+    expect(result.lastDailyEntriesReset).toBeGreaterThan(yesterdayMs);
+  });
+
+  it("preserves dailyEntries within the same UTC day", () => {
+    const now = Date.now();
+    const state: PortfolioState = {
+      totalValue: 10000,
+      positions: [],
+      cash: 10000,
+      dailyPnl: 0,
+      weeklyPnl: 0,
+      monthlyPnl: 0,
+      dailyEntries: 3,
+      lastDailyEntriesReset: now,
+      lastDailyReset: now,
+    };
+    const result = resetPnlCounters(state);
+    expect(result.dailyEntries).toBe(3);
+  });
+
+  it("initializes dailyEntries when lastDailyEntriesReset is undefined (legacy file)", () => {
+    const state: PortfolioState = {
+      totalValue: 10000,
+      positions: [],
+      cash: 10000,
+      dailyPnl: 0,
+      weeklyPnl: 0,
+      monthlyPnl: 0,
+      // no dailyEntries / lastDailyEntriesReset — simulates pre-upgrade portfolio.json
+    };
+    const result = resetPnlCounters(state);
+    expect(result.dailyEntries).toBe(0);
+    expect(result.lastDailyEntriesReset).toBeDefined();
+  });
+
   it("resets monthly PnL when lastMonthlyReset is before 1st of this month UTC", () => {
     // Set lastMonthlyReset to 40 days ago (guaranteed to be before 1st of month)
     const fortyDaysAgo = Date.now() - 40 * 24 * 60 * 60 * 1000;
@@ -401,5 +451,212 @@ describe("PortfolioTracker.addToPosition", () => {
     await expect(tracker.addToPosition("bitcoin", 100, 0, "long")).rejects.toThrow(/Invalid add quantity/);
     await expect(tracker.addToPosition("bitcoin", 100, -1, "long")).rejects.toThrow(/Invalid add quantity/);
     await expect(tracker.addToPosition("bitcoin", 0, 1, "long")).rejects.toThrow(/Invalid add price/);
+  });
+});
+
+describe("PortfolioTracker.openPosition (Orca-inspired fields)", () => {
+  function setupBacking() {
+    const backing = { state: null as string | null };
+    mockReadFile.mockImplementation(async () => {
+      if (backing.state === null) throw new Error("ENOENT: no such file");
+      return backing.state;
+    });
+    return backing;
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { writeFile, rename, mkdir } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(rename).mockResolvedValue(undefined);
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+  });
+
+  it("seeds peakPrice at entryPrice on open (HWM profit-lock)", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (_p: any, data: any) => {
+      backing.state = typeof data === "string" ? data : data.toString();
+    });
+    const tracker = new PortfolioTracker();
+    const pos = await tracker.openPosition({
+      tokenId: "bitcoin", symbol: "BTC", side: "long",
+      entryPrice: 100, currentPrice: 100, quantity: 10,
+      entryTimestamp: Date.now(),
+      stopLoss: 95, takeProfit: 110, strategy: "test",
+    });
+    expect(pos.peakPrice).toBe(100);
+  });
+
+  it("increments dailyEntries on each new position (daily cap counter)", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (_p: any, data: any) => {
+      backing.state = typeof data === "string" ? data : data.toString();
+    });
+    const tracker = new PortfolioTracker();
+
+    await tracker.openPosition({
+      tokenId: "bitcoin", symbol: "BTC", side: "long",
+      entryPrice: 100, currentPrice: 100, quantity: 1,
+      entryTimestamp: Date.now(), stopLoss: 95, takeProfit: 110, strategy: "test",
+    });
+    let state = await tracker.load();
+    expect(state.dailyEntries).toBe(1);
+
+    await tracker.openPosition({
+      tokenId: "ethereum", symbol: "ETH", side: "long",
+      entryPrice: 2000, currentPrice: 2000, quantity: 1,
+      entryTimestamp: Date.now(), stopLoss: 1900, takeProfit: 2100, strategy: "test",
+    });
+    state = await tracker.load();
+    expect(state.dailyEntries).toBe(2);
+  });
+
+  it("pyramid adds via addToPosition do NOT increment dailyEntries", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (_p: any, data: any) => {
+      backing.state = typeof data === "string" ? data : data.toString();
+    });
+    const tracker = new PortfolioTracker();
+
+    await tracker.openPosition({
+      tokenId: "bitcoin", symbol: "BTC", side: "long",
+      entryPrice: 100, currentPrice: 100, quantity: 10,
+      entryTimestamp: Date.now(), stopLoss: 97, takeProfit: 110, strategy: "test",
+    });
+
+    await tracker.addToPosition("bitcoin", 105, 5, "long");
+    const state = await tracker.load();
+    // still just the single new entry from openPosition
+    expect(state.dailyEntries).toBe(1);
+  });
+});
+
+describe("PortfolioTracker.closePartial", () => {
+  // Tracks portfolio.json and trades.json separately so appendTradeRecord
+  // doesn't accidentally parse the portfolio state as a trades array.
+  function setupBacking() {
+    const backing = { state: null as string | null, trades: null as string | null };
+    mockReadFile.mockImplementation(async (path: any) => {
+      const p = String(path);
+      if (p.includes("trades")) {
+        if (backing.trades === null) throw new Error("ENOENT: no such file");
+        return backing.trades;
+      }
+      if (backing.state === null) throw new Error("ENOENT: no such file");
+      return backing.state;
+    });
+    return backing;
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { writeFile, rename, mkdir } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(rename).mockResolvedValue(undefined);
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+  });
+
+  it("reduces quantity by fraction and records trade", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (path: any, data: any) => {
+      const content = typeof data === "string" ? data : data.toString();
+      if (String(path).includes("trades")) {
+        backing.trades = content;
+      } else {
+        backing.state = content;
+      }
+    });
+    const tracker = new PortfolioTracker();
+
+    await tracker.openPosition({
+      tokenId: "bitcoin", symbol: "BTC", side: "long",
+      entryPrice: 100, currentPrice: 120, quantity: 10,
+      entryTimestamp: Date.now(),
+      stopLoss: 97, takeProfit: 130, strategy: "test",
+    });
+
+    const result = await tracker.closePartial("bitcoin", 0.5, 120, "Partial profit");
+    expect(result.quantityClosed).toBe(5);
+    expect(result.pnlPercent).toBeCloseTo(0.20, 2); // (120-100)/100
+    expect(result.pnl).toBeCloseTo(100, 0); // 20 * 5
+  });
+
+  it("sets partialTaken flag on remaining position", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (path: any, data: any) => {
+      const content = typeof data === "string" ? data : data.toString();
+      if (String(path).includes("trades")) {
+        backing.trades = content;
+      } else {
+        backing.state = content;
+      }
+    });
+    const tracker = new PortfolioTracker();
+
+    await tracker.openPosition({
+      tokenId: "ethereum", symbol: "ETH", side: "long",
+      entryPrice: 2000, currentPrice: 2100, quantity: 1,
+      entryTimestamp: Date.now(),
+      stopLoss: 1940, takeProfit: 2200, strategy: "test",
+    });
+
+    await tracker.closePartial("ethereum", 0.5, 2100, "Partial profit");
+
+    // Verify partialTaken by loading the persisted state
+    const state = await tracker.load();
+    const pos = state.positions.find((p) => p.tokenId === "ethereum");
+    expect(pos).toBeDefined();
+    expect(pos!.quantity).toBeCloseTo(0.5, 4);
+    expect(pos!.partialTaken).toBe(true);
+  });
+
+  it("keeps totalValue on margin-equity accounting after partial close", async () => {
+    const backing = setupBacking();
+    const { writeFile } = await import("node:fs/promises");
+    vi.mocked(writeFile).mockImplementation(async (path: any, data: any) => {
+      const content = typeof data === "string" ? data : data.toString();
+      if (String(path).includes("trades")) {
+        backing.trades = content;
+      } else {
+        backing.state = content;
+      }
+    });
+    const tracker = new PortfolioTracker();
+
+    await tracker.openPosition({
+      tokenId: "bitcoin", symbol: "BTC", side: "long",
+      entryPrice: 100, currentPrice: 120, quantity: 10,
+      entryTimestamp: Date.now(),
+      stopLoss: 95, takeProfit: 130, strategy: "test",
+    });
+
+    await tracker.closePartial("bitcoin", 0.5, 120, "Partial profit");
+
+    const state = await tracker.load();
+    expect(state.cash).toBeCloseTo(9935, 2);
+    expect(state.positions[0]!.quantity).toBeCloseTo(5, 4);
+    // cash + remaining margin (5*100*0.33) + remaining unrealized PnL (5*20)
+    expect(state.totalValue).toBeCloseTo(10200, 2);
+  });
+
+  it("rejects invalid fraction", async () => {
+    const tracker = new PortfolioTracker();
+    await expect(tracker.closePartial("bitcoin", 0, 100, "test")).rejects.toThrow(/Invalid fraction/);
+    await expect(tracker.closePartial("bitcoin", 1, 100, "test")).rejects.toThrow(/Invalid fraction/);
+    await expect(tracker.closePartial("bitcoin", 1.5, 100, "test")).rejects.toThrow(/Invalid fraction/);
+  });
+
+  it("rejects when no position exists", async () => {
+    mockReadFile.mockResolvedValueOnce(JSON.stringify({
+      totalValue: 10000, cash: 10000, positions: [],
+      dailyPnl: 0, weeklyPnl: 0, monthlyPnl: 0,
+    }));
+    const tracker = new PortfolioTracker();
+    await expect(tracker.closePartial("bitcoin", 0.5, 100, "test")).rejects.toThrow(/No open position/);
   });
 });
