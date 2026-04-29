@@ -462,6 +462,33 @@ contract SyndicateVaultTest is Test {
         vault.rescueERC20(address(usdc), makeAddr("recipient"), 1_000e6);
     }
 
+    function test_transferPerformanceFee_otherAsset_reverts() public {
+        weth.mint(address(vault), 1e18);
+
+        vm.prank(MOCK_GOVERNOR);
+        vm.expectRevert(ISyndicateVault.InvalidAsset.selector);
+        vault.transferPerformanceFee(address(weth), makeAddr("recipient"), 1e18);
+    }
+
+    function test_transferPerformanceFee_zeroRecipient_reverts() public {
+        usdc.mint(address(vault), 1_000e6);
+
+        vm.prank(MOCK_GOVERNOR);
+        vm.expectRevert(ISyndicateVault.ZeroAddress.selector);
+        vault.transferPerformanceFee(address(usdc), address(0), 1_000e6);
+    }
+
+    function test_transferPerformanceFee_assetMatch_succeeds() public {
+        usdc.mint(address(vault), 1_000e6);
+        address recipient = makeAddr("fee-recipient");
+
+        vm.prank(MOCK_GOVERNOR);
+        vault.transferPerformanceFee(address(usdc), recipient, 500e6);
+
+        assertEq(usdc.balanceOf(recipient), 500e6);
+        assertEq(usdc.balanceOf(address(vault)), 500e6);
+    }
+
     // ==================== RESCUE ERC721 ====================
 
     function test_rescueERC721() public {

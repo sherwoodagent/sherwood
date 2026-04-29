@@ -82,7 +82,7 @@ contract MoonwellSupplyStrategyTest is Test {
         strategy = MoonwellSupplyStrategy(clone);
 
         // Initialize (anyone can initialize — in production the agent does this)
-        bytes memory initData = abi.encode(address(usdc), address(mUsdc), SUPPLY_AMOUNT, MIN_REDEEM);
+        bytes memory initData = abi.encode(address(usdc), address(mUsdc), SUPPLY_AMOUNT, MIN_REDEEM, false);
         strategy.initialize(vault, proposer, initData);
     }
 
@@ -100,21 +100,21 @@ contract MoonwellSupplyStrategyTest is Test {
     }
 
     function test_initialize_twice_reverts() public {
-        bytes memory initData = abi.encode(address(usdc), address(mUsdc), SUPPLY_AMOUNT, MIN_REDEEM);
+        bytes memory initData = abi.encode(address(usdc), address(mUsdc), SUPPLY_AMOUNT, MIN_REDEEM, false);
         vm.expectRevert(BaseStrategy.AlreadyInitialized.selector);
         strategy.initialize(vault, proposer, initData);
     }
 
     function test_initialize_zeroVault_reverts() public {
         address payable clone = payable(Clones.clone(address(template)));
-        bytes memory initData = abi.encode(address(usdc), address(mUsdc), SUPPLY_AMOUNT, MIN_REDEEM);
+        bytes memory initData = abi.encode(address(usdc), address(mUsdc), SUPPLY_AMOUNT, MIN_REDEEM, false);
         vm.expectRevert(BaseStrategy.ZeroAddress.selector);
         MoonwellSupplyStrategy(clone).initialize(address(0), proposer, initData);
     }
 
     function test_initialize_zeroAmount_reverts() public {
         address payable clone = payable(Clones.clone(address(template)));
-        bytes memory initData = abi.encode(address(usdc), address(mUsdc), 0, MIN_REDEEM);
+        bytes memory initData = abi.encode(address(usdc), address(mUsdc), 0, MIN_REDEEM, false);
         vm.expectRevert(MoonwellSupplyStrategy.InvalidAmount.selector);
         MoonwellSupplyStrategy(clone).initialize(vault, proposer, initData);
     }
@@ -385,7 +385,7 @@ contract MoonwellSupplyStrategyTest is Test {
 
         address payable clone = payable(Clones.clone(address(template)));
         MoonwellSupplyStrategy wethStrategy = MoonwellSupplyStrategy(clone);
-        bytes memory initData = abi.encode(address(weth), address(mWeth), supplyAmount, minRedeem);
+        bytes memory initData = abi.encode(address(weth), address(mWeth), supplyAmount, minRedeem, true);
         wethStrategy.initialize(vault, proposer, initData);
 
         // Pre-execute: always (0, false).
@@ -427,12 +427,29 @@ contract MoonwellSupplyStrategyTest is Test {
         address payable clone2 = payable(Clones.clone(address(template)));
         MoonwellSupplyStrategy strategy2 = MoonwellSupplyStrategy(clone2);
 
-        bytes memory initData2 = abi.encode(address(usdc), address(mUsdc), 100_000e6, 99_000e6);
+        bytes memory initData2 = abi.encode(address(usdc), address(mUsdc), 100_000e6, 99_000e6, false);
         strategy2.initialize(vault, proposer, initData2);
 
         assertEq(strategy.supplyAmount(), SUPPLY_AMOUNT);
         assertEq(strategy2.supplyAmount(), 100_000e6);
         assertEq(strategy.minRedeemAmount(), MIN_REDEEM);
         assertEq(strategy2.minRedeemAmount(), 99_000e6);
+    }
+
+    function test_settle_unexpectedEth_onNonNativeMarket_reverts() public {
+        // USDC strategy receiving stray ETH must revert rather than try to
+        // wrap-via-IWETH (the underlying isn't a WETH contract).
+        _executeStrategy();
+        vm.deal(address(strategy), 1 ether);
+        vm.prank(vault);
+        vm.expectRevert(MoonwellSupplyStrategy.EthWrapFailed.selector);
+        strategy.settle();
+    }
+
+    function _executeStrategy() internal {
+        vm.prank(vault);
+        usdc.approve(address(strategy), SUPPLY_AMOUNT);
+        vm.prank(vault);
+        strategy.execute();
     }
 }

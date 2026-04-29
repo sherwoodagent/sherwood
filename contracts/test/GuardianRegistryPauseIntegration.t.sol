@@ -96,6 +96,20 @@ contract GuardianRegistryPauseIntegrationTest is Test {
         registry.unpause();
     }
 
+    function test_pause_whenAlreadyPaused_reverts() public {
+        vm.prank(owner);
+        registry.pause();
+        uint64 firstPausedAt = registry.pausedAt();
+
+        vm.warp(block.timestamp + 6 days);
+
+        vm.prank(owner);
+        vm.expectRevert(IGuardianRegistry.AlreadyPaused.selector);
+        registry.pause();
+
+        assertEq(registry.pausedAt(), firstPausedAt, "deadman timer not reset");
+    }
+
     // ──────────────────────────────────────────────────────────────
     // Pause freezes review voting but NOT stake / unstake paths
     // ──────────────────────────────────────────────────────────────

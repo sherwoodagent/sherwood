@@ -59,6 +59,8 @@ contract PortfolioStrategy is BaseStrategy {
     error SwapFailed();
     error RebalancingInProgress();
     error StalePrice();
+    error InvalidSlippage();
+    error QuoteUnavailable();
 
     // ── Constants ──
     uint256 public constant MAX_BASKET_SIZE = 20;
@@ -133,6 +135,7 @@ contract PortfolioStrategy is BaseStrategy {
         if (tokens.length == 0 || tokens.length > MAX_BASKET_SIZE) revert TooManyTokens();
         if (tokens.length != weightsBps.length || tokens.length != swapExtraData_.length) revert LengthMismatch();
         if (totalAmount_ == 0) revert InvalidAmount();
+        if (maxSlippageBps_ == 0 || maxSlippageBps_ >= BPS_DENOMINATOR) revert InvalidSlippage();
 
         uint256 weightSum;
         for (uint256 i; i < tokens.length; ++i) {
@@ -164,7 +167,8 @@ contract PortfolioStrategy is BaseStrategy {
             if (allocation == 0) continue;
 
             IERC20(asset).forceApprove(address(swapAdapter), allocation);
-            uint256 amountOut = swapAdapter.swap(asset, alloc.token, allocation, 0, _swapExtraData[i]);
+            uint256 minOut = _quoteMinOut(asset, alloc.token, allocation, _swapExtraData[i]);
+            uint256 amountOut = swapAdapter.swap(asset, alloc.token, allocation, minOut, _swapExtraData[i]);
             if (amountOut == 0) revert SwapFailed();
 
             alloc.tokenAmount = amountOut;
@@ -185,7 +189,8 @@ contract PortfolioStrategy is BaseStrategy {
             if (bal == 0) continue;
 
             IERC20(alloc.token).forceApprove(address(swapAdapter), bal);
-            swapAdapter.swap(alloc.token, asset, bal, 0, _swapExtraData[i]);
+            uint256 minOut = _quoteMinOut(alloc.token, asset, bal, _swapExtraData[i]);
+            swapAdapter.swap(alloc.token, asset, bal, minOut, _swapExtraData[i]);
 
             alloc.tokenAmount = 0;
         }
@@ -217,6 +222,7 @@ contract PortfolioStrategy is BaseStrategy {
         }
 
         if (newMaxSlippageBps > 0) {
+            if (newMaxSlippageBps >= BPS_DENOMINATOR) revert InvalidSlippage();
             maxSlippageBps = newMaxSlippageBps;
         }
 
@@ -258,7 +264,8 @@ contract PortfolioStrategy is BaseStrategy {
             if (bal == 0) continue;
 
             IERC20(alloc.token).forceApprove(address(swapAdapter), bal);
-            swapAdapter.swap(alloc.token, asset, bal, 0, _swapExtraData[i]);
+            uint256 minOut = _quoteMinOut(alloc.token, asset, bal, _swapExtraData[i]);
+            swapAdapter.swap(alloc.token, asset, bal, minOut, _swapExtraData[i]);
             alloc.tokenAmount = 0;
             alloc.investedAmount = 0;
         }
@@ -271,7 +278,8 @@ contract PortfolioStrategy is BaseStrategy {
             if (allocation == 0) continue;
 
             IERC20(asset).forceApprove(address(swapAdapter), allocation);
-            uint256 amountOut = swapAdapter.swap(asset, alloc.token, allocation, 0, _swapExtraData[i]);
+            uint256 minOut = _quoteMinOut(asset, alloc.token, allocation, _swapExtraData[i]);
+            uint256 amountOut = swapAdapter.swap(asset, alloc.token, allocation, minOut, _swapExtraData[i]);
             if (amountOut == 0) revert SwapFailed();
 
             alloc.tokenAmount = amountOut;
@@ -339,7 +347,12 @@ contract PortfolioStrategy is BaseStrategy {
                 if (tokensToSell > bal) tokensToSell = bal;
                 if (tokensToSell > 0) {
                     IERC20(_allocations[i].token).forceApprove(address(swapAdapter), tokensToSell);
-                    swapAdapter.swap(_allocations[i].token, asset, tokensToSell, 0, _swapExtraData[i]);
+                    // Expected output (in `asset` units) = tokensToSell * price / PRECISION.
+                    // Apply slippage off the chainlink-priced expectation so an AMM
+                    // sandwich can't drift output below this floor.
+                    uint256 expected = (tokensToSell * prices[i]) / PRICE_PRECISION;
+                    uint256 minOut = (expected * (BPS_DENOMINATOR - maxSlippageBps)) / BPS_DENOMINATOR;
+                    swapAdapter.swap(_allocations[i].token, asset, tokensToSell, minOut, _swapExtraData[i]);
                     ++swapsExecuted;
                 }
             }
@@ -356,8 +369,12 @@ contract PortfolioStrategy is BaseStrategy {
                 uint256 amountToSpend = deficitValue > available ? available : deficitValue;
                 if (amountToSpend > 0) {
                     IERC20(asset).forceApprove(address(swapAdapter), amountToSpend);
+                    // Expected output (in `_allocations[i].token` units) =
+                    //   amountToSpend * PRECISION / price.
+                    uint256 expected = (amountToSpend * PRICE_PRECISION) / prices[i];
+                    uint256 minOut = (expected * (BPS_DENOMINATOR - maxSlippageBps)) / BPS_DENOMINATOR;
                     uint256 amountOut =
-                        swapAdapter.swap(asset, _allocations[i].token, amountToSpend, 0, _swapExtraData[i]);
+                        swapAdapter.swap(asset, _allocations[i].token, amountToSpend, minOut, _swapExtraData[i]);
                     if (amountOut == 0) revert SwapFailed();
                     ++swapsExecuted;
                 }
@@ -373,6 +390,26 @@ contract PortfolioStrategy is BaseStrategy {
 
         _rebalancing = false;
         emit RebalancedDelta(tokens, oldWeights, newWeights, oldBalances, newBalances, totalValue, swapsExecuted);
+    }
+
+    // ── Slippage helper ──
+
+    /// @dev Adapter-quote-driven minOut. Adapters with reliable quote() (e.g.
+    ///      UniswapSwapAdapter against a real V3 pool) return the expected
+    ///      output, off which we apply maxSlippageBps. Adapters whose quote()
+    ///      returns 0 or reverts cannot guarantee slippage, so we revert with
+    ///      `QuoteUnavailable`. The chainlink-priced `rebalanceDelta` path
+    ///      bypasses this helper and computes its floor from signed feeds.
+    function _quoteMinOut(address tokenIn, address tokenOut, uint256 amountIn, bytes memory extraData)
+        internal
+        returns (uint256)
+    {
+        try swapAdapter.quote(tokenIn, tokenOut, amountIn, extraData) returns (uint256 expected) {
+            if (expected == 0) revert QuoteUnavailable();
+            return (expected * (BPS_DENOMINATOR - maxSlippageBps)) / BPS_DENOMINATOR;
+        } catch {
+            revert QuoteUnavailable();
+        }
     }
 
     // ── Chainlink price verification ──

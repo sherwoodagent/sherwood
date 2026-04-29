@@ -3,6 +3,8 @@ pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {Create3} from "../src/Create3.sol";
+import {Create3Factory} from "../src/Create3Factory.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 contract SimpleContract {
     uint256 public value;
@@ -73,5 +75,28 @@ contract Create3Test is Test {
         // Same wrapper + same salt = CREATE2 collision → revert
         vm.expectRevert(Create3.TrampolineDeployFailed.selector);
         wrapper.deployWith(keccak256("test.dup"), abi.encodePacked(type(SimpleContract).creationCode, abi.encode(2)));
+    }
+
+    function testFactoryDeploy_notOwner_reverts() public {
+        address ownerAddr = makeAddr("c3-owner");
+        address stranger = makeAddr("c3-stranger");
+        Create3Factory factory = new Create3Factory(ownerAddr);
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        factory.deploy(
+            keccak256("test.factory.salt"), abi.encodePacked(type(SimpleContract).creationCode, abi.encode(7))
+        );
+    }
+
+    function testFactoryDeploy_owner_succeeds() public {
+        address ownerAddr = makeAddr("c3-owner");
+        Create3Factory factory = new Create3Factory(ownerAddr);
+
+        vm.prank(ownerAddr);
+        address deployed = factory.deploy(
+            keccak256("test.factory.ok"), abi.encodePacked(type(SimpleContract).creationCode, abi.encode(99))
+        );
+        assertEq(SimpleContract(deployed).value(), 99);
     }
 }

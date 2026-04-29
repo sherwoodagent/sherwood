@@ -28,6 +28,7 @@ contract MamoYieldStrategy is BaseStrategy {
     error CreateStrategyFailed();
     error DepositFailed();
     error NoTunableParams();
+    error UntrustedMamoStrategy();
 
     // ── Storage (per-clone) ──
     address public underlying; // e.g., USDC
@@ -36,21 +37,28 @@ contract MamoYieldStrategy is BaseStrategy {
 
     uint256 public supplyAmount; // actual amount supplied (set on execute from vault balance)
     uint256 public minRedeemAmount; // minimum underlying to accept on redeem
+    bytes32 public allowedStrategyCodehash; // expected Mamo strategy bytecode hash
 
     /// @inheritdoc IStrategy
     function name() external pure returns (string memory) {
         return "Mamo Yield";
     }
 
-    /// @notice Decode: (address underlying, address mamoFactory, uint256 minRedeemAmount)
+    /// @notice Decode: (address underlying, address mamoFactory, uint256 minRedeemAmount,
+    ///         bytes32 allowedStrategyCodehash)
+    /// @dev `allowedStrategyCodehash` pins the bytecode hash that Mamo's
+    ///      factory must return from `createStrategyForUser`. Set it from
+    ///      a known-good audited Mamo strategy version. Pass `bytes32(0)`
+    ///      to skip the check (NOT recommended for mainnet).
     function _initialize(bytes calldata data) internal override {
-        (address underlying_, address mamoFactory_, uint256 minRedeemAmount_) =
-            abi.decode(data, (address, address, uint256));
+        (address underlying_, address mamoFactory_, uint256 minRedeemAmount_, bytes32 allowedStrategyCodehash_) =
+            abi.decode(data, (address, address, uint256, bytes32));
         if (underlying_ == address(0) || mamoFactory_ == address(0)) revert ZeroAddress();
 
         underlying = underlying_;
         mamoFactory = mamoFactory_;
         minRedeemAmount = minRedeemAmount_;
+        allowedStrategyCodehash = allowedStrategyCodehash_;
     }
 
     /// @notice Pull entire vault underlying balance, create Mamo strategy, deposit
@@ -68,8 +76,17 @@ contract MamoYieldStrategy is BaseStrategy {
 
         // Verify the factory returned a contract, not an EOA
         uint256 codeSize;
-        assembly { codeSize := extcodesize(mamoStrategy_) }
+        assembly {
+            codeSize := extcodesize(mamoStrategy_)
+        }
         if (codeSize == 0) revert CreateStrategyFailed();
+
+        // Optionally pin the Mamo strategy's bytecode hash so a compromised
+        // Mamo factory can't swap in attacker bytecode that accepts the deposit
+        // and funnels funds to a third party.
+        if (allowedStrategyCodehash != bytes32(0) && mamoStrategy_.codehash != allowedStrategyCodehash) {
+            revert UntrustedMamoStrategy();
+        }
 
         // Approve the Mamo strategy to pull our underlying (deposit does safeTransferFrom)
         IERC20(underlying).forceApprove(mamoStrategy_, amount);

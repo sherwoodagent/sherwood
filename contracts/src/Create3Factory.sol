@@ -2,16 +2,19 @@
 pragma solidity 0.8.28;
 
 import {Create3} from "./Create3.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Thin wrapper around Create3 library — deployed once, then called externally.
 ///         This avoids Foundry splitting create2 into 2 broadcast transactions.
-///         Each deploy() call is a single transaction: caller → factory → create2 + create.
-contract Create3Factory {
+///         Each deploy() call is a single transaction: owner → factory → create2 + create.
+contract Create3Factory is Ownable {
+    constructor(address _owner) Ownable(_owner) {}
+
     /// @notice Deploy a contract via CREATE3. Only the factory owner can call.
     /// @param salt Unique salt for deterministic addressing
     /// @param creationCode Full creation code (type(X).creationCode + constructor args)
     /// @return deployed The address of the deployed contract
-    function deploy(bytes32 salt, bytes memory creationCode) external returns (address deployed) {
+    function deploy(bytes32 salt, bytes memory creationCode) external onlyOwner returns (address deployed) {
         return Create3.deploy(salt, creationCode);
     }
 

@@ -449,11 +449,10 @@ contract CollaborativeProposalsTest is Test {
     // ==================== G-C7: zero-rounding regression ====================
 
     /// @dev 5 active co-proposers each at MIN_SPLIT_BPS (100 bps). If the agent
-    ///      fee is small enough that `fee * 100 / 10000` rounds to zero, the
-    ///      prior behavior silently routed every zero share to the lead. We
-    ///      now revert with `CoProposerShareUnderflow` so proposers must
-    ///      structure the split meaningfully.
-    function test_coProposerShare_revertsIfRoundsToZero() public {
+    ///      fee is small enough that `fee * 100 / 10000` rounds to zero, each
+    ///      active co-prop is floored at 1 wei (C-11 fix). Settlement no
+    ///      longer reverts on tiny PnL.
+    function test_coProposerShare_floorAtOneWei() public {
         // Register 3 additional co-props so we can hit 5 at 100bps each.
         address co3 = makeAddr("co3");
         address co4 = makeAddr("co4");
@@ -495,13 +494,18 @@ contract CollaborativeProposalsTest is Test {
 
         governor.executeProposal(proposalId);
 
-        // Profit of 49 wei of USDC (base units). perfFeeBps=2000 => agentFee = 9.
-        // 9 * 100 / 10000 = 0 → revert.
+        // Profit of 49 wei of USDC. perfFeeBps=2000 => agentFee = 9.
+        // 9 * 100 / 10000 = 0 → each active co-prop floored at 1 wei.
+        // 5 co-props * 1 wei = 5 wei distributed; lead gets agentFee - 5 = 4 wei.
         usdc.mint(address(vault), 49);
 
+        uint256 leadBefore = usdc.balanceOf(leadAgent);
+        uint256 co1Before = usdc.balanceOf(coAgent1);
         vm.prank(leadAgent);
-        vm.expectRevert(ISyndicateGovernor.CoProposerShareUnderflow.selector);
         governor.settleProposal(proposalId);
+
+        assertEq(usdc.balanceOf(coAgent1), co1Before + 1, "co1 floored at 1 wei");
+        assertEq(usdc.balanceOf(leadAgent) - leadBefore, 4, "lead gets remainder 4 wei");
     }
 
     /// @dev Deregistered co-proposers with splits that round to zero are

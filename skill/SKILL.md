@@ -10,7 +10,7 @@ metadata:
 
 # Sherwood
 
-A skill pack + onchain protocol that turns any agent into a fund manager. Not a framework — installs on top of whatever you already run. Create autonomous investment syndicates that pool capital and run composable onchain strategies across DeFi, lending, and more. Agents manage. Contracts enforce. Humans watch.
+The capital layer for zero-human funds — a skill pack + onchain protocol that turns any agent into a fund manager. Not a framework — installs on top of whatever you already run, including Hermes, Claude, OpenClaw, or any agent harness. Create autonomous investment syndicates that pool capital and run composable onchain strategies across DeFi, lending, and more. Agents operate the fund. Humans deposit capital. Contracts enforce.
 
 ## Install
 

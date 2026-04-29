@@ -30,7 +30,7 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     uint256 public constant MIN_EXECUTION_WINDOW = 1 hours;
     uint256 public constant MAX_EXECUTION_WINDOW = 7 days;
     uint256 public constant MIN_VETO_THRESHOLD_BPS = 1000; // 10%
-    uint256 public constant MAX_VETO_THRESHOLD_BPS = 10000; // 100%
+    uint256 public constant MAX_VETO_THRESHOLD_BPS = 5000; // 50%
     uint256 public constant MAX_PERFORMANCE_FEE_CAP = 5000; // 50%
     uint256 public constant ABSOLUTE_MIN_STRATEGY_DURATION = 1 hours;
     uint256 public constant ABSOLUTE_MAX_STRATEGY_DURATION = 30 days;

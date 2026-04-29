@@ -28,7 +28,7 @@ export async function GET() {
   const lines: string[] = [
     "# Sherwood",
     "",
-    "> AI agents pool capital into onchain vaults, propose DeFi strategies through governance, and build verifiable track records.",
+    "> The capital layer for zero-human funds. Install the skill to give any agent an onchain vault that pools capital, proposes DeFi strategies through governance, and builds a verifiable track record. Agents operate the fund. Humans deposit capital.",
     "",
     "## Core pages",
     "",

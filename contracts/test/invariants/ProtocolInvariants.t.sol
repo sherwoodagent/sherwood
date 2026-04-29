@@ -440,33 +440,18 @@ contract ProtocolInvariantsTest is StdInvariant, Test {
     /// @notice INV-11 — for any (agentFee, co-proposer splits) pair, the sum
     ///         of distributed co-proposer shares plus the lead's remainder
     ///         equals `agentFee` exactly. Zero rounding leak.
-    /// @dev    This is a **property test** (unit-level with fuzzed input),
-    ///         not a `StdInvariant` handler assertion. Split distribution is
-    ///         a pure function of proposal state at settlement time — there
-    ///         is no storage to evolve, so a stateless fuzz is the correct
-    ///         tool. The math mirrors `SyndicateGovernor._distributeAgentFee`
-    ///         (post G-C7): each active co-prop gets `floor(agentFee *
-    ///         splitBps / 10_000)`, any active co-prop whose share rounds to
-    ///         zero reverts `CoProposerShareUnderflow`, and the lead picks
-    ///         up the remainder (`agentFee - sum(shares)`).
-    ///
-    ///         Bounds mirror production: `splitBps >= MIN_SPLIT_BPS (100)`,
-    ///         `sum(splits) <= 9_000` (leaving ≥10% for the lead), and
-    ///         `coPropCount <= MAX_CO_PROPOSERS` (5 for this harness; the
-    ///         on-chain absolute ceiling is 10).
+    /// @dev    Mirrors `SyndicateGovernor._distributeAgentFee` (post C-11):
+    ///         each active co-prop gets max(floor(agentFee * splitBps /
+    ///         10_000), 1) so tiny PnL never bricks settlement, and the
+    ///         lead picks up the remainder.
     function testFuzz_coProposerSplit_sumEqualsAgentFee(uint256 agentFee, uint256 coPropCount, uint256 salt) public {
-        // 100 wei USDC to 1M USDC — spans realistic settlement amounts.
-        agentFee = bound(agentFee, 100, 1_000_000e6);
+        agentFee = bound(agentFee, 1, 1_000_000e6);
         coPropCount = bound(coPropCount, 0, 5);
 
-        // Build a valid split vector: each entry >= MIN_SPLIT_BPS, total <= 9_000.
         uint256[] memory splits = new uint256[](coPropCount);
         uint256 totalSplitBps = 0;
         for (uint256 i = 0; i < coPropCount; i++) {
             uint256 remaining = 9_000 - totalSplitBps;
-            // Reserve MIN_SPLIT_BPS (100) for each later slot so we never paint
-            // ourselves into a corner where `remaining < 100` for a slot that
-            // still needs a valid split.
             uint256 slotsLeftAfter = coPropCount - i - 1;
             uint256 reserved = slotsLeftAfter * 100;
             uint256 maxThis = remaining > reserved ? remaining - reserved : 100;
@@ -476,21 +461,19 @@ contract ProtocolInvariantsTest is StdInvariant, Test {
             totalSplitBps += thisSplit;
         }
 
-        // Mirror `_distributeAgentFee` share math exactly.
         uint256 distributed = 0;
         for (uint256 i = 0; i < coPropCount; i++) {
             uint256 share = (agentFee * splits[i]) / 10_000;
-            // In production this would revert `CoProposerShareUnderflow`; we
-            // mimic the short-circuit so the property test stays meaningful
-            // for tiny `agentFee` values where a 100-bps split rounds to zero.
-            if (share == 0 && agentFee > 0) return;
+            if (share == 0) {
+                if (distributed >= agentFee) continue;
+                share = 1;
+            }
             distributed += share;
         }
+        if (distributed > agentFee) distributed = agentFee;
         uint256 leadShare = agentFee - distributed;
 
-        // INV-11 — no rounding leak anywhere.
         assertEq(distributed + leadShare, agentFee, "INV-11: split math must be exact");
-        // Sanity: lead always gets a non-negative share (distributed <= agentFee).
         assertLe(distributed, agentFee, "INV-11: distributed shares exceed agentFee");
     }
 }
