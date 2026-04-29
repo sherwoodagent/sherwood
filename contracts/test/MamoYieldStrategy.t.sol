@@ -118,7 +118,7 @@ contract MamoYieldStrategyTest is Test {
         strategy = MamoYieldStrategy(clone);
 
         // Initialize — no supplyAmount, taken from vault balance at execute time
-        bytes memory initData = abi.encode(address(usdc), address(mamoFactory), MIN_REDEEM);
+        bytes memory initData = abi.encode(address(usdc), address(mamoFactory), MIN_REDEEM, bytes32(0));
         strategy.initialize(vault, proposer, initData);
     }
 
@@ -136,28 +136,28 @@ contract MamoYieldStrategyTest is Test {
     }
 
     function test_initialize_twice_reverts() public {
-        bytes memory initData = abi.encode(address(usdc), address(mamoFactory), MIN_REDEEM);
+        bytes memory initData = abi.encode(address(usdc), address(mamoFactory), MIN_REDEEM, bytes32(0));
         vm.expectRevert(BaseStrategy.AlreadyInitialized.selector);
         strategy.initialize(vault, proposer, initData);
     }
 
     function test_initialize_zeroVault_reverts() public {
         address clone = Clones.clone(address(template));
-        bytes memory initData = abi.encode(address(usdc), address(mamoFactory), MIN_REDEEM);
+        bytes memory initData = abi.encode(address(usdc), address(mamoFactory), MIN_REDEEM, bytes32(0));
         vm.expectRevert(BaseStrategy.ZeroAddress.selector);
         MamoYieldStrategy(clone).initialize(address(0), proposer, initData);
     }
 
     function test_initialize_zeroUnderlying_reverts() public {
         address clone = Clones.clone(address(template));
-        bytes memory initData = abi.encode(address(0), address(mamoFactory), MIN_REDEEM);
+        bytes memory initData = abi.encode(address(0), address(mamoFactory), MIN_REDEEM, bytes32(0));
         vm.expectRevert(BaseStrategy.ZeroAddress.selector);
         MamoYieldStrategy(clone).initialize(vault, proposer, initData);
     }
 
     function test_initialize_zeroFactory_reverts() public {
         address clone = Clones.clone(address(template));
-        bytes memory initData = abi.encode(address(usdc), address(0), MIN_REDEEM);
+        bytes memory initData = abi.encode(address(usdc), address(0), MIN_REDEEM, bytes32(0));
         vm.expectRevert(BaseStrategy.ZeroAddress.selector);
         MamoYieldStrategy(clone).initialize(vault, proposer, initData);
     }
@@ -325,7 +325,7 @@ contract MamoYieldStrategyTest is Test {
         address clone2 = Clones.clone(address(template));
         MamoYieldStrategy strategy2 = MamoYieldStrategy(clone2);
 
-        bytes memory initData2 = abi.encode(address(usdc), address(mamoFactory), 50_000e6);
+        bytes memory initData2 = abi.encode(address(usdc), address(mamoFactory), 50_000e6, bytes32(0));
         strategy2.initialize(vault, proposer, initData2);
 
         assertEq(strategy.minRedeemAmount(), MIN_REDEEM);
@@ -339,7 +339,7 @@ contract MamoYieldStrategyTest is Test {
         MockMamoFactoryReturnsEOA badFactory = new MockMamoFactoryReturnsEOA();
         address clone = Clones.clone(address(template));
         MamoYieldStrategy badStrategy = MamoYieldStrategy(clone);
-        badStrategy.initialize(vault, proposer, abi.encode(address(usdc), address(badFactory), MIN_REDEEM));
+        badStrategy.initialize(vault, proposer, abi.encode(address(usdc), address(badFactory), MIN_REDEEM, bytes32(0)));
 
         vm.prank(vault);
         usdc.approve(address(badStrategy), VAULT_BALANCE);
@@ -354,7 +354,7 @@ contract MamoYieldStrategyTest is Test {
         MockMamoFactoryNoPull badFactory = new MockMamoFactoryNoPull();
         address clone = Clones.clone(address(template));
         MamoYieldStrategy badStrategy = MamoYieldStrategy(clone);
-        badStrategy.initialize(vault, proposer, abi.encode(address(usdc), address(badFactory), MIN_REDEEM));
+        badStrategy.initialize(vault, proposer, abi.encode(address(usdc), address(badFactory), MIN_REDEEM, bytes32(0)));
 
         vm.prank(vault);
         usdc.approve(address(badStrategy), VAULT_BALANCE);
@@ -362,6 +362,23 @@ contract MamoYieldStrategyTest is Test {
         vm.prank(vault);
         vm.expectRevert(MamoYieldStrategy.DepositFailed.selector);
         badStrategy.execute();
+    }
+
+    function test_execute_unallowedCodehash_reverts() public {
+        address clone = Clones.clone(address(template));
+        MamoYieldStrategy pinnedStrategy = MamoYieldStrategy(clone);
+        // Pin a bogus codehash that won't match whatever the mamoFactory returns.
+        bytes32 bogusHash = keccak256("not the real codehash");
+        pinnedStrategy.initialize(
+            vault, proposer, abi.encode(address(usdc), address(mamoFactory), MIN_REDEEM, bogusHash)
+        );
+
+        vm.prank(vault);
+        usdc.approve(address(pinnedStrategy), VAULT_BALANCE);
+
+        vm.prank(vault);
+        vm.expectRevert(MamoYieldStrategy.UntrustedMamoStrategy.selector);
+        pinnedStrategy.execute();
     }
 
     // ==================== HELPERS ====================

@@ -33,6 +33,7 @@ contract MoonwellSupplyStrategy is BaseStrategy {
     error InvalidAmount();
     error MintFailed();
     error RedeemFailed();
+    error EthWrapFailed();
 
     // ── Storage (per-clone) ──
     address public underlying; // e.g., USDC
@@ -41,15 +42,23 @@ contract MoonwellSupplyStrategy is BaseStrategy {
     uint256 public supplyAmount; // underlying tokens to supply
     uint256 public minRedeemAmount; // minimum underlying to accept on redeem
 
+    bool public isNativeEthMarket; // mWETH-style markets that send native ETH on redeem
+
     /// @inheritdoc IStrategy
     function name() external pure returns (string memory) {
         return "Moonwell Supply";
     }
 
-    /// @notice Decode: (address underlying, address mToken, uint256 supplyAmount, uint256 minRedeemAmount)
+    /// @notice Decode: (address underlying, address mToken, uint256 supplyAmount,
+    ///         uint256 minRedeemAmount, bool isNativeEthMarket)
     function _initialize(bytes calldata data) internal override {
-        (address underlying_, address mToken_, uint256 supplyAmount_, uint256 minRedeemAmount_) =
-            abi.decode(data, (address, address, uint256, uint256));
+        (
+            address underlying_,
+            address mToken_,
+            uint256 supplyAmount_,
+            uint256 minRedeemAmount_,
+            bool isNativeEthMarket_
+        ) = abi.decode(data, (address, address, uint256, uint256, bool));
         if (underlying_ == address(0) || mToken_ == address(0)) revert ZeroAddress();
         if (supplyAmount_ == 0) revert InvalidAmount();
 
@@ -57,6 +66,7 @@ contract MoonwellSupplyStrategy is BaseStrategy {
         mToken = mToken_;
         supplyAmount = supplyAmount_;
         minRedeemAmount = minRedeemAmount_;
+        isNativeEthMarket = isNativeEthMarket_;
     }
 
     /// @notice Pull USDC from vault, supply to Moonwell
@@ -83,7 +93,11 @@ contract MoonwellSupplyStrategy is BaseStrategy {
 
         // Some markets (e.g. Moonwell mWETH) send native ETH instead of ERC20 WETH.
         // Wrap any received ETH back to WETH so the vault always receives ERC20 tokens.
+        // Only attempt the wrap when this clone was configured as a native-ETH market;
+        // an unexpected ETH balance on a non-WETH market would otherwise revert here
+        // and brick settlement permanently.
         if (address(this).balance > 0) {
+            if (!isNativeEthMarket) revert EthWrapFailed();
             IWETH(underlying).deposit{value: address(this).balance}();
         }
 

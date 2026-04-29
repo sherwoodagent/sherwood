@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {CoreWriter} from "./CoreWriter.sol";
+import {ICoreWriter} from "./CoreWriter.sol";
 
 // ============ Enums ============
 
@@ -362,6 +362,6 @@ library L1Write {
     /// @notice Internal helper to send an action to CoreWriter
     /// @param data The fully encoded action data
     function _sendAction(bytes memory data) private {
-        CoreWriter(CORE_WRITER_ADDRESS).sendRawAction(data);
+        ICoreWriter(CORE_WRITER_ADDRESS).sendRawAction(data);
     }
 }

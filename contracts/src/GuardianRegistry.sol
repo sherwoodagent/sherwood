@@ -1391,6 +1391,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      callable so guardians can exit and the owner can capitalize the
     ///      reserve during an incident.
     function pause() external onlyOwner {
+        if (paused) revert AlreadyPaused();
         paused = true;
         pausedAt = uint64(block.timestamp);
         emit Paused(msg.sender);

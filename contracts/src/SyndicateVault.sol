@@ -354,8 +354,10 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
-    function transferPerformanceFee(address asset, address to, uint256 amount) external onlyGovernor {
-        IERC20(asset).safeTransfer(to, amount);
+    function transferPerformanceFee(address asset_, address to, uint256 amount) external onlyGovernor {
+        if (asset_ != asset()) revert InvalidAsset();
+        if (to == address(0)) revert ZeroAddress();
+        IERC20(asset_).safeTransfer(to, amount);
     }
 
     /// @inheritdoc ISyndicateVault

@@ -221,6 +221,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     // ── Task 24: emergency-call storage overrides ──
 
     function _storeEmergencyCalls(uint256 id, BatchExecutorLib.Call[] calldata calls) internal override {
+        if (calls.length > MAX_CALLS_PER_PROPOSAL) revert TooManyCalls();
         _emergencyCallsHashes[id] = keccak256(abi.encode(calls));
         delete _emergencyCalls[id];
         for (uint256 i = 0; i < calls.length; i++) {
@@ -443,14 +444,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         emit ProposalCancelled(proposalId, msg.sender);
     }
 
-    /// @dev Single-site decrement for the open-proposal counter (PR #229 Fix 2).
-    ///      Unchecked to save bytecode; the caller guarantees the counter is > 0
-    ///      (each dec is matched by a prior inc on Draft -> Pending in
-    ///      `propose` / `approveCollaboration`).
     function _decOpen(address vault) private {
-        unchecked {
-            --openProposalCount[vault];
-        }
+        --openProposalCount[vault];
     }
 
     /// @inheritdoc ISyndicateGovernor
@@ -924,10 +919,18 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _activeProposal[vault] = 0;
         _lastSettledAt[vault] = block.timestamp;
         proposal.state = ProposalState.Settled;
-        // PR #229 Fix 2: single dec for the happy-path lifecycle
-        // (Pending -> GuardianReview? -> Approved -> Executed -> Settled).
-        // `_activeProposal` also covers Executed so `requestUnstakeOwner`'s
-        // OR-check blocks rage-quit even before this dec fires.
+        delete _capitalSnapshots[proposalId];
+        if (_emergencyCallsHashes[proposalId] != bytes32(0)) {
+            // PR #247 follow-up: H-G-01 hardened cancelEmergencySettle /
+            // finalizeEmergencySettle to require state == Executed. If a
+            // standard settleProposal / unstick races ahead of an open
+            // registry review, those entrypoints can never invalidate the
+            // review afterwards. Cancel it here so the permissionless
+            // resolveEmergencyReview can no longer slash the owner for a
+            // proposal that already settled normally.
+            _getRegistry().cancelEmergencyReview(proposalId);
+            _clearEmergencyCalls(proposalId);
+        }
         _decOpen(vault);
 
         uint256 totalFee = 0;
@@ -1023,29 +1026,27 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     function _distributeAgentFee(uint256 proposalId, address vault, address asset, address proposer, uint256 agentFee)
         internal
     {
+        if (agentFee == 0) return;
         CoProposer[] storage coProps = _coProposers[proposalId];
         if (coProps.length > 0) {
-            // Distribute to co-proposers first, lead gets remainder
-            // Deregistered co-proposers are skipped -- their share goes to the lead
-            // G-C7: active co-props with share == 0 revert to prevent silently
-            // routing their rounded-to-zero share to the lead.
             uint256 distributed = 0;
             for (uint256 i = 0; i < coProps.length; i++) {
-                uint256 share = (agentFee * coProps[i].splitBps) / 10000;
                 bool active = ISyndicateVault(vault).isAgent(coProps[i].agent);
-                if (active && share == 0) revert CoProposerShareUnderflow();
-                if (share > 0 && active) {
-                    _payFee(vault, asset, coProps[i].agent, share);
-                    distributed += share;
+                if (!active) continue;
+                uint256 share = (agentFee * coProps[i].splitBps) / 10000;
+                if (share == 0) {
+                    if (distributed >= agentFee) continue;
+                    share = 1;
                 }
+                _payFee(vault, asset, coProps[i].agent, share);
+                distributed += share;
             }
-            // Lead proposer gets remainder (handles rounding)
+            if (distributed > agentFee) distributed = agentFee;
             uint256 leadShare = agentFee - distributed;
             if (leadShare > 0) {
                 _payFee(vault, asset, proposer, leadShare);
             }
         } else {
-            // Solo proposal -- all to proposer
             _payFee(vault, asset, proposer, agentFee);
         }
     }

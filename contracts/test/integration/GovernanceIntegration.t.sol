@@ -52,7 +52,7 @@ contract GovernanceIntegrationTest is BaseIntegrationTest {
         internal
         returns (address strategy, BatchExecutorLib.Call[] memory execCalls, BatchExecutorLib.Call[] memory settleCalls)
     {
-        bytes memory initData = abi.encode(USDC, MOONWELL_MUSDC, supplyAmount, MIN_REDEEM);
+        bytes memory initData = abi.encode(USDC, MOONWELL_MUSDC, supplyAmount, MIN_REDEEM, false);
         strategy = _cloneAndInit(moonwellTemplate, initData);
         (execCalls, settleCalls) = _buildMoonwellCalls(strategy, supplyAmount);
     }

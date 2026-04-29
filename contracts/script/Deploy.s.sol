@@ -101,7 +101,7 @@ contract DeploySherwood is ScriptBase {
         console.log("Chain ID:", block.chainid);
 
         // 0. Deploy Create3Factory (regular CREATE — one tx)
-        Create3Factory c3 = new Create3Factory();
+        Create3Factory c3 = new Create3Factory(d.deployer);
         console.log("\nCreate3Factory:", address(c3));
 
         // 1. BatchExecutorLib

@@ -205,16 +205,21 @@ contract SyndicateGauge is Ownable, ReentrancyGuard {
         return _distributions[epoch];
     }
 
-    function getLPRewardPercentage(uint256 epoch) public pure returns (uint256) {
-        if (epoch <= 4) {
-            return 1000; // 10%
-        } else if (epoch <= 8) {
-            return 700; // 7%
-        } else if (epoch <= 12) {
-            return 300; // 3%
-        } else {
-            return 0; // 0%
-        }
+    function getLPRewardPercentage(uint256) public pure returns (uint256) {
+        return 0;
+    }
+
+    /// @notice Owner-only rescue path for `lpRewards` slices that accrued
+    ///         under the prior bootstrap schedule (epochs ≤ 12) but are
+    ///         unclaimable while LP integration is unimplemented.
+    function rescueStuckLPRewards(uint256 epoch, address recipient) external onlyOwner {
+        if (recipient == address(0)) revert NotAuthorized();
+        EmissionDistribution storage distribution = _distributions[epoch];
+        uint256 amount = distribution.lpRewards;
+        if (amount == 0) revert NoEmissionToDistribute();
+        distribution.lpRewards = 0;
+        wood.safeTransfer(recipient, amount);
+        emit LPRewardsClaimed(recipient, amount, epoch);
     }
 
     function getPendingLPRewards(address lp, uint256 epoch) external view returns (uint256) {
@@ -237,13 +242,10 @@ contract SyndicateGauge is Ownable, ReentrancyGuard {
 
     // ==================== INTERNAL FUNCTIONS ====================
 
-    /// @dev Calculate LP reward based on their share of the Uniswap V3 position
-    /// @dev Implements bootstrapping schedule: 10%→7%→3%→0% over epochs 1-12
-    /// @dev TODO: Integrate with Uniswap V3 position manager for pro-rata LP shares
-    function _calculateLPReward(address, uint256 epoch, uint256) internal pure returns (uint256) {
-        if (epoch > LP_BOOTSTRAP_EPOCHS) return 0;
-        // LP reward distribution not yet implemented — requires Uniswap V3 integration.
-        // Guarded to prevent first-come-first-served exploit with placeholder logic.
-        revert NotAuthorized();
+    /// @dev V1: LP rewards are not implemented. `getLPRewardPercentage`
+    ///      returns 0 so future emissions never accrue to this slice; legacy
+    ///      lp slices are recoverable via `rescueStuckLPRewards`.
+    function _calculateLPReward(address, uint256, uint256) internal pure returns (uint256) {
+        return 0;
     }
 }

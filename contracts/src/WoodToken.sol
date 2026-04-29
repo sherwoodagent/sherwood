@@ -18,6 +18,12 @@ contract WoodToken is OFT, ERC20Permit, ERC20Votes {
 
     address public immutable minter;
 
+    /// @notice Cumulative WOOD ever minted on this chain. Independent of
+    ///         `totalSupply()` (which OFT bridges decrement via `_burn`)
+    ///         so the 1B cap stays load-bearing across cross-chain
+    ///         round-trips.
+    uint256 private _totalEverMinted;
+
     error OnlyMinter();
 
     modifier onlyMinter() {
@@ -46,12 +52,26 @@ contract WoodToken is OFT, ERC20Permit, ERC20Votes {
         if (remaining == 0) return 0;
 
         minted = amount > remaining ? remaining : amount;
+        _totalEverMinted += minted;
         _mint(to, minted);
     }
 
-    /// @notice Returns how many tokens can still be minted before hitting the cap.
+    /// @notice Remaining mintable headroom against the lifetime mint cap.
+    /// @dev Computed as `MAX_SUPPLY - _totalEverMinted`, NOT
+    ///      `MAX_SUPPLY - totalSupply()`. Burns (including OFT bridge-out
+    ///      `_burn`) do NOT replenish this counter — once a token is minted on
+    ///      this chain it permanently consumes cap budget, so the 1B cap stays
+    ///      load-bearing across cross-chain round-trips. Integrators looking
+    ///      for circulating-supply headroom should compute that themselves
+    ///      from `totalSupply()`.
     function totalMintable() public view returns (uint256) {
-        return MAX_SUPPLY - totalSupply();
+        return MAX_SUPPLY - _totalEverMinted;
+    }
+
+    /// @notice Cumulative WOOD ever minted on this chain (does not decrement
+    ///         on OFT bridge-out / `_burn`). Cap reference for `mint`.
+    function totalEverMinted() external view returns (uint256) {
+        return _totalEverMinted;
     }
 
     // ─────────────────────────────────────────────────────────────────

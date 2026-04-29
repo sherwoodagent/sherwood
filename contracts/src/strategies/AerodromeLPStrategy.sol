@@ -114,6 +114,8 @@ contract AerodromeLPStrategy is BaseStrategy {
         if (p.tokenA == address(0) || p.tokenB == address(0)) revert ZeroAddress();
         if (p.router == address(0) || p.lpToken == address(0)) revert ZeroAddress();
         if (p.amountADesired == 0 && p.amountBDesired == 0) revert InvalidAmount();
+        // Require at least one execute-side slippage min so addLiquidity is sandwich-resistant.
+        if (p.amountAMin == 0 && p.amountBMin == 0) revert InvalidAmount();
         // Require at least one settlement slippage param to prevent sandwich attacks
         if (p.minAmountAOut == 0 && p.minAmountBOut == 0) revert InvalidAmount();
 

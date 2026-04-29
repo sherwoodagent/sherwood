@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {PortfolioStrategy, ChainlinkReport} from "../src/strategies/PortfolioStrategy.sol";
 import {BaseStrategy} from "../src/strategies/BaseStrategy.sol";
-import {MockSwapAdapter} from "../src/adapters/MockSwapAdapter.sol";
+import {MockSwapAdapter} from "./mocks/MockSwapAdapter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 

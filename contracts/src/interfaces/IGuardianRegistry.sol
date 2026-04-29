@@ -37,6 +37,7 @@ interface IGuardianRegistry {
     // V1.5 removed: InvalidEpoch, EpochNotEnded, NothingToClaim, FundEpochLocked,
     // SweepTooEarly — all tied to the on-chain epoch-claim path now in Merkl.
     error ProtocolPaused();
+    error AlreadyPaused();
     error NotPausedOrDeadmanNotElapsed();
     error RefundCapExceeded();
     // V1.5 delegation
