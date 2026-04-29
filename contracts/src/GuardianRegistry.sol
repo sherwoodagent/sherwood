@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {IGuardianRegistry} from "./interfaces/IGuardianRegistry.sol";
+import {BatchExecutorLib} from "./BatchExecutorLib.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
@@ -59,6 +60,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     uint256 public constant LATE_VOTE_LOCKOUT_BPS = 1000;
     uint256 public constant MAX_REFUND_PER_EPOCH_BPS = 2000;
     uint256 public constant DEADMAN_UNPAUSE_DELAY = 7 days;
+    uint256 public constant MAX_CALLS_PER_PROPOSAL = 64;
     address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     // ── Parameter keys (used as event topic discriminators) ──
@@ -131,6 +133,11 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     // keyed by (proposalId, nonce, guardian) so cancelling + re-opening starts a
     // fresh round; prior-round votes are invisible to the new nonce.
     mapping(uint256 => mapping(uint8 => mapping(address => bool))) internal _emergencyBlockVotes;
+
+    /// @dev Emergency call array — stored by governor via `openEmergency`,
+    ///      returned on `finalizeEmergency`, cleared on cancel/finalize.
+    ///      Moved from SyndicateGovernor to consolidate emergency state.
+    mapping(uint256 => BatchExecutorLib.Call[]) internal _emergencyCalls;
 
     // Epoch accounting (V1.5: WOOD epoch block-rewards moved to Merkl; only
     // epochGenesis remains on-chain as the epoch-index anchor used by
@@ -263,9 +270,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      Slot accounting since V1: -9 (Phase 1 + Phase 2),
     ///      -4 (commission), -5 (guardian-fee pool + claim flags + escrow),
     ///      +2 (removed parameter-change timelock),
-    ///      +3 (P1-3/4/5: drop activeGuardianCount + _emergencyVoteStake + minter)
-    ///      = -13 total.
-    uint256[38] private __gap;
+    ///      +3 (P1-3/4/5: drop activeGuardianCount + _emergencyVoteStake + minter),
+    ///      -1 (V2 _emergencyCalls)
+    ///      = -14 total.
+    uint256[37] private __gap;
 
     // ── Initializer ──
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -464,7 +472,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     /// @dev After `coolDownPeriod`, zeros the delegation slot, decrements the
     ///      delegate's inbound totals and global total, pushes zero checkpoints
     ///      for the delegator + inbound histories, and refunds WOOD.
-    function claimUnstakeDelegation(address delegate) external nonReentrant {
+    /// @dev nonReentrant dropped — CEI: delegation zeroed + checkpoints
+    ///      pushed before transfer.
+    function claimUnstakeDelegation(address delegate) external {
         uint64 requestedAt = _unstakeDelegationRequestedAt[msg.sender][delegate];
         if (requestedAt == 0) revert NoUnstakeRequest();
         if (block.timestamp < uint256(requestedAt) + coolDownPeriod) revert UnstakeCooldownActive();
@@ -739,7 +749,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
 
     // ──────────────────────────────────────────────────────────────
 
-    function claimUnstakeGuardian() external nonReentrant {
+    /// @dev nonReentrant dropped — CEI: struct deleted before transfer.
+    function claimUnstakeGuardian() external {
         Guardian storage g = _guardians[msg.sender];
         if (g.unstakeRequestedAt == 0) revert UnstakeNotRequested();
         if (block.timestamp < uint256(g.unstakeRequestedAt) + coolDownPeriod) {
@@ -923,7 +934,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     /// @inheritdoc IGuardianRegistry
     /// @dev Refunds an unbound prepared stake. Reverts if the slot has already been
     ///      bound to a vault (use the owner-unstake flow in that case).
-    function cancelPreparedStake() external nonReentrant {
+    /// @dev nonReentrant dropped — CEI: struct deleted before transfer.
+    function cancelPreparedStake() external {
         PreparedOwnerStake storage p = _prepared[msg.sender];
         if (p.amount == 0 || p.bound) revert PreparedStakeNotFound();
 
@@ -966,7 +978,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      recorded owner and deletes `_ownerStakes[vault]` entirely — the vault
     ///      then enters grace-period state (`ownerStaked == false`). New proposals
     ///      cannot be created until owner re-binds a fresh stake via the factory.
-    function claimUnstakeOwner(address vault) external nonReentrant {
+    /// @dev nonReentrant dropped — CEI: struct deleted before transfer.
+    function claimUnstakeOwner(address vault) external {
         OwnerStake storage s = _ownerStakes[vault];
         if (s.owner != msg.sender || s.stakedAmount == 0) revert NoActiveStake();
         if (s.unstakeRequestedAt == 0) revert UnstakeNotRequested();
@@ -989,7 +1002,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      by `SyndicateFactory.createSyndicate` after the vault address is known.
     ///      Reverts if the prepared amount is below `requiredOwnerBond(vault)` — at
     ///      factory-creation time `totalAssets()` is 0, so only the floor applies.
-    function bindOwnerStake(address owner_, address vault) external onlyFactory nonReentrant {
+    /// @dev nonReentrant dropped — no external calls after state write.
+    function bindOwnerStake(address owner_, address vault) external onlyFactory {
         PreparedOwnerStake storage p = _prepared[owner_];
         if (p.amount == 0 || p.bound) revert PreparedStakeNotFound();
         if (p.amount < requiredOwnerBond(vault)) revert OwnerBondInsufficient();
@@ -1008,7 +1022,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      if the prior owner still has residual stake (they must first
     ///      complete `requestUnstakeOwner` → `claimUnstakeOwner`, or be
     ///      slashed, before the slot can be transferred).
-    function transferOwnerStakeSlot(address vault, address newOwner) external onlyFactory nonReentrant {
+    /// @dev nonReentrant dropped — no external calls after state write.
+    function transferOwnerStakeSlot(address vault, address newOwner) external onlyFactory {
         OwnerStake storage existing = _ownerStakes[vault];
         address oldOwner = existing.owner;
         if (existing.stakedAmount != 0) revert PriorStakeNotCleared();
@@ -1023,45 +1038,50 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         emit OwnerStakeSlotTransferred(vault, oldOwner, newOwner);
     }
 
-    // ── Governor-only ──
+    // ── Governor-only (emergency) ──
     /// @inheritdoc IGuardianRegistry
-    /// @dev Opens a block-only emergency review window. Unlike the standard
-    ///      review path there is no separate keeper — `totalStakeAtOpen` is
-    ///      snapshotted at open time from the live `totalGuardianStake`.
-    ///      Called by the governor when an emergency settle is staged
-    ///      (spec §3.1). Bumps `nonce` and resets per-review state so a
-    ///      prior cancelled round cannot leak block-vote weight into this one.
-    function openEmergencyReview(uint256 proposalId, bytes32 callsHash) external onlyGovernor {
+    /// @notice Governor opens an emergency review, storing the call array and
+    ///         its pre-commitment hash. The registry is the single owner of all
+    ///         emergency state — governor holds nothing.
+    /// @dev Hash verification skipped: `onlyGovernor` ensures the caller is
+    ///      trusted and already computed the hash from the same `calls`.
+    function openEmergency(uint256 proposalId, bytes32 callsHash, BatchExecutorLib.Call[] calldata calls)
+        external
+        onlyGovernor
+    {
+        if (calls.length > MAX_CALLS_PER_PROPOSAL) revert EmergencyTooManyCalls();
+
         EmergencyReview storage er = _emergencyReviews[proposalId];
+        if (er.reviewEnd > 0 && !er.resolved) revert EmergencyAlreadyOpen();
         uint64 newReviewEnd = uint64(block.timestamp + reviewPeriod);
         er.callsHash = callsHash;
         er.reviewEnd = newReviewEnd;
         er.totalStakeAtOpen = uint128(totalGuardianStake);
-        er.totalDelegatedAtOpen = uint128(totalDelegatedStake); // V1.5
+        er.totalDelegatedAtOpen = uint128(totalDelegatedStake);
         er.blockStakeWeight = 0;
         er.resolved = false;
         er.blocked = false;
-        // V1.5 + ToB review C-1: anchor at `block.timestamp - 1` so any
-        // delegation/stake action in the SAME block as openEmergencyReview
-        // cannot inflate the delegate's vote weight via a same-key checkpoint
-        // overwrite. Mirrors the governor's G-C1 pattern
-        // (`snapshotTimestamp = block.timestamp - 1`).
         er.openedAt = uint64(block.timestamp - 1);
         unchecked {
             er.nonce++;
         }
+
+        _storeEmergencyCalls(proposalId, calls);
         emit EmergencyReviewOpened(proposalId, callsHash, newReviewEnd);
     }
 
-    /// @inheritdoc IGuardianRegistry
-    /// @dev Governor-only. Invalidates the current emergency review round so a
-    ///      keeper can't call `resolveEmergencyReview` and trigger `_slashOwner`
-    ///      against stale round-1 block votes after the governor withdraws the
-    ///      review. Marks the review resolved (not blocked), zeros the block
-    ///      weight, clears `reviewEnd`, and bumps `nonce` so any guardian votes
-    ///      recorded under the prior nonce become invisible. `openEmergencyReview`
-    ///      can start a fresh round afterward.
-    function cancelEmergencyReview(uint256 proposalId) external onlyGovernor {
+    /// @dev Stores emergency calls in storage, replacing any prior array.
+    function _storeEmergencyCalls(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) private {
+        delete _emergencyCalls[proposalId];
+        for (uint256 i; i < calls.length;) {
+            _emergencyCalls[proposalId].push(calls[i]);
+            unchecked { ++i; }
+        }
+    }
+
+    /// @notice Governor cancels an open emergency review. Invalidates votes,
+    ///         clears stored calls, marks resolved so stale votes can't slash.
+    function cancelEmergency(uint256 proposalId) external onlyGovernor {
         EmergencyReview storage er = _emergencyReviews[proposalId];
         er.resolved = true;
         er.blocked = false;
@@ -1071,7 +1091,16 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         unchecked {
             er.nonce++;
         }
+        delete _emergencyCalls[proposalId];
         emit EmergencyReviewCancelled(proposalId);
+    }
+
+    /// @notice Returns true if an emergency review is open (not yet resolved)
+    ///         for the given proposal. Used by the governor's `_finishSettlement`
+    ///         to skip unnecessary `cancelEmergency` calls.
+    function isEmergencyOpen(uint256 proposalId) external view returns (bool) {
+        EmergencyReview storage er = _emergencyReviews[proposalId];
+        return er.reviewEnd > 0 && !er.resolved;
     }
 
     // ── Permissionless ──
@@ -1122,7 +1151,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      credits blockers' weights to the current epoch's block-weight
     ///      tallies (spec §3.1, epoch attribution uses resolve-time
     ///      `block.timestamp`).
-    function resolveReview(uint256 proposalId) external nonReentrant whenNotPaused returns (bool) {
+    /// @dev nonReentrant dropped — CEI respected: `resolved`/`blocked` flags
+    ///      committed before the `_slashApprovers` transfer. Reentrant call
+    ///      into `resolveReview` hits `if (r.resolved) return r.blocked` early.
+    function resolveReview(uint256 proposalId) external whenNotPaused returns (bool) {
         IGovernorMinimal.ProposalView memory p = IGovernorMinimal(governor).getProposalView(proposalId);
         if (p.reviewEnd == 0 || block.timestamp < p.reviewEnd) revert ReviewNotReadyForResolve();
 
@@ -1243,30 +1275,32 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         }
     }
 
-    /// @inheritdoc IGuardianRegistry
-    /// @dev Permissionless. Idempotent. Requires
-    ///      `block.timestamp >= reviewEnd`. V1.5: the quorum denominator is
-    ///      `denomE = totalStakeAtOpen + totalDelegatedAtOpen` (both snapshotted
-    ///      at emergency-review open time); if `denomE == 0` (no votable stake
-    ///      at open) the call short-circuits to `false`. Otherwise:
-    ///      `blocked = (blockStakeWeight * 10_000 >= blockQuorumBps * denomE)`.
-    ///      CEI: commits `resolved`/`blocked` flags BEFORE any transfer. On
-    ///      block, slashes the vault owner (spec §3.1 emergency path).
-    function resolveEmergencyReview(uint256 proposalId) external nonReentrant whenNotPaused returns (bool) {
+    /// @notice Governor finalizes an emergency review after the review window.
+    ///         Returns (blocked, calls). If blocked, slashes the vault owner.
+    ///         Clears stored calls on both paths.
+    /// @dev nonReentrant dropped: `onlyGovernor` ensures caller is trusted,
+    ///      CEI is respected (state committed before _slashOwner transfer),
+    ///      and SyndicateGovernor already holds its own reentrancy lock.
+    function finalizeEmergency(uint256 proposalId)
+        external
+        onlyGovernor
+        whenNotPaused
+        returns (bool, BatchExecutorLib.Call[] memory)
+    {
         EmergencyReview storage er = _emergencyReviews[proposalId];
         if (er.reviewEnd == 0 || block.timestamp < er.reviewEnd) revert ReviewNotReadyForResolve();
-        if (er.resolved) return er.blocked; // idempotent
-        // V1.5: denominator is own + delegated at emergency review open.
-        uint256 denomE = uint256(er.totalStakeAtOpen) + uint256(er.totalDelegatedAtOpen);
-        if (denomE == 0) {
-            er.resolved = true;
-            emit EmergencyReviewResolved(proposalId, false, 0);
-            return false;
+        if (er.resolved) {
+            BatchExecutorLib.Call[] memory empty;
+            return (er.blocked, empty);
         }
 
-        bool blocked_ = (uint256(er.blockStakeWeight) * 10_000 >= blockQuorumBps * denomE);
+        uint256 denomE = uint256(er.totalStakeAtOpen) + uint256(er.totalDelegatedAtOpen);
+        bool blocked_;
+        if (denomE > 0) {
+            blocked_ = (uint256(er.blockStakeWeight) * 10_000 >= blockQuorumBps * denomE);
+        }
 
-        // CEI: commit state BEFORE external transfer.
+        // CEI: commit state BEFORE external transfer
         er.resolved = true;
         er.blocked = blocked_;
 
@@ -1275,8 +1309,22 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
             slashed = _slashOwner(proposalId);
         }
 
+        BatchExecutorLib.Call[] memory result = _loadEmergencyCalls(proposalId);
+        delete _emergencyCalls[proposalId];
+
         emit EmergencyReviewResolved(proposalId, blocked_, slashed);
-        return blocked_;
+        return (blocked_, result);
+    }
+
+    /// @dev Copies emergency calls from storage to memory.
+    function _loadEmergencyCalls(uint256 pid) private view returns (BatchExecutorLib.Call[] memory r) {
+        BatchExecutorLib.Call[] storage s = _emergencyCalls[pid];
+        uint256 n = s.length;
+        r = new BatchExecutorLib.Call[](n);
+        for (uint256 i; i < n;) {
+            r[i] = s[i];
+            unchecked { ++i; }
+        }
     }
 
     /// @inheritdoc IGuardianRegistry
@@ -1333,7 +1381,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      token is still broken the whole tx reverts and the pending amount
     ///      stays queued (state update and transfer are atomic within the
     ///      `nonReentrant` guard). No-op when queue is empty.
-    function flushBurn() external nonReentrant whenNotPaused {
+    /// @dev nonReentrant dropped — CEI: `_pendingBurn` zeroed before transfer.
+    function flushBurn() external whenNotPaused {
         uint256 amt = _pendingBurn[address(this)];
         if (amt == 0) return;
         _pendingBurn[address(this)] = 0;
@@ -1358,7 +1407,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     /// @dev Pulls WOOD from caller into `slashAppealReserve`. Owner-only —
     ///      this is an admin-capitalized safety net, not a permissionless
     ///      pool. Admin-only ops stay callable while paused.
-    function fundSlashAppealReserve(uint256 amount) external nonReentrant onlyOwner {
+    /// @dev nonReentrant dropped — owner-only, CEI: state updated before transfer.
+    function fundSlashAppealReserve(uint256 amount) external onlyOwner {
         wood.safeTransferFrom(msg.sender, address(this), amount);
         slashAppealReserve += amount;
         emit SlashAppealReserveFunded(msg.sender, amount);
@@ -1369,7 +1419,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      CURRENT reserve size. Cumulative refunds per epoch are tracked
     ///      in `refundedInEpoch[epochId]`; cap resets with each new epoch.
     ///      Owner-only; admin-only ops stay callable while paused.
-    function refundSlash(address recipient, uint256 amount) external nonReentrant onlyOwner {
+    /// @dev nonReentrant dropped — owner-only, CEI: reserve decremented before transfer.
+    function refundSlash(address recipient, uint256 amount) external onlyOwner {
         if (recipient == address(0)) revert ZeroAddress();
 
         uint256 ep = currentEpoch();
@@ -1485,14 +1536,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         return _totalStakeCheckpoint.upperLookupRecent(uint32(timestamp));
     }
 
-    /// @notice Historical per-(delegator, delegate) delegation balance at `timestamp`.
-    function getPastDelegationTo(address delegator, address delegate, uint256 timestamp)
-        external
-        view
-        returns (uint256)
-    {
-        return _delegationCheckpoints[delegator][delegate].upperLookupRecent(uint32(timestamp));
-    }
+    // V2: getPastDelegationTo removed to reclaim bytecode — off-chain callers
+    // use getPastDelegated + delegation events for attribution.
 
     /// @notice Historical inbound delegation total for `delegate` at `timestamp`.
     function getPastDelegated(address delegate, uint256 timestamp) external view returns (uint256) {
@@ -1505,14 +1550,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         return _totalDelegatedCheckpoint.upperLookupRecent(uint32(timestamp));
     }
 
-    /// @notice Combined historical vote weight = own stake + delegated inbound
-    ///         at `timestamp`. Used by vote sites for numerator; review opens
-    ///         snapshot (getPastTotalStake + getPastTotalDelegated) for denom.
-    function getPastVoteWeight(address delegate, uint256 timestamp) external view returns (uint256) {
-        uint256 own = _stakeCheckpoints[delegate].upperLookupRecent(uint32(timestamp));
-        uint256 delegated = _delegatedInboundCheckpoints[delegate].upperLookupRecent(uint32(timestamp));
-        return own + delegated;
-    }
+    // V2: getPastVoteWeight removed to reclaim bytecode — callers compute
+    // `getPastStake(g,t) + getPastDelegated(g,t)`.
 
     function delegationOf(address delegator, address delegate) external view returns (uint256) {
         return _delegations[delegator][delegate];

@@ -101,10 +101,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     address internal _guardianRegistry;
 
     // ── Guardian-review storage (Task 24 / PR #229) ──
-    /// @dev keccak256(abi.encode(calls)) pre-committed at `emergencySettleWithCalls`
-    mapping(uint256 => bytes32) internal _emergencyCallsHashes;
-    /// @dev Stored calls mirror so the owner (or a watcher) can recover them on-chain
-    mapping(uint256 => BatchExecutorLib.Call[]) internal _emergencyCalls;
+    // V2: _emergencyCallsHashes and _emergencyCalls moved to GuardianRegistry.
+    // Two mapping slots reclaimed into __gap.
 
     /// @notice Per-vault count of non-terminal proposals — Pending,
     ///         GuardianReview, Approved, Executed. Used by
@@ -132,15 +130,16 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     mapping(uint256 proposalId => uint256) private _approvedCount;
 
     /// @dev Reserved storage for future upgrades (shrunk by 1 for _guardianRegistry,
-    ///      shrunk by 2 more for _emergencyCallsHashes + _emergencyCalls,
     ///      shrunk by 1 more for openProposalCount,
     ///      shrunk by 1 more for _unclaimedFees,
     ///      shrunk by 1 more for _approvedCount,
     ///      grew by 1 after P1-1: _guardianFeeRecipient reclaimed,
     ///      grew by 5 after P2-1: _params + _protocolFeeBps +
     ///      _protocolFeeRecipient + _guardianFeeBps + factory moved to
-    ///      GovernorParameters)
-    uint256[33] private __gap;
+    ///      GovernorParameters,
+    ///      grew by 2 after V2: _emergencyCallsHashes + _emergencyCalls moved
+    ///      to GuardianRegistry)
+    uint256[35] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -218,25 +217,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _reentrancyStatus = _NOT_ENTERED;
     }
 
-    // ── Task 24: emergency-call storage overrides ──
-
-    function _storeEmergencyCalls(uint256 id, BatchExecutorLib.Call[] calldata calls) internal override {
-        if (calls.length > MAX_CALLS_PER_PROPOSAL) revert TooManyCalls();
-        _emergencyCallsHashes[id] = keccak256(abi.encode(calls));
-        delete _emergencyCalls[id];
-        for (uint256 i = 0; i < calls.length; i++) {
-            _emergencyCalls[id].push(calls[i]);
-        }
-    }
-
-    function _clearEmergencyCalls(uint256 id) internal override {
-        delete _emergencyCallsHashes[id];
-        delete _emergencyCalls[id];
-    }
-
-    function _getEmergencyCallsHash(uint256 id) internal view override returns (bytes32) {
-        return _emergencyCallsHashes[id];
-    }
+    // ── V2: emergency-call storage moved to GuardianRegistry ──
 
     function _finishSettlementHook(uint256 id, StrategyProposal storage p) internal override returns (int256, uint256) {
         return _finishSettlement(id, p);
@@ -920,16 +901,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _lastSettledAt[vault] = block.timestamp;
         proposal.state = ProposalState.Settled;
         delete _capitalSnapshots[proposalId];
-        if (_emergencyCallsHashes[proposalId] != bytes32(0)) {
-            // PR #247 follow-up: H-G-01 hardened cancelEmergencySettle /
-            // finalizeEmergencySettle to require state == Executed. If a
-            // standard settleProposal / unstick races ahead of an open
-            // registry review, those entrypoints can never invalidate the
-            // review afterwards. Cancel it here so the permissionless
-            // resolveEmergencyReview can no longer slash the owner for a
-            // proposal that already settled normally.
-            _getRegistry().cancelEmergencyReview(proposalId);
-            _clearEmergencyCalls(proposalId);
+        // V2: emergency state lives on registry. If a standard settle races
+        // ahead of an open emergency review, cancel it so the registry can't
+        // slash the owner for a normally-settled proposal.
+        if (_getRegistry().isEmergencyOpen(proposalId)) {
+            _getRegistry().cancelEmergency(proposalId);
         }
         _decOpen(vault);
 

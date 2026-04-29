@@ -34,6 +34,8 @@ interface IGuardianRegistry {
     error PriorStakeNotCleared();
     error PoolAlreadyFunded();
     error OwnerBondInsufficient();
+    error EmergencyTooManyCalls();
+    error EmergencyAlreadyOpen();
     // V1.5 removed: InvalidEpoch, EpochNotEnded, NothingToClaim, FundEpochLocked,
     // SweepTooEarly — all tied to the on-chain epoch-claim path now in Merkl.
     error ProtocolPaused();
@@ -120,14 +122,17 @@ interface IGuardianRegistry {
     function bindOwnerStake(address owner, address vault) external;
     function transferOwnerStakeSlot(address vault, address newOwner) external;
 
-    // ── Governor-only ──
-    function openEmergencyReview(uint256 proposalId, bytes32 callsHash) external;
-    function cancelEmergencyReview(uint256 proposalId) external;
+    // ── Governor-only (emergency) ──
+    function openEmergency(uint256 proposalId, bytes32 callsHash, BatchExecutorLib.Call[] calldata calls) external;
+    function cancelEmergency(uint256 proposalId) external;
+    function finalizeEmergency(uint256 proposalId) external returns (bool blocked, BatchExecutorLib.Call[] memory calls);
+
+    // ── Views (emergency) ──
+    function isEmergencyOpen(uint256 proposalId) external view returns (bool);
 
     // ── Permissionless ──
     function openReview(uint256 proposalId) external;
     function resolveReview(uint256 proposalId) external returns (bool blocked);
-    function resolveEmergencyReview(uint256 proposalId) external returns (bool blocked);
     function voteBlockEmergencySettle(uint256 proposalId) external;
     function flushBurn() external;
 
@@ -184,8 +189,7 @@ interface IGuardianRegistry {
     function getPastStake(address guardian, uint256 timestamp) external view returns (uint256);
     function getPastTotalStake(uint256 timestamp) external view returns (uint256);
     function getPastDelegated(address delegate, uint256 timestamp) external view returns (uint256);
-    function getPastDelegationTo(address delegator, address delegate, uint256 timestamp) external view returns (uint256);
-    function getPastVoteWeight(address delegate, uint256 timestamp) external view returns (uint256);
+    // V2: getPastDelegationTo + getPastVoteWeight removed to reclaim bytecode.
     function getPastTotalDelegated(uint256 timestamp) external view returns (uint256);
 
     event DelegationIncreased(address indexed delegator, address indexed delegate, uint256 amount);

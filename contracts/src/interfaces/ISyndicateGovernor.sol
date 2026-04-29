@@ -140,9 +140,7 @@ interface ISyndicateGovernor {
     // ── Guardian-review emergency settle errors (Task 24) ──
     error OwnerBondInsufficient();
     error EmergencySettleBlocked();
-    error EmergencySettleMismatch();
     error EmergencyNotProposed();
-    error EmergencyAlreadyOpen();
 
     // ── Guardian-review lifecycle errors (Task 25) ──
     error NotInGuardianReview();
@@ -297,7 +295,7 @@ interface ISyndicateGovernor {
     function unstick(uint256 proposalId) external;
     function emergencySettleWithCalls(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external;
     function cancelEmergencySettle(uint256 proposalId) external;
-    function finalizeEmergencySettle(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external;
+    function finalizeEmergencySettle(uint256 proposalId) external;
 
     function cancelProposal(uint256 proposalId) external;
 
