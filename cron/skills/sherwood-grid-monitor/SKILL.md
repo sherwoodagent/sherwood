@@ -55,12 +55,25 @@ roi_pct = (monthly / total_alloc * 100) if total_alloc > 0 else 0
 
 # Hedge stats (delta-neutral hedging PnL)
 hedge_path = os.path.join(home, '.sherwood/grid/hedge.json')
-hedge_pnl = 0.0
+hedge_realized = 0.0
+hedge_today = 0.0
 hedge_count = 0
+hedge_unrealized = 0.0
 try:
     h = json.load(open(hedge_path))
-    hedge_pnl = h.get('totalPnlUsd', 0.0)
-    hedge_count = h.get('totalHedges', 0)
+    hedge_realized = h.get('totalRealizedPnl', 0.0)
+    hedge_today = h.get('todayRealizedPnl', 0.0)
+    hedge_count = len([p for p in h.get('positions', []) if p.get('quantity', 0) > 0])
+except (FileNotFoundError, json.JSONDecodeError):
+    pass
+# Unrealized hedge PnL from latest cycle log
+cycles_path = os.path.join(home, '.sherwood/grid/cycles.jsonl')
+try:
+    with open(cycles_path) as f:
+        lines = f.readlines()
+    if lines:
+        last = json.loads(lines[-1])
+        hedge_unrealized = last.get('hedgeUnrealizedPnl', 0.0)
 except (FileNotFoundError, json.JSONDecodeError):
     pass
 
@@ -68,8 +81,8 @@ print(f'GRID STRATEGY REPORT')
 print(f'━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
 print()
 print(f'💰 Total PnL: +\${total_pnl:.2f} ({total_rts} round trips)')
-print(f'🛡️ Hedge PnL: \${hedge_pnl:+.2f} ({hedge_count} hedges)')
-print(f'📊 Today: +\${today_pnl:.2f} ({today_fills} fills)')
+print(f'🛡️ Hedge: \${hedge_realized:+.2f} realized, \${hedge_unrealized:+.2f} unrealized ({hedge_count} active)')
+print(f'📊 Today: +\${today_pnl:.2f} grid ({today_fills} fills) | \${hedge_today:+.2f} hedge')
 print(f'📈 Daily avg: \${daily_avg:.2f}/day')
 print(f'📅 Monthly projection: \${monthly:.0f}/month ({roi_pct:.0f}% ROI)')
 print(f'💼 Allocation: \${total_alloc:,.0f}')
