@@ -78,9 +78,9 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - USDC on Base has **6 decimals** not 18 — always account for this
 - Use SafeERC20 for all token transfers
 - Run `forge build` and `forge test` before every PR
-- Run `forge fmt` before committing
-- SyndicateGovernor runtime is **23,603 / 24,576 bytes (973-byte EIP-170 margin)** as of 2026-04-23 post-ToB P1/P2/P2-1. Setters apply immediately (owner is a multisig with its own delay). Run `forge build --sizes` before any governor edit.
-- GuardianRegistry runtime is **23,379 / 24,576 bytes (1,197-byte EIP-170 margin)** as of 2026-04-23 post-ToB P1-3/P1-4/P1-5. Reclaim levers used to stay under EIP-170: dropped `nonReentrant` where CEI is respected, dropped external `pending*` views, dropped `activeGuardianCount` + `minter` + `_emergencyVoteStake` + `recordEpochBudget` as part of the ToB simplification pass.
+- Run `forge fmt` before committing. CI runs `forge fmt --check` — always run `forge fmt` locally before pushing contract changes.
+- SyndicateGovernor runtime is **24,250 / 24,576 bytes (326-byte EIP-170 margin)** as of 2026-04-29 post-V2 emergency consolidation. Run `forge build --sizes` before any governor edit.
+- GuardianRegistry runtime is **24,548 / 24,576 bytes (28-byte EIP-170 margin)** as of 2026-04-29 post-V2 emergency state consolidation. **Any addition requires bytecode reduction levers.** Levers already used: dropped `nonReentrant` where CEI is respected, dropped external `pending*` views, dropped `getPastVoteWeight`/`getPastDelegationTo` convenience views, dropped `activeGuardianCount` + `minter` + `_emergencyVoteStake` + `recordEpochBudget`.
 - **`via_ir` is on** in `foundry.toml`. Compile is ~2× slower than the legacy pipeline. Required to fit `GovernorEmergency` under the bytecode limit — do not disable without re-measuring the governor.
 - Under `via_ir = true`, the IR optimizer reorders `block.timestamp` reads across `vm.warp` cheatcodes. In tests, use `vm.getBlockTimestamp()` at each read site — never cache it in a local before a warp.
 - `openReview` / `openEmergencyReview` snapshot votable stake at `block.timestamp - 1` (ToB C-1). Tests that stake guardians and open a review in the same block fail with `NotActiveGuardian` because the checkpoint at `t-1` is 0. Fix: `vm.warp(vm.getBlockTimestamp() + 1)` between staking and `openReview`.
@@ -103,9 +103,9 @@ Live contract sizes from `forge build --sizes` (2026-04):
 
 | Contract | Runtime | Notes |
 |---|---|---|
-| SyndicateGovernor | 23,811 | 765-byte EIP-170 margin (V1.5 post-timelock-removal) |
+| SyndicateGovernor | 24,250 | 326-byte EIP-170 margin (V2 post-emergency-consolidation) |
 | SyndicateFactory | 11,206 | ample headroom |
-| GuardianRegistry | 24,492 | 84-byte EIP-170 margin (V1.5: delegation + commission + guardian-fee claim) |
+| GuardianRegistry | 24,548 | **28-byte EIP-170 margin** (V2: emergency state consolidated from governor) |
 | SyndicateVault | 11,069 | — |
 | WoodToken | 15,788 | ERC20Votes + OFT multi-inherit (Phase 1 V1.5) |
 
@@ -264,6 +264,7 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 - Contracts: Foundry tests in `contracts/test/`, fork tests for protocol integrations
 - CLI: vitest (when wired up)
 - Always include test results in PR description
+- **`MockRegistryMinimal`** (`test/mocks/MockRegistryMinimal.sol`) is used by ~6 governor test files. It only stubs the read surface (`reviewPeriod`, `resolveReview`, `getReviewState`, `isEmergencyOpen`, `cancelEmergency`). When `IGuardianRegistry` interface changes, this mock MUST be updated or 20+ tests silently fail with `unrecognized function selector`.
 - `cli/src/lib/network.test.ts` has 4 pre-existing failures from `BASE_RPC_URL` env-var leak (Moonwell RPC override). Always verify with `git stash && npm test` before assuming new test failures are from your changes.
 - **systemd services** need `Environment="NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"` — linuxbrew Node.js can't find CA certs without it. All HTTPS fetch calls fail silently with `TypeError: fetch failed`.
 - `forge coverage` runs again as of PR #229 (struct-literal refactor in `SyndicateGovernor.propose`). Prior stack-too-deep workaround no longer needed.
