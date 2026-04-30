@@ -58,6 +58,31 @@ jobs:
             exit 1
           fi
 
+          # Vault: currently ~11k bytes. 22,000 byte gate gives us ~10kb of
+          # headroom but catches a runaway addition before it tips EIP-170.
+          VAULT_SIZE=$(echo "$SIZES_JSON" | jq -r '.SyndicateVault.runtime_size // empty')
+          echo "SyndicateVault runtime size: $VAULT_SIZE bytes"
+          if [ -z "$VAULT_SIZE" ]; then
+            echo "::error::could not read SyndicateVault runtime size"
+            exit 1
+          fi
+          if [ "$VAULT_SIZE" -gt 22000 ]; then
+            echo "::error::SyndicateVault $VAULT_SIZE > 22000 byte budget"
+            exit 1
+          fi
+
+          # Factory: currently ~11k bytes. Same headroom rationale.
+          FACTORY_SIZE=$(echo "$SIZES_JSON" | jq -r '.SyndicateFactory.runtime_size // empty')
+          echo "SyndicateFactory runtime size: $FACTORY_SIZE bytes"
+          if [ -z "$FACTORY_SIZE" ]; then
+            echo "::error::could not read SyndicateFactory runtime size"
+            exit 1
+          fi
+          if [ "$FACTORY_SIZE" -gt 22000 ]; then
+            echo "::error::SyndicateFactory $FACTORY_SIZE > 22000 byte budget"
+            exit 1
+          fi
+
       - name: Unit tests
         run: forge test -vvv --no-match-path "test/integration/*"
 
