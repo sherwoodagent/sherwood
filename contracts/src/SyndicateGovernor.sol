@@ -377,6 +377,25 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     // unstick / emergencySettleWithCalls / cancelEmergencySettle / finalizeEmergencySettle.
 
     /// @inheritdoc ISyndicateGovernor
+    function bindProposalAdapter(uint256 proposalId, address adapter) external {
+        StrategyProposal storage proposal = _proposals[proposalId];
+        // Proposer check covers the nonexistent-proposal case (proposer is
+        // the zero address for unset slots and msg.sender can never be zero).
+        if (msg.sender != proposal.proposer) revert NotProposer();
+
+        // Pre-execute window only. After Executed the adapter is already on
+        // the vault and the binding is meaningless. View resolution is
+        // sufficient — this path doesn't commit transitions.
+        if (uint256(_resolveStateView(proposal)) > uint256(ProposalState.Approved)) revert AdapterBindingClosed();
+        // Push directly to the vault — no governor-side mapping needed (the
+        // vault is per-proposal anyway, and the adapter is implicitly cleared
+        // post-settle because `totalAssets` only reads it while
+        // `redemptionsLocked()`).
+        ISyndicateVault(proposal.vault).setActiveStrategyAdapter(adapter);
+        emit ProposalAdapterBound(proposalId, adapter);
+    }
+
+    /// @inheritdoc ISyndicateGovernor
     function cancelProposal(uint256 proposalId) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
         if (msg.sender != proposal.proposer) revert NotProposer();

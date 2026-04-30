@@ -176,6 +176,13 @@ interface ISyndicateGovernor {
     // V1.5 new parameter errors
     error InvalidGuardianFeeBps();
 
+    /// @notice Revert if `bindProposalAdapter` is called once the proposal has
+    ///         passed the pre-execute window (Executed / Settled / Rejected /
+    ///         Cancelled / Expired). Pre-execute the binding is mutable; after
+    ///         that point the vault binding is either already locked-in or
+    ///         meaningless.
+    error AdapterBindingClosed();
+
     // ── Events ──
 
     event ProposalCreated(
@@ -247,6 +254,11 @@ interface ISyndicateGovernor {
     // ── Parameter change event (V1.5: owner-instant, no queue/cancel) ──
     event ParameterChangeFinalized(bytes32 indexed paramKey, uint256 oldValue, uint256 newValue);
 
+    /// @notice Emitted when the proposer binds (or unbinds, with `address(0)`)
+    ///         an `IStrategy` adapter on the proposal's vault. The vault setter
+    ///         is invoked synchronously from `bindProposalAdapter`.
+    event ProposalAdapterBound(uint256 indexed proposalId, address indexed adapter);
+
     /// @notice V1.5: emitted in `_distributeFees` when `guardianFeeBps > 0`.
     ///         Guardian fee is carved from gross PnL and transferred to
     ///         `recipient` (GuardianRegistry in V1.5).
@@ -287,6 +299,17 @@ interface ISyndicateGovernor {
     function executeProposal(uint256 proposalId) external;
 
     function settleProposal(uint256 proposalId) external;
+
+    /// @notice Bind an `IStrategy` adapter on the proposal's vault so
+    ///         `totalAssets` aggregates live position value during the active
+    ///         strategy window. After settle, the vault's `redemptionsLocked()`
+    ///         short-circuit silently ignores any stale pointer (implicit clear).
+    /// @dev Callable only by the proposer, only while the proposal is in a
+    ///      pre-execute state (Draft / Pending / GuardianReview / Approved).
+    ///      Re-binding is allowed within that window — the vault setter
+    ///      always overwrites. Pass `address(0)` to unbind. Once the proposal
+    ///      reaches Executed (or terminal), reverts with `AdapterBindingClosed`.
+    function bindProposalAdapter(uint256 proposalId, address adapter) external;
 
     // ── Guardian-review emergency settle lifecycle (Task 24) ──
     // NOTE (Task 25 / PR #229): legacy `emergencySettle` removed — use

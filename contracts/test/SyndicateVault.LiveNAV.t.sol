@@ -57,12 +57,6 @@ contract VaultLiveNAVTest is Test {
         vault.setActiveStrategyAdapter(MOCK_ADAPTER);
     }
 
-    function test_setActiveStrategyAdapter_zeroAddressReverts() public {
-        vm.prank(MOCK_GOVERNOR);
-        vm.expectRevert(ISyndicateVault.ZeroAddress.selector);
-        vault.setActiveStrategyAdapter(address(0));
-    }
-
     function test_setActiveStrategyAdapter_setsAndEmits() public {
         vm.expectEmit(true, false, false, true, address(vault));
         emit ISyndicateVault.ActiveStrategyAdapterSet(MOCK_ADAPTER);
@@ -72,43 +66,31 @@ contract VaultLiveNAVTest is Test {
         assertEq(vault.activeStrategyAdapter(), MOCK_ADAPTER);
     }
 
-    function test_setActiveStrategyAdapter_alreadyBoundReverts() public {
-        vm.prank(MOCK_GOVERNOR);
-        vault.setActiveStrategyAdapter(MOCK_ADAPTER);
-        address other = address(0xBEEF);
-        vm.prank(MOCK_GOVERNOR);
-        vm.expectRevert(ISyndicateVault.AdapterAlreadyBound.selector);
-        vault.setActiveStrategyAdapter(other);
-    }
-
-    function test_clearActiveStrategyAdapter_governorOnly() public {
-        address attacker = makeAddr("attacker");
-        vm.prank(attacker);
-        vm.expectRevert(ISyndicateVault.NotGovernor.selector);
-        vault.clearActiveStrategyAdapter();
-    }
-
-    function test_clearActiveStrategyAdapter_clearsAndEmits() public {
+    function test_setActiveStrategyAdapter_zeroAddressUnbindsAndEmits() public {
+        // Bind first.
         vm.prank(MOCK_GOVERNOR);
         vault.setActiveStrategyAdapter(MOCK_ADAPTER);
 
         vm.expectEmit(false, false, false, false, address(vault));
         emit ISyndicateVault.ActiveStrategyAdapterCleared();
         vm.prank(MOCK_GOVERNOR);
-        vault.clearActiveStrategyAdapter();
+        vault.setActiveStrategyAdapter(address(0));
 
         assertEq(vault.activeStrategyAdapter(), address(0));
     }
 
-    function test_setActiveStrategyAdapter_canRebindAfterClear() public {
+    function test_setActiveStrategyAdapter_overwritesExisting() public {
         vm.prank(MOCK_GOVERNOR);
         vault.setActiveStrategyAdapter(MOCK_ADAPTER);
-        vm.prank(MOCK_GOVERNOR);
-        vault.clearActiveStrategyAdapter();
         address next = address(0xBEEF);
         vm.prank(MOCK_GOVERNOR);
         vault.setActiveStrategyAdapter(next);
         assertEq(vault.activeStrategyAdapter(), next);
+    }
+
+    /// @dev Make `redemptionsLocked()` return true so the adapter NAV is read.
+    function _mockActiveProposal() internal {
+        vm.mockCall(MOCK_GOVERNOR, abi.encodeWithSignature("getActiveProposal(address)"), abi.encode(uint256(1)));
     }
 
     function test_totalAssets_includesAdapterNAVWhenValid() public {
@@ -130,6 +112,9 @@ contract VaultLiveNAVTest is Test {
         vm.prank(address(vault));
         usdc.transfer(address(adapter), 1_000e6);
 
+        // Adapter NAV is only included while a proposal is active.
+        _mockActiveProposal();
+
         // float = 0; adapter NAV = 2000; totalAssets = 2000
         assertEq(vault.totalAssets(), 2_000e6);
     }
@@ -146,6 +131,7 @@ contract VaultLiveNAVTest is Test {
         adapter.setValue(0, false);
         vm.prank(MOCK_GOVERNOR);
         vault.setActiveStrategyAdapter(address(adapter));
+        _mockActiveProposal();
 
         // Adapter is invalid, totalAssets falls back to float-only
         assertEq(vault.totalAssets(), 1_000e6);
@@ -179,7 +165,29 @@ contract VaultLiveNAVTest is Test {
         // Move only 500e6 to the adapter — vault keeps 500e6 float
         vm.prank(address(vault));
         usdc.transfer(address(adapter), 500e6);
+        _mockActiveProposal();
 
         assertEq(vault.totalAssets(), 1_000e6); // 500 float + 500 adapter
+    }
+
+    function test_totalAssets_ignoresStaleAdapterWhenUnlocked() public {
+        // Implicit-clear behaviour: with no active proposal the adapter
+        // pointer is silently ignored even if non-zero.
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(9_999e6, true);
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+
+        // No active proposal mock => `redemptionsLocked()` is false.
+        // Stale adapter pointer must be ignored — float-only NAV.
+        assertEq(vault.activeStrategyAdapter(), address(adapter));
+        assertEq(vault.totalAssets(), 1_000e6);
     }
 }

@@ -410,22 +410,15 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
-    /// @dev Governor-only. Bound at `executeProposal`. Reverts if already
-    ///      bound — the governor must `clearActiveStrategyAdapter` between
-    ///      proposals (called from `_finishSettlement`).
+    /// @dev Governor-only. Always overwrites — the proposer can re-bind freely
+    ///      via `governor.bindProposalAdapter` while the proposal is
+    ///      pre-execute. Pass `address(0)` to unbind. The pointer is implicitly
+    ///      ignored after settle because `totalAssets` only reads it while
+    ///      `redemptionsLocked()` returns true (lock-gated read).
     function setActiveStrategyAdapter(address adapter) external onlyGovernor {
-        if (adapter == address(0)) revert ZeroAddress();
-        if (_activeStrategyAdapter != address(0)) revert AdapterAlreadyBound();
         _activeStrategyAdapter = adapter;
-        emit ActiveStrategyAdapterSet(adapter);
-    }
-
-    /// @inheritdoc ISyndicateVault
-    /// @dev Governor-only. Cleared at `_finishSettlement` so the next
-    ///      proposal can bind a fresh adapter.
-    function clearActiveStrategyAdapter() external onlyGovernor {
-        _activeStrategyAdapter = address(0);
-        emit ActiveStrategyAdapterCleared();
+        if (adapter == address(0)) emit ActiveStrategyAdapterCleared();
+        else emit ActiveStrategyAdapterSet(adapter);
     }
 
     /// @inheritdoc ISyndicateVault
@@ -492,14 +485,18 @@ contract SyndicateVault is
     /// @inheritdoc ERC4626Upgradeable
     /// @dev Aggregates the vault's idle float with the active strategy
     ///      adapter's `positionValue()` when the adapter reports `valid=true`.
-    ///      When the adapter is unbound or reports invalid, falls back to
-    ///      float-only (legacy behavior). See
+    ///      Lock-gated: the adapter is only read while `redemptionsLocked()` is
+    ///      true (i.e. an active proposal binds the vault). Outside the active
+    ///      window the adapter pointer may be stale from a prior settle, so
+    ///      `totalAssets` falls back to float-only — the implicit clear that
+    ///      lets the governor skip an explicit `clearActiveStrategyAdapter`
+    ///      call (saved bytecode on the governor; see
     ///      `docs/superpowers/specs/2026-04-30-live-nav-async-withdrawals-design.md`
-    ///      §5 Phase 2 NAV Math.
+    ///      §5 Phase 2 NAV Math).
     function totalAssets() public view override returns (uint256) {
         uint256 float = IERC20(asset()).balanceOf(address(this));
         address adapter = _activeStrategyAdapter;
-        if (adapter == address(0)) return float;
+        if (adapter == address(0) || !redemptionsLocked()) return float;
         (uint256 value, bool valid) = IStrategy(adapter).positionValue();
         return valid ? float + value : float;
     }

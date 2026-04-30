@@ -33,7 +33,6 @@ interface ISyndicateVault {
     error InsufficientShares();
     error RedemptionsNotLocked();
     error QueueReserveBreached();
-    error AdapterAlreadyBound();
 
     // ── Init Params ──
     struct InitParams {
@@ -82,8 +81,7 @@ interface ISyndicateVault {
     function redemptionsLocked() external view returns (bool);
     function managementFeeBps() external view returns (uint256);
     function activeStrategyAdapter() external view returns (address);
-    function setActiveStrategyAdapter(address adapter) external; // governor-only
-    function clearActiveStrategyAdapter() external; // governor-only
+    function setActiveStrategyAdapter(address adapter) external; // governor-only; pass address(0) to unbind
 
     // ── Async Withdrawal Queue ──
     function setWithdrawalQueue(address queue) external; // factory-only, set-once
