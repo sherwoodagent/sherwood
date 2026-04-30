@@ -139,4 +139,66 @@ contract VaultAsyncRedeemTest is Test {
         vm.prank(alice);
         vault.requestRedeem(shares / 2, alice);
     }
+
+    function test_requestRedeem_revertsWhenQueueUnset() public {
+        // Deploy a fresh vault (this test contract acts as factory) but do NOT
+        // bind a queue. requestRedeem must revert with WithdrawalQueueNotSet
+        // before it ever reaches the redemptionsLocked() check.
+        SyndicateVault impl = new SyndicateVault();
+        bytes memory initData = abi.encodeCall(
+            SyndicateVault.initialize,
+            (ISyndicateVault.InitParams({
+                    asset: address(usdc),
+                    name: "Bare",
+                    symbol: "B",
+                    owner: owner,
+                    executorImpl: address(executorLib),
+                    openDeposits: true,
+                    agentRegistry: address(agentRegistry),
+                    managementFeeBps: 0
+                }))
+        );
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
+        SyndicateVault bare = SyndicateVault(payable(address(proxy)));
+
+        vm.prank(alice);
+        vm.expectRevert(ISyndicateVault.WithdrawalQueueNotSet.selector);
+        bare.requestRedeem(1e18, alice);
+    }
+
+    function test_requestRedeem_thirdPartyWithAllowance() public {
+        vm.prank(alice);
+        uint256 shares = vault.deposit(1_000e6, alice);
+        address bob = makeAddr("bob");
+
+        // alice grants bob allowance for half her shares
+        vm.prank(alice);
+        vault.approve(bob, shares / 2);
+
+        _setProposalActive(true);
+
+        vm.prank(bob);
+        uint256 reqId = vault.requestRedeem(shares / 2, alice);
+
+        assertEq(reqId, 1);
+        assertEq(vault.allowance(alice, bob), 0); // allowance consumed
+        assertEq(vault.balanceOf(address(queue)), shares / 2);
+        assertEq(vault.balanceOf(alice), shares - shares / 2);
+    }
+
+    function test_requestRedeem_byOwnerArrayGrows() public {
+        vm.prank(alice);
+        uint256 shares = vault.deposit(1_000e6, alice);
+        _setProposalActive(true);
+
+        vm.prank(alice);
+        vault.requestRedeem(shares / 4, alice);
+        vm.prank(alice);
+        vault.requestRedeem(shares / 4, alice);
+
+        uint256[] memory ids = queue.getRequestsByOwner(alice);
+        assertEq(ids.length, 2);
+        assertEq(ids[0], 1);
+        assertEq(ids[1], 2);
+    }
 }

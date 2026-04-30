@@ -490,6 +490,12 @@ contract SyndicateVault is
     ///         Transfers `shares` from `owner_` into the queue and records a claim
     ///         that anyone can settle once `redemptionsLocked() == false`. Standard
     ///         `redeem`/`withdraw` should be used outside the lock window.
+    /// @dev `whenNotPaused` blocks queueing while the vault is paused (mirrors
+    ///      `_deposit` / `executeGovernorBatch`). LPs are not trapped — the
+    ///      queue's `cancel` path is unpaused and lets the owner withdraw
+    ///      escrowed shares back to themselves at any time.
+    /// @return requestId Always > 0 — the queue uses index 0 as a sentinel.
+    ///         Off-chain integrators may treat 0 as "no request".
     function requestRedeem(uint256 shares, address owner_)
         external
         nonReentrant
@@ -503,8 +509,12 @@ contract SyndicateVault is
         if (msg.sender != owner_) {
             _spendAllowance(owner_, msg.sender, shares);
         }
-        // Move shares into queue custody. They retain governance weight at the
-        // queue address (no auto-delegate) and are burned later inside `claim`.
+        // Move shares into queue custody. Voting weight at the queue address is 0
+        // (queue contract has no delegate). For proposals already open at request
+        // time, the voter's checkpoint at `snapshotTimestamp` is frozen with the
+        // pre-transfer weight, so vote power is preserved for in-flight proposals.
+        // Queued shares forfeit voting power for any proposal opened after escrow.
+        // Shares are burned later by `claim`.
         _transfer(owner_, q, shares);
         requestId = IVaultWithdrawalQueue(q).queueRequest(owner_, shares);
         emit RedeemRequested(requestId, owner_, shares);
