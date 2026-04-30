@@ -79,8 +79,8 @@ Key sections: [Learn](https://docs.sherwood.sh/learn/quickstart) | [Protocol](ht
 - Use SafeERC20 for all token transfers
 - Run `forge build` and `forge test` before every PR
 - Run `forge fmt` before committing. CI runs `forge fmt --check` — always run `forge fmt` locally before pushing contract changes.
-- SyndicateGovernor runtime is **24,250 / 24,576 bytes (326-byte EIP-170 margin)** as of 2026-04-29 post-V2 emergency consolidation. Run `forge build --sizes` before any governor edit.
-- GuardianRegistry runtime is **24,548 / 24,576 bytes (28-byte EIP-170 margin)** as of 2026-04-29 post-V2 emergency state consolidation. **Any addition requires bytecode reduction levers.** Levers already used: dropped `nonReentrant` where CEI is respected, dropped external `pending*` views, dropped `getPastVoteWeight`/`getPastDelegationTo` convenience views, dropped `activeGuardianCount` + `minter` + `_emergencyVoteStake` + `recordEpochBudget`.
+- SyndicateGovernor runtime is **24,255 / 24,576 bytes (321-byte EIP-170 margin)** as of 2026-04-30 post-PR #256 (`_initPendingProposal` extraction for `forge coverage`). Run `forge build --sizes` before any governor edit.
+- GuardianRegistry runtime is **24,306 / 24,576 bytes (270-byte EIP-170 margin)** as of 2026-04-30 post-PR #252 review fix. **Any addition requires bytecode reduction levers.** Levers already used: dropped `nonReentrant` where CEI is respected, dropped external `pending*` views, dropped `getPastVoteWeight`/`getPastDelegationTo` convenience views, dropped `activeGuardianCount` + `minter` + `_emergencyVoteStake` + `recordEpochBudget`, dropped the entire `getPast*` view family (PR #252 — see #254 for off-chain reconstruction guidance).
 - **`via_ir` is on** in `foundry.toml`. Compile is ~2× slower than the legacy pipeline. Required to fit `GovernorEmergency` under the bytecode limit — do not disable without re-measuring the governor.
 - Under `via_ir = true`, the IR optimizer reorders `block.timestamp` reads across `vm.warp` cheatcodes. In tests, use `vm.getBlockTimestamp()` at each read site — never cache it in a local before a warp.
 - `openReview` / `openEmergencyReview` snapshot votable stake at `block.timestamp - 1` (ToB C-1). Tests that stake guardians and open a review in the same block fail with `NotActiveGuardian` because the checkpoint at `t-1` is 0. Fix: `vm.warp(vm.getBlockTimestamp() + 1)` between staking and `openReview`.
@@ -103,10 +103,10 @@ Live contract sizes from `forge build --sizes` (2026-04):
 
 | Contract | Runtime | Notes |
 |---|---|---|
-| SyndicateGovernor | 24,250 | 326-byte EIP-170 margin (V2 post-emergency-consolidation) |
-| SyndicateFactory | 11,206 | ample headroom |
-| GuardianRegistry | 24,548 | **28-byte EIP-170 margin** (V2: emergency state consolidated from governor) |
-| SyndicateVault | 11,069 | — |
+| SyndicateGovernor | 24,255 | **321-byte EIP-170 margin** (post-PR #256 `_initPendingProposal` extraction) |
+| SyndicateFactory | 11,665 | ample headroom |
+| GuardianRegistry | 24,306 | **270-byte EIP-170 margin** (post-PR #252 review fix) |
+| SyndicateVault | 19,881 | ample headroom (CI gate at 22,000) |
 | WoodToken | 15,788 | ERC20Votes + OFT multi-inherit (Phase 1 V1.5) |
 
 - **SyndicateVault** — ERC-4626 vault with ERC20Votes for governance. Standard `redeem()`/`withdraw()` for LP exits (no custom ragequit). `_decimalsOffset()` = `asset.decimals()` for first-depositor inflation protection (shares have 12 decimals for USDC). Deposits and `rescueERC20` are blocked during active proposals (`redemptionsLocked()`).
