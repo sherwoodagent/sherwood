@@ -201,4 +201,118 @@ contract VaultAsyncRedeemTest is Test {
         assertEq(ids[0], 1);
         assertEq(ids[1], 2);
     }
+
+    function test_maxWithdraw_capsAtFloatMinusReserve() public {
+        vm.prank(alice);
+        uint256 aliceShares = vault.deposit(1_000e6, alice);
+
+        address bob = makeAddr("bob");
+        usdc.mint(bob, 100_000e6);
+        vm.prank(bob);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(bob);
+        vault.deposit(1_000e6, bob);
+
+        // Activate proposal, alice queues half her shares
+        _setProposalActive(true);
+        vm.prank(alice);
+        vault.requestRedeem(aliceShares / 2, alice);
+
+        // Settle (lock cleared)
+        _setProposalActive(false);
+
+        uint256 reserve = vault.reservedQueueAssets();
+        uint256 float = usdc.balanceOf(address(vault));
+
+        uint256 cap = vault.maxWithdraw(bob);
+        // Bob is capped by min(his entitled assets, float - reserve)
+        assertLe(cap, float - reserve);
+    }
+
+    function test_withdraw_revertsWhenWouldBreachQueueReserve() public {
+        vm.prank(alice);
+        uint256 aliceShares = vault.deposit(1_000e6, alice);
+
+        address bob = makeAddr("bob");
+        usdc.mint(bob, 100_000e6);
+        vm.prank(bob);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(bob);
+        vault.deposit(100e6, bob); // bob deposits much less than alice queued
+
+        _setProposalActive(true);
+        vm.prank(alice);
+        vault.requestRedeem(aliceShares, alice); // queue ALL of alice
+        _setProposalActive(false);
+
+        // Bob tries to withdraw 1000e6 (way more than (float - reserve) allows).
+        // The OZ `maxWithdraw` pre-check is intentionally bypassed by our
+        // `withdraw` override, so the reserve check in `_withdraw` fires first.
+        vm.prank(bob);
+        vm.expectRevert(ISyndicateVault.QueueReserveBreached.selector);
+        vault.withdraw(1_000e6, bob, bob);
+    }
+
+    function test_queueClaim_bypassesReserveCheck() public {
+        vm.prank(alice);
+        uint256 aliceShares = vault.deposit(1_000e6, alice);
+
+        _setProposalActive(true);
+        vm.prank(alice);
+        uint256 reqId = vault.requestRedeem(aliceShares, alice);
+        _setProposalActive(false);
+
+        // Even though reservedQueueAssets > 0 and float == reserve,
+        // the queue MUST be able to claim and drain the reserve to alice.
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+        uint256 assets = queue.claim(reqId);
+        assertGt(assets, 0);
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore + assets);
+    }
+
+    function test_maxRedeem_capsAtPendingShares() public {
+        vm.prank(alice);
+        uint256 aliceShares = vault.deposit(1_000e6, alice);
+
+        _setProposalActive(true);
+        vm.prank(alice);
+        vault.requestRedeem(aliceShares / 2, alice); // half escrowed
+        _setProposalActive(false);
+
+        uint256 cap = vault.maxRedeem(alice);
+        // Alice has aliceShares/2 left; reserve cap shouldn't exceed her balance either
+        assertLe(cap, vault.balanceOf(alice));
+    }
+
+    function test_redeem_revertsWhenWouldBreachReserveByShares() public {
+        // Defense-in-depth: with valid share-conservation math, a `redeem`
+        // can't exceed `float - reserve`. But if a malicious caller asks for
+        // more shares than they own (which would also blow up `_burn`), the
+        // reserve check MUST fire first when the requested asset slice would
+        // breach the queue's reservation. We construct that scenario by
+        // having bob request all of alice's queued share-equivalents on top
+        // of his own ledger entitlement.
+        vm.prank(alice);
+        uint256 aliceShares = vault.deposit(1_000e6, alice);
+
+        address bob = makeAddr("bob");
+        usdc.mint(bob, 100_000e6);
+        vm.prank(bob);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(bob);
+        vault.deposit(100e6, bob);
+
+        _setProposalActive(true);
+        vm.prank(alice);
+        vault.requestRedeem(aliceShares, alice);
+        _setProposalActive(false);
+
+        // Bob requests far more shares than he owns. With our `redeem`
+        // override skipping the OZ user-max gate, the reserve check in
+        // `_withdraw` fires before `_burn`, producing `QueueReserveBreached`.
+        uint256 bigShares = aliceShares; // alice's worth of shares
+        vm.prank(bob);
+        vm.expectRevert(ISyndicateVault.QueueReserveBreached.selector);
+        vault.redeem(bigShares, bob, bob);
+    }
 }

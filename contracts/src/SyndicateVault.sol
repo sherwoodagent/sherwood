@@ -480,7 +480,57 @@ contract SyndicateVault is
         whenNotPaused
     {
         if (redemptionsLocked()) revert RedemptionsLocked();
+        // Queue bypasses the reserve check — it owns the reserved float.
+        if (caller != _withdrawalQueue) {
+            uint256 reserve = reservedQueueAssets();
+            uint256 float = IERC20(asset()).balanceOf(address(this));
+            if (assets + reserve > float) revert QueueReserveBreached();
+        }
         super._withdraw(caller, receiver, _owner, assets, shares);
+    }
+
+    /// @dev Cap visible to integrators so they don't propose withdrawals that
+    ///      would breach the queue's reservation. Returns 0 while
+    ///      `redemptionsLocked()` is true (regular withdraw is closed).
+    function maxWithdraw(address owner_) public view override returns (uint256) {
+        if (paused() || redemptionsLocked()) return 0;
+        uint256 userMax = super.maxWithdraw(owner_);
+        uint256 reserve = reservedQueueAssets();
+        uint256 float = IERC20(asset()).balanceOf(address(this));
+        if (float <= reserve) return 0;
+        uint256 available = float - reserve;
+        return userMax > available ? available : userMax;
+    }
+
+    /// @dev Cap visible to integrators so they don't propose redeems that would
+    ///      breach the queue's reservation. Returns 0 while
+    ///      `redemptionsLocked()` is true (regular redeem is closed).
+    function maxRedeem(address owner_) public view override returns (uint256) {
+        if (paused() || redemptionsLocked()) return 0;
+        uint256 userMax = super.maxRedeem(owner_);
+        uint256 reserveShares = pendingQueueShares();
+        uint256 ts = totalSupply();
+        if (ts == 0 || reserveShares >= ts) return 0;
+        uint256 availableShares = ts - reserveShares;
+        return userMax > availableShares ? availableShares : userMax;
+    }
+
+    /// @dev Override `withdraw` to bypass OZ's `maxWithdraw`-based pre-check
+    ///      so the reserve guard in `_withdraw` produces the canonical
+    ///      `QueueReserveBreached` revert. Underflow on insufficient shares
+    ///      is caught by `_burn` in OZ's `_withdraw` (reverts with
+    ///      `ERC20InsufficientBalance`).
+    function withdraw(uint256 assets, address receiver, address owner_) public override returns (uint256) {
+        uint256 shares = previewWithdraw(assets);
+        _withdraw(_msgSender(), receiver, owner_, assets, shares);
+        return shares;
+    }
+
+    /// @dev Override `redeem` for the same reason as `withdraw`.
+    function redeem(uint256 shares, address receiver, address owner_) public override returns (uint256) {
+        uint256 assets = previewRedeem(shares);
+        _withdraw(_msgSender(), receiver, owner_, assets, shares);
+        return assets;
     }
 
     // ==================== ASYNC REDEEM ====================
