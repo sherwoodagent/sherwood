@@ -7,6 +7,7 @@ import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
 import {VaultWithdrawalQueue} from "../src/queue/VaultWithdrawalQueue.sol";
 import {IVaultWithdrawalQueue} from "../src/interfaces/IVaultWithdrawalQueue.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
+import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
@@ -229,7 +230,7 @@ contract VaultAsyncRedeemTest is Test {
         assertLe(cap, float - reserve);
     }
 
-    function test_withdraw_revertsWhenWouldBreachQueueReserve() public {
+    function test_withdraw_revertsWhenExceedsMaxWithdraw() public {
         vm.prank(alice);
         uint256 aliceShares = vault.deposit(1_000e6, alice);
 
@@ -245,11 +246,14 @@ contract VaultAsyncRedeemTest is Test {
         vault.requestRedeem(aliceShares, alice); // queue ALL of alice
         _setProposalActive(false);
 
-        // Bob tries to withdraw 1000e6 (way more than (float - reserve) allows).
-        // The OZ `maxWithdraw` pre-check is intentionally bypassed by our
-        // `withdraw` override, so the reserve check in `_withdraw` fires first.
+        // Bob tries to withdraw far more than `maxWithdraw(bob)` (which is
+        // capped by `float - reserve`). EIP-4626 conformance requires the OZ
+        // `ERC4626ExceededMaxWithdraw` revert here — `maxWithdraw` is the
+        // visible cap and `withdraw` must honour it.
+        uint256 cap = vault.maxWithdraw(bob);
+        assertLt(cap, 1_000e6, "test invariant: request must exceed cap");
         vm.prank(bob);
-        vm.expectRevert(ISyndicateVault.QueueReserveBreached.selector);
+        vm.expectPartialRevert(ERC4626Upgradeable.ERC4626ExceededMaxWithdraw.selector);
         vault.withdraw(1_000e6, bob, bob);
     }
 
@@ -284,14 +288,11 @@ contract VaultAsyncRedeemTest is Test {
         assertLe(cap, vault.balanceOf(alice));
     }
 
-    function test_redeem_revertsWhenWouldBreachReserveByShares() public {
-        // Defense-in-depth: with valid share-conservation math, a `redeem`
-        // can't exceed `float - reserve`. But if a malicious caller asks for
-        // more shares than they own (which would also blow up `_burn`), the
-        // reserve check MUST fire first when the requested asset slice would
-        // breach the queue's reservation. We construct that scenario by
-        // having bob request all of alice's queued share-equivalents on top
-        // of his own ledger entitlement.
+    function test_redeem_revertsWhenExceedsMaxRedeem() public {
+        // EIP-4626 conformance: `redeem` MUST revert with
+        // `ERC4626ExceededMaxRedeem` when the requested shares exceed
+        // `maxRedeem(owner)`. The reserve cap surfaces through `maxRedeem`
+        // (queue-bypass aside), so the standard OZ gate fires first.
         vm.prank(alice);
         uint256 aliceShares = vault.deposit(1_000e6, alice);
 
@@ -307,12 +308,12 @@ contract VaultAsyncRedeemTest is Test {
         vault.requestRedeem(aliceShares, alice);
         _setProposalActive(false);
 
-        // Bob requests far more shares than he owns. With our `redeem`
-        // override skipping the OZ user-max gate, the reserve check in
-        // `_withdraw` fires before `_burn`, producing `QueueReserveBreached`.
+        // Bob requests far more shares than `maxRedeem(bob)` permits.
         uint256 bigShares = aliceShares; // alice's worth of shares
+        uint256 cap = vault.maxRedeem(bob);
+        assertLt(cap, bigShares, "test invariant: request must exceed cap");
         vm.prank(bob);
-        vm.expectRevert(ISyndicateVault.QueueReserveBreached.selector);
+        vm.expectPartialRevert(ERC4626Upgradeable.ERC4626ExceededMaxRedeem.selector);
         vault.redeem(bigShares, bob, bob);
     }
 }
