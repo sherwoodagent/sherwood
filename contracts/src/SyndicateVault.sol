@@ -5,6 +5,7 @@ import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
 import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
 import {ISyndicateFactory} from "./interfaces/ISyndicateFactory.sol";
 import {IVaultWithdrawalQueue} from "./interfaces/IVaultWithdrawalQueue.sol";
+import {IStrategy} from "./interfaces/IStrategy.sol";
 import {BatchExecutorLib} from "./BatchExecutorLib.sol";
 import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {
@@ -486,6 +487,21 @@ contract SyndicateVault is
     ///      underlying USDC/ERC-20, so pinning once at init is safe.
     function _decimalsOffset() internal view virtual override returns (uint8) {
         return _cachedDecimalsOffset;
+    }
+
+    /// @inheritdoc ERC4626Upgradeable
+    /// @dev Aggregates the vault's idle float with the active strategy
+    ///      adapter's `positionValue()` when the adapter reports `valid=true`.
+    ///      When the adapter is unbound or reports invalid, falls back to
+    ///      float-only (legacy behavior). See
+    ///      `docs/superpowers/specs/2026-04-30-live-nav-async-withdrawals-design.md`
+    ///      §5 Phase 2 NAV Math.
+    function totalAssets() public view override returns (uint256) {
+        uint256 float = IERC20(asset()).balanceOf(address(this));
+        address adapter = _activeStrategyAdapter;
+        if (adapter == address(0)) return float;
+        (uint256 value, bool valid) = IStrategy(adapter).positionValue();
+        return valid ? float + value : float;
     }
 
     /// @dev Block deposits when paused or depositor not approved.

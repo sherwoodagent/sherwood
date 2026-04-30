@@ -8,6 +8,7 @@ import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
+import {MockStrategyAdapter} from "./mocks/MockStrategyAdapter.sol";
 
 contract VaultLiveNAVTest is Test {
     SyndicateVault vault;
@@ -108,5 +109,77 @@ contract VaultLiveNAVTest is Test {
         vm.prank(MOCK_GOVERNOR);
         vault.setActiveStrategyAdapter(next);
         assertEq(vault.activeStrategyAdapter(), next);
+    }
+
+    function test_totalAssets_includesAdapterNAVWhenValid() public {
+        // alice deposits 1000 USDC
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        // Bind a mock adapter that reports 2000e6 value with valid=true
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(2_000e6, true);
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+
+        // Simulate funds deployed: vault float drained
+        vm.prank(address(vault));
+        usdc.transfer(address(adapter), 1_000e6);
+
+        // float = 0; adapter NAV = 2000; totalAssets = 2000
+        assertEq(vault.totalAssets(), 2_000e6);
+    }
+
+    function test_totalAssets_ignoresAdapterWhenInvalid() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(0, false);
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+
+        // Adapter is invalid, totalAssets falls back to float-only
+        assertEq(vault.totalAssets(), 1_000e6);
+    }
+
+    function test_totalAssets_floatOnlyWhenAdapterUnbound() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        assertEq(vault.activeStrategyAdapter(), address(0));
+        assertEq(vault.totalAssets(), 1_000e6);
+    }
+
+    function test_totalAssets_floatPlusAdapterValue() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(500e6, true); // half deployed, half float
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+
+        // Move only 500e6 to the adapter — vault keeps 500e6 float
+        vm.prank(address(vault));
+        usdc.transfer(address(adapter), 500e6);
+
+        assertEq(vault.totalAssets(), 1_000e6); // 500 float + 500 adapter
     }
 }
