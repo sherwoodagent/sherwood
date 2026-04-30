@@ -21,14 +21,20 @@ import {
   STALE_ANCHOR_MS,
 } from './price-validator.js';
 
-async function waitForFile(path: string, timeoutMs = 1000): Promise<string> {
+async function waitForFile(
+  path: string,
+  timeoutMs = 1000,
+  predicate: (raw: string) => boolean = () => true,
+): Promise<string> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      return await readFile(path, 'utf-8');
+      const raw = await readFile(path, 'utf-8');
+      if (predicate(raw)) return raw;
     } catch {
-      await new Promise((r) => setTimeout(r, 10));
+      // not yet
     }
+    await new Promise((r) => setTimeout(r, 10));
   }
   throw new Error(`timed out waiting for ${path}`);
 }
@@ -136,9 +142,17 @@ describe('PriceValidator', () => {
     v1.check('bitcoin', 50_000);
     v1.check('ethereum', 3_000);
 
-    // Wait for the fire-and-forget write to land.
+    // Wait for BOTH fire-and-forget writes to land — bitcoin lands first,
+    // ethereum can race a step behind. Predicate ensures both keys present.
     const cacheFile = join(cacheDir, 'price-validator.json');
-    const raw = await waitForFile(cacheFile);
+    const raw = await waitForFile(cacheFile, 1000, (r) => {
+      try {
+        const p = JSON.parse(r);
+        return !!p.bitcoin && !!p.ethereum;
+      } catch {
+        return false;
+      }
+    });
     const parsed = JSON.parse(raw);
     expect(parsed.bitcoin.price).toBe(50_000);
     expect(parsed.ethereum.price).toBe(3_000);

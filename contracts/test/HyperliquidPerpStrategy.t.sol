@@ -58,7 +58,7 @@ contract HyperliquidPerpStrategyTest is Test {
         assertEq(strategy.perpAssetIndex(), PERP_ASSET);
         assertEq(strategy.leverage(), LEVERAGE);
         assertEq(strategy.settled(), false);
-        assertEq(strategy.swept(), false);
+        assertEq(strategy.cumulativeSwept(), 0);
         assertEq(strategy.hasActiveStopLoss(), false);
         assertEq(strategy.maxPositionSize(), MAX_POSITION);
         assertEq(strategy.maxTradesPerDay(), MAX_TRADES);
@@ -377,7 +377,7 @@ contract HyperliquidPerpStrategyTest is Test {
 
         uint256 vaultBefore = usdc.balanceOf(vault);
         strategy.sweepToVault(); // Anyone can call
-        assertEq(strategy.swept(), true);
+        assertEq(strategy.cumulativeSwept(), DEPOSIT);
         assertEq(usdc.balanceOf(address(strategy)), 0);
         assertEq(usdc.balanceOf(vault) - vaultBefore, DEPOSIT);
     }
@@ -403,6 +403,7 @@ contract HyperliquidPerpStrategyTest is Test {
         uint256 insufficientAmount = MIN_RETURN - 1;
         usdc.mint(address(strategy), insufficientAmount);
 
+        // cumulativeSwept (0) + bal (insufficient) < MIN_RETURN
         vm.expectRevert(
             abi.encodeWithSelector(HyperliquidPerpStrategy.InsufficientReturn.selector, insufficientAmount, MIN_RETURN)
         );
@@ -430,16 +431,17 @@ contract HyperliquidPerpStrategyTest is Test {
         // First sweep
         usdc.mint(address(strategy), DEPOSIT);
         strategy.sweepToVault();
-        assertTrue(strategy.swept());
+        assertEq(strategy.cumulativeSwept(), DEPOSIT);
 
         // Second sweep — more USDC arrives (partial async)
         usdc.mint(address(strategy), 500e6);
         uint256 vaultBefore = usdc.balanceOf(vault);
-        strategy.sweepToVault(); // Does not revert
+        strategy.sweepToVault(); // Does not revert (cumulative >= minReturn)
         assertEq(usdc.balanceOf(vault) - vaultBefore, 500e6);
+        assertEq(strategy.cumulativeSwept(), DEPOSIT + 500e6);
     }
 
-    function test_sweepToVault_secondSweepSkipsMinReturn() public {
+    function test_sweepToVault_secondSweepWithCumulativeAboveMin() public {
         _settleFirst();
         _burnStrategyBalance();
 
@@ -447,9 +449,26 @@ contract HyperliquidPerpStrategyTest is Test {
         usdc.mint(address(strategy), DEPOSIT);
         strategy.sweepToVault();
 
-        // Second sweep with just 1 wei — should succeed (minReturn only on first)
+        // Second sweep with just 1 wei — succeeds because cumulative (DEPOSIT+1) >= MIN_RETURN
         usdc.mint(address(strategy), 1);
         strategy.sweepToVault(); // Does not revert
+    }
+
+    /// @notice #255 S-C6 regression: dust race must not bypass minReturnAmount.
+    function test_sweepToVault_dustRaceCannotBypassMinReturn() public {
+        _settleFirst();
+        _burnStrategyBalance();
+
+        // Attacker triggers first sweep with 100 USDC of dust (< MIN_RETURN = 9_900)
+        usdc.mint(address(strategy), 100e6);
+        vm.expectRevert(abi.encodeWithSelector(HyperliquidPerpStrategy.InsufficientReturn.selector, 100e6, MIN_RETURN));
+        strategy.sweepToVault();
+        assertEq(strategy.cumulativeSwept(), 0); // Failed sweep does not advance accumulator
+
+        // More USDC arrives — total now 10,100 > MIN_RETURN
+        usdc.mint(address(strategy), 10_000e6);
+        strategy.sweepToVault();
+        assertEq(strategy.cumulativeSwept(), 10_100e6);
     }
 
     function test_sweepToVault_zeroMinReturn_skipsCheck() public {
@@ -472,7 +491,9 @@ contract HyperliquidPerpStrategyTest is Test {
         // Even 1 wei should work with minReturnAmount = 0
         usdc.mint(address(strat2), 1);
         strat2.sweepToVault();
-        assertTrue(strat2.swept());
+        // Strategy still holds DEPOSIT from execute (mock doesn't actually move
+        // funds via L1Write.sendUsdClassTransfer), so cumulativeSwept == DEPOSIT + 1
+        assertEq(strat2.cumulativeSwept(), DEPOSIT + 1);
     }
 
     // ==================== FULL LIFECYCLE ====================
@@ -508,7 +529,7 @@ contract HyperliquidPerpStrategyTest is Test {
         // Verify terminal state
         assertEq(uint8(strategy.state()), uint8(BaseStrategy.State.Settled));
         assertEq(strategy.settled(), true);
-        assertEq(strategy.swept(), true);
+        assertGt(strategy.cumulativeSwept(), 0);
         assertEq(usdc.balanceOf(address(strategy)), 0);
     }
 

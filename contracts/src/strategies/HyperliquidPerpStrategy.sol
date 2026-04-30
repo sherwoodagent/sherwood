@@ -75,7 +75,10 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     bool public leverageSentToCore; // Whether leverage has been set on HyperCore
     bool public hasActiveStopLoss; // Whether a GTC stop-loss is currently live
     bool public settled; // Whether _settle() has been called
-    bool public swept; // Whether sweepToVault() has been called at least once
+    /// @dev Cumulative USDC pushed back to the vault across all sweepToVault() calls.
+    ///      Replaces the prior `bool swept` (which let a permissionless dust race
+    ///      bypass minReturnAmount on subsequent calls — fixes #255 S-C6).
+    uint256 public cumulativeSwept;
     uint256 public maxPositionSize; // Max USDC in a single position (on-chain risk cap)
     uint32 public maxTradesPerDay; // Rate limit on trading actions per day
     uint32 public tradesToday; // Counter for today's trades
@@ -150,6 +153,12 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     ///   action=1: (uint8 action, uint64 limitPx, uint64 sz, uint64 stopLossPx, uint64 stopLossSz)
     ///   action=2: (uint8 action, uint64 limitPx, uint64 sz)
     ///   action=3: (uint8 action, uint64 triggerPx, uint64 sz)
+    /// @dev Notional check (#255 D-2 / S-H11): HL convention is
+    ///      `szDecimals + pxDecimals = 6` for every perp asset, so
+    ///      `sz * limitPx / 1e6` always yields notional in USDC-6-decimal units
+    ///      regardless of the asset's specific szDecimals. This identity holds
+    ///      for ALL HyperCore perps; if HL ever changes the convention, every
+    ///      `approxUsd` site below must switch to per-asset divisors.
     function _updateParams(bytes calldata data) internal override {
         if (data.length < 32) revert InvalidAction();
         uint8 action = abi.decode(data[:32], (uint8));
@@ -342,18 +351,21 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     /// @notice Push USDC back to the vault after async transfer completes.
     /// @dev Callable by anyone — funds only go to the vault, no griefing vector.
     ///      Can be called multiple times to handle partial async arrivals.
-    ///      First call enforces minReturnAmount; subsequent calls skip the check.
+    ///      Enforces `minReturnAmount` cumulatively until threshold met (#255 S-C6).
+    ///      Prevents the dust race where an attacker triggers the first sweep with
+    ///      1 USDC of arrived funds, bypassing the LP minReturn guarantee for
+    ///      subsequent arrivals.
     function sweepToVault() external {
         if (!settled) revert NotSweepable();
 
         uint256 bal = IERC20(asset).balanceOf(address(this));
         if (bal == 0) revert InvalidAmount();
 
-        // Enforce minimum return on first sweep only
-        if (!swept && minReturnAmount > 0 && bal < minReturnAmount) {
-            revert InsufficientReturn(bal, minReturnAmount);
+        uint256 newTotal = cumulativeSwept + bal;
+        if (minReturnAmount > 0 && newTotal < minReturnAmount) {
+            revert InsufficientReturn(newTotal, minReturnAmount);
         }
-        swept = true;
+        cumulativeSwept = newTotal;
 
         uint256 vaultBefore = IERC20(asset).balanceOf(vault());
         _pushAllToVault(address(asset));

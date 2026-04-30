@@ -31,12 +31,34 @@ export function registerGridCommand(program: Command): void {
     .option('--tokens <list>', 'Comma-separated token list', 'bitcoin,ethereum,solana')
     .option('--leverage <n>', 'Leverage multiplier', '5')
     .option('--levels <n>', 'Grid levels per side', '15')
+    .option('--live', 'enable live execution (places real orders on Hyperliquid)')
+    .option('--asset-indices <pairs>', 'comma-separated token=index pairs (e.g. bitcoin=3,ethereum=4,solana=5)')
+    .option('--strategy <address>', 'on-chain strategy contract address (enables on-chain executor)')
     .action(async (opts) => {
       const capital = parseFloat(opts.capital);
       const cycleMs = parseInt(opts.cycle, 10) * 1000;
       const tokens = opts.tokens.split(',').map((t: string) => t.trim());
       const leverage = parseFloat(opts.leverage);
       const levels = parseInt(opts.levels, 10);
+
+      const live = !!opts.live;
+      let assetIndices: Record<string, number> | undefined;
+      if (live) {
+        if (!opts.assetIndices) {
+          throw new Error('--asset-indices required when --live (e.g. --asset-indices bitcoin=3,ethereum=4,solana=5)');
+        }
+        assetIndices = {};
+        for (const pair of (opts.assetIndices as string).split(',')) {
+          const [tok, idx] = pair.split('=');
+          if (!tok || !idx) throw new Error(`Bad asset-indices pair: ${pair}`);
+          assetIndices[tok.trim()] = Number(idx);
+        }
+      }
+
+      const strategyAddress = opts.strategy as `0x${string}` | undefined;
+      if (strategyAddress && !live) {
+        throw new Error('--strategy requires --live');
+      }
 
       // Build equal-weight token split
       const weight = 1 / tokens.length;
@@ -58,6 +80,9 @@ export function registerGridCommand(program: Command): void {
       const loop = new GridLoop({
         capital,
         cycle: cycleMs,
+        live,
+        assetIndices,
+        strategyAddress,
         config: {
           ...DEFAULT_GRID_CONFIG,
           tokens,
