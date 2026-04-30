@@ -28,6 +28,11 @@ interface ISyndicateVault {
     error GovernorNotSet();
     error ExecutorCodehashMismatch();
     error InvalidAsset();
+    error WithdrawalQueueNotSet();
+    error WithdrawalQueueAlreadySet();
+    error InsufficientShares();
+    error RedemptionsNotLocked();
+    error QueueReserveBreached();
 
     // ── Init Params ──
     struct InitParams {
@@ -76,6 +81,13 @@ interface ISyndicateVault {
     function redemptionsLocked() external view returns (bool);
     function managementFeeBps() external view returns (uint256);
 
+    // ── Async Withdrawal Queue ──
+    function setWithdrawalQueue(address queue) external; // factory-only, set-once
+    function withdrawalQueue() external view returns (address);
+    function requestRedeem(uint256 shares, address owner_) external returns (uint256 requestId);
+    function pendingQueueShares() external view returns (uint256);
+    function reservedQueueAssets() external view returns (uint256);
+
     // ── Rescue ──
     function rescueEth(address payable to, uint256 amount) external;
     function rescueERC20(address token, address to, uint256 amount) external;
@@ -101,4 +113,6 @@ interface ISyndicateVault {
     ///      Aerodrome / Uniswap). Emitting here gives a first-class
     ///      vault-level execution marker.
     event GovernorBatchExecuted(address indexed governor, uint256 callCount);
+    event WithdrawalQueueSet(address indexed queue);
+    event RedeemRequested(uint256 indexed requestId, address indexed owner, uint256 shares);
 }

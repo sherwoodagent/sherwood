@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
 import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
 import {ISyndicateFactory} from "./interfaces/ISyndicateFactory.sol";
+import {IVaultWithdrawalQueue} from "./interfaces/IVaultWithdrawalQueue.sol";
 import {BatchExecutorLib} from "./BatchExecutorLib.sol";
 import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {
@@ -104,8 +105,11 @@ contract SyndicateVault is
     ///         `convertTo*` / `_deposit` / `_withdraw`).
     uint8 private _cachedDecimalsOffset;
 
+    /// @notice Per-vault async withdrawal queue (set-once at deploy by the factory).
+    address private _withdrawalQueue;
+
     /// @dev Reserved storage for future upgrades
-    uint256[38] private __gap;
+    uint256[37] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -315,6 +319,23 @@ contract SyndicateVault is
         _transferOwnership(newOwner);
     }
 
+    // ==================== WITHDRAWAL QUEUE BINDING ====================
+
+    /// @notice Bind the per-vault `VaultWithdrawalQueue`. Factory-only, set-once.
+    /// @dev Called once by `SyndicateFactory.createSyndicate` immediately after init.
+    function setWithdrawalQueue(address q) external {
+        if (msg.sender != _factory) revert NotFactory();
+        if (q == address(0)) revert ZeroAddress();
+        if (_withdrawalQueue != address(0)) revert WithdrawalQueueAlreadySet();
+        _withdrawalQueue = q;
+        emit WithdrawalQueueSet(q);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function withdrawalQueue() external view returns (address) {
+        return _withdrawalQueue;
+    }
+
     // ==================== GOVERNOR ====================
 
     modifier onlyGovernor() {
@@ -460,6 +481,45 @@ contract SyndicateVault is
     {
         if (redemptionsLocked()) revert RedemptionsLocked();
         super._withdraw(caller, receiver, _owner, assets, shares);
+    }
+
+    // ==================== ASYNC REDEEM ====================
+
+    /// @inheritdoc ISyndicateVault
+    /// @notice Burn-deferred redemption used while a strategy proposal is active.
+    ///         Transfers `shares` from `owner_` into the queue and records a claim
+    ///         that anyone can settle once `redemptionsLocked() == false`. Standard
+    ///         `redeem`/`withdraw` should be used outside the lock window.
+    function requestRedeem(uint256 shares, address owner_)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 requestId)
+    {
+        address q = _withdrawalQueue;
+        if (q == address(0)) revert WithdrawalQueueNotSet();
+        if (!redemptionsLocked()) revert RedemptionsNotLocked();
+        if (shares == 0) revert InsufficientShares();
+        if (msg.sender != owner_) {
+            _spendAllowance(owner_, msg.sender, shares);
+        }
+        // Move shares into queue custody. They retain governance weight at the
+        // queue address (no auto-delegate) and are burned later inside `claim`.
+        _transfer(owner_, q, shares);
+        requestId = IVaultWithdrawalQueue(q).queueRequest(owner_, shares);
+        emit RedeemRequested(requestId, owner_, shares);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function pendingQueueShares() public view returns (uint256) {
+        address q = _withdrawalQueue;
+        if (q == address(0)) return 0;
+        return IVaultWithdrawalQueue(q).pendingShares();
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function reservedQueueAssets() public view returns (uint256) {
+        return convertToAssets(pendingQueueShares());
     }
 
     // ==================== RESCUE ====================
