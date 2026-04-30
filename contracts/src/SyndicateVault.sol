@@ -108,8 +108,15 @@ contract SyndicateVault is
     /// @notice Per-vault async withdrawal queue (set-once at deploy by the factory).
     address private _withdrawalQueue;
 
+    /// @notice Active strategy adapter (set by the governor on `executeProposal`,
+    ///         cleared on `_finishSettlement`). When non-zero AND the adapter
+    ///         reports `valid=true`, `totalAssets()` adds its `positionValue()`
+    ///         to the float and live deposit/withdraw is unlocked. See
+    ///         `docs/superpowers/specs/2026-04-30-live-nav-async-withdrawals-design.md`.
+    address private _activeStrategyAdapter;
+
     /// @dev Reserved storage for future upgrades
-    uint256[37] private __gap;
+    uint256[36] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -394,6 +401,30 @@ contract SyndicateVault is
         address gov = _getGovernor();
         if (gov == address(0)) revert GovernorNotSet();
         return ISyndicateGovernor(gov).getActiveProposal(address(this)) != 0;
+    }
+
+    /// @inheritdoc ISyndicateVault
+    function activeStrategyAdapter() external view returns (address) {
+        return _activeStrategyAdapter;
+    }
+
+    /// @inheritdoc ISyndicateVault
+    /// @dev Governor-only. Bound at `executeProposal`. Reverts if already
+    ///      bound — the governor must `clearActiveStrategyAdapter` between
+    ///      proposals (called from `_finishSettlement`).
+    function setActiveStrategyAdapter(address adapter) external onlyGovernor {
+        if (adapter == address(0)) revert ZeroAddress();
+        if (_activeStrategyAdapter != address(0)) revert AdapterAlreadyBound();
+        _activeStrategyAdapter = adapter;
+        emit ActiveStrategyAdapterSet(adapter);
+    }
+
+    /// @inheritdoc ISyndicateVault
+    /// @dev Governor-only. Cleared at `_finishSettlement` so the next
+    ///      proposal can bind a fresh adapter.
+    function clearActiveStrategyAdapter() external onlyGovernor {
+        _activeStrategyAdapter = address(0);
+        emit ActiveStrategyAdapterCleared();
     }
 
     /// @inheritdoc ISyndicateVault
