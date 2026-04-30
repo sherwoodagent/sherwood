@@ -10,6 +10,7 @@ import {VeniceInferenceStrategy} from "../src/strategies/VeniceInferenceStrategy
 import {WstETHMoonwellStrategy} from "../src/strategies/WstETHMoonwellStrategy.sol";
 import {MamoYieldStrategy} from "../src/strategies/MamoYieldStrategy.sol";
 import {HyperliquidPerpStrategy} from "../src/strategies/HyperliquidPerpStrategy.sol";
+import {HyperliquidGridStrategy} from "../src/strategies/HyperliquidGridStrategy.sol";
 
 /**
  * @notice Deploy strategy template singletons (one-time per chain).
@@ -170,6 +171,18 @@ contract DeployTemplates is ScriptBase {
         console.log("\n=== Validation ===\n");
         _validate(t, isHyperEvm);
         console.log("\n  All validations passed.\n");
+    }
+
+    /// @notice Test helper — deploys a fresh `HyperliquidGridStrategy` template.
+    ///         Used by `HyperEVMIntegrationTest.setUp()`. Does not persist to JSON.
+    /// @dev Caller is responsible for `vm.startBroadcast()` if needed.
+    function _deployHyperliquidGridTemplate() public returns (address) {
+        return address(new HyperliquidGridStrategy());
+    }
+
+    /// @notice Test helper — deploys a fresh `HyperliquidPerpStrategy` template.
+    function _deployHyperliquidPerpTemplate() public returns (address) {
+        return address(new HyperliquidPerpStrategy());
     }
 
     // ── Helpers ──
