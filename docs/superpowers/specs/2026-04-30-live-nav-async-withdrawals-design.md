@@ -94,23 +94,25 @@ Notes:
 
 ```
 [lock on]
-  LP ──vault.requestRedeem(shares, owner)──▶ SyndicateVault
+  LP ──vault.requestRedeem(shares, owner)──▶ SyndicateVault   (msg.sender = LP)
                                               - require redemptionsLocked()
-                                              - vault._transfer(owner → queue)
+                                              - vault._transfer(owner, queue, shares)   // privileged: caller is the vault itself
                                               - queue.recordRequest(owner, shares)
                                               - emit RedeemRequested(id, owner, shares)
 
-  LP (optional, before claim) ──queue.cancel(id)──▶ WithdrawalQueue
+  LP (optional, before claim) ──queue.cancel(id)──▶ WithdrawalQueue   (msg.sender = request.owner)
                                               - require msg.sender == request.owner
-                                              - vault._transfer(queue → owner)
+                                              - IERC20(vault).transfer(owner, shares)   // queue holds shares, calls vault as ERC20
                                               - delete request
 
 [lock cleared post-settle]
-  anyone ──queue.claim(id)──▶ WithdrawalQueue
+  anyone ──queue.claim(id)──▶ WithdrawalQueue   (msg.sender = anyone; permissionless)
                               - require !vault.redemptionsLocked()
                               - vault.redeem(shares, owner, address(queue))
-                                  · vault burns shares the queue holds
-                                  · vault transfers assets to owner
+                                  // OZ ERC4626 sig: redeem(uint256 shares, address receiver, address owner)
+                                  // receiver = owner (gets the assets), owner = queue (whose shares are burned)
+                                  · vault burns the shares the queue holds
+                                  · vault transfers assets to the original LP (owner)
                               - emit RedeemClaimed(id, owner, assets)
 ```
 
@@ -180,12 +182,12 @@ OZ ERC4626's virtual-shares inflation protection still holds. With
 `_decimalsOffset = asset.decimals()` (today's setting):
 
 ```
-shares = assets * (totalSupply + 10^offset) / (totalAssets + 1)
-assets = shares * (totalAssets + 1) / (totalSupply + 10^offset)
+shares = assets * (totalSupply + 10**offset) / (totalAssets + 1)
+assets = shares * (totalAssets + 1) / (totalSupply + 10**offset)
 ```
 
 The only change is that `totalAssets` is no longer just the float when an
-adapter is bound. The virtual-shares term `(totalSupply + 10^offset)` and
+adapter is bound. The virtual-shares term `(totalSupply + 10**offset)` and
 the `+1` denominator are untouched, so first-depositor inflation is still
 defended. No new unit conversions; no decimal mixing.
 
@@ -216,9 +218,9 @@ Based on the strategies in `contracts/src/strategies/`:
 
 | Strategy                  | `positionValue` `valid` | `onLiveDeposit`                              | Notes |
 |---------------------------|-------------------------|----------------------------------------------|-------|
-| `MoonwellSupplyStrategy`  | true                    | mint additional mToken                       | `mToken.balanceOfUnderlying(vault)` is the live NAV; deposit forwards into `mToken.mint`. |
-| `WstETHMoonwellStrategy`  | true                    | mint additional mToken                       | Same as Moonwell core, plus the wstETH/stETH wrap leg pinned to `IStETH.getPooledEthByShares`. |
-| `AerodromeLPStrategy`     | true                    | no-op (default)                              | NAV via LP-token redemption preview against the pool reserves. `onLiveDeposit` would require rebalancing both legs of the pool — left as future work for v1. |
+| `MoonwellSupplyStrategy`  | true                    | mint additional mToken                       | Live NAV: `mToken.balanceOf(vault) * mToken.exchangeRateStored() / 1e18`. Cannot use the non-`view` `balanceOfUnderlying` (accrues interest) from a `view`-only adapter; one-block staleness is acceptable for share-pricing. Deposit forwards into `mToken.mint`. |
+| `WstETHMoonwellStrategy`  | false (default; requires oracle wiring) | n/a (default)                | `_positionValue` inherits the `BaseStrategy` `(0, false)` default. A live read needs a Chainlink WSTETH/ETH feed (Base: `0x43a5C292A453A3bF3606fa856197f09D7B74251a`) threaded through `InitParams` and all construction callers. Promotion deferred to a focused follow-up. |
+| `AerodromeLPStrategy`     | false (default; live read deferred — issue #188) | n/a (default)       | `_positionValue` inherits the `BaseStrategy` `(0, false)` default. Promotion to `valid=true` requires LP decomposition (pool reserves + totalSupply, gauge-staked portion) and a stable-vs-volatile curve quote — non-trivial and out of scope for v1. |
 | `MamoYieldStrategy`       | false                   | n/a                                          | Mamo accrues yield off-chain. NAV cannot be read on-chain → falls back to queue. |
 | `VeniceInferenceStrategy` | false                   | n/a                                          | Off-chain compute strategy. No on-chain NAV. |
 | `HyperliquidPerpStrategy` | false                   | n/a                                          | Hyperliquid PnL lives outside EVM state. |
@@ -239,12 +241,15 @@ math. The argument rests on ERC20Votes checkpoints:
   historical timestamp is the checkpoint value at that timestamp, not their
   live balance.
 - **Proposal vote weight is read at the snapshot.** `voteOnProposal` resolves
-  weight via `getPastVotes(voter, voteSnapshotAt)`, where
-  `voteSnapshotAt` is stamped at `propose()` (and `openReview` for guardian
-  cohort, per the registry). A new deposit at `block.timestamp >
-  voteSnapshotAt` produces a checkpoint that is strictly *after* the
-  snapshot, so the new shares contribute zero weight to the in-flight
-  proposal.
+  weight via `getPastVotes(voter, snapshotTimestamp)`, where
+  `snapshotTimestamp` is stamped at proposal activation (the
+  `Draft → Pending` transition via `activatePending`, or directly inside
+  `_initPendingProposal` when called from `propose`; see
+  `SyndicateGovernor.sol`). The registry's `openReview` independently
+  stamps the guardian cohort. A new deposit at
+  `block.timestamp > snapshotTimestamp` produces a checkpoint that is
+  strictly *after* the snapshot, so the new shares contribute zero
+  weight to the in-flight proposal.
 - **Same logic isolates the guardian cohort.** The registry already reads
   `_stakeCheckpoints[voter].upperLookupRecent(r.openedAt)` and
   `_delegatedInboundCheckpoints[voter].upperLookupRecent(r.openedAt)` to
@@ -254,8 +259,8 @@ math. The argument rests on ERC20Votes checkpoints:
   `requestRedeem` and the queue takes custody, the shares are *transferred*,
   not burned. ERC20Votes registers a delegation move from `owner` to
   `address(queue)`. The owner's pre-transfer checkpoint at
-  `voteSnapshotAt` is unchanged, so any vote they already cast retains its
-  weight. If the owner cancels before claim, custody returns and future
+  `snapshotTimestamp` is unchanged, so any vote they already cast retains
+  its weight. If the owner cancels before claim, custody returns and future
   proposal snapshots count those shares again.
 
 The conclusion: late depositors cannot influence a proposal opened before
@@ -283,8 +288,11 @@ don't touch the queue or adapter behave identically — `adapter == 0` keeps
 `totalAssets()` at the pre-change formula, and `_withdrawalQueue == 0` is
 detected by `requestRedeem` as "queue not configured" and reverts. Setters
 (`setWithdrawalQueue`, `setActiveStrategyAdapter`) are owner-only and
-emit `ParameterChangeFinalized` so the multisig delay applies via Gnosis
-Safe + Zodiac (consistent with V1.5's "no on-chain timelock" stance).
+emit vault-local events `WithdrawalQueueSet` and
+`ActiveStrategyAdapterSet` (the `ParameterChangeFinalized` event lives on
+`GovernorParameters` and is reserved for governor parameters). The
+multisig delay applies externally via Gnosis Safe + Zodiac, consistent
+with V1.5's "no on-chain timelock" stance.
 
 ---
 
