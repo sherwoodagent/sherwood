@@ -23,6 +23,8 @@ contract HyperliquidGridForkTest is HyperEVMIntegrationTest {
     uint32 constant MAX_ORDERS = 32;
     uint256 constant DURATION = 7 days;
 
+    bytes32 constant RAW_ACTION_TOPIC = keccak256("RawAction(address,bytes)");
+
     function setUp() public override {
         super.setUp();
         // If the parent skipped (no fork URL), bail out before any chain interaction.
@@ -88,7 +90,9 @@ contract HyperliquidGridForkTest is HyperEVMIntegrationTest {
         // Each order emits one RawAction event from CORE_WRITER + one GridOrderPlaced from strategy
         uint256 rawActionCount = 0;
         for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].emitter == CORE_WRITER) rawActionCount++;
+            if (logs[i].emitter == CORE_WRITER && logs[i].topics.length > 0 && logs[i].topics[0] == RAW_ACTION_TOPIC) {
+                rawActionCount++;
+            }
         }
         assertEq(rawActionCount, 6, "6 RawAction events");
 
@@ -144,7 +148,9 @@ contract HyperliquidGridForkTest is HyperEVMIntegrationTest {
         // Expect 4 RawAction events: 2 cancels + 2 places
         uint256 rawActionCount = 0;
         for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].emitter == CORE_WRITER) rawActionCount++;
+            if (logs[i].emitter == CORE_WRITER && logs[i].topics.length > 0 && logs[i].topics[0] == RAW_ACTION_TOPIC) {
+                rawActionCount++;
+            }
         }
         assertEq(rawActionCount, 4, "2 cancels + 2 places");
 

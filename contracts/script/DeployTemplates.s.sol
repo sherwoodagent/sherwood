@@ -176,13 +176,8 @@ contract DeployTemplates is ScriptBase {
     /// @notice Test helper — deploys a fresh `HyperliquidGridStrategy` template.
     ///         Used by `HyperEVMIntegrationTest.setUp()`. Does not persist to JSON.
     /// @dev Caller is responsible for `vm.startBroadcast()` if needed.
-    function _deployHyperliquidGridTemplate() public returns (address) {
+    function deployHyperliquidGridTemplate() public returns (address) {
         return address(new HyperliquidGridStrategy());
-    }
-
-    /// @notice Test helper — deploys a fresh `HyperliquidPerpStrategy` template.
-    function _deployHyperliquidPerpTemplate() public returns (address) {
-        return address(new HyperliquidPerpStrategy());
     }
 
     // ── Helpers ──

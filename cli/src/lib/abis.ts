@@ -1411,13 +1411,6 @@ export const HYPERLIQUID_PERP_STRATEGY_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "bool" }],
   },
-  {
-    name: "minReturnAmount",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-  },
 ] as const;
 
 // ── PortfolioStrategy (extends BaseStrategy with rebalancing + views) ──

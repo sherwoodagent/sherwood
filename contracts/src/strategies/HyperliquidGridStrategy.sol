@@ -209,6 +209,7 @@ contract HyperliquidGridStrategy is BaseStrategy {
     ///      a strategy that loses money must still be able to return whatever
     ///      remains. The cumulative tracker (`cumulativeSwept`) records totals
     ///      for off-chain monitoring but does not gate withdrawals.
+    /// @dev Closes #255 S-C6: minReturnAmount removed (was permanently locking funds on lossy strategies).
     function sweepToVault() external {
         if (!settled) revert NotSweepable();
 

@@ -94,7 +94,7 @@ contract DeploySherwood is ScriptBase {
         require(cfg.woodToken != address(0), "WOOD_TOKEN not set (env or chains.json)");
 
         vm.startBroadcast();
-        Deployed memory d = _deployCore(cfg);
+        Deployed memory d = deployCore(cfg);
         console.log("\nDeployer:", d.deployer);
         console.log("Chain ID:", block.chainid);
         console.log("BatchExecutorLib:", d.executorLib);
@@ -142,7 +142,7 @@ contract DeploySherwood is ScriptBase {
     ///           - validate (callers can if they want)
     /// @dev Used by `HyperEVMIntegrationTest.setUp()` to deploy on a fork without
     ///      writing to disk. Production deploys keep using `run()`.
-    function _deployCore(Config memory cfg) public returns (Deployed memory d) {
+    function deployCore(Config memory cfg) public returns (Deployed memory d) {
         d.deployer = msg.sender;
 
         Create3Factory c3 = new Create3Factory(d.deployer);

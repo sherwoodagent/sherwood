@@ -23,6 +23,12 @@ import {ERC20Mock} from "../mocks/ERC20Mock.sol";
  *
  * @dev Skips if HYPEREVM_RPC_URL is not set. Run with:
  *      forge test --fork-url $HYPEREVM_RPC_URL --match-path "test/integration/HyperliquidGridFork.t.sol"
+ *
+ * @dev Owner of the deployed protocol contracts is `deployer` (the address of
+ *      `DeploySherwood` script instance), NOT `owner`. This is because nested
+ *      calls inside `deployCore` execute as the script address, and the script
+ *      writes `d.deployer = msg.sender`. Subclasses needing owner-gated calls
+ *      (e.g., setProtocolFeeRecipient) must `vm.prank(deployer)` not `vm.prank(owner)`.
  */
 abstract contract HyperEVMIntegrationTest is Test {
     // ── HyperEVM mainnet addresses ──
@@ -48,6 +54,7 @@ abstract contract HyperEVMIntegrationTest is Test {
     address vaultImpl;
     address executorLib;
     address hyperliquidGridTemplate;
+    address deployer;
 
     // Matches Deploy.s.sol DEFAULT_MIN_OWNER_STAKE
     uint256 constant MIN_OWNER_STAKE = 10_000e18;
@@ -94,7 +101,7 @@ abstract contract HyperEVMIntegrationTest is Test {
             slashAppealSeed: 0,
             epochZeroSeed: 0
         });
-        // `_deployCore` constructs a Create3Factory owned by `msg.sender` and
+        // `deployCore` constructs a Create3Factory owned by `msg.sender` and
         // then calls `c3.deploy(...)` from inside itself — so the owner must be
         // `address(deployScript)`. `vm.startBroadcast` only changes msg.sender
         // for *direct* external calls from the test contract; nested calls
@@ -104,13 +111,14 @@ abstract contract HyperEVMIntegrationTest is Test {
         // which is fine: these tests only exercise permissionless paths
         // (`createSyndicate`, voting, settlement) and never owner-gated ones.
         vm.prank(address(deployScript));
-        DeploySherwood.Deployed memory d = deployScript._deployCore(cfg);
+        DeploySherwood.Deployed memory d = deployScript.deployCore(cfg);
 
         governor = SyndicateGovernor(d.governorProxy);
         factory = SyndicateFactory(d.factoryProxy);
         registry = GuardianRegistry(d.registryProxy);
         vaultImpl = d.vaultImpl;
         executorLib = d.executorLib;
+        deployer = d.deployer; // address(deployScript) — owner of factory/governor/registry
     }
 
     function _deployTemplates() internal {
@@ -118,7 +126,7 @@ abstract contract HyperEVMIntegrationTest is Test {
         // Same reason as _deployProtocol: prank as the script so internal
         // c3.deploy calls match the Create3Factory owner.
         vm.prank(address(t));
-        hyperliquidGridTemplate = t._deployHyperliquidGridTemplate();
+        hyperliquidGridTemplate = t.deployHyperliquidGridTemplate();
     }
 
     /// @dev Mints WOOD to the syndicate owner and prepares the owner stake so that
