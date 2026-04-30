@@ -47,6 +47,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     using SafeERC20 for IERC20;
 
     // ── Constants ──
+    /// @notice 100% in basis points.
+    /// @dev `internal` to avoid emitting an auto-getter (the registry is at the
+    ///      28-byte EIP-170 ceiling — every byte counts).
+    uint256 internal constant BPS_DENOMINATOR = 10_000;
     uint256 public constant EPOCH_DURATION = 7 days;
     uint256 public constant MIN_COHORT_STAKE_AT_OPEN = 50_000 * 1e18;
     uint256 public constant MAX_APPROVERS_PER_PROPOSAL = 100;
@@ -637,7 +641,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         // Commission RATE stays at settledAt (INV-V1.5-11) — only the
         // vote-weight lookup moves to openedAt.
         uint256 rate = _commissionCheckpoints[msg.sender].upperLookupRecent(uint32(pool.settledAt));
-        uint256 commission = (grossFromDelegated * rate) / 10_000;
+        uint256 commission = (grossFromDelegated * rate) / BPS_DENOMINATOR;
         uint256 approverPayout = grossFromOwn + commission;
         uint256 remainder = grossFromDelegated - commission;
 
@@ -824,7 +828,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
             // `reviewPeriod` after proposal creation cannot shift the lockout
             // start time.
             uint256 reviewWindow = uint256(p.reviewEnd) - uint256(p.voteEnd);
-            uint256 lockoutStart = p.reviewEnd - (reviewWindow * LATE_VOTE_LOCKOUT_BPS) / 10_000;
+            uint256 lockoutStart = p.reviewEnd - (reviewWindow * LATE_VOTE_LOCKOUT_BPS) / BPS_DENOMINATOR;
             if (block.timestamp >= lockoutStart) revert VoteChangeLockedOut();
 
             uint128 weight = _voteStake[proposalId][msg.sender]; // preserved snapshot
@@ -1437,7 +1441,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         if (recipient == address(0)) revert ZeroAddress();
 
         uint256 ep = currentEpoch();
-        uint256 cap = (slashAppealReserve * MAX_REFUND_PER_EPOCH_BPS) / 10_000;
+        uint256 cap = (slashAppealReserve * MAX_REFUND_PER_EPOCH_BPS) / BPS_DENOMINATOR;
         if (refundedInEpoch[ep] + amount > cap) revert RefundCapExceeded();
 
         refundedInEpoch[ep] += amount;
