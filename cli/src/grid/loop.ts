@@ -17,6 +17,7 @@ import { DEFAULT_GRID_CONFIG } from './config.js';
 import type { GridConfig } from './config.js';
 import { HyperliquidProvider } from '../providers/data/hyperliquid.js';
 import { GridHedgeManager } from './hedge.js';
+import { GridExecutor } from './executor.js';
 
 const GRID_CYCLES_PATH = join(homedir(), '.sherwood', 'grid', 'cycles.jsonl');
 
@@ -27,6 +28,10 @@ export interface GridLoopConfig {
   cycle: number;
   /** Optional overrides for the default grid config. */
   config?: Partial<GridConfig>;
+  /** Live execution mode — when true, places real orders on Hyperliquid. */
+  live?: boolean;
+  /** HL asset indices per token (required when live=true). */
+  assetIndices?: Record<string, number>;
 }
 
 export class GridLoop {
@@ -35,6 +40,7 @@ export class GridLoop {
   private manager: GridManager;
   private hedge: GridHedgeManager;
   private hl: HyperliquidProvider;
+  private executor: GridExecutor | null = null;
   private running = false;
   private cycleCount = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -45,6 +51,13 @@ export class GridLoop {
     this.manager = new GridManager(this.gridConfig);
     this.hedge = new GridHedgeManager();
     this.hl = new HyperliquidProvider();
+
+    if (cfg.live) {
+      if (!cfg.assetIndices) {
+        throw new Error('assetIndices required when live=true');
+      }
+      this.executor = new GridExecutor({ assetIndices: cfg.assetIndices });
+    }
   }
 
   /** Start the grid loop. Resolves when shut down via SIGINT/SIGTERM. */
@@ -118,6 +131,20 @@ export class GridLoop {
 
     const result = await this.manager.tick(prices);
     const elapsed = Date.now() - start;
+
+    // Live mode: submit real orders via executor
+    if (this.executor) {
+      const plan = this.manager.computeOrders(prices);
+      if (plan.ordersToPlace.length > 0 || plan.assetsToCancel.length > 0) {
+        const res = await this.executor.execute(plan);
+        if (res.errors.length > 0) {
+          console.error(chalk.yellow(`  [grid-loop] Executor errors: ${res.errors.join('; ')}`));
+        }
+        if (res.placed > 0 || res.cancelled > 0) {
+          console.error(chalk.cyan(`  [grid-loop] Live: placed=${res.placed} cancelled=${res.cancelled}`));
+        }
+      }
+    }
 
     // Log round trips when they happen
     if (result.roundTrips > 0) {

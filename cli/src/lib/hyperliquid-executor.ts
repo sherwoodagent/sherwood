@@ -181,6 +181,30 @@ export async function hlGetPositions(): Promise<
     });
 }
 
+/**
+ * Place a GTC limit order on Hyperliquid perps.
+ * Returns oid (HyperCore order ID) on success.
+ */
+export async function hlPlaceLimitOrder(
+  coin: string,
+  isBuy: boolean,
+  sizeInToken: number,
+  limitPrice: number,
+): Promise<HLOrderResult> {
+  const cmd = isBuy ? 'limit-buy' : 'limit-sell';
+  const raw = await runHLScript(cmd, [coin, String(sizeInToken), String(limitPrice)]);
+  return parseOrderResponse(raw);
+}
+
+/**
+ * Cancel all open orders, optionally scoped to a single coin.
+ * Returns the raw response.
+ */
+export async function hlCancelAllOrders(coin?: string): Promise<string> {
+  const args = coin ? [coin] : [];
+  return runHLScript('cancel-all', args);
+}
+
 /** Validate that required env vars are set for live HL trading. */
 export function validateHLEnv(): void {
   if (!process.env.HYPERLIQUID_PRIVATE_KEY) {

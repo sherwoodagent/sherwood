@@ -70,3 +70,24 @@ Each 1-min cycle (`grid/loop.ts`):
   cost for tighter level spacing around current price.
 - `tokenSplit` is rebalance-on-rebuild, not continuous — drift inside a
   cycle does not get rebalanced until the next full rebuild.
+
+## Live Deployment (Hyperliquid)
+
+The grid runs in two modes:
+
+**Simulation (default):** `sherwood grid start --capital 5000 --cycle 60`
+- Simulates fills against price, no real orders
+- Use for backtesting and tuning
+
+**Live:** `sherwood grid start --capital 5000 --cycle 60 --live --asset-indices bitcoin=3,ethereum=4,solana=5`
+- Places real GTC limit orders on Hyperliquid via the HL SDK
+- Requires `HYPERLIQUID_PRIVATE_KEY` env var (the keeper EOA, must be the proposer)
+- Asset indices are HyperCore perp asset IDs (BTC=3, ETH=4, SOL=5 as of 2026-04)
+
+### Prerequisites for live mode
+
+1. Deploy `HyperliquidGridStrategy` clone via a Sherwood proposal
+2. Strategy's `_execute()` pulls vault USDC and parks it on HyperCore margin
+3. Keeper EOA = proposer EOA (only the proposer can call `updateParams`)
+4. Set `HYPERLIQUID_PRIVATE_KEY` to the proposer's key
+5. Run `sherwood grid start --live ...` — the loop will compute orders each tick and submit them
