@@ -36,6 +36,11 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     uint256 public constant ABSOLUTE_MAX_STRATEGY_DURATION = 30 days;
     uint256 public constant MIN_COOLDOWN_PERIOD = 1 hours;
     uint256 public constant MAX_COOLDOWN_PERIOD = 30 days;
+    /// @notice 100% in basis points. Centralized so SyndicateGovernor and
+    ///         GuardianRegistry both reference one constant.
+    /// @dev `internal` to avoid emitting an auto-getter (would add ~39 bytes
+    ///      to SyndicateGovernor; this constant is for internal arithmetic only).
+    uint256 internal constant BPS_DENOMINATOR = 10_000;
     uint256 public constant MAX_PROTOCOL_FEE_BPS = 1000; // 10%
     uint256 public constant MAX_GUARDIAN_FEE_BPS = 500; // 5%
 

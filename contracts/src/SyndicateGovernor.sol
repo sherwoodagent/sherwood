@@ -833,7 +833,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
             // don't move the bar for in-flight proposals.
             uint256 pastTotalSupply = IVotes(proposal.vault).getPastTotalSupply(proposal.snapshotTimestamp);
             if (pastTotalSupply > 0) {
-                uint256 vetoThreshold = (pastTotalSupply * proposal.vetoThresholdBps) / 10000;
+                uint256 vetoThreshold = (pastTotalSupply * proposal.vetoThresholdBps) / BPS_DENOMINATOR;
                 if (proposal.votesAgainst >= vetoThreshold) {
                     return ProposalState.Rejected;
                 }
@@ -939,7 +939,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         // (initialize + setProtocolFeeBps); re-asserting here closes any path
         // that could bypass the bounds dispatcher.
         if (_protocolFeeBps > 0) {
-            protocolFee = (profit * _protocolFeeBps) / 10000;
+            protocolFee = (profit * _protocolFeeBps) / BPS_DENOMINATOR;
             if (protocolFee > 0) {
                 if (_protocolFeeRecipient == address(0)) revert InvalidProtocolFeeRecipient();
                 _payFee(vault, asset, _protocolFeeRecipient, protocolFee);
@@ -955,7 +955,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         // On fund-funding failure (post-transfer), the amount is in the
         // registry but unpooled; ops can recover via the registry owner.
         if (_guardianFeeBps > 0) {
-            uint256 fee = (profit * _guardianFeeBps) / 10000;
+            uint256 fee = (profit * _guardianFeeBps) / BPS_DENOMINATOR;
             address recipient = _guardianRegistry;
             if (fee > 0) {
                 try ISyndicateVault(vault).transferPerformanceFee(asset, recipient, fee) {
@@ -980,10 +980,10 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         uint256 netProfit = profit - protocolFee - guardianFee;
 
         // Agent performance fee from net profit
-        agentFee = (netProfit * perfFeeBps) / 10000;
+        agentFee = (netProfit * perfFeeBps) / BPS_DENOMINATOR;
 
         // Management fee from remainder after agent fee
-        uint256 mgmtFee = ((netProfit - agentFee) * ISyndicateVault(vault).managementFeeBps()) / 10000;
+        uint256 mgmtFee = ((netProfit - agentFee) * ISyndicateVault(vault).managementFeeBps()) / BPS_DENOMINATOR;
 
         if (agentFee > 0) {
             _distributeAgentFee(proposalId, vault, asset, proposer, agentFee);
@@ -1013,7 +1013,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
             for (uint256 i = 0; i < coProps.length; i++) {
                 bool active = ISyndicateVault(vault).isAgent(coProps[i].agent);
                 if (!active) continue;
-                uint256 share = (agentFee * coProps[i].splitBps) / 10000;
+                uint256 share = (agentFee * coProps[i].splitBps) / BPS_DENOMINATOR;
                 if (share == 0) {
                     if (distributed >= agentFee) continue;
                     share = 1;
