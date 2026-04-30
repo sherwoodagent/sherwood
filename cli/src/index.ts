@@ -115,7 +115,7 @@ syndicate
   .option("--asset <symbol-or-address>", "Vault asset: USDC, WETH, or a token address")
   .option("--description <text>", "Short description")
   .option("--metadata-uri <uri>", "Override metadata URI (skip IPFS upload)")
-  .option("--open-deposits", "Allow anyone to deposit (no whitelist)")
+  .option("--open-deposits", "Allow anyone to deposit (default: whitelist only)")
   .option("--public-chat", "Enable dashboard spectator mode", false)
   .option("-y, --yes", "Skip confirmation prompt (non-interactive mode)", false)
   .action(async (opts) => {
@@ -168,10 +168,10 @@ syndicate
       );
 
       const openDeposits = opts.openDeposits !== undefined ? opts.openDeposits : (nonInteractive
-        ? true
+        ? false
         : await confirm({
-            message: G("Open deposits? (anyone can deposit)"),
-            default: true,
+            message: G("Open deposits? (anyone can deposit, no whitelist)"),
+            default: false,
           }));
 
       // ── Resolve asset ──
@@ -227,7 +227,7 @@ syndicate
       console.log(W(`  Agent ID:     #${agentIdStr}`));
       console.log(W(`  Asset:        ${assetSymbol} (${asset.slice(0, 10)}...)`));
       console.log(W(`  Share token:  ${symbol}`));
-      console.log(W(`  Open deposits: ${openDeposits ? G("yes") : chalk.red("no (whitelist)")}`));
+      console.log(W(`  Open deposits: ${openDeposits ? chalk.yellow("yes (anyone can deposit)") : G("no (whitelist)")}`));
       SEP();
 
       if (!nonInteractive) {
