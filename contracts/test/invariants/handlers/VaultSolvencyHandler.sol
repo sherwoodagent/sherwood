@@ -59,7 +59,6 @@ contract VaultSolvencyHandler is Test {
     uint256 public redeemCount;
     uint256 public profitableLifecycleCount;
     uint256 public lossyLifecycleCount;
-    uint256 public solvencyChecks;
 
     constructor(
         SyndicateGovernor _governor,
@@ -237,7 +236,7 @@ contract VaultSolvencyHandler is Test {
         vm.warp(vm.getBlockTimestamp() + votingPeriod + 1);
 
         try governor.executeProposal(proposalId) {}
-            catch {
+        catch {
             return false;
         }
 
@@ -255,22 +254,18 @@ contract VaultSolvencyHandler is Test {
             usdc.transfer(sink, toBurn);
         }
 
-        // Settle as proposer (anytime). MAY revert (e.g. fee-distribution
-        // edge cases on a loss); skip on revert — solvency invariant is
-        // checked after every action regardless of whether THIS one
-        // landed.
+        // Settle as proposer (anytime). MUST NOT revert — a settle revert
+        // is exactly the bug class INV-15 hunts (fee-distribution math
+        // exploding on a realized loss, share-accounting drift, etc.).
+        // Reraise with the underlying selector so the fuzzer surfaces a
+        // concrete counterexample (mirrors `FeeBlacklistHandler::runProposalLifecycle`).
         vm.prank(leadAgent);
-        try governor.settleProposal(proposalId) {} catch {}
+        try governor.settleProposal(proposalId) {}
+        catch (bytes memory err) {
+            revert(string.concat("INV-15 violation: settleProposal reverted: ", _bytesToHex(err)));
+        }
 
         return true;
-    }
-
-    // ──────────────────────────────────────────────────────────────
-    // Solvency probe — called by the invariant after every action.
-    // ──────────────────────────────────────────────────────────────
-
-    function probeSolvency() external {
-        solvencyChecks += 1;
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -284,5 +279,20 @@ contract VaultSolvencyHandler is Test {
             value: 0,
             data: abi.encodeWithSignature("approve(address,uint256)", address(this), uint256(0))
         });
+    }
+
+    /// @dev Hex-encode a bytes blob for inclusion in a revert string. Used
+    ///      so a `settleProposal` revert reraised by the lifecycle helper
+    ///      surfaces the underlying selector + payload to the fuzzer.
+    function _bytesToHex(bytes memory data) internal pure returns (string memory) {
+        bytes memory hexAlphabet = "0123456789abcdef";
+        bytes memory out = new bytes(2 + data.length * 2);
+        out[0] = "0";
+        out[1] = "x";
+        for (uint256 i = 0; i < data.length; i++) {
+            out[2 + i * 2] = hexAlphabet[uint8(data[i]) >> 4];
+            out[3 + i * 2] = hexAlphabet[uint8(data[i]) & 0x0f];
+        }
+        return string(out);
     }
 }

@@ -195,10 +195,13 @@ contract VaultSolvencyInvariantTest is StdInvariant, Test {
     ///         are already solvent). Require at least one of: extra deposit,
     ///         redeem, or settled lifecycle to have landed.
     function afterInvariant() external view {
-        uint256 totalActions = handler.depositCount() + handler.redeemCount() + handler.profitableLifecycleCount()
-            + handler.lossyLifecycleCount();
-
-        assertGt(totalActions, 0, "INV-15 sanity: no fuzz action landed on the vault - vacuous run");
+        // Per-counter guards: a regression that breaks ONLY `runLossyLifecycle`
+        // (the riskier path per the file docstring) must not pass vacuously
+        // while the other three counters keep climbing.
+        assertGt(handler.depositCount(), 0, "INV-15 sanity: no deposits landed - vacuous run");
+        assertGt(handler.redeemCount(), 0, "INV-15 sanity: no redeems landed - vacuous run");
+        assertGt(handler.profitableLifecycleCount(), 0, "INV-15 sanity: no profitable lifecycles - vacuous run");
+        assertGt(handler.lossyLifecycleCount(), 0, "INV-15 sanity: no lossy lifecycles - vacuous run");
     }
 
     /// @notice Direct unit-style sanity. Drives one full lifecycle end-to-end

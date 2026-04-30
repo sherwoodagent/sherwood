@@ -632,7 +632,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         {
             uint256 w = _voteStake[proposalId][msg.sender];
             Review storage r = _reviews[proposalId];
-            // totalW >= w by construction (w is one of the weights summed into it).
+            // approveStakeWeight >= w by construction (w is one of the weights summed into it).
             gross = (uint256(pool.amount) * w) / uint256(r.approveStakeWeight);
 
             // Split the approver's gross share between own-stake portion (fully
