@@ -93,26 +93,26 @@ contract VaultSolvencyHandler is Test {
     // ──────────────────────────────────────────────────────────────
 
     function depositRandom(uint256 seed) external {
-        // Skip if vault has an active proposal (deposits are blocked
-        // during `redemptionsLocked()`).
+        // Skip when any proposal is open: covers `redemptionsLocked()`
+        // (active proposal at vote/execute) AND the broader `Pending`
+        // window where deposits are still blocked. `openProposalCount` is
+        // a strict superset of `getActiveProposal != 0`.
         if (governor.openProposalCount(address(vault)) != 0) return;
 
         address[3] memory lps = [lp1, lp2, lp3];
         address depositor = lps[seed % 3];
 
-        // Bound the deposit to a reasonable working range.
         uint256 amount = bound(uint256(keccak256(abi.encode(seed, "amt"))), 1e6, 50_000e6);
 
         usdc.mint(depositor, amount);
         vm.prank(depositor);
         usdc.approve(address(vault), amount);
+        // No try/catch — vault is unpaused, openDeposits=true, and the
+        // openProposalCount gate covers `redemptionsLocked()`. Any revert
+        // here is a real regression and should surface in the fuzz output.
         vm.prank(depositor);
-        try vault.deposit(amount, depositor) {
-            depositCount += 1;
-        } catch {
-            // Acceptable revert reasons: paused, openDeposits=false. Both
-            // legitimate; skipping doesn't violate the invariant.
-        }
+        vault.deposit(amount, depositor);
+        depositCount += 1;
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -120,6 +120,8 @@ contract VaultSolvencyHandler is Test {
     // ──────────────────────────────────────────────────────────────
 
     function redeemRandom(uint256 seed) external {
+        // Same gate semantics as `depositRandom` — `openProposalCount`
+        // is a strict superset of the vault's `redemptionsLocked()`.
         if (governor.openProposalCount(address(vault)) != 0) return;
 
         address[3] memory lps = [lp1, lp2, lp3];
@@ -135,12 +137,12 @@ contract VaultSolvencyHandler is Test {
         uint256 toRedeem = shares / divisor;
         if (toRedeem == 0) toRedeem = 1;
 
+        // No try/catch — gate above covers redemptionsLocked, redeemer
+        // has shares > 0, and vault is unpaused. Any revert surfaces as
+        // a real regression.
         vm.prank(redeemer);
-        try vault.redeem(toRedeem, redeemer, redeemer) {
-            redeemCount += 1;
-        } catch {
-            // Acceptable: paused, redemptions locked between checks.
-        }
+        vault.redeem(toRedeem, redeemer, redeemer);
+        redeemCount += 1;
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -200,9 +202,11 @@ contract VaultSolvencyHandler is Test {
 
         BatchExecutorLib.Call[] memory calls = _noopCalls();
 
+        // No try/catch on propose: openProposalCount + cooldown gates
+        // above cover the only failure modes (`VaultHasOpenProposal`,
+        // `CooldownNotElapsed`). Any other revert is a real regression.
         vm.prank(leadAgent);
-        uint256 proposalId;
-        try governor.propose(
+        uint256 proposalId = governor.propose(
             address(vault),
             "ipfs://test",
             perfFeeBps,
@@ -210,35 +214,27 @@ contract VaultSolvencyHandler is Test {
             calls,
             calls,
             new ISyndicateGovernor.CoProposer[](0)
-        ) returns (
-            uint256 id
-        ) {
-            proposalId = id;
-        } catch {
-            return false;
-        }
+        );
 
         vm.warp(vm.getBlockTimestamp() + 1);
 
-        // LPs vote For. They may or may not have shares — that's fine,
-        // a zero-weight vote still counts toward `castCount` in the
-        // governor; turnout below veto threshold means proposal passes
-        // (optimistic governance).
+        // LPs vote For. The `balanceOf > 0` guard ensures the voter has
+        // checkpointed delegation weight at the snapshot timestamp; no
+        // legitimate revert reason remains, so we let any revert surface.
         if (vault.balanceOf(lp1) > 0) {
             vm.prank(lp1);
-            try governor.vote(proposalId, ISyndicateGovernor.VoteType.For) {} catch {}
+            governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
         }
         if (vault.balanceOf(lp2) > 0) {
             vm.prank(lp2);
-            try governor.vote(proposalId, ISyndicateGovernor.VoteType.For) {} catch {}
+            governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
         }
 
         vm.warp(vm.getBlockTimestamp() + votingPeriod + 1);
 
-        try governor.executeProposal(proposalId) {}
-        catch {
-            return false;
-        }
+        // No try/catch: warp past voteEnd + no veto/Against votes → state
+        // is Approved. Any other state is a real regression.
+        governor.executeProposal(proposalId);
 
         // Inject the configured PnL.
         if (pnlSigned > 0) {
