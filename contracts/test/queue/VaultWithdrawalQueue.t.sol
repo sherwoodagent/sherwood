@@ -91,4 +91,60 @@ contract VaultWithdrawalQueueTest is Test {
         assertEq(ids[0], 1);
         assertEq(ids[1], 2);
     }
+
+    function test_queueRequest_zeroSharesReverts() public {
+        vm.prank(address(vault));
+        vm.expectRevert(IVaultWithdrawalQueue.ZeroShares.selector);
+        queue.queueRequest(alice, 0);
+    }
+
+    function test_claim_twiceReverts() public {
+        vm.prank(address(vault));
+        queue.queueRequest(alice, 100e18);
+        vault.mint(address(queue), 100e18);
+        vault.setLocked(false);
+        queue.claim(1);
+        vm.expectRevert(IVaultWithdrawalQueue.AlreadyClaimed.selector);
+        queue.claim(1);
+    }
+
+    function test_cancel_returnsSharesToOwner() public {
+        vm.prank(address(vault));
+        queue.queueRequest(alice, 100e18);
+        // simulate vault transfer of shares into queue
+        vault.mint(address(queue), 100e18);
+        uint256 aliceBalBefore = vault.balanceOf(alice);
+        vm.prank(alice);
+        queue.cancel(1);
+        assertEq(vault.balanceOf(alice), aliceBalBefore + 100e18);
+        assertEq(queue.pendingShares(), 0);
+        IVaultWithdrawalQueue.Request memory r = queue.getRequest(1);
+        assertTrue(r.cancelled);
+        assertFalse(r.claimed);
+    }
+
+    function test_cancel_nonOwnerReverts() public {
+        vm.prank(address(vault));
+        queue.queueRequest(alice, 100e18);
+        address bob = makeAddr("bob");
+        vm.prank(bob);
+        vm.expectRevert(IVaultWithdrawalQueue.NotQueueOwner.selector);
+        queue.cancel(1);
+    }
+
+    function test_claim_unknownRequestReverts() public {
+        vm.expectRevert(IVaultWithdrawalQueue.RequestNotFound.selector);
+        queue.claim(99);
+    }
+
+    function test_cancel_afterClaimReverts() public {
+        vm.prank(address(vault));
+        queue.queueRequest(alice, 100e18);
+        vault.mint(address(queue), 100e18);
+        vault.setLocked(false);
+        queue.claim(1);
+        vm.prank(alice);
+        vm.expectRevert(IVaultWithdrawalQueue.AlreadyClaimed.selector);
+        queue.cancel(1);
+    }
 }
