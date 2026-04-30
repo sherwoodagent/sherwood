@@ -14,6 +14,7 @@ import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
 import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
 import {IGuardianRegistry} from "./interfaces/IGuardianRegistry.sol";
 import {IL2Registrar} from "./interfaces/IL2Registrar.sol";
+import {VaultWithdrawalQueue} from "./queue/VaultWithdrawalQueue.sol";
 
 /**
  * @title SyndicateFactory
@@ -165,6 +166,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     event VaultUpgraded(address indexed vault, address indexed newImpl);
     event UpgradesEnabledUpdated(bool enabled);
     event OwnerRotated(address indexed vault, address indexed newOwner);
+    event WithdrawalQueueDeployed(address indexed vault, address indexed queue);
 
     struct InitParams {
         address owner;
@@ -259,6 +261,13 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         bytes memory initData = abi.encodeCall(SyndicateVault.initialize, (initParams));
 
         vault = address(new ERC1967Proxy(vaultImpl, initData));
+
+        // Deploy the per-vault async withdrawal queue and bind it. The vault checks
+        // `msg.sender == _factory`, so we must call `setWithdrawalQueue` from this
+        // (factory) context.
+        VaultWithdrawalQueue queue = new VaultWithdrawalQueue(vault);
+        ISyndicateVault(vault).setWithdrawalQueue(address(queue));
+        emit WithdrawalQueueDeployed(vault, address(queue));
 
         // Register vault with the governor so it can receive proposals
         ISyndicateGovernor(governor).addVault(vault);

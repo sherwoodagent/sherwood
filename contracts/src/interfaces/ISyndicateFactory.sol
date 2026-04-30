@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 interface ISyndicateFactory {
     // ── Events (Task 26) ──
     event OwnerRotated(address indexed vault, address indexed newOwner);
+    event WithdrawalQueueDeployed(address indexed vault, address indexed queue);
 
     // ── Errors (Task 26) ──
     error VaultStillStaked();
