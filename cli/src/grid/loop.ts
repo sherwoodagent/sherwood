@@ -18,6 +18,8 @@ import type { GridConfig } from './config.js';
 import { HyperliquidProvider } from '../providers/data/hyperliquid.js';
 import { GridHedgeManager } from './hedge.js';
 import { GridExecutor } from './executor.js';
+import { OnchainGridExecutor } from './onchain-executor.js';
+import type { Address } from 'viem';
 
 const GRID_CYCLES_PATH = join(homedir(), '.sherwood', 'grid', 'cycles.jsonl');
 
@@ -32,6 +34,8 @@ export interface GridLoopConfig {
   live?: boolean;
   /** HL asset indices per token (required when live=true). */
   assetIndices?: Record<string, number>;
+  /** When set, use on-chain executor (calls strategy contract). */
+  strategyAddress?: Address;
 }
 
 export class GridLoop {
@@ -40,7 +44,7 @@ export class GridLoop {
   private manager: GridManager;
   private hedge: GridHedgeManager;
   private hl: HyperliquidProvider;
-  private executor: GridExecutor | null = null;
+  private executor: GridExecutor | OnchainGridExecutor | null = null;
   private running = false;
   private cycleCount = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -56,7 +60,14 @@ export class GridLoop {
       if (!cfg.assetIndices) {
         throw new Error('assetIndices required when live=true');
       }
-      this.executor = new GridExecutor({ assetIndices: cfg.assetIndices });
+      if (cfg.strategyAddress) {
+        this.executor = new OnchainGridExecutor({
+          strategyAddress: cfg.strategyAddress,
+          assetIndices: cfg.assetIndices,
+        });
+      } else {
+        this.executor = new GridExecutor({ assetIndices: cfg.assetIndices });
+      }
     }
   }
 

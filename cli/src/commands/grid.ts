@@ -33,6 +33,7 @@ export function registerGridCommand(program: Command): void {
     .option('--levels <n>', 'Grid levels per side', '15')
     .option('--live', 'enable live execution (places real orders on Hyperliquid)')
     .option('--asset-indices <pairs>', 'comma-separated token=index pairs (e.g. bitcoin=3,ethereum=4,solana=5)')
+    .option('--strategy <address>', 'on-chain strategy contract address (enables on-chain executor)')
     .action(async (opts) => {
       const capital = parseFloat(opts.capital);
       const cycleMs = parseInt(opts.cycle, 10) * 1000;
@@ -52,6 +53,11 @@ export function registerGridCommand(program: Command): void {
           if (!tok || !idx) throw new Error(`Bad asset-indices pair: ${pair}`);
           assetIndices[tok.trim()] = Number(idx);
         }
+      }
+
+      const strategyAddress = opts.strategy as `0x${string}` | undefined;
+      if (strategyAddress && !live) {
+        throw new Error('--strategy requires --live');
       }
 
       // Build equal-weight token split
@@ -76,6 +82,7 @@ export function registerGridCommand(program: Command): void {
         cycle: cycleMs,
         live,
         assetIndices,
+        strategyAddress,
         config: {
           ...DEFAULT_GRID_CONFIG,
           tokens,

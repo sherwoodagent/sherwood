@@ -91,3 +91,22 @@ The grid runs in two modes:
 3. Keeper EOA = proposer EOA (only the proposer can call `updateParams`)
 4. Set `HYPERLIQUID_PRIVATE_KEY` to the proposer's key
 5. Run `sherwood grid start --live ...` — the loop will compute orders each tick and submit them
+
+### On-chain Mode (Vault Funds)
+
+For vault-funded grid trading, deploy `HyperliquidGridStrategy` and pass its address:
+
+```bash
+sherwood --network hyperevm grid start \
+  --capital 5000 --cycle 60 --live \
+  --asset-indices bitcoin=3,ethereum=4,solana=5 \
+  --strategy 0xYourStrategyAddress
+```
+
+Requirements:
+- `HYPEREVM_RPC_URL` env var
+- `PRIVATE_KEY` env var (the proposer EOA — only this address can call `updateParams`)
+- Strategy contract already executed (vault USDC parked on HyperCore margin)
+
+Without `--strategy`: orders go to the keeper's own HyperCore account via HL SDK
+With `--strategy`: orders go through `strategy.updateParams()` so the strategy contract's HyperCore account (funded by vault) is used
