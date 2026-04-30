@@ -63,6 +63,16 @@ Everything in §3 below is orthogonal to guardian review.
 
 ---
 
+## 2.5 Closed in `feat/live-nav-async-withdrawals` (Phase 1)
+
+Async-redeem queue lets LPs request exits while a strategy proposal is active and claim them after settlement. Closes the V1 UX gap where deposits and redemptions both blocked during active proposals (`redemptionsLocked()`).
+
+| Ref | Finding | How Phase 1 addresses it | Commit(s) |
+|---|---|---|---|
+| AR-LN | LPs cannot exit while a proposal is active — competitive parity gap vs. async-redeem vaults (e.g. Concrete) | New per-vault `VaultWithdrawalQueue` deployed by factory at `createSyndicate`. `vault.requestRedeem(shares, owner)` escrows shares while locked; `queue.claim(requestId)` burns + pays out post-settle. Vault tracks `pendingQueueShares()` / `reservedQueueAssets()`; non-queue `withdraw`/`redeem` capped via `maxWithdraw` / `maxRedeem` overrides so queue claims cannot be starved. Invariants INV-Q1/Q2/Q3 added under `test/invariants/`. | `f921dfa`, `16a4729`, `68e065c`, `063ff9f`, `641de9e`, `cd30ac3`, `ab87613`, `2bedc9e`, `2b51a32` |
+
+---
+
 ## 3. Critical bug findings still open (from #225)
 
 Grouped by domain. All require separate PRs.

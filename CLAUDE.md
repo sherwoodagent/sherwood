@@ -104,10 +104,11 @@ Live contract sizes from `forge build --sizes` (2026-04):
 | Contract | Runtime | Notes |
 |---|---|---|
 | SyndicateGovernor | 24,255 | **321-byte EIP-170 margin** (post-PR #256 `_initPendingProposal` extraction) |
-| SyndicateFactory | 11,665 | ample headroom |
+| SyndicateFactory | 14,600 | grew with `VaultWithdrawalQueue` deploy at `createSyndicate` (Phase 1 async-redeem) |
 | GuardianRegistry | 24,306 | **270-byte EIP-170 margin** (post-PR #252 review fix) |
-| SyndicateVault | 19,881 | ample headroom (CI gate at 22,000) |
-| WoodToken | 15,788 | ERC20Votes + OFT multi-inherit (Phase 1 V1.5) |
+| SyndicateVault | 21,444 | CI gate at 22,000; +1,563 bytes for `requestRedeem` + queue reserve accounting |
+| VaultWithdrawalQueue | 2,502 | per-vault async redemption escrow (Phase 1 live-NAV / async-withdrawals) |
+| WoodToken | 15,850 | ERC20Votes + OFT multi-inherit (Phase 1 V1.5) |
 
 - **SyndicateVault** — ERC-4626 vault with ERC20Votes for governance. Standard `redeem()`/`withdraw()` for LP exits (no custom ragequit). `_decimalsOffset()` = `asset.decimals()` for first-depositor inflation protection (shares have 12 decimals for USDC). Deposits and `rescueERC20` are blocked during active proposals (`redemptionsLocked()`).
 - **SyndicateGovernor** — Proposal lifecycle, optimistic voting, execution, settlement, collaborative proposals. Inherits `GovernorParameters` (abstract) for parameter setters/timelock and `GovernorEmergency` (abstract) for `unstick` / `emergencySettleWithCalls` / `cancelEmergencySettle` / `finalizeEmergencySettle`. The `GovernorEmergency` extraction plus `via_ir` keep the runtime under 24,550 bytes with the guardian-review changes.
@@ -117,6 +118,15 @@ Live contract sizes from `forge build --sizes` (2026-04):
 - **SyndicateFactory** — UUPS upgradeable factory. Deploys vault + registers it with the governor. `governor` and `guardianRegistry` are both **set-once at init** (no `setGovernor` — removed to close V-H2; governor upgrades must go through a UUPS upgrade of the governor proxy itself). `createSyndicate` requires the creator to have called `guardianRegistry.prepareOwnerStake` first; `bindOwnerStake` binds the prepared stake to the new vault atomically. `rotateOwner(vault, newOwner)` provides a slot-transfer recovery path for a dead-key vault owner. Owner-configurable: `setVaultImpl`, `setCreationFee`, `setManagementFeeBps`, `setUpgradesEnabled`.
 - **BatchExecutorLib** — Stateless 63-line contract for `delegatecall`-based batch execution. The "delegatecall to BatchExecutorLib only" invariant **is enforced in code** via V-C2: `SyndicateVault.initialize` stamps `_expectedExecutorCodehash = executorImpl.codehash`, and `executeGovernorBatch` reverts with `ExecutorCodehashMismatch` if the pinned codehash drifts at call time.
 - **Strategy Templates** — `BaseStrategy` (abstract) + `MoonwellSupplyStrategy` + `AerodromeLPStrategy`. ERC-1167 clonable. Vault calls `execute()`/`settle()` via batch.
+
+### Async withdrawal queue
+
+- **VaultWithdrawalQueue** — per-vault, deployed by the factory at `createSyndicate` time. Bound on the vault via factory-only `setWithdrawalQueue`.
+- LPs call `vault.requestRedeem(shares, owner)` ONLY while `redemptionsLocked() == true` (a strategy proposal is active). Shares are escrowed in the queue (no burn). Each request gets a `requestId` and lives in `Request{owner, shares, requestedAt, claimed, cancelled}`.
+- Anyone calls `queue.claim(requestId)` once `redemptionsLocked() == false` — the queue calls `vault.redeem(shares, owner, address(queue))`, the vault burns the queued shares and forwards underlying assets to the original owner.
+- Queue owners can `cancel(requestId)` any time before claim — shares are returned to them.
+- Vault tracks `pendingQueueShares()` and `reservedQueueAssets()`. Standard `withdraw`/`redeem` from non-queue callers is capped via `maxWithdraw`/`maxRedeem` overrides so queue claims cannot be starved. The queue address is special-cased to bypass these caps.
+- `_withdraw` keeps a `caller != _withdrawalQueue` reserve guard as defense-in-depth.
 
 ### Governor Key Concepts
 
