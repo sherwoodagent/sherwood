@@ -90,6 +90,10 @@ export class GridLoop {
     // Initialize grid if no state exists
     await this.manager.init(this.cfg.capital);
 
+    if (this.executor instanceof OnchainGridExecutor) {
+      await this.executor.load();
+    }
+
     // Startup banner
     console.error(chalk.cyan(
       `\n  [grid-loop] Started — capital=$${this.cfg.capital.toFixed(0)} ` +
