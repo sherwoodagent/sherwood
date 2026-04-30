@@ -482,18 +482,22 @@ contract SyndicateVault is
         return _cachedDecimalsOffset;
     }
 
-    /// @dev True iff LP flow (`_deposit`, `maxWithdraw`, `maxRedeem`) must be
-    ///      blocked. Combined gate: a proposal is active AND no live NAV
-    ///      adapter is reporting a valid value. When the adapter reports
-    ///      `valid=true`, share price is queryable and LP flow is unlocked
-    ///      even during the active window. Single helper instead of two
-    ///      (`redemptionsLocked && !_liveNAVAvailable`) keeps bytecode flat.
-    function _lpFlowBlocked() private view returns (bool) {
-        if (!redemptionsLocked()) return false;
+    /// @dev Combined LP-flow gate. Returns:
+    ///        - `blocked = true` when LP flow must revert (active proposal AND
+    ///          no valid live-NAV adapter).
+    ///        - `liveAdapter` set to the adapter address whenever LP flow is
+    ///          unlocked *because* a live-NAV adapter is reporting valid NAV.
+    ///          The `_deposit` path uses this to forward the new capital into
+    ///          the adapter so it starts earning yield immediately. Outside
+    ///          the active window or when the adapter is invalid this is
+    ///          `address(0)` so the caller skips the forward.
+    function _lpFlowGate() private view returns (bool blocked, address liveAdapter) {
+        if (!redemptionsLocked()) return (false, address(0));
         address adapter = _activeStrategyAdapter;
-        if (adapter == address(0)) return true;
+        if (adapter == address(0)) return (true, address(0));
         (, bool valid) = IStrategy(adapter).positionValue();
-        return !valid;
+        if (!valid) return (true, address(0));
+        return (false, adapter);
     }
 
     /// @inheritdoc ERC4626Upgradeable
@@ -517,18 +521,31 @@ contract SyndicateVault is
 
     /// @dev Block deposits when paused or depositor not approved.
     ///      Auto-delegate to self on first deposit so shareholders get voting power.
+    ///      When a live-NAV adapter is bound, forward the new capital so it
+    ///      starts earning yield immediately instead of sitting as idle float.
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares)
         internal
         override
         whenNotPaused
     {
-        if (_lpFlowBlocked()) revert DepositsLocked();
+        (bool blocked, address liveAdapter) = _lpFlowGate();
+        if (blocked) revert DepositsLocked();
         if (!_openDeposits && !_approvedDepositors.contains(receiver)) revert NotApprovedDepositor();
         super._deposit(caller, receiver, assets, shares);
 
         // Auto-delegate: if receiver has no delegate, delegate to self
         if (delegates(receiver) == address(0)) {
             _delegate(receiver, receiver);
+        }
+
+        // Forward live deposits to the adapter so capital starts earning
+        // immediately. `_lpFlowGate` already validated `valid=true` when it
+        // returned a non-zero adapter, so no extra positionValue check is
+        // needed here. Push model: transfer the assets to the adapter then
+        // call the hook — avoids needing an approve + transferFrom.
+        if (liveAdapter != address(0)) {
+            IERC20(asset()).safeTransfer(liveAdapter, assets);
+            IStrategy(liveAdapter).onLiveDeposit(assets);
         }
     }
 
@@ -557,7 +574,8 @@ contract SyndicateVault is
     ///      reserved float belongs to it — capping the queue would block
     ///      `claim()` whenever pending shares dominate supply.
     function maxWithdraw(address owner_) public view override returns (uint256) {
-        if (paused() || _lpFlowBlocked()) return 0;
+        (bool blocked,) = _lpFlowGate();
+        if (paused() || blocked) return 0;
         if (owner_ == _withdrawalQueue) return super.maxWithdraw(owner_);
         uint256 userMax = super.maxWithdraw(owner_);
         uint256 reserve = reservedQueueAssets();
@@ -573,7 +591,8 @@ contract SyndicateVault is
     ///      The bound withdrawal queue bypasses the reserve cap (see
     ///      `maxWithdraw`).
     function maxRedeem(address owner_) public view override returns (uint256) {
-        if (paused() || _lpFlowBlocked()) return 0;
+        (bool blocked,) = _lpFlowGate();
+        if (paused() || blocked) return 0;
         if (owner_ == _withdrawalQueue) return super.maxRedeem(owner_);
         uint256 userMax = super.maxRedeem(owner_);
         uint256 reserveShares = pendingQueueShares();

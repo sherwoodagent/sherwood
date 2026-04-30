@@ -285,6 +285,68 @@ contract VaultLiveNAVTest is Test {
         assertGt(vault.maxWithdraw(alice), 0);
     }
 
+    // ──────────────────────── Task 13: live-deposit forwarding ────────────────────────
+
+    /// @notice On a live deposit (proposal active, adapter valid), the vault
+    ///         pushes the new capital into the adapter via `onLiveDeposit`
+    ///         so it starts earning yield immediately.
+    function test_deposit_forwardsAssetsToLiveAdapter() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(0, true);
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+        _mockActiveProposal(true);
+
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        // Vault pushed the assets to the adapter and called the hook.
+        assertEq(adapter.lastLiveDeposit(), 1_000e6, "adapter received forwarded assets");
+        assertEq(adapter.liveDepositCount(), 1, "hook called exactly once");
+        assertEq(usdc.balanceOf(address(adapter)), 1_000e6, "assets pushed to adapter");
+        assertEq(usdc.balanceOf(address(vault)), 0, "vault float drained");
+    }
+
+    /// @notice Outside the lock window the forwarding hook must not fire,
+    ///         even if a stale adapter pointer is still set.
+    function test_deposit_doesNotForwardWhenUnlocked() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(0, true);
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+        // No active proposal mocked — `redemptionsLocked()` is false.
+
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        assertEq(adapter.liveDepositCount(), 0, "hook not called when unlocked");
+        assertEq(usdc.balanceOf(address(vault)), 1_000e6, "vault keeps float");
+    }
+
+    /// @notice With no adapter bound the vault must not attempt to forward.
+    function test_deposit_doesNotForwardWhenAdapterUnbound() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+
+        // No active proposal, no adapter — plain deposit path.
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        assertEq(usdc.balanceOf(address(vault)), 1_000e6, "vault keeps float");
+    }
+
     function test_totalAssets_ignoresStaleAdapterWhenUnlocked() public {
         // Implicit-clear behaviour: with no active proposal the adapter
         // pointer is silently ignored even if non-zero.

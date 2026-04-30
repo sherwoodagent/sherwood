@@ -118,6 +118,15 @@ abstract contract BaseStrategy is IStrategy {
         return _positionValue();
     }
 
+    /// @inheritdoc IStrategy
+    /// @dev V1.5: default no-op — strategies that can absorb mid-position
+    ///      capital override `_onLiveDeposit`. Only callable by the vault and
+    ///      only while the strategy is `Executed`.
+    function onLiveDeposit(uint256 assets) external virtual onlyVault {
+        if (_state != State.Executed) return;
+        _onLiveDeposit(assets);
+    }
+
     // ── Internal helpers ──
 
     /// @notice Pull tokens from the vault into this strategy
@@ -157,5 +166,15 @@ abstract contract BaseStrategy is IStrategy {
     ///         an onchain value override this with their implementation.
     function _positionValue() internal view virtual returns (uint256, bool) {
         return (0, false);
+    }
+
+    /// @notice Override to route new vault deposits into the live position.
+    ///         Default: no-op. Only invoked while the strategy is `Executed`.
+    function _onLiveDeposit(
+        uint256 /*assets*/
+    )
+        internal
+        virtual {
+        // default: do nothing
     }
 }

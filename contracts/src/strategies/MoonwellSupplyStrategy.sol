@@ -120,6 +120,18 @@ contract MoonwellSupplyStrategy is BaseStrategy {
         if (newMinRedeemAmount > 0) minRedeemAmount = newMinRedeemAmount;
     }
 
+    /// @notice Mint additional mTokens against `assets` of underlying that
+    ///         the vault has just pushed into this strategy. The vault
+    ///         performs the push via `safeTransfer` immediately before
+    ///         calling `onLiveDeposit`, so the underlying is already on
+    ///         this contract's balance — we only need to approve + mint.
+    function _onLiveDeposit(uint256 assets) internal override {
+        if (assets == 0) return;
+        IERC20(underlying).forceApprove(mToken, assets);
+        uint256 err = ICToken(mToken).mint(assets);
+        if (err != 0) revert MintFailed();
+    }
+
     // ── positionValue ──
 
     /// @dev Current underlying value of the supplied position. Uses

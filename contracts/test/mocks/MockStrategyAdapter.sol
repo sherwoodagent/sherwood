@@ -4,10 +4,16 @@ pragma solidity 0.8.28;
 import {IStrategy} from "../../src/interfaces/IStrategy.sol";
 
 /// @notice Minimal IStrategy stub for vault NAV tests. Lets a test set
-///         `(value, valid)` returned by `positionValue()`.
+///         `(value, valid)` returned by `positionValue()` and records
+///         the last `onLiveDeposit` call so the vault's forwarding hook
+///         can be asserted.
 contract MockStrategyAdapter is IStrategy {
     uint256 public mockValue;
     bool public mockValid;
+
+    /// @notice Last assets pushed into `onLiveDeposit` by the vault.
+    uint256 public lastLiveDeposit;
+    uint256 public liveDepositCount;
 
     function setValue(uint256 v, bool valid_) external {
         mockValue = v;
@@ -41,5 +47,10 @@ contract MockStrategyAdapter is IStrategy {
 
     function name() external pure returns (string memory) {
         return "MockStrategyAdapter";
+    }
+
+    function onLiveDeposit(uint256 assets) external {
+        lastLiveDeposit = assets;
+        liveDepositCount++;
     }
 }

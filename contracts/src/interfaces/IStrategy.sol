@@ -71,4 +71,14 @@ interface IStrategy {
     ///               current position isn't queryable from this contract
     ///               (external loans, offchain perps, etc.).
     function positionValue() external view returns (uint256 value, bool valid);
+
+    /// @notice Vault hook: called from `vault._deposit` when the strategy is the
+    ///         active adapter and reports live NAV. Lets the strategy absorb the
+    ///         new capital into its position so it earns yield immediately
+    ///         instead of sitting as idle vault float.
+    /// @dev    `onlyVault` enforced by `BaseStrategy`. Default impl in
+    ///         `BaseStrategy` is a no-op for strategies that cannot route
+    ///         mid-position capital (Mamo, Venice, off-chain).
+    /// @param  assets Amount of vault asset just deposited.
+    function onLiveDeposit(uint256 assets) external;
 }
