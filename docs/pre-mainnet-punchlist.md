@@ -143,9 +143,9 @@ Grouped by domain. All require separate PRs.
 
 | Ref | Finding | Severity | Fix |
 |---|---|---|---|
-| A-C1 | `Create3Factory.deploy` permissionless despite doc claim | 85 | Add `Ownable`, or use Solady CREATE3 |
+| A-C1 ✅ | `Create3Factory.deploy` permissionless despite doc claim | 85 | Closed — `Create3Factory.sol:17` carries `Ownable` + `onlyOwner`. Regression: `test/Create3Factory.t.sol` (PR #256 `96b4036`). |
 | A-C2/C3 | Synthra swap / callback paths unverified | 75+ | Fork tests; adapter refactor per S-C2 |
-| A-C4 | CREATE3 silent-succeeds on failed CREATE (`deployed.code.length == 0`) | 70 | `require(deployed.code.length > 0)` after inner create |
+| A-C4 ✅ | CREATE3 silent-succeeds on failed CREATE (`deployed.code.length == 0`) | 70 | Closed — `Create3.sol:37` reverts `DeployFailed` on `!success || deployed.code.length == 0`. Regression: `test/Create3.t.sol` (PR #256 `96b4036`). |
 
 ---
 
@@ -197,7 +197,7 @@ Each row is a **doc update** (not a code change). `mintlify-docs/` changes route
 | A20 | `settlement.mdx`: "Governor calls `vault.lockRedemptions()`" | No such function (pull-model `redemptionsLocked()`) | `mintlify-docs/protocol/settlement.mdx` — fix |
 | A21 | `settlement.mdx`: `vault.executeBatch` | Governor uses `executeGovernorBatch` | `mintlify-docs/protocol/settlement.mdx` — fix |
 | A22 | `settlement.mdx`: "Fee transfers wrapped in try/catch" | No try/catch; USDC blacklist bricks settlement | Either fix code (W-1) or remove doc claim |
-| A23 | `settlement.mdx`: EAS `STRATEGY_PNL` attestation on settle | Not implemented | Either ship or remove doc claim |
+| A23 ❌ | `settlement.mdx`: EAS `STRATEGY_PNL` attestation on settle | Not implemented | **Dropped** — HyperEVM has no EAS deployment, so an in-`_finishSettlement` attestation can't be chain-uniform. Remove the doc claim from `mintlify-docs/protocol/settlement.mdx`. If multi-chain attestation matters later, ship as a keeper-driven attestor that runs only on EAS-supported chains. |
 | A24 | `overview.mdx` struct has `capitalRequired` | Field doesn't exist | `mintlify-docs/overview.mdx` — fix; also `docs/governor-architecture.md` |
 | A25 | `overview.mdx`: "Snapshot at proposal creation (`block.number`)" | Timestamp-based | `mintlify-docs/overview.mdx` — fix |
 | A26 | `collaborative-proposals.mdx`: "Splits must sum to 10000 BPS" | Code requires `totalCoSplitBps <= 9000` | `mintlify-docs/collaborative-proposals.mdx` — fix |
@@ -244,19 +244,19 @@ Ranked by effort-to-impact. PR #229 doesn't touch items 1–5, 7, 8, 9; it lands
 1. ~~Refactor `SyndicateGovernor.propose()` struct literal — unblocks `forge coverage`.~~ ✅ **done in #229** (`78257c3`).
 2. PoC tests for every Critical in #225 (26 items).
 3. Delete dead code (14 items in #226 §10.1).
-4. Move `MockSwapAdapter.sol` + `CoreWriter.sol` from `src/` to `test/mocks/`.
-5. Fix `Create3Factory.deploy` — add `Ownable` OR use Solady CREATE3.
+4. ~~Move `MockSwapAdapter.sol` + `CoreWriter.sol` from `src/` to `test/mocks/`.~~ ✅ **done.** `MockSwapAdapter.sol` was already at `test/mocks/`; `CoreWriter.sol` was actually a 4-line production interface — inlined into `L1Write.sol` and the orphan `src/` file deleted (PR #256 `00d2e9c`).
+5. ~~Fix `Create3Factory.deploy` — add `Ownable` OR use Solady CREATE3.~~ ✅ **done.** Already had `Ownable` + `onlyOwner` (`Create3Factory.sol:17`). PR #256 added regression tests (`96b4036`).
 6. Fix doc↔code mismatches (§6 above).
 7. Wire `maxSlippageBps` → `amountOutMin` in `PortfolioStrategy`.
 8. Rotate all owners to `TimelockController` + Gnosis Safe.
-9. Echidna harness for the 48 invariants (priority: INV-2, -3, -11, -15, -23). 🟡 **partial in #229** (`963e565` — 3 guardian-scope invariants; `bf0e4cd` — INV-2 / -3 / -30 / -33 / -46; `12deb4d` — INV-11 co-proposer split property test; `feat/guardian-review-lifecycle` HEAD — INV-9 active-proposal pointer consistency + INV-10 capital-snapshot lifecycle, closes #236). INV-15 / -23 deferred to tokenomics / strategies branches per #236 scope.
+9. Echidna harness for the 48 invariants (priority: INV-2, -3, -11, -15, -23, -47). 🟡 **partial — closed: INV-2 / -3 / -9 / -10 / -11 / -30 / -33 / -46 / -47**. PR #229: `963e565` (3 guardian-scope) + `bf0e4cd` (INV-2/-3/-30/-33/-46) + `12deb4d` (INV-11). PR #229 HEAD: INV-9 + INV-10. PR #256: **INV-47** fee-blacklist non-blocking fuzz harness (`2d4c28b`) — `accrued = claimed + escrowed` holds across 128k randomized calls, zero counterexamples. INV-15 / -23 still deferred to tokenomics / strategies branches per #236 scope.
 10. ~~CI size gate: `forge build --sizes` must fail if `SyndicateGovernor > 24,500` bytes.~~ ✅ **done in #229** (`607386e` — gate at 24,400).
 11. Document invariants at call sites (#226 §10.3).
 12. Add `Pausable` across tokenomics contracts. (Registry now has pause + 7d deadman — tokenomics still outstanding.)
 13. Add `nonReentrant` on every state-mutating governor fn (G-C6). 🟡 **partial in #229** — registry externals covered; governor legacy fns still open.
 14. Wrap fee transfers in try/catch (A22) + regression test.
 15. Fix `maxDeposit` / `maxMint` / `maxWithdraw` / `maxRedeem` to return 0 when blocked.
-16. Extract `BPS_DENOMINATOR = 10_000` to one shared library.
+16. ~~Extract `BPS_DENOMINATOR = 10_000` to one shared library.~~ ✅ **done in #256.** `BPS_DENOMINATOR` added to `GovernorParameters` (used by governor) (`8585b4e`) and `GuardianRegistry` (`ec44f21`). Skipped Voter / Minter / SyndicateGauge — deleted in v4 per `docs/tokenomics-wood.md`. Bytecode-neutral (constants inlined). `MAX_MANAGEMENT_FEE_BPS` also extracted in `SyndicateFactory` (`568473f`).
 17. NatSpec on every non-`@inheritdoc` public fn.
 18. Publish `executorImplCodehash()` view.
 
