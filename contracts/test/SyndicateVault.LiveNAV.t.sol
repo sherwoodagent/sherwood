@@ -90,7 +90,16 @@ contract VaultLiveNAVTest is Test {
 
     /// @dev Make `redemptionsLocked()` return true so the adapter NAV is read.
     function _mockActiveProposal() internal {
-        vm.mockCall(MOCK_GOVERNOR, abi.encodeWithSignature("getActiveProposal(address)"), abi.encode(uint256(1)));
+        _mockActiveProposal(true);
+    }
+
+    /// @dev Toggle the mocked active proposal — `true` locks the vault.
+    function _mockActiveProposal(bool active) internal {
+        vm.mockCall(
+            MOCK_GOVERNOR,
+            abi.encodeWithSignature("getActiveProposal(address)"),
+            abi.encode(active ? uint256(1) : uint256(0))
+        );
     }
 
     function test_totalAssets_includesAdapterNAVWhenValid() public {
@@ -168,6 +177,112 @@ contract VaultLiveNAVTest is Test {
         _mockActiveProposal();
 
         assertEq(vault.totalAssets(), 1_000e6); // 500 float + 500 adapter
+    }
+
+    // ──────────────────────── Task 12: live-NAV LP-flow gating ────────────────────────
+
+    function test_deposit_allowedWhenAdapterValidDuringLock() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(0, true); // value=0 + valid=true
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+        _mockActiveProposal(true);
+
+        vm.prank(alice);
+        uint256 shares = vault.deposit(1_000e6, alice);
+        assertGt(shares, 0);
+    }
+
+    function test_deposit_blockedWhenAdapterInvalidDuringLock() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(0, false);
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+        _mockActiveProposal(true);
+
+        vm.prank(alice);
+        vm.expectRevert(ISyndicateVault.DepositsLocked.selector);
+        vault.deposit(1_000e6, alice);
+    }
+
+    function test_deposit_blockedWhenAdapterUnboundDuringLock() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+
+        _mockActiveProposal(true); // no adapter set
+        vm.prank(alice);
+        vm.expectRevert(ISyndicateVault.DepositsLocked.selector);
+        vault.deposit(1_000e6, alice);
+    }
+
+    function test_withdraw_allowedWhenAdapterValidDuringLock() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(alice);
+        uint256 shares = vault.deposit(1_000e6, alice);
+
+        // Bind adapter, lock, valid=true
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(0, true);
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+        _mockActiveProposal(true);
+
+        // Should be able to withdraw via standard path
+        vm.prank(alice);
+        uint256 redeemed = vault.redeem(shares, alice, alice);
+        assertGt(redeemed, 0);
+    }
+
+    function test_withdraw_blockedWhenAdapterInvalidDuringLock() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(0, false); // invalid
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+        _mockActiveProposal(true);
+
+        // OZ ERC4626 hits maxRedeem == 0 → ERC4626ExceededMaxRedeem before _withdraw runs.
+        vm.prank(alice);
+        vm.expectRevert();
+        vault.redeem(1, alice, alice);
+    }
+
+    function test_maxWithdraw_returnsNonZeroWhenAdapterValid() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(0, true);
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+        _mockActiveProposal(true);
+
+        assertGt(vault.maxWithdraw(alice), 0);
     }
 
     function test_totalAssets_ignoresStaleAdapterWhenUnlocked() public {

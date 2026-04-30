@@ -482,6 +482,20 @@ contract SyndicateVault is
         return _cachedDecimalsOffset;
     }
 
+    /// @dev True iff LP flow (`_deposit`, `maxWithdraw`, `maxRedeem`) must be
+    ///      blocked. Combined gate: a proposal is active AND no live NAV
+    ///      adapter is reporting a valid value. When the adapter reports
+    ///      `valid=true`, share price is queryable and LP flow is unlocked
+    ///      even during the active window. Single helper instead of two
+    ///      (`redemptionsLocked && !_liveNAVAvailable`) keeps bytecode flat.
+    function _lpFlowBlocked() private view returns (bool) {
+        if (!redemptionsLocked()) return false;
+        address adapter = _activeStrategyAdapter;
+        if (adapter == address(0)) return true;
+        (, bool valid) = IStrategy(adapter).positionValue();
+        return !valid;
+    }
+
     /// @inheritdoc ERC4626Upgradeable
     /// @dev Aggregates the vault's idle float with the active strategy
     ///      adapter's `positionValue()` when the adapter reports `valid=true`.
@@ -508,7 +522,7 @@ contract SyndicateVault is
         override
         whenNotPaused
     {
-        if (redemptionsLocked()) revert DepositsLocked();
+        if (_lpFlowBlocked()) revert DepositsLocked();
         if (!_openDeposits && !_approvedDepositors.contains(receiver)) revert NotApprovedDepositor();
         super._deposit(caller, receiver, assets, shares);
 
@@ -518,12 +532,15 @@ contract SyndicateVault is
         }
     }
 
+    /// @dev `maxWithdraw` / `maxRedeem` are the canonical lock gate (OZ
+    ///      ERC4626 invokes them before `_withdraw`). The redundant
+    ///      `redemptionsLocked()` check here was dropped to fit live-NAV
+    ///      logic under the bytecode budget.
     function _withdraw(address caller, address receiver, address _owner, uint256 assets, uint256 shares)
         internal
         override
         whenNotPaused
     {
-        if (redemptionsLocked()) revert RedemptionsLocked();
         // Queue bypasses the reserve check — it owns the reserved float.
         if (caller != _withdrawalQueue) {
             uint256 reserve = reservedQueueAssets();
@@ -540,7 +557,7 @@ contract SyndicateVault is
     ///      reserved float belongs to it — capping the queue would block
     ///      `claim()` whenever pending shares dominate supply.
     function maxWithdraw(address owner_) public view override returns (uint256) {
-        if (paused() || redemptionsLocked()) return 0;
+        if (paused() || _lpFlowBlocked()) return 0;
         if (owner_ == _withdrawalQueue) return super.maxWithdraw(owner_);
         uint256 userMax = super.maxWithdraw(owner_);
         uint256 reserve = reservedQueueAssets();
@@ -556,7 +573,7 @@ contract SyndicateVault is
     ///      The bound withdrawal queue bypasses the reserve cap (see
     ///      `maxWithdraw`).
     function maxRedeem(address owner_) public view override returns (uint256) {
-        if (paused() || redemptionsLocked()) return 0;
+        if (paused() || _lpFlowBlocked()) return 0;
         if (owner_ == _withdrawalQueue) return super.maxRedeem(owner_);
         uint256 userMax = super.maxRedeem(owner_);
         uint256 reserveShares = pendingQueueShares();
