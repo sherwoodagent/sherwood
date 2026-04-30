@@ -41,7 +41,6 @@ contract HyperliquidGridStrategy is BaseStrategy {
     error InvalidAction();
     error DepositAmountTooLarge();
     error NotSweepable();
-    error InsufficientReturn(uint256 actual, uint256 minimum);
     error TooManyOrders(uint256 actual, uint256 max);
     error OrderTooLarge(uint256 actual, uint256 max);
     error AssetNotWhitelisted(uint32 asset);
@@ -57,7 +56,6 @@ contract HyperliquidGridStrategy is BaseStrategy {
     // ── Storage (per-clone) ──
     IERC20 public asset;
     uint256 public depositAmount;
-    uint256 public minReturnAmount;
     uint32 public leverage;
     /// @notice Per-order notional cap (USD, 6 decimals). Each individual GridOrder's
     ///         notional (sz * limitPx / 1e6) must be <= this value. This is NOT a
@@ -89,12 +87,11 @@ contract HyperliquidGridStrategy is BaseStrategy {
         (
             address asset_,
             uint256 depositAmount_,
-            uint256 minReturnAmount_,
             uint32 leverage_,
             uint256 maxOrderSize_,
             uint32 maxOrdersPerTick_,
             uint32[] memory assetIndices_
-        ) = abi.decode(data, (address, uint256, uint256, uint32, uint256, uint32, uint32[]));
+        ) = abi.decode(data, (address, uint256, uint32, uint256, uint32, uint32[]));
 
         if (asset_ == address(0)) revert ZeroAddress();
         if (depositAmount_ > type(uint64).max) revert DepositAmountTooLarge();
@@ -106,7 +103,6 @@ contract HyperliquidGridStrategy is BaseStrategy {
 
         asset = IERC20(asset_);
         depositAmount = depositAmount_;
-        minReturnAmount = minReturnAmount_;
         leverage = leverage_;
         maxOrderSize = maxOrderSize_;
         maxOrdersPerTick = maxOrdersPerTick_;
@@ -208,21 +204,19 @@ contract HyperliquidGridStrategy is BaseStrategy {
     }
 
     /// @notice Push USDC back to the vault after async transfer completes.
-    /// @dev Permissionless — funds only go to vault. Repeatable for partial arrivals.
+    /// @dev Permissionless — funds only go to the vault, no diversion possible.
+    ///      Repeatable for partial async arrivals. NO minReturnAmount guard:
+    ///      a strategy that loses money must still be able to return whatever
+    ///      remains. The cumulative tracker (`cumulativeSwept`) records totals
+    ///      for off-chain monitoring but does not gate withdrawals.
+    /// @dev Closes #255 S-C6: minReturnAmount removed (was permanently locking funds on lossy strategies).
     function sweepToVault() external {
         if (!settled) revert NotSweepable();
 
         uint256 bal = IERC20(asset).balanceOf(address(this));
         if (bal == 0) revert InvalidAmount();
 
-        // Enforce minReturn cumulatively until threshold met. Prevents dust race
-        // where an attacker triggers the first sweep with 1 USDC of arrived
-        // funds and bypasses the LP minReturn guarantee for subsequent arrivals.
-        uint256 newTotal = cumulativeSwept + bal;
-        if (minReturnAmount > 0 && newTotal < minReturnAmount) {
-            revert InsufficientReturn(newTotal, minReturnAmount);
-        }
-        cumulativeSwept = newTotal;
+        cumulativeSwept += bal;
 
         uint256 vaultBefore = IERC20(asset).balanceOf(vault());
         _pushAllToVault(address(asset));
