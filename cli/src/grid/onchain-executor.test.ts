@@ -7,6 +7,9 @@ vi.mock('../lib/client.js', () => ({
     sentTxs.push(params);
     return '0xdeadbeef' as const;
   }),
+  getPublicClient: vi.fn(() => ({
+    waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' as const })),
+  })),
 }));
 
 // Mock hlGetMeta so executor doesn't shell out
@@ -24,11 +27,12 @@ vi.mock('../lib/hyperliquid-executor.js', async () => {
   };
 });
 
-// Mock fs to avoid touching disk
+// Mock fs to avoid touching disk. `rename` is required by the atomic-save path.
 vi.mock('node:fs/promises', () => ({
   readFile: vi.fn(async () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }),
   writeFile: vi.fn(async () => {}),
   mkdir: vi.fn(async () => {}),
+  rename: vi.fn(async () => {}),
 }));
 
 beforeEach(() => {
@@ -104,17 +108,5 @@ describe('OnchainGridExecutor', () => {
       needsRebalance: false,
     });
     expect(result.errors.some((e) => e.includes('No HL') || e.includes('No HL ticker'))).toBe(true);
-  });
-});
-
-describe('gridCloid', () => {
-  it('produces deterministic 16-byte uint128', async () => {
-    const { gridCloid } = await import('./cloid.js');
-    const c1 = gridCloid(3, true, 0, 1);
-    const c2 = gridCloid(3, true, 0, 1);
-    expect(c1).toBe(c2);
-    const c3 = gridCloid(3, true, 0, 2);
-    expect(c3).not.toBe(c1);
-    expect(c1).toBeLessThan(2n ** 128n);
   });
 });

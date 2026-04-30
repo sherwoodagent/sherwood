@@ -338,8 +338,8 @@ export class GridManager {
       if (!price || price <= 0) continue;
 
       const wasEmpty = grid.levels.length === 0;
-      const fullRebuild = wasEmpty || this.needsFullRebuildPublic(grid);
-      const shift = !fullRebuild && grid.centerPrice > 0 && this.needsShiftPublic(grid, price);
+      const fullRebuild = wasEmpty || this.needsFullRebuild(grid);
+      const shift = !fullRebuild && grid.centerPrice > 0 && this.needsShift(grid, price);
 
       if (fullRebuild || shift) {
         needsRebalance = true;
@@ -358,16 +358,6 @@ export class GridManager {
     }
 
     return { ordersToPlace, assetsToCancel, needsRebalance };
-  }
-
-  /** Public wrapper for needsFullRebuild — used by computeOrders. */
-  needsFullRebuildPublic(grid: GridTokenState): boolean {
-    return this.needsFullRebuild(grid);
-  }
-
-  /** Public wrapper for needsShift — used by computeOrders. */
-  needsShiftPublic(grid: GridTokenState, currentPrice: number): boolean {
-    return this.needsShift(grid, currentPrice);
   }
 
   /** Get aggregate stats for display. */

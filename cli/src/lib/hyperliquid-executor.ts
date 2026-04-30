@@ -225,22 +225,33 @@ export interface HLAssetMeta {
   pxDecimals: number;
 }
 
+const META_TTL_MS = 60 * 60 * 1000; // 1 hour
 let _metaCache: Map<string, HLAssetMeta> | null = null;
+let _metaCachedAt = 0;
 
 /**
  * Fetch HL perp universe metadata, returning per-coin szDecimals + pxDecimals.
- * Caches the result for the process lifetime — restart to refresh.
+ * Caches the result for {@link META_TTL_MS} so long-running daemons refresh
+ * after universe additions without needing a restart.
  */
 export async function hlGetMeta(): Promise<Map<string, HLAssetMeta>> {
-  if (_metaCache) return _metaCache;
+  if (_metaCache && Date.now() - _metaCachedAt < META_TTL_MS) return _metaCache;
   const raw = await runHLScript('meta');
   const universe = JSON.parse(raw) as Array<{ name: string; szDecimals: number }>;
-  _metaCache = new Map();
+  const fresh = new Map<string, HLAssetMeta>();
   for (const u of universe) {
     // Hyperliquid convention: pxDecimals = 6 - szDecimals (so price * 10^pxDecimals fits uint64).
     // Reference: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#perpetuals-metadata
     const pxDecimals = 6 - u.szDecimals;
-    _metaCache.set(u.name, { name: u.name, szDecimals: u.szDecimals, pxDecimals });
+    fresh.set(u.name, { name: u.name, szDecimals: u.szDecimals, pxDecimals });
   }
+  _metaCache = fresh;
+  _metaCachedAt = Date.now();
   return _metaCache;
+}
+
+/** Force refetch on next hlGetMeta() call. */
+export function hlInvalidateMeta(): void {
+  _metaCache = null;
+  _metaCachedAt = 0;
 }
