@@ -280,19 +280,7 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         if (isCollaborative) {
             p.state = ProposalState.Draft;
         } else {
-            // -1 closes the same-block flash-delegate window (G-C1).
-            p.snapshotTimestamp = block.timestamp - 1;
-            p.voteEnd = block.timestamp + _params.votingPeriod;
-            p.reviewEnd = p.voteEnd + reviewPeriod_;
-            p.executeBy = p.reviewEnd + _params.executionWindow;
-            p.state = ProposalState.Pending;
-            // G-H6: snapshot vetoThresholdBps so a mid-vote timelock finalize
-            // can't retroactively move the threshold for this proposal.
-            p.vetoThresholdBps = _params.vetoThresholdBps;
-            // Draft doesn't count (not binding on the vault); Pending does.
-            unchecked {
-                ++openProposalCount[vault];
-            }
+            _initPendingProposal(p, reviewPeriod_);
         }
 
         // Store calls separately
@@ -683,6 +671,26 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     // (see overrides above).
 
     // ==================== INTERNAL ====================
+
+    /// @dev Hoisted out of `propose` to keep that function under Yul's
+    ///      stack budget when `forge coverage` runs (optimizer + viaIR off).
+    ///      Reads `vault` from storage (already written by caller) to keep
+    ///      the call-site arg count to two.
+    function _initPendingProposal(StrategyProposal storage p, uint256 reviewPeriod_) private {
+        // -1 closes the same-block flash-delegate window (G-C1).
+        p.snapshotTimestamp = block.timestamp - 1;
+        p.voteEnd = block.timestamp + _params.votingPeriod;
+        p.reviewEnd = p.voteEnd + reviewPeriod_;
+        p.executeBy = p.reviewEnd + _params.executionWindow;
+        p.state = ProposalState.Pending;
+        // G-H6: snapshot vetoThresholdBps so a mid-vote timelock finalize
+        // can't retroactively move the threshold for this proposal.
+        p.vetoThresholdBps = _params.vetoThresholdBps;
+        // Draft doesn't count (not binding on the vault); Pending does.
+        unchecked {
+            ++openProposalCount[p.vault];
+        }
+    }
 
     /// @dev Push calldata calls into a storage mapping slot
     function _storeCalls(
