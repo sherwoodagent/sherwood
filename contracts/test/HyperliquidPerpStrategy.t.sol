@@ -19,7 +19,6 @@ contract HyperliquidPerpStrategyTest is Test {
     address public attacker = makeAddr("attacker");
 
     uint256 constant DEPOSIT = 10_000e6;
-    uint256 constant MIN_RETURN = 9_900e6;
     uint32 constant PERP_ASSET = 3; // ETH
     uint32 constant LEVERAGE = 5;
     uint256 constant MAX_POSITION = 100_000e6; // 100k USDC
@@ -37,8 +36,7 @@ contract HyperliquidPerpStrategyTest is Test {
         address payable clone = payable(Clones.clone(address(template)));
         strategy = HyperliquidPerpStrategy(clone);
 
-        bytes memory initData =
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(usdc), DEPOSIT, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
         strategy.initialize(vault, proposer, initData);
 
         // Fund vault
@@ -54,7 +52,6 @@ contract HyperliquidPerpStrategyTest is Test {
         assertEq(strategy.proposer(), proposer);
         assertEq(address(strategy.asset()), address(usdc));
         assertEq(strategy.depositAmount(), DEPOSIT);
-        assertEq(strategy.minReturnAmount(), MIN_RETURN);
         assertEq(strategy.perpAssetIndex(), PERP_ASSET);
         assertEq(strategy.leverage(), LEVERAGE);
         assertEq(strategy.settled(), false);
@@ -67,23 +64,21 @@ contract HyperliquidPerpStrategyTest is Test {
     }
 
     function test_initialize_twice_reverts() public {
-        bytes memory initData =
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(usdc), DEPOSIT, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
         vm.expectRevert(BaseStrategy.AlreadyInitialized.selector);
         strategy.initialize(vault, proposer, initData);
     }
 
     function test_initialize_zeroAsset_reverts() public {
         address payable clone = payable(Clones.clone(address(template)));
-        bytes memory initData =
-            abi.encode(address(0), DEPOSIT, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(0), DEPOSIT, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
         vm.expectRevert(BaseStrategy.ZeroAddress.selector);
         HyperliquidPerpStrategy(clone).initialize(vault, proposer, initData);
     }
 
     function test_initialize_zeroDeposit_allowsDynamicAll() public {
         address payable clone = payable(Clones.clone(address(template)));
-        bytes memory initData = abi.encode(address(usdc), 0, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(usdc), 0, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
         HyperliquidPerpStrategy(clone).initialize(vault, proposer, initData);
         assertEq(HyperliquidPerpStrategy(clone).depositAmount(), 0);
     }
@@ -91,7 +86,7 @@ contract HyperliquidPerpStrategyTest is Test {
     function test_execute_dynamicAll_usesFullVaultBalance() public {
         address payable clone = payable(Clones.clone(address(template)));
         HyperliquidPerpStrategy s = HyperliquidPerpStrategy(clone);
-        bytes memory initData = abi.encode(address(usdc), 0, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(usdc), 0, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
         s.initialize(vault, proposer, initData);
 
         uint256 vaultBalance = usdc.balanceOf(vault);
@@ -110,7 +105,7 @@ contract HyperliquidPerpStrategyTest is Test {
     function test_execute_dynamicAll_zeroVaultBalance_reverts() public {
         address payable clone = payable(Clones.clone(address(template)));
         HyperliquidPerpStrategy s = HyperliquidPerpStrategy(clone);
-        bytes memory initData = abi.encode(address(usdc), 0, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(usdc), 0, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
         s.initialize(vault, proposer, initData);
 
         deal(address(usdc), vault, 0);
@@ -125,7 +120,7 @@ contract HyperliquidPerpStrategyTest is Test {
     function test_execute_dynamicAll_vaultBalanceTooLarge_reverts() public {
         address payable clone = payable(Clones.clone(address(template)));
         HyperliquidPerpStrategy s = HyperliquidPerpStrategy(clone);
-        bytes memory initData = abi.encode(address(usdc), 0, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(usdc), 0, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
         s.initialize(vault, proposer, initData);
 
         // Fund vault beyond uint64.max
@@ -141,32 +136,28 @@ contract HyperliquidPerpStrategyTest is Test {
     function test_initialize_depositTooLarge_reverts() public {
         address payable clone = payable(Clones.clone(address(template)));
         uint256 tooLarge = uint256(type(uint64).max) + 1;
-        bytes memory initData =
-            abi.encode(address(usdc), tooLarge, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(usdc), tooLarge, PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
         vm.expectRevert(HyperliquidPerpStrategy.DepositAmountTooLarge.selector);
         HyperliquidPerpStrategy(clone).initialize(vault, proposer, initData);
     }
 
     function test_initialize_zeroLeverage_reverts() public {
         address payable clone = payable(Clones.clone(address(template)));
-        bytes memory initData =
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, PERP_ASSET, uint32(0), MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(usdc), DEPOSIT, PERP_ASSET, uint32(0), MAX_POSITION, MAX_TRADES);
         vm.expectRevert(HyperliquidPerpStrategy.InvalidAmount.selector);
         HyperliquidPerpStrategy(clone).initialize(vault, proposer, initData);
     }
 
     function test_initialize_leverageTooHigh_reverts() public {
         address payable clone = payable(Clones.clone(address(template)));
-        bytes memory initData =
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, PERP_ASSET, uint32(51), MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(usdc), DEPOSIT, PERP_ASSET, uint32(51), MAX_POSITION, MAX_TRADES);
         vm.expectRevert(HyperliquidPerpStrategy.InvalidAmount.selector);
         HyperliquidPerpStrategy(clone).initialize(vault, proposer, initData);
     }
 
     function test_initialize_maxLeverage_succeeds() public {
         address payable clone = payable(Clones.clone(address(template)));
-        bytes memory initData =
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, PERP_ASSET, uint32(50), MAX_POSITION, MAX_TRADES);
+        bytes memory initData = abi.encode(address(usdc), DEPOSIT, PERP_ASSET, uint32(50), MAX_POSITION, MAX_TRADES);
         HyperliquidPerpStrategy(clone).initialize(vault, proposer, initData);
         assertEq(HyperliquidPerpStrategy(clone).leverage(), 50);
     }
@@ -218,14 +209,6 @@ contract HyperliquidPerpStrategyTest is Test {
     function _executeFirst() internal {
         vm.prank(vault);
         strategy.execute();
-    }
-
-    function test_updateParams_updateMinReturn() public {
-        _executeFirst();
-        bytes memory data = abi.encode(uint8(0), uint256(5_000e6));
-        vm.prank(proposer);
-        strategy.updateParams(data);
-        assertEq(strategy.minReturnAmount(), 5_000e6);
     }
 
     function test_updateParams_openLong() public {
@@ -288,14 +271,14 @@ contract HyperliquidPerpStrategyTest is Test {
 
     function test_updateParams_notProposer_reverts() public {
         _executeFirst();
-        bytes memory data = abi.encode(uint8(0), uint256(5_000e6));
+        bytes memory data = abi.encode(uint8(2), uint64(3100e6), uint64(1e6));
         vm.prank(attacker);
         vm.expectRevert(BaseStrategy.NotProposer.selector);
         strategy.updateParams(data);
     }
 
     function test_updateParams_notExecuted_reverts() public {
-        bytes memory data = abi.encode(uint8(0), uint256(5_000e6));
+        bytes memory data = abi.encode(uint8(2), uint64(3100e6), uint64(1e6));
         vm.prank(proposer);
         vm.expectRevert(BaseStrategy.NotExecuted.selector);
         strategy.updateParams(data);
@@ -396,20 +379,6 @@ contract HyperliquidPerpStrategyTest is Test {
         assertEq(usdc.balanceOf(attacker), 0); // Attacker gets nothing
     }
 
-    function test_sweepToVault_enforces_minReturnAmount() public {
-        _settleFirst();
-        _burnStrategyBalance();
-
-        uint256 insufficientAmount = MIN_RETURN - 1;
-        usdc.mint(address(strategy), insufficientAmount);
-
-        // cumulativeSwept (0) + bal (insufficient) < MIN_RETURN
-        vm.expectRevert(
-            abi.encodeWithSelector(HyperliquidPerpStrategy.InsufficientReturn.selector, insufficientAmount, MIN_RETURN)
-        );
-        strategy.sweepToVault();
-    }
-
     function test_sweepToVault_zeroBalance_reverts() public {
         _settleFirst();
         _burnStrategyBalance();
@@ -436,7 +405,7 @@ contract HyperliquidPerpStrategyTest is Test {
         // Second sweep — more USDC arrives (partial async)
         usdc.mint(address(strategy), 500e6);
         uint256 vaultBefore = usdc.balanceOf(vault);
-        strategy.sweepToVault(); // Does not revert (cumulative >= minReturn)
+        strategy.sweepToVault();
         assertEq(usdc.balanceOf(vault) - vaultBefore, 500e6);
         assertEq(strategy.cumulativeSwept(), DEPOSIT + 500e6);
     }
@@ -445,55 +414,13 @@ contract HyperliquidPerpStrategyTest is Test {
         _settleFirst();
         _burnStrategyBalance();
 
-        // First sweep with enough funds
+        // First sweep with full deposit
         usdc.mint(address(strategy), DEPOSIT);
         strategy.sweepToVault();
 
-        // Second sweep with just 1 wei — succeeds because cumulative (DEPOSIT+1) >= MIN_RETURN
+        // Second sweep with just 1 wei — succeeds; no minReturn gate.
         usdc.mint(address(strategy), 1);
         strategy.sweepToVault(); // Does not revert
-    }
-
-    /// @notice #255 S-C6 regression: dust race must not bypass minReturnAmount.
-    function test_sweepToVault_dustRaceCannotBypassMinReturn() public {
-        _settleFirst();
-        _burnStrategyBalance();
-
-        // Attacker triggers first sweep with 100 USDC of dust (< MIN_RETURN = 9_900)
-        usdc.mint(address(strategy), 100e6);
-        vm.expectRevert(abi.encodeWithSelector(HyperliquidPerpStrategy.InsufficientReturn.selector, 100e6, MIN_RETURN));
-        strategy.sweepToVault();
-        assertEq(strategy.cumulativeSwept(), 0); // Failed sweep does not advance accumulator
-
-        // More USDC arrives — total now 10,100 > MIN_RETURN
-        usdc.mint(address(strategy), 10_000e6);
-        strategy.sweepToVault();
-        assertEq(strategy.cumulativeSwept(), 10_100e6);
-    }
-
-    function test_sweepToVault_zeroMinReturn_skipsCheck() public {
-        // Create strategy with minReturnAmount = 0
-        address payable clone = payable(Clones.clone(address(template)));
-        HyperliquidPerpStrategy strat2 = HyperliquidPerpStrategy(clone);
-        bytes memory initData =
-            abi.encode(address(usdc), DEPOSIT, uint256(0), PERP_ASSET, LEVERAGE, MAX_POSITION, MAX_TRADES);
-        strat2.initialize(vault, proposer, initData);
-
-        usdc.mint(vault, DEPOSIT);
-        vm.prank(vault);
-        usdc.approve(address(strat2), type(uint256).max);
-
-        vm.prank(vault);
-        strat2.execute();
-        vm.prank(vault);
-        strat2.settle();
-
-        // Even 1 wei should work with minReturnAmount = 0
-        usdc.mint(address(strat2), 1);
-        strat2.sweepToVault();
-        // Strategy still holds DEPOSIT from execute (mock doesn't actually move
-        // funds via L1Write.sendUsdClassTransfer), so cumulativeSwept == DEPOSIT + 1
-        assertEq(strat2.cumulativeSwept(), DEPOSIT + 1);
     }
 
     // ==================== FULL LIFECYCLE ====================
@@ -568,9 +495,7 @@ contract HyperliquidPerpStrategyTest is Test {
         address payable clone = payable(Clones.clone(address(template)));
         HyperliquidPerpStrategy strat = HyperliquidPerpStrategy(clone);
         strat.initialize(
-            vault,
-            proposer,
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, uint32(2))
+            vault, proposer, abi.encode(address(usdc), DEPOSIT, PERP_ASSET, LEVERAGE, MAX_POSITION, uint32(2))
         );
         usdc.mint(vault, DEPOSIT);
         vm.prank(vault);
@@ -597,9 +522,7 @@ contract HyperliquidPerpStrategyTest is Test {
         address payable clone = payable(Clones.clone(address(template)));
         HyperliquidPerpStrategy strat = HyperliquidPerpStrategy(clone);
         strat.initialize(
-            vault,
-            proposer,
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, uint32(1))
+            vault, proposer, abi.encode(address(usdc), DEPOSIT, PERP_ASSET, LEVERAGE, MAX_POSITION, uint32(1))
         );
         usdc.mint(vault, DEPOSIT);
         vm.prank(vault);
@@ -629,9 +552,7 @@ contract HyperliquidPerpStrategyTest is Test {
         address payable clone = payable(Clones.clone(address(template)));
         HyperliquidPerpStrategy strat = HyperliquidPerpStrategy(clone);
         strat.initialize(
-            vault,
-            proposer,
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, PERP_ASSET, LEVERAGE, uint256(1000e6), MAX_TRADES)
+            vault, proposer, abi.encode(address(usdc), DEPOSIT, PERP_ASSET, LEVERAGE, uint256(1000e6), MAX_TRADES)
         );
         usdc.mint(vault, DEPOSIT);
         vm.prank(vault);
@@ -642,30 +563,6 @@ contract HyperliquidPerpStrategyTest is Test {
         // Attempt to open a position worth ~3000 USDC (3000e6 * 1e6 / 1e6 = 3000e6)
         vm.prank(proposer);
         vm.expectRevert(abi.encodeWithSelector(HyperliquidPerpStrategy.PositionTooLarge.selector, 3000e6, 1000e6));
-        strat.updateParams(abi.encode(uint8(1), uint64(3000e6), uint64(1e6), uint64(2800e6), uint64(1e6)));
-    }
-
-    function test_updateMinReturn_doesNotCountAsTrade() public {
-        // Create strategy with maxTradesPerDay = 1
-        address payable clone = payable(Clones.clone(address(template)));
-        HyperliquidPerpStrategy strat = HyperliquidPerpStrategy(clone);
-        strat.initialize(
-            vault,
-            proposer,
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, PERP_ASSET, LEVERAGE, MAX_POSITION, uint32(1))
-        );
-        usdc.mint(vault, DEPOSIT);
-        vm.prank(vault);
-        usdc.approve(address(strat), type(uint256).max);
-        vm.prank(vault);
-        strat.execute();
-
-        // Action 0 (update min return) should NOT count as a trade
-        vm.prank(proposer);
-        strat.updateParams(abi.encode(uint8(0), uint256(5_000e6)));
-
-        // Trade 1 — should still be allowed (counter not incremented by action 0)
-        vm.prank(proposer);
         strat.updateParams(abi.encode(uint8(1), uint64(3000e6), uint64(1e6), uint64(2800e6), uint64(1e6)));
     }
 }

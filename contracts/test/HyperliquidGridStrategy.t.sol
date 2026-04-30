@@ -18,7 +18,6 @@ contract HyperliquidGridStrategyTest is Test {
     address public attacker = makeAddr("attacker");
 
     uint256 constant DEPOSIT = 10_000e6;
-    uint256 constant MIN_RETURN = 9_900e6;
     uint32 constant LEVERAGE = 5;
     uint256 constant MAX_ORDER_SIZE = 100_000e6;
     uint32 constant MAX_ORDERS = 32;
@@ -41,8 +40,7 @@ contract HyperliquidGridStrategyTest is Test {
         assets[1] = ETH_ASSET;
         assets[2] = SOL_ASSET;
 
-        bytes memory initData =
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, LEVERAGE, MAX_ORDER_SIZE, MAX_ORDERS, assets);
+        bytes memory initData = abi.encode(address(usdc), DEPOSIT, LEVERAGE, MAX_ORDER_SIZE, MAX_ORDERS, assets);
         strategy.initialize(vault, proposer, initData);
 
         usdc.mint(vault, 100_000e6);
@@ -190,17 +188,6 @@ contract HyperliquidGridStrategyTest is Test {
         strategy.sweepToVault();
     }
 
-    function test_sweepToVault_revertsIfBelowMinReturn() public {
-        _execAndPrep();
-        vm.prank(vault);
-        strategy.settle();
-        // Drain strategy so balance < MIN_RETURN
-        vm.prank(address(strategy));
-        usdc.transfer(attacker, DEPOSIT - 1000e6); // leave 1000e6 < 9900e6
-        vm.expectRevert(abi.encodeWithSelector(HyperliquidGridStrategy.InsufficientReturn.selector, 1000e6, MIN_RETURN));
-        strategy.sweepToVault();
-    }
-
     function test_updateParams_placeGrid_revertsOnOrderTooLarge() public {
         _execAndPrep();
         HyperliquidGridStrategy.GridOrder[] memory orders = new HyperliquidGridStrategy.GridOrder[](1);
@@ -228,24 +215,5 @@ contract HyperliquidGridStrategyTest is Test {
         uint256 vaultBefore = usdc.balanceOf(vault);
         strategy.sweepToVault();
         assertEq(usdc.balanceOf(vault), vaultBefore + 5_000e6);
-    }
-
-    function test_sweepToVault_dustRaceCannotBypassMinReturn() public {
-        _execAndPrep();
-        vm.prank(vault);
-        strategy.settle();
-        // Drain to dust
-        vm.prank(address(strategy));
-        usdc.transfer(attacker, DEPOSIT - 100e6); // leave 100 USDC
-
-        // Attacker tries to sweep dust (100 USDC < 9900 minReturn)
-        vm.expectRevert(abi.encodeWithSelector(HyperliquidGridStrategy.InsufficientReturn.selector, 100e6, MIN_RETURN));
-        strategy.sweepToVault();
-
-        // More USDC arrives bringing total to over minReturn
-        usdc.mint(address(strategy), 10_000e6); // total 10,100
-        // Now sweep succeeds — cumulativeSwept (0) + bal (10,100) >= 9,900
-        strategy.sweepToVault();
-        assertEq(strategy.cumulativeSwept(), 10_100e6);
     }
 }
