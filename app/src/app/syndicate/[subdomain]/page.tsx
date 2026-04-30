@@ -99,6 +99,9 @@ export default async function SyndicateDetailPage({
     addressNames[agent.agentAddress.toLowerCase()] = displayName;
   }
   const creatorKey = data.creator.toLowerCase();
+  const creatorAgentId = data.agents
+    .find((a) => a.agentAddress.toLowerCase() === creatorKey)
+    ?.agentId.toString();
   const chainAddrs = getAddresses(data.chainId);
   const hasIdentityRegistry = chainAddrs.identityRegistry !== "0x0000000000000000000000000000000000000000";
   const hasEAS = !!chainAddrs.easExplorer;
@@ -150,6 +153,7 @@ export default async function SyndicateDetailPage({
             vault={data.vault}
             creator={data.creator}
             creatorName={addressNames[creatorKey]}
+            creatorAgentId={creatorAgentId}
             paused={data.paused}
             chainId={data.chainId}
             assetDecimals={data.assetDecimals}

@@ -138,6 +138,7 @@ export default async function AgentDetailPage({
             vault={data.vault}
             creator={data.creator}
             creatorName={addressNames[data.creator.toLowerCase()]}
+            creatorAgentId={data.agents.find((a) => a.agentAddress.toLowerCase() === data.creator.toLowerCase())?.agentId.toString()}
             paused={data.paused}
             chainId={data.chainId}
             assetDecimals={data.assetDecimals}
