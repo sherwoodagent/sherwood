@@ -71,6 +71,14 @@ Async-redeem queue lets LPs request exits while a strategy proposal is active an
 |---|---|---|---|
 | AR-LN | LPs cannot exit while a proposal is active — competitive parity gap vs. async-redeem vaults (e.g. Concrete) | New per-vault `VaultWithdrawalQueue` deployed by factory at `createSyndicate`. `vault.requestRedeem(shares, owner)` escrows shares while locked; `queue.claim(requestId)` burns + pays out post-settle. Vault tracks `pendingQueueShares()` / `reservedQueueAssets()`; non-queue `withdraw`/`redeem` capped via `maxWithdraw` / `maxRedeem` overrides so queue claims cannot be starved. Invariants INV-Q1/Q2/Q3 added under `test/invariants/`. | `f921dfa`, `16a4729`, `68e065c`, `063ff9f`, `641de9e`, `cd30ac3`, `ab87613`, `2bedc9e`, `2b51a32` |
 
+## 2.6 Closed in `feat/live-nav-async-withdrawals` (Phase 2)
+
+Live NAV via a per-proposal `IStrategy` adapter. Vault `totalAssets()` aggregates float + adapter-reported NAV (only while locked). When adapter `positionValue()` returns `valid=true`, `_deposit` and `_withdraw` are unlocked even mid-proposal so LPs can enter/exit at fair NAV instead of being routed through the queue. Closes the second half of the V1 UX gap (queue is still the fallback when an adapter has no live NAV).
+
+| Ref | Finding | How Phase 2 addresses it | Commit(s) |
+|---|---|---|---|
+| AR-LN2 | Phase 2: live NAV via `IStrategy` adapter; deposit/withdraw unlocked when adapter reports `valid`; `onLiveDeposit` forwarding routes mid-strategy deposits into the position | `vault._activeStrategyAdapter` slot bound by governor (`bindProposalAdapter` → vault `setActiveStrategyAdapter`). `totalAssets()` reads `IStrategy.positionValue()` only while `redemptionsLocked() == true` — implicit clear after settle. Lock relaxation: `_deposit`/`_withdraw` revert only when `redemptionsLocked() && !_liveNAVAvailable()`. `IStrategy.onLiveDeposit(assets)` hook (no-op default in `BaseStrategy`, override in `MoonwellSupplyStrategy`) forwards new capital into the position. Spec: `docs/superpowers/specs/2026-04-30-live-nav-async-withdrawals-design.md`. | `6bf0227`, `44fe18d`, `7daf8e3`, `864e5fe`, `d777246` |
+
 ---
 
 ## 3. Critical bug findings still open (from #225)

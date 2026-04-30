@@ -103,11 +103,12 @@ Live contract sizes from `forge build --sizes` (2026-04):
 
 | Contract | Runtime | Notes |
 |---|---|---|
-| SyndicateGovernor | 24,255 | **321-byte EIP-170 margin** (post-PR #256 `_initPendingProposal` extraction) |
+| SyndicateGovernor | 24,524 | **52-byte EIP-170 margin** (post Phase 2 adapter binding; tight — re-measure before any edit) |
 | SyndicateFactory | 14,600 | grew with `VaultWithdrawalQueue` deploy at `createSyndicate` (Phase 1 async-redeem) |
 | GuardianRegistry | 24,306 | **270-byte EIP-170 margin** (post-PR #252 review fix) |
-| SyndicateVault | 21,444 | CI gate at 22,000; +1,563 bytes for `requestRedeem` + queue reserve accounting |
+| SyndicateVault | 22,399 | CI gate bumped to 22,500; live-NAV adapter slot + lock-aware deposit/withdraw + `onLiveDeposit` forwarding (Phase 2) |
 | VaultWithdrawalQueue | 2,502 | per-vault async redemption escrow (Phase 1 live-NAV / async-withdrawals) |
+| MoonwellSupplyStrategy | 3,659 | absorbs mid-strategy LP deposits via `onLiveDeposit` override (Phase 2) |
 | WoodToken | 15,850 | ERC20Votes + OFT multi-inherit (Phase 1 V1.5) |
 
 - **SyndicateVault** — ERC-4626 vault with ERC20Votes for governance. Standard `redeem()`/`withdraw()` for LP exits (no custom ragequit). `_decimalsOffset()` = `asset.decimals()` for first-depositor inflation protection (shares have 12 decimals for USDC). Deposits and `rescueERC20` are blocked during active proposals (`redemptionsLocked()`).
@@ -128,6 +129,15 @@ Live contract sizes from `forge build --sizes` (2026-04):
 - Vault tracks `pendingQueueShares()` and `reservedQueueAssets()`. Standard `withdraw`/`redeem` from non-queue callers is capped via `maxWithdraw`/`maxRedeem` overrides so queue claims cannot be starved. The queue address is special-cased to bypass these caps.
 - `_withdraw` keeps a `caller != _withdrawalQueue` reserve guard as defense-in-depth.
 
+### Live NAV via strategy adapter (V2)
+
+- **Adapter binding flow** — Proposer creates a strategy clone, then before execute calls `governor.bindProposalAdapter(proposalId, adapter)`. The governor pushes the address synchronously onto `vault._activeStrategyAdapter` via `setActiveStrategyAdapter`. No governor-side mapping is kept (size-aware redesign — every byte counts at the 24,524-byte governor runtime).
+- **Implicit clear via lock state** — The vault's `totalAssets` ignores `_activeStrategyAdapter` whenever `!redemptionsLocked()`. After settle, the slot retains the last-bound address but it has zero observable effect. Re-bind on the next proposal overwrites it.
+- **Live NAV math** — `totalAssets() = float + (adapter == 0 || !locked ? 0 : (valid ? value : 0))`. Standard OZ ERC-4626 virtual-shares math is unchanged.
+- **Lock relaxation** — `_deposit` and `_withdraw` revert only when `redemptionsLocked() && !_liveNAVAvailable()`. When live NAV is available, both are unlocked. `requestRedeem` still requires `redemptionsLocked() == true` (queue path) and works regardless of adapter validity.
+- **`onLiveDeposit` hook** — `vault._deposit` forwards new assets via `IStrategy(adapter).onLiveDeposit(assets)` after `super._deposit`. Default in `BaseStrategy` is a no-op; `MoonwellSupplyStrategy` overrides to mint additional mTokens. Push-and-call: vault `safeTransfer`s the assets to the adapter, then calls `onLiveDeposit` (no `transferFrom` allowance flow).
+- **Strategy support matrix** — see `docs/superpowers/specs/2026-04-30-live-nav-async-withdrawals-design.md` §6. Currently only `MoonwellSupplyStrategy` is wired for live NAV; other adapters inherit the default no-op and the vault falls back to queue-only behavior under their proposals.
+
 ### Governor Key Concepts
 
 - **Optimistic governance** — Proposals pass by default after voting period ends. Only rejected if AGAINST votes reach `vetoThresholdBps`. Vault owner can `vetoProposal()` only while the proposal is `Pending`; once the proposal enters `GuardianReview`, the only way to block is a guardian block-quorum.
@@ -138,7 +148,8 @@ Live contract sizes from `forge build --sizes` (2026-04):
 - **Guardian fee (V1.5)** — `guardianFeeBps` (max 5% / 500 bps) + `guardianFeeRecipient` (set to GuardianRegistry at deploy). On successful settle, a slice is transferred to the registry which stamps `_proposalGuardianPool[proposalId]`. Approvers claim via `registry.claimProposalReward(pid)` (DPoS commission split); delegators via `registry.claimDelegatorProposalReward(delegate, pid)`. W-1 escrow handles USDC-blacklist-style transfer failures (`flushUnclaimedApproverFee` retries). Fixes the approve-bias problem (V1 only rewarded blockers).
 - **Four emergency entrypoints** (on `GovernorEmergency`): (1) `unstick()` — owner-instant, pre-committed calls only, no new calldata; (2) `emergencySettleWithCalls(calls)` — commits calldata hash and opens a guardian-reviewed window (default 24h); (3) `finalizeEmergencySettle(calls)` — after review window, executes if not blocked or reverts if guardians reached block quorum (owner stake burned); (4) `cancelEmergencySettle()` — owner withdraws a pending emergency settle during the review window.
 - **Standard settlement** still happens via `settleProposal` — proposer anytime, anyone after strategy duration.
-- **Vault reads governor from factory** — no `setGovernor` on vault, no lock/unlock storage. `redemptionsLocked()` checks `governor.getActiveProposal()` directly.
+- **Vault reads governor from factory** — no `setGovernor` on vault, no lock/unlock storage. `redemptionsLocked()` checks `governor.getActiveProposal()` directly. Lock state is the single source of truth for the active-strategy adapter slot: `totalAssets()` and the deposit/withdraw lock-relaxation only consult `_activeStrategyAdapter` while `redemptionsLocked() == true` (Phase 2 — see "Live NAV via strategy adapter" below).
+- **Live NAV via strategy adapter (V2)** — Proposers may call `governor.bindProposalAdapter(proposalId, adapter)` before execute to bind an `IStrategy` clone whose `positionValue() returns (uint256 value, bool valid)` is queryable. The vault reads the adapter inside `totalAssets()` and gates the read on `redemptionsLocked()` so stale pointers are silently ignored after settle. When the adapter reports `valid=true`, `_deposit` and `_withdraw` are unlocked even during an active proposal — share price is queryable so LPs can enter/exit at fair NAV. The vault also forwards new deposits to the adapter via `IStrategy.onLiveDeposit(assets)` so capital starts earning immediately. Strategies without a live NAV (Mamo / Venice / off-chain perps) return `(0, false)` and the vault falls back to the queue path.
 
 ### Guardian Review Lifecycle
 
