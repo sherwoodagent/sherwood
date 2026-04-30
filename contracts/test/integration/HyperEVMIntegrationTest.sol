@@ -12,6 +12,7 @@ import {GuardianRegistry} from "../../src/GuardianRegistry.sol";
 import {BatchExecutorLib} from "../../src/BatchExecutorLib.sol";
 import {DeploySherwood} from "../../script/Deploy.s.sol";
 import {DeployTemplates} from "../../script/DeployTemplates.s.sol";
+import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 
 /**
  * @title HyperEVMIntegrationTest
@@ -43,9 +44,13 @@ abstract contract HyperEVMIntegrationTest is Test {
     SyndicateGovernor governor;
     SyndicateFactory factory;
     GuardianRegistry registry;
+    ERC20Mock wood;
     address vaultImpl;
     address executorLib;
     address hyperliquidGridTemplate;
+
+    // Matches Deploy.s.sol DEFAULT_MIN_OWNER_STAKE
+    uint256 constant MIN_OWNER_STAKE = 10_000e18;
 
     // ── Per-test syndicate ──
     SyndicateVault vault;
@@ -61,12 +66,18 @@ abstract contract HyperEVMIntegrationTest is Test {
         }
         vm.createSelectFork(rpc);
 
+        _deployWood();
         _deployProtocol();
         _deployTemplates();
+        _bondOwnerStake();
 
         // Fund LPs with HyperEVM-native USDC via deal()
         deal(USDC, lp1, 60_000e6);
         deal(USDC, lp2, 40_000e6);
+    }
+
+    function _deployWood() internal {
+        wood = new ERC20Mock("Wood", "WOOD", 18);
     }
 
     // ── Protocol deployment via the existing scripts ──
@@ -79,13 +90,21 @@ abstract contract HyperEVMIntegrationTest is Test {
             managementFeeBps: 50,
             protocolFeeBps: 200,
             maxStrategyDays: 14,
-            woodToken: address(this), // dummy — registry init requires non-zero, fork tests don't use WOOD
+            woodToken: address(wood),
             slashAppealSeed: 0,
             epochZeroSeed: 0
         });
-        vm.startBroadcast(owner);
+        // `_deployCore` constructs a Create3Factory owned by `msg.sender` and
+        // then calls `c3.deploy(...)` from inside itself — so the owner must be
+        // `address(deployScript)`. `vm.startBroadcast` only changes msg.sender
+        // for *direct* external calls from the test contract; nested calls
+        // inside the script still use the script's address. Pranking as the
+        // script gives consistent ownership across the full deploy chain.
+        // The resulting governor/factory/registry owners are also the script,
+        // which is fine: these tests only exercise permissionless paths
+        // (`createSyndicate`, voting, settlement) and never owner-gated ones.
+        vm.prank(address(deployScript));
         DeploySherwood.Deployed memory d = deployScript._deployCore(cfg);
-        vm.stopBroadcast();
 
         governor = SyndicateGovernor(d.governorProxy);
         factory = SyndicateFactory(d.factoryProxy);
@@ -96,9 +115,22 @@ abstract contract HyperEVMIntegrationTest is Test {
 
     function _deployTemplates() internal {
         DeployTemplates t = new DeployTemplates();
-        vm.startBroadcast(owner);
+        // Same reason as _deployProtocol: prank as the script so internal
+        // c3.deploy calls match the Create3Factory owner.
+        vm.prank(address(t));
         hyperliquidGridTemplate = t._deployHyperliquidGridTemplate();
-        vm.stopBroadcast();
+    }
+
+    /// @dev Mints WOOD to the syndicate owner and prepares the owner stake so that
+    ///      `SyndicateFactory.createSyndicate` can bind it atomically. Without this
+    ///      the factory reverts on the missing prepared stake.
+    function _bondOwnerStake() internal {
+        wood.mint(owner, MIN_OWNER_STAKE);
+        vm.startPrank(owner);
+        wood.approve(address(registry), type(uint256).max);
+        registry.prepareOwnerStake(MIN_OWNER_STAKE);
+        vm.stopPrank();
+        // Factory binds the prepared stake atomically when createSyndicate is called.
     }
 
     // ── Test syndicate creation ──
