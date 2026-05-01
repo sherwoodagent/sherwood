@@ -14,6 +14,13 @@ isolated capital, parallel to the directional agent.
 
 - `sherwood grid start` — start the standalone event loop.
 - `sherwood grid status` — print current grid state, fills, PnL.
+- `sherwood grid backtest --from <iso> --to <iso>` — replay historical
+  Hyperliquid 1-minute bars through the grid manager and report
+  PnL, round trips, drawdown. Results saved to
+  `~/.sherwood/grid/backtests/{runId}.json`. Cached fetches at
+  `~/.sherwood/grid/backtest-cache/`. See
+  `docs/superpowers/specs/2026-05-01-grid-strategy-backtester-design.md`
+  for the full design.
 - Grid does not run inside the directional agent loop. It has its own
   binary entry point and its own portfolio file.
 
