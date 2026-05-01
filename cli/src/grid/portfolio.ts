@@ -114,10 +114,11 @@ export class GridPortfolio {
   ): boolean {
     const currentValue = state.grids.reduce((sum, g) => {
       const price = prices[g.token];
+      // quantity already leveraged at build time — see manager.simulateFills.
       const unrealized = (price && price > 0)
         ? g.openFills
             .filter(f => !f.closed)
-            .reduce((s, f) => s + (price - f.buyPrice) * f.quantity * config.leverage, 0)
+            .reduce((s, f) => s + (price - f.buyPrice) * f.quantity, 0)
         : 0;
       return sum + g.allocation + unrealized;
     }, 0);

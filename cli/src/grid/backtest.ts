@@ -386,10 +386,13 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
       if (stateLiq && haltedAt === null) {
         const lev = opts.config.leverage;
         const maint = opts.config.maintenanceMarginPct;
-        // Calibrated threshold: real-world liquidation occurs at
-        // (1/lev - maint) adverse move; in our overstated PnL units that is
-        // -allocation * lev * (1 - lev*maint).
-        const liquidationCoefficient = lev * (1 - lev * maint);
+        // Now that the manager's PnL formula no longer double-counts leverage,
+        // unrealized in this loop is the REAL dollar PnL. Threshold drops
+        // by a factor of leverage vs. the previous (overstated) calibration:
+        //   real-world liquidation at (1/lev - maint) adverse move →
+        //   unrealized loss = allocation - allocation × lev × maint
+        //   = allocation × (1 - lev × maint).
+        const liquidationCoefficient = 1 - lev * maint;
         for (const grid of stateLiq.grids) {
           if (liquidatedTokens.has(grid.token)) continue;
           const close = barIndex[grid.token]?.get(t)?.c;
@@ -397,7 +400,7 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
           let unrealized = 0;
           for (const f of grid.openFills) {
             if (f.closed) continue;
-            unrealized += (close - f.buyPrice) * f.quantity * lev;
+            unrealized += (close - f.buyPrice) * f.quantity;
           }
           const tokenAlloc = initialAllocations[grid.token] ?? 0;
           const threshold = -tokenAlloc * liquidationCoefficient;
@@ -410,7 +413,7 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
               if (!f.closed) {
                 f.closed = true;
                 f.closedAt = t;
-                f.pnlUsd = (close - f.buyPrice) * f.quantity * lev;
+                f.pnlUsd = (close - f.buyPrice) * f.quantity;
               }
             }
             // Drop the level grid so manager doesn't fire new fills
@@ -475,7 +478,8 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
             if (close === undefined) continue;
             for (const f of grid.openFills) {
               if (f.closed) continue;
-              unrealizedPnl += (close - f.buyPrice) * f.quantity * opts.config.leverage;
+              // quantity already leveraged — see manager.simulateFills note.
+              unrealizedPnl += (close - f.buyPrice) * f.quantity;
             }
           }
           const runningFees = Object.values(feesByToken).reduce((a, b) => a + b, 0);

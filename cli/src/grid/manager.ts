@@ -331,7 +331,11 @@ export class GridManager {
     for (const openFill of grid.openFills) {
       if (openFill.closed) continue;
       if (this.closeFillDetector(openFill, currentPrice)) {
-        const profit = (currentPrice - openFill.buyPrice) * openFill.quantity * this.config.leverage;
+        // PnL = price_change × quantity. quantity is already the leveraged
+        // contract size (effectiveCapital / (levels × price) at build), so
+        // multiplying by leverage again would double-count. The realized
+        // dollar PnL here is the same as a real futures position would book.
+        const profit = (currentPrice - openFill.buyPrice) * openFill.quantity;
         if (profit >= this.config.minProfitPerFillUsd) {
           openFill.closed = true;
           openFill.pnlUsd = profit;
