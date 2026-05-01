@@ -62,10 +62,10 @@ describe('shortHash', () => {
 describe('computeDrawdown', () => {
   it('finds peak-to-trough drop on a known curve', () => {
     const curve = [
-      { t: 1, totalAllocation: 100, totalPnl: 0, totalRoundTrips: 0, openFillCount: 0, paused: false },
-      { t: 2, totalAllocation: 120, totalPnl: 20, totalRoundTrips: 0, openFillCount: 0, paused: false },
-      { t: 3, totalAllocation: 90, totalPnl: -10, totalRoundTrips: 0, openFillCount: 0, paused: false },
-      { t: 4, totalAllocation: 110, totalPnl: 10, totalRoundTrips: 0, openFillCount: 0, paused: false },
+      { t: 1, totalAllocation: 100, totalPnl: 0,   totalRoundTrips: 0, openFillCount: 0, paused: false },
+      { t: 2, totalAllocation: 100, totalPnl: 20,  totalRoundTrips: 0, openFillCount: 0, paused: false },
+      { t: 3, totalAllocation: 100, totalPnl: -10, totalRoundTrips: 0, openFillCount: 0, paused: false },
+      { t: 4, totalAllocation: 100, totalPnl: 10,  totalRoundTrips: 0, openFillCount: 0, paused: false },
     ];
     const dd = computeDrawdown(curve);
     expect(dd.maxUsd).toBe(30);

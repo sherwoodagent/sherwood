@@ -99,24 +99,27 @@ export function computeDrawdown(curve: EquityPoint[]): BacktestResult['drawdown'
   if (curve.length === 0) {
     return { maxUsd: 0, maxPct: 0, peakAt: 0, troughAt: 0 };
   }
-  let peak = curve[0]!.totalAllocation;
+  const equityAt = (p: EquityPoint) => p.totalAllocation + p.totalPnl;
+  let peak = equityAt(curve[0]!);
   let peakAt = curve[0]!.t;
   let maxDrop = 0;
   let dropPeakAt = peakAt;
   let dropTroughAt = peakAt;
   for (const point of curve) {
-    if (point.totalAllocation > peak) {
-      peak = point.totalAllocation;
+    const eq = equityAt(point);
+    if (eq > peak) {
+      peak = eq;
       peakAt = point.t;
     }
-    const drop = peak - point.totalAllocation;
+    const drop = peak - eq;
     if (drop > maxDrop) {
       maxDrop = drop;
       dropPeakAt = peakAt;
       dropTroughAt = point.t;
     }
   }
-  const peakValue = curve.find(p => p.t === dropPeakAt)?.totalAllocation ?? 0;
+  const peakPoint = curve.find(p => p.t === dropPeakAt);
+  const peakValue = peakPoint ? equityAt(peakPoint) : 0;
   return {
     maxUsd: maxDrop,
     maxPct: peakValue > 0 ? maxDrop / peakValue : 0,
