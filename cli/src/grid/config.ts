@@ -132,6 +132,11 @@ export interface GridConfig {
    *  threshold. Default 0.10 (10% drop in 56h = clear downtrend → don't
    *  buy into the falling knife). Set to 0 to disable filter. */
   downtrendBlockPct: number;
+  /** Force-close any open buy if currentPrice drops this fraction below
+   *  buyPrice. Per-position stop-loss: limits how much any single fill can
+   *  contribute to the cross-margin pool's drawdown. Default 0.30 (30%
+   *  adverse from entry). 0 = disabled. */
+  stopLossPct: number;
 }
 
 export const DEFAULT_GRID_CONFIG: GridConfig = {
@@ -151,4 +156,5 @@ export const DEFAULT_GRID_CONFIG: GridConfig = {
   maintenanceMarginPct: 0.02,
   maxOpenNotionalMultiple: 2.0,
   downtrendBlockPct: 0.10,
+  stopLossPct: 0.30,
 };

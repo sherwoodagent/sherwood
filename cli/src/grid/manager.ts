@@ -238,8 +238,16 @@ export class GridManager {
 
     const levels: GridLevel[] = [];
 
-    // Buy levels below current price
-    for (let i = 1; i <= this.config.levelsPerSide; i++) {
+    // Asymmetric grid in confirmed downtrend: skip most buy levels so the
+    // grid stops adding exposure to a falling knife. Keep ONE buy level just
+    // below current price so the grid can re-enter on a chop reversal once
+    // trend recovers (otherwise we'd never re-engage). Sell levels still
+    // place fully so existing inventory can exit on rallies.
+    const inDowntrend = this.config.downtrendBlockPct > 0
+      && trend < -this.config.downtrendBlockPct;
+    const buyCount = inDowntrend ? 1 : this.config.levelsPerSide;
+
+    for (let i = 1; i <= buyCount; i++) {
       levels.push({
         price: currentPrice - spacing * i,
         side: 'buy',
@@ -269,7 +277,8 @@ export class GridManager {
     console.error(chalk.dim(
       `  [grid] Built ${grid.token} grid: center=$${currentPrice.toFixed(2)} ` +
       `ATR=$${atr.toFixed(2)} range=$${(currentPrice - range).toFixed(2)}-$${(currentPrice + range).toFixed(2)} ` +
-      `spacing=$${spacing.toFixed(2)} qty=${quantity.toFixed(6)} trend=${(trend * 100).toFixed(1)}%`
+      `spacing=$${spacing.toFixed(2)} qty=${quantity.toFixed(6)} trend=${(trend * 100).toFixed(1)}%` +
+      `${inDowntrend ? ' [DOWNTREND: 1 buy / ' + this.config.levelsPerSide + ' sells]' : ''}`
     ));
   }
 
@@ -379,6 +388,31 @@ export class GridManager {
 
           console.error(chalk.green(
             `  [grid] ROUND-TRIP ${grid.token}: buy $${openFill.buyPrice.toFixed(2)} → sell $${currentPrice.toFixed(2)} = +$${profit.toFixed(2)}`
+          ));
+        }
+      }
+    }
+
+    // Step 3: stop-loss — force-close any open buy whose unrealized loss
+    // crosses the configured threshold. Acts as a per-position circuit
+    // breaker. Without this, the grid can accumulate enough underwater
+    // exposure across rebuilds to wipe the cross-margin pool even at
+    // low leverage (issue #269). Disabled if stopLossPct = 0.
+    if (this.config.stopLossPct > 0) {
+      for (const openFill of grid.openFills) {
+        if (openFill.closed) continue;
+        const stopPrice = openFill.buyPrice * (1 - this.config.stopLossPct);
+        if (currentPrice <= stopPrice) {
+          const realizedLoss = (currentPrice - openFill.buyPrice) * openFill.quantity;
+          openFill.closed = true;
+          openFill.pnlUsd = realizedLoss;
+          openFill.closedAt = now;
+          pnlUsd += realizedLoss;  // negative
+          grid.stats.totalPnlUsd += realizedLoss;
+          grid.stats.todayPnlUsd += realizedLoss;
+          grid.allocation += realizedLoss;  // pool shrinks; positive contributors do the same
+          console.error(chalk.red(
+            `  [grid] STOP-LOSS ${grid.token}: buy $${openFill.buyPrice.toFixed(2)} → close $${currentPrice.toFixed(2)} = $${realizedLoss.toFixed(2)}`
           ));
         }
       }
