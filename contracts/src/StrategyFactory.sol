@@ -26,11 +26,10 @@ interface IVaultMembership {
 ///
 ///         This factory bundles both into a single tx.
 ///
-///         MS-C2 hardening: strategies must always be pre-deployed by the
-///         vault's creator or a registered agent BEFORE proposal execution.
-///         The governor itself does not deploy strategies during execute —
-///         proposals reference an already-cloned-and-initialized strategy
-///         address. Authorized callers are:
+///         Strategies must always be pre-deployed by the vault's creator or
+///         a registered agent BEFORE proposal execution. The governor itself
+///         does not deploy strategies during execute — proposals reference an
+///         already-cloned-and-initialized strategy address. Authorized callers:
 ///
 ///           - `vault.owner()` (creator pre-deploy);
 ///           - `vault.isAgent(msg.sender)` (registered agent pre-deploy).
@@ -54,9 +53,8 @@ contract StrategyFactory {
         syndicateFactory = syndicateFactory_;
     }
 
-    /// @dev MS-C2: caller is the vault's owner or a registered agent of the
-    ///      vault, and the vault is a registered Sherwood vault. Strategies
-    ///      are always pre-deployed; the governor does not deploy at execute.
+    /// @dev Caller is the vault's owner or a registered agent of the vault,
+    ///      and the vault is a registered Sherwood vault.
     function _authClone(address vault) internal view {
         if (ISyndicateRegistry(syndicateFactory).vaultToSyndicate(vault) == 0) {
             revert VaultNotRegistered();

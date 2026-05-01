@@ -81,7 +81,7 @@ interface ISyndicateGovernor {
         uint256 splitBps;
     }
 
-    // V1.5: timelock removed. Owner-multisig governs via its own delay.
+    // Owner-multisig governs parameter changes via its own delay.
 
     // ── Errors ──
 
@@ -137,12 +137,12 @@ interface ISyndicateGovernor {
     ///         otherwise wire governance at a dead address.
     error NotASyndicateVault();
 
-    // ── Guardian-review emergency settle errors (Task 24) ──
+    // ── Guardian-review emergency settle errors ──
     error OwnerBondInsufficient();
     error EmergencySettleBlocked();
     error EmergencyNotProposed();
 
-    // ── Guardian-review lifecycle errors (Task 25) ──
+    // ── Guardian-review lifecycle errors ──
     error NotInGuardianReview();
     error EmergencySettleNotReady();
     error RegistryNotSet();
@@ -173,7 +173,6 @@ interface ISyndicateGovernor {
     /// @dev Prevents silent routing of zero-rounded shares to the lead.
     error CoProposerShareUnderflow();
 
-    // V1.5 new parameter errors
     error InvalidGuardianFeeBps();
 
     /// @notice Revert if `bindProposalAdapter` is called once the proposal has
@@ -223,14 +222,14 @@ interface ISyndicateGovernor {
     ///         argument to `claimUnclaimedFees` (traceable via `tx.input`).
     event FeeClaimed(address indexed recipient, address indexed token, uint256 amount);
 
-    // ── Guardian-review emergency settle events (Task 24) ──
+    // ── Guardian-review emergency settle events ──
     event EmergencySettleProposed(
         uint256 indexed proposalId, address indexed owner, bytes32 callsHash, uint64 reviewEnd
     );
     event EmergencySettleCancelled(uint256 indexed proposalId, address indexed owner);
     event EmergencySettleFinalized(uint256 indexed proposalId, int256 pnl);
 
-    // ── Guardian-review lifecycle events (Task 25) ──
+    // ── Guardian-review lifecycle events ──
     event GuardianReviewResolved(uint256 indexed proposalId, bool blocked);
 
     event VaultAdded(address indexed vault);
@@ -251,7 +250,7 @@ interface ISyndicateGovernor {
     event CollaborationTransitionedToPending(uint256 indexed proposalId);
     event CollaborationDeadlineExpired(uint256 indexed proposalId);
 
-    // ── Parameter change event (V1.5: owner-instant, no queue/cancel) ──
+    // ── Parameter change event (owner-instant, no queue/cancel) ──
     event ParameterChangeFinalized(bytes32 indexed paramKey, uint256 oldValue, uint256 newValue);
 
     /// @notice Emitted when the proposer binds (or unbinds, with `address(0)`)
@@ -259,25 +258,25 @@ interface ISyndicateGovernor {
     ///         is invoked synchronously from `bindProposalAdapter`.
     event ProposalAdapterBound(uint256 indexed proposalId, address indexed adapter);
 
-    /// @notice V1.5: emitted in `_distributeFees` when `guardianFeeBps > 0`.
+    /// @notice Emitted in `_distributeFees` when `guardianFeeBps > 0`.
     ///         Guardian fee is carved from gross PnL and transferred to
-    ///         `recipient` (GuardianRegistry in V1.5).
+    ///         `recipient` (the GuardianRegistry).
     event GuardianFeeAccrued(
         uint256 indexed proposalId, address indexed asset, address indexed recipient, uint256 amount, uint64 settledAt
     );
 
-    /// @notice V1.5: W-1 regression guard. Emitted when the guardian-fee
-    ///         transfer from the vault to the recipient reverts (e.g.
-    ///         recipient blacklisted on USDC). The fee stays in the vault.
+    /// @notice Emitted when the guardian-fee transfer from the vault to the
+    ///         recipient reverts (e.g. recipient blacklisted on USDC). The
+    ///         fee stays in the vault.
     event GuardianFeeDeliveryFailed(
         uint256 indexed proposalId, address indexed asset, address indexed recipient, uint256 amount
     );
 
-    /// @notice V1.5: W-1 regression guard. Emitted when the transfer succeeds
-    ///         but the recipient's `fundProposalGuardianPool` call reverts
-    ///         (misconfigured recipient, registry upgrade bug). The asset is
-    ///         in the recipient's balance but no pool is stamped — ops can
-    ///         recover via the recipient contract's owner.
+    /// @notice Emitted when the transfer succeeds but the recipient's
+    ///         `fundProposalGuardianPool` call reverts (misconfigured
+    ///         recipient, registry upgrade bug). The asset is in the
+    ///         recipient's balance but no pool is stamped — ops can recover
+    ///         via the recipient contract's owner.
     event GuardianFeePoolFundingFailed(
         uint256 indexed proposalId, address indexed asset, address indexed recipient, uint256 amount
     );
@@ -311,10 +310,9 @@ interface ISyndicateGovernor {
     ///      reaches Executed (or terminal), reverts with `AdapterBindingClosed`.
     function bindProposalAdapter(uint256 proposalId, address adapter) external;
 
-    // ── Guardian-review emergency settle lifecycle (Task 24) ──
-    // NOTE (Task 25 / PR #229): legacy `emergencySettle` removed — use
-    // `unstick` (pre-committed calls) or `emergencySettleWithCalls` +
-    // `finalizeEmergencySettle` (guardian-gated) for the owner-driven path.
+    // ── Guardian-review emergency settle lifecycle ──
+    // Owner-driven paths: `unstick` (pre-committed calls) or
+    // `emergencySettleWithCalls` + `finalizeEmergencySettle` (guardian-gated).
     function unstick(uint256 proposalId) external;
     function emergencySettleWithCalls(uint256 proposalId, BatchExecutorLib.Call[] calldata calls) external;
     function cancelEmergencySettle(uint256 proposalId) external;
@@ -325,9 +323,9 @@ interface ISyndicateGovernor {
     function emergencyCancel(uint256 proposalId) external;
 
     /// @notice Vault owner vetoes a Pending proposal only, setting it to Rejected.
-    /// @dev Narrowed in PR #229 (Task 25) so guardians own post-review blocks —
-    ///      once a proposal has passed voting and entered `GuardianReview`, the
-    ///      guardian cohort and execution window drive the outcome rather than
+    /// @dev Narrowed so guardians own post-review blocks — once a proposal
+    ///      has passed voting and entered `GuardianReview`, the guardian
+    ///      cohort and execution window drive the outcome rather than
     ///      unilateral owner action. Use `emergencyCancel` for Draft/Pending.
     function vetoProposal(uint256 proposalId) external;
 
@@ -375,13 +373,12 @@ interface ISyndicateGovernor {
     ///      `GuardianRegistry.requestUnstakeOwner` alongside `getActiveProposal`
     ///      to block rage-quit while any proposal binds the vault — the OR
     ///      check is belt-and-braces so stale-cache transitions can't slip
-    ///      through. See PR #229 Fix 2.
+    ///      through.
     function openProposalCount(address vault) external view returns (uint256);
     function getCooldownEnd(address vault) external view returns (uint256);
     function getCapitalSnapshot(uint256 proposalId) external view returns (uint256);
     function isRegisteredVault(address vault) external view returns (bool);
     function getCoProposers(uint256 proposalId) external view returns (CoProposer[] memory);
-    // V1.5: getPendingChange removed (no queue).
     function protocolFeeBps() external view returns (uint256);
     function protocolFeeRecipient() external view returns (address);
 

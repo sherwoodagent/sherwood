@@ -75,12 +75,9 @@ contract VaultWithdrawalQueue is IVaultWithdrawalQueue, ReentrancyGuardTransient
         uint256 shares = uint256(r.shares);
         r.claimed = true;
 
-        // Q-H2: decrement pendingShares AFTER the external redeem so the queue's
-        // share balance and `_pendingShares` only diverge inside the same nonReentrant
-        // window. Vault's `_withdraw` bypasses the reserve check for the queue caller,
-        // so the live read of `pendingQueueShares()` during `redeem` is irrelevant for
-        // the queue's own claim path. The `r.claimed` flag (set before the call)
-        // continues to block double-claim re-entry.
+        // Decrement pendingShares AFTER the external redeem so the queue's
+        // share balance and `_pendingShares` only diverge inside the same
+        // nonReentrant window; `r.claimed` blocks double-claim reentry.
         assets = IRedeemableVault(vault).redeem(shares, r.owner, address(this));
         _pendingShares -= shares;
         emit WithdrawalClaimed(requestId, r.owner, shares, assets);

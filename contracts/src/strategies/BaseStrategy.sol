@@ -131,7 +131,7 @@ abstract contract BaseStrategy is IStrategy {
     }
 
     /// @inheritdoc IStrategy
-    /// @dev V1.5: default no-op — strategies that can absorb mid-position
+    /// @dev Default no-op — strategies that can absorb mid-position
     ///      capital override `_onLiveDeposit`. Only callable by the vault and
     ///      only while the strategy is `Executed`.
     function onLiveDeposit(uint256 assets) external virtual onlyVault {

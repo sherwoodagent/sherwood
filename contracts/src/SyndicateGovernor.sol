@@ -83,14 +83,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ///         so executeGovernorBatch can't be weaponized for gas griefing.
     uint256 public constant MAX_CALLS_PER_PROPOSAL = 64;
 
-    /// @notice MS-H3: minimum elapsed time post-execute before the proposer
-    ///         can self-settle (skipping `strategyDuration`). Prevents the
-    ///         single-block execute → settle skim where a proposer gains
+    /// @notice Minimum elapsed time post-execute before the proposer can
+    ///         self-settle (skipping `strategyDuration`). Prevents the single-
+    ///         block execute → settle skim where a proposer gains
     ///         `performanceFeeBps` on a one-block trade. Anyone other than the
-    ///         proposer still waits for `strategyDuration`. 1 hour is short
-    ///         enough not to obstruct legitimate early-exit and long enough
-    ///         that a flash-loan-funded skim gets consumed by gas + slippage.
-    /// @dev `internal` to avoid emitting an auto-getter.
+    ///         proposer still waits for `strategyDuration`.
     uint256 internal constant MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE = 1 hours;
 
     // ── New storage (appended -- UUPS safe) ──
@@ -101,17 +98,15 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     /// @notice Proposal ID -> settlement (closing) calls
     mapping(uint256 => BatchExecutorLib.Call[]) private _settlementCalls;
 
-    // V1.5: _parameterChangeDelay + _pendingChanges removed (timelock
-    // eliminated in favor of owner-multisig delay).
-    // P2-1: _protocolFeeBps / _protocolFeeRecipient / _guardianFeeBps live
-    //       in `GovernorParameters`.
+    // `_protocolFeeBps` / `_protocolFeeRecipient` / `_guardianFeeBps` live in
+    // `GovernorParameters`.
 
     /// @notice Guardian registry. Set in `initialize`; required (non-zero).
-    ///         Fees always route here (ToB P1-1 — no separate recipient slot).
+    ///         Fees always route here — no separate recipient slot.
     address internal _guardianRegistry;
 
-    // ── Guardian-review storage (Task 24 / PR #229) ──
-    // V2: _emergencyCallsHashes and _emergencyCalls moved to GuardianRegistry.
+    // ── Guardian-review storage ──
+    // `_emergencyCallsHashes` and `_emergencyCalls` live in GuardianRegistry.
     // Two mapping slots reclaimed into __gap.
 
     /// @notice Per-vault count of non-terminal proposals — Pending,
@@ -120,7 +115,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ///         `_activeProposal` to block owner rage-quit while any proposal
     ///         binds the vault. Incremented on Draft -> Pending. Decremented
     ///         on the terminal edge (Rejected / Expired / Cancelled / Settled).
-    ///         Added in PR #229 Fix 2.
     mapping(address => uint256) public openProposalCount;
 
     /// @dev Escrow of fee transfers that reverted (e.g., USDC blacklist) so the
@@ -369,11 +363,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         StrategyProposal storage proposal = _proposals[proposalId];
         if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
 
-        // MS-H3: proposer fast-path requires at least
-        // MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE elapsed since execute, so
-        // a one-block execute → settle skim cannot capture `performanceFeeBps`
-        // on a same-block trade. Everyone else still waits the full
-        // `strategyDuration` as before.
         uint256 minWait =
             msg.sender == proposal.proposer ? MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE : proposal.strategyDuration;
         if (block.timestamp < proposal.executedAt + minWait) {
@@ -386,12 +375,8 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _finishSettlement(proposalId, proposal);
     }
 
-    // NOTE: emergencySettle removed in Task 2 — replaced by the full guardian
-    // review lifecycle in GovernorEmergency (implemented in Task 24):
-    // unstick / emergencySettleWithCalls / cancelEmergencySettle / finalizeEmergencySettle.
-
     /// @inheritdoc ISyndicateGovernor
-    /// @dev I-3: smoke-test happens inside `vault.setActiveStrategyAdapter`.
+    /// @dev Smoke-test happens inside `vault.setActiveStrategyAdapter`.
     ///      Centralising the validation on the vault lets governor stay
     ///      under EIP-170 (the via_ir-inlined staticcall + return-size
     ///      check costs ~25 bytes and the vault has the headroom). The
@@ -713,10 +698,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         address vault;
     }
 
-    // V1.5: _applyProtocolFeeBpsChange + _applyAddressParam removed.
-    // GovernorParameters setters now write directly via _set* virtuals
-    // (see overrides above).
-
     // ==================== INTERNAL ====================
 
     /// @dev Hoisted out of `propose` to keep that function under Yul's
@@ -957,16 +938,10 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _lastSettledAt[vault] = block.timestamp;
         proposal.state = ProposalState.Settled;
         delete _capitalSnapshots[proposalId];
-        // MS-H2: do NOT auto-cancel an open emergency review here. Auto-cancel
-        // let a vault owner who opened `emergencySettleWithCalls` and saw
-        // block-votes accruing race a `settleProposal` to wipe registry state
-        // and dodge the slash. Emergency reviews now resolve naturally:
-        // - Owner's `finalizeEmergencySettle` reverts because state == Settled.
-        // - Permissionless `resolveEmergencyReview` at reviewEnd applies the
-        //   block-quorum slash if guardians actually voted block; otherwise
-        //   the review resolves harmlessly (blocked == false, no slash).
-        // The owner can still cleanly withdraw a non-malicious emergency via
-        // `cancelEmergencySettle` while the review is open.
+        // Open emergency reviews are NOT auto-cancelled here — they resolve
+        // naturally via `resolveEmergencyReview` at reviewEnd (slashing if the
+        // block quorum was met, no-op otherwise) so an owner who opened an
+        // adversarial emergency cannot dodge slash by racing a settle.
         _decOpen(vault);
 
         uint256 totalFee = 0;
@@ -1002,9 +977,9 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
             }
         }
 
-        // V1.5: guardian fee — slice of settled PnL routed to the registry
-        // (funds per-proposal approver-reward pool). See spec §4.8.
-        // W-1-resilient: if the recipient transfer or pool-funding fails
+        // Guardian fee — slice of settled PnL routed to the registry (funds
+        // per-proposal approver-reward pool). See spec §4.8.
+        // Resilient: if the recipient transfer or pool-funding fails
         // (blacklist, misconfigured recipient, registry upgrade bug), emit
         // a diagnostic event and skip the fee so settlement cannot brick.
         // On transfer failure, the fee stays in the vault (LPs benefit).

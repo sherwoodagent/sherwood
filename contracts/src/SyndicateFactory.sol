@@ -57,10 +57,8 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     error VaultStillStaked();
     error RegistryMismatch();
     error ZeroAddress();
-    // ── MS-H8: rotateOwner blocked while a proposal binds the vault ──
     error ProposalActive();
     error ProposalsOpen();
-    // ── V-M7: reject zero/empty SyndicateConfig fields ──
     error InvalidSyndicateConfig();
 
     struct SyndicateConfig {
@@ -371,15 +369,8 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         // Registry-consistency invariant: governor and factory must share one registry.
         ISyndicateGovernor gov = ISyndicateGovernor(governor);
         if (gov.guardianRegistry() != guardianRegistry) revert RegistryMismatch();
-        // MS-H8: forbid rotation while any proposal binds the vault. Without
-        // this guard, a factory owner could hot-swap the vault owner mid-flight,
-        // handing the new owner `pause()` (halts strategy execution) and other
-        // owner-only powers in the middle of a live proposal lifecycle. We
-        // check both `getActiveProposal` (currently-Executed) and
-        // `openProposalCount` (Pending / GuardianReview / Approved /
-        // Executed) — `getActiveProposal` is a subset of `openProposalCount`,
-        // but check both for explicit pre/post-execute coverage and a clearer
-        // revert reason when only one signal is set.
+        // Forbid rotation while any proposal binds the vault — otherwise the
+        // new owner inherits `pause()` and other owner-only powers mid-flight.
         if (gov.getActiveProposal(vault) != 0) revert ProposalActive();
         if (gov.openProposalCount(vault) != 0) revert ProposalsOpen();
 
@@ -429,7 +420,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     /// @dev    Backed by `_activeSyndicateIds` (EnumerableSet) so reads are
     ///         O(limit) instead of O(syndicateCount). `limit` is hard-capped at
     ///         `MAX_PAGE_LIMIT` to guarantee the call stays well below block
-    ///         gas even as the set grows. Closes V-C4.
+    ///         gas even as the set grows.
     /// @param offset Starting index (0-based) into the active-set
     /// @param limit  Maximum number of results to return; clamped to `MAX_PAGE_LIMIT`
     /// @return result Array of active syndicates (in insertion order with swap-pop gaps filled)
