@@ -70,3 +70,80 @@ Each 1-min cycle (`grid/loop.ts`):
   cost for tighter level spacing around current price.
 - `tokenSplit` is rebalance-on-rebuild, not continuous — drift inside a
   cycle does not get rebalanced until the next full rebuild.
+
+## Live Deployment (Hyperliquid)
+
+The grid runs in two modes:
+
+**Simulation (default):** `sherwood grid start --capital 5000 --cycle 60`
+- Simulates fills against price, no real orders
+- Use for backtesting and tuning
+
+**Live:** `sherwood grid start --capital 5000 --cycle 60 --live --asset-indices bitcoin=3,ethereum=4,solana=5`
+- Places real GTC limit orders on Hyperliquid via the HL SDK
+- Requires `HYPERLIQUID_PRIVATE_KEY` env var (the keeper EOA, must be the proposer)
+- Asset indices are HyperCore perp asset IDs (BTC=3, ETH=4, SOL=5 as of 2026-04)
+
+### Prerequisites for live mode
+
+1. Deploy `HyperliquidGridStrategy` clone via a Sherwood proposal
+2. Strategy's `_execute()` pulls vault USDC and parks it on HyperCore margin
+3. Keeper EOA = proposer EOA (only the proposer can call `updateParams`)
+4. Set `HYPERLIQUID_PRIVATE_KEY` to the proposer's key
+5. Run `sherwood grid start --live ...` — the loop will compute orders each tick and submit them
+
+### On-chain Mode (Vault Funds)
+
+For vault-funded grid trading, deploy `HyperliquidGridStrategy` and pass its address:
+
+```bash
+sherwood --network hyperevm grid start \
+  --capital 5000 --cycle 60 --live \
+  --asset-indices bitcoin=3,ethereum=4,solana=5 \
+  --strategy 0xYourStrategyAddress
+```
+
+Requirements:
+- `HYPEREVM_RPC_URL` env var
+- `PRIVATE_KEY` env var (the proposer EOA — only this address can call `updateParams`)
+- Strategy contract already executed (vault USDC parked on HyperCore margin)
+
+Without `--strategy`: orders go to the keeper's own HyperCore account via HL SDK
+With `--strategy`: orders go through `strategy.updateParams()` so the strategy contract's HyperCore account (funded by vault) is used
+
+## ⚠️ Settlement Runbook (Vault-Funded Mode)
+
+`HyperliquidGridStrategy._settle()` does NOT cancel resting GTC grid orders
+on-chain. The contract has no on-chain CLOID storage (CLOIDs are derived
+deterministically off-chain by the keeper), so it cannot self-cancel.
+
+**Before the vault settles the proposal, the keeper MUST cancel all grid
+orders** — otherwise resting GTC orders may fill against the IOC reduce-only
+force-close orders in `_settle()`, leaving net positions and stranded margin.
+
+### Settlement procedure (proposer)
+
+1. **Stop the grid keeper loop** — `systemctl --user stop sherwood-grid`
+   (or kill the `sherwood grid start --live --strategy ...` process).
+2. **Cancel all open orders for every grid asset** — call the strategy with
+   `ACTION_CANCEL_ALL` for each asset index, OR use the HL SDK directly:
+   ```bash
+   HYPERLIQUID_PRIVATE_KEY=<proposer> hyperliquid cancel-all BTC
+   HYPERLIQUID_PRIVATE_KEY=<proposer> hyperliquid cancel-all ETH
+   HYPERLIQUID_PRIVATE_KEY=<proposer> hyperliquid cancel-all SOL
+   ```
+   Note: `cancel-all` here cancels orders on the EOA's HyperCore account.
+   For the strategy contract's account, the keeper must call
+   `strategy.updateParams(ACTION_CANCEL_ALL, assetIndex, cloids)` per asset
+   using the persisted CLOIDs from `~/.sherwood/grid/onchain-state.json`.
+3. **Verify** open orders == 0 on HyperCore for the strategy address.
+4. **Settle the proposal** via the governor (`settleProposal` after duration,
+   or `unstick` / `emergencySettleWithCalls` per the runbook).
+5. **Sweep** — once HyperCore async USD transfer lands, anyone can call
+   `strategy.sweepToVault()` to push USDC back to the vault.
+
+If step 2 is skipped: resting grid orders may fill during the
+`_settle()` force-close window, leaving the strategy with residual positions
+and `sendUsdClassTransfer(uint64.max, false)` returns less margin than
+expected. Recovery: re-run cancel-all, then re-call `sweepToVault()` after
+positions naturally close on HL.

@@ -3,13 +3,56 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { GridTokenState, GridStats, GridLevel } from './config.js';
+import type { GridTokenState, GridStats, GridLevel, GridPortfolioState } from './config.js';
 import { DEFAULT_GRID_CONFIG } from './config.js';
 
-// Mock HyperliquidProvider
+// In-memory GridPortfolio state (per-test, reset in beforeEach for computeOrders)
+let mockPortfolioState: GridPortfolioState | null = null;
+
+// Mock GridPortfolio to avoid disk I/O while still letting GridManager.init/tick run
+vi.mock('./portfolio.js', () => ({
+  GridPortfolio: class {
+    async load() { return mockPortfolioState; }
+    async save(state: GridPortfolioState) { mockPortfolioState = state; }
+    getState() { return mockPortfolioState; }
+    async initialize(capital: number, config: { tokens: string[]; tokenSplit: Record<string, number> }) {
+      const grids: GridTokenState[] = config.tokens.map(token => ({
+        token,
+        levels: [],
+        openFills: [],
+        allocation: capital * (config.tokenSplit[token] ?? 1 / config.tokens.length),
+        stats: { totalRoundTrips: 0, totalPnlUsd: 0, todayPnlUsd: 0, totalFills: 0, todayFills: 0, lastDailyReset: 0, lastRebalanceAt: 0 },
+        centerPrice: 0,
+        atr: 0,
+      }));
+      mockPortfolioState = { totalAllocation: capital, grids, paused: false, pauseReason: '', initializedAt: Date.now() };
+    }
+    resetDailyStats() { /* no-op */ }
+    checkPauseThreshold() { /* no-op */ }
+    aggregateStats() { return { totalPnlUsd: 0, todayPnlUsd: 0, todayFills: 0, totalRoundTrips: 0 }; }
+  },
+}));
+
+// Mock HyperliquidProvider — return synthetic candles so buildGrid yields valid ATR
+function makeSyntheticCandles(basePrice: number, count = 60) {
+  const candles = [];
+  for (let i = 0; i < count; i++) {
+    const drift = (i % 5) * 50;
+    candles.push({
+      timestamp: Date.now() - (count - i) * 4 * 60 * 60 * 1000,
+      open: basePrice + drift,
+      high: basePrice + drift + 200,
+      low: basePrice + drift - 200,
+      close: basePrice + drift + 50,
+      volume: 100,
+    });
+  }
+  return candles;
+}
+
 vi.mock('../providers/data/hyperliquid.js', () => ({
   HyperliquidProvider: class {
-    getCandles = vi.fn().mockResolvedValue(null);
+    getCandles = vi.fn(async (token: string) => makeSyntheticCandles(50_000));
     getHyperliquidData = vi.fn().mockResolvedValue(null);
   },
   safeNumber: (x: unknown) => {
@@ -231,5 +274,23 @@ describe('Grid capital isolation', () => {
     const currentValue = totalAlloc * 0.78; // dropped 22%
     const dropPct = 1 - (currentValue / totalAlloc);
     expect(dropPct).toBeGreaterThanOrEqual(DEFAULT_GRID_CONFIG.pauseThresholdPct);
+  });
+});
+
+describe('computeOrders', () => {
+  beforeEach(() => {
+    mockPortfolioState = null;
+  });
+
+  it('returns orders for unfilled grid levels', async () => {
+    // Lazy-load GridManager so the mocks are applied first
+    const { GridManager } = await import('./manager.js');
+    const cfg = { ...DEFAULT_GRID_CONFIG, tokens: ['bitcoin'], tokenSplit: { bitcoin: 1.0 }, levelsPerSide: 2 };
+    const mgr = new GridManager(cfg);
+    await mgr.init(1000);
+    await mgr.tick({ bitcoin: 50_000 });
+    const plan = mgr.computeOrders({ bitcoin: 50_000 });
+    expect(plan.ordersToPlace.length).toBeGreaterThan(0);
+    expect(plan.needsRebalance).toBe(false);
   });
 });

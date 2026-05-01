@@ -94,62 +94,21 @@ contract DeploySherwood is ScriptBase {
         require(cfg.woodToken != address(0), "WOOD_TOKEN not set (env or chains.json)");
 
         vm.startBroadcast();
-
-        Deployed memory d;
-        d.deployer = msg.sender;
-        console.log("Deployer:", d.deployer);
+        Deployed memory d = deployCore(cfg);
+        console.log("\nDeployer:", d.deployer);
         console.log("Chain ID:", block.chainid);
-
-        // 0. Deploy Create3Factory (regular CREATE — one tx)
-        Create3Factory c3 = new Create3Factory(d.deployer);
-        console.log("\nCreate3Factory:", address(c3));
-
-        // 1. BatchExecutorLib
-        d.executorLib = c3.deploy(SALT_EXECUTOR, abi.encodePacked(type(BatchExecutorLib).creationCode));
         console.log("BatchExecutorLib:", d.executorLib);
-
-        // 2. SyndicateVault implementation
-        d.vaultImpl = c3.deploy(SALT_VAULT_IMPL, abi.encodePacked(type(SyndicateVault).creationCode));
         console.log("VaultImpl:", d.vaultImpl);
-
-        // 3. SyndicateGovernor implementation + proxy. The registry is required
-        //    at init-time, but the registry itself needs the governor address,
-        //    so we break the circular dep with CREATE3 `addressOf(salt)` —
-        //    predict the registry proxy address, pass it to governor init, then
-        //    deploy the registry at that address pointing at the real governor.
-        address predictedRegistryProxy = c3.addressOf(SALT_REGISTRY_PROXY);
-        console.log("Predicted RegistryProxy:", predictedRegistryProxy);
-        address govImpl = c3.deploy(SALT_GOVERNOR_IMPL, abi.encodePacked(type(SyndicateGovernor).creationCode));
-        d.governorProxy = _deployGovernorProxy(c3, govImpl, d.deployer, predictedRegistryProxy, cfg);
         console.log("GovernorProxy:", d.governorProxy);
-
-        // 4. GuardianRegistry impl + proxy. Factory address also predicted via
-        //    CREATE3 — same computation the Create3Factory uses at deploy time,
-        //    so the prediction is exact regardless of deployer nonce.
-        address predictedFactoryProxy = c3.addressOf(SALT_FACTORY_PROXY);
-        console.log("Predicted FactoryProxy:", predictedFactoryProxy);
-        address registryImpl = c3.deploy(SALT_REGISTRY_IMPL, abi.encodePacked(type(GuardianRegistry).creationCode));
-        d.registryProxy =
-            _deployRegistryProxy(c3, registryImpl, d.deployer, d.governorProxy, predictedFactoryProxy, cfg);
         console.log("GuardianRegistryProxy:", d.registryProxy);
-        require(d.registryProxy == predictedRegistryProxy, "registry addr mismatch");
-
-        // 5. SyndicateFactory impl + proxy — now with real registry address.
-        address factoryImpl = c3.deploy(SALT_FACTORY_IMPL, abi.encodePacked(type(SyndicateFactory).creationCode));
-        d.factoryProxy = _deployFactoryProxy(c3, factoryImpl, d, cfg);
         console.log("FactoryProxy:", d.factoryProxy);
-        require(d.factoryProxy == predictedFactoryProxy, "factory addr mismatch");
-
-        // 6. Register factory on governor. V1.5: setFactory applies
-        //    immediately (owner-multisig governs via its own delay).
-        SyndicateGovernor(d.governorProxy).setFactory(d.factoryProxy);
         console.log("Governor.setFactory applied");
 
-        // 7. P1-1: guardian fee recipient pinned to `_guardianRegistry` at
-        //    init — no separate wiring step needed.
+        // P1-1: guardian fee recipient pinned to `_guardianRegistry` at
+        // init — no separate wiring step needed.
 
-        // 8. Seed slash appeal reserve + epoch 0 rewards (best-effort; skipped
-        //    on zero amounts so testnets don't need a WOOD balance).
+        // Seed slash appeal reserve + epoch 0 rewards (best-effort; skipped
+        // on zero amounts so testnets don't need a WOOD balance).
         _seedRegistry(d.deployer, d.registryProxy, cfg);
 
         vm.stopBroadcast();
@@ -173,8 +132,39 @@ contract DeploySherwood is ScriptBase {
         _patchAddress("GUARDIAN_REGISTRY", d.registryProxy);
 
         console.log("\nDeployment complete on %s (chain %s)", _chainName(), block.chainid);
-        console.log("Create3Factory: %s (save for future deploys)", address(c3));
         console.log("Next: forge script script/DeployTemplates.s.sol --rpc-url <chain> --broadcast");
+    }
+
+    /// @notice Deployment helper extracted from `run()` for use in fork tests.
+    ///         Performs all CREATE3 deploys + governor.setFactory() but does NOT:
+    ///           - call `vm.startBroadcast()` / `vm.stopBroadcast()` (caller's responsibility)
+    ///           - persist addresses to chains/{chainId}.json
+    ///           - validate (callers can if they want)
+    /// @dev Used by `HyperEVMIntegrationTest.setUp()` to deploy on a fork without
+    ///      writing to disk. Production deploys keep using `run()`.
+    function deployCore(Config memory cfg) public returns (Deployed memory d) {
+        d.deployer = msg.sender;
+
+        Create3Factory c3 = new Create3Factory(d.deployer);
+
+        d.executorLib = c3.deploy(SALT_EXECUTOR, abi.encodePacked(type(BatchExecutorLib).creationCode));
+        d.vaultImpl = c3.deploy(SALT_VAULT_IMPL, abi.encodePacked(type(SyndicateVault).creationCode));
+
+        address predictedRegistryProxy = c3.addressOf(SALT_REGISTRY_PROXY);
+        address govImpl = c3.deploy(SALT_GOVERNOR_IMPL, abi.encodePacked(type(SyndicateGovernor).creationCode));
+        d.governorProxy = _deployGovernorProxy(c3, govImpl, d.deployer, predictedRegistryProxy, cfg);
+
+        address predictedFactoryProxy = c3.addressOf(SALT_FACTORY_PROXY);
+        address registryImpl = c3.deploy(SALT_REGISTRY_IMPL, abi.encodePacked(type(GuardianRegistry).creationCode));
+        d.registryProxy =
+            _deployRegistryProxy(c3, registryImpl, d.deployer, d.governorProxy, predictedFactoryProxy, cfg);
+        require(d.registryProxy == predictedRegistryProxy, "registry addr mismatch");
+
+        address factoryImpl = c3.deploy(SALT_FACTORY_IMPL, abi.encodePacked(type(SyndicateFactory).creationCode));
+        d.factoryProxy = _deployFactoryProxy(c3, factoryImpl, d, cfg);
+        require(d.factoryProxy == predictedFactoryProxy, "factory addr mismatch");
+
+        SyndicateGovernor(d.governorProxy).setFactory(d.factoryProxy);
     }
 
     function _deployGovernorProxy(

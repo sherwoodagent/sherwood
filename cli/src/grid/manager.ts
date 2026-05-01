@@ -314,6 +314,52 @@ export class GridManager {
     }).filter(e => e.fillCount > 0);
   }
 
+  /**
+   * Compute the orders that should be placed for the current grid state,
+   * without simulating fills. Used by the live executor.
+   *
+   * Returns:
+   *   - ordersToPlace: all current grid levels that haven't been filled
+   *   - assetsToCancel: tokens whose grid was rebalanced (need cancel-and-place)
+   *   - needsRebalance: whether any grid was rebuilt this tick
+   */
+  computeOrders(prices: Record<string, number>): GridOrderPlan {
+    const state = this.portfolio.getState();
+    if (!state || state.paused || !this.config.enabled) {
+      return { ordersToPlace: [], assetsToCancel: [], needsRebalance: false };
+    }
+
+    const ordersToPlace: ComputedOrder[] = [];
+    const assetsToCancel: string[] = [];
+    let needsRebalance = false;
+
+    for (const grid of state.grids) {
+      const price = prices[grid.token];
+      if (!price || price <= 0) continue;
+
+      const wasEmpty = grid.levels.length === 0;
+      const fullRebuild = wasEmpty || this.needsFullRebuild(grid);
+      const shift = !fullRebuild && grid.centerPrice > 0 && this.needsShift(grid, price);
+
+      if (fullRebuild || shift) {
+        needsRebalance = true;
+        if (!wasEmpty) assetsToCancel.push(grid.token);
+      }
+
+      for (const level of grid.levels) {
+        if (level.filled) continue;
+        ordersToPlace.push({
+          token: grid.token,
+          isBuy: level.side === 'buy',
+          price: level.price,
+          quantity: level.quantity,
+        });
+      }
+    }
+
+    return { ordersToPlace, assetsToCancel, needsRebalance };
+  }
+
   /** Get aggregate stats for display. */
   getStats(): { totalPnlUsd: number; todayPnlUsd: number; todayFills: number; totalRoundTrips: number; allocation: number; paused: boolean } | null {
     const state = this.portfolio.getState();
@@ -332,4 +378,17 @@ export interface GridTickResult {
   roundTrips: number;
   pnlUsd: number;
   paused: boolean;
+}
+
+export interface ComputedOrder {
+  token: string;
+  isBuy: boolean;
+  price: number;
+  quantity: number;
+}
+
+export interface GridOrderPlan {
+  ordersToPlace: ComputedOrder[];
+  assetsToCancel: string[];
+  needsRebalance: boolean;
 }

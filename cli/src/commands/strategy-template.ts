@@ -538,30 +538,12 @@ async function buildInitDataForTemplate(
     const decimals = token.toUpperCase() === "USDC" ? 6 : 18;
     // Omit --amount to use the vault's full asset balance at execute time (dynamic-all mode).
     const depositAmount = opts.amount ? parseUnits(opts.amount as string, decimals) : 0n;
-    // --min-return is a settlement floor: `sweepToVault` reverts on the first
-    // call if `balance < minReturnAmount`. With --amount set we default to 1:1
-    // (return at least the deposit). With dynamic-all we have no anchor, so
-    // require --min-return explicitly — a zero floor would trivially pass the
-    // settlement guard and defeat the whole check.
-    if (depositAmount === 0n && !opts.minReturn) {
-      console.error(chalk.red(
-        "--min-return is required when --amount is omitted (dynamic-all mode).\n" +
-        "  The settlement floor can't be derived without a reference deposit — " +
-        "set it explicitly to the minimum USDC you'll accept back from HyperCore.",
-      ));
-      process.exit(1);
-    }
-    const minReturn = opts.minReturn
-      ? parseUnits(opts.minReturn as string, decimals)
-      : opts.amount
-        ? parseUnits(opts.amount as string, decimals)
-        : 0n;
     const leverage = Number((opts.leverage as string) || "10");
     const assetIndex = Number((opts.assetIndex as string) || "0");
     const maxPosition = parseUnits((opts.maxPosition as string) || "100000", decimals);
     const maxTradesDay = Number((opts.maxTradesPerDay as string) || "50");
     return {
-      initData: hyperliquidPerpBuilder.buildInitData(asset, depositAmount, minReturn, assetIndex, leverage, maxPosition, maxTradesDay),
+      initData: hyperliquidPerpBuilder.buildInitData(asset, depositAmount, assetIndex, leverage, maxPosition, maxTradesDay),
       asset, assetAmount: depositAmount,
     };
   }
@@ -777,7 +759,6 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     // hyperliquid-perp
     .option("--leverage <number>", "Leverage multiplier (Hyperliquid Perp, default: 10)")
     .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
-    .option("--min-return <n>", "Min return amount on settlement (Hyperliquid Perp)")
     .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
     .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
     .action(async (templateKey: string, opts) => {
@@ -877,7 +858,6 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     // hyperliquid-perp
     .option("--leverage <number>", "Leverage multiplier (Hyperliquid Perp, default: 10)")
     .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
-    .option("--min-return <n>", "Min return amount on settlement (Hyperliquid Perp)")
     .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
     .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
     .action(async (templateKey: string, opts) => {
@@ -990,7 +970,6 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     // hyperliquid-perp
     .option("--leverage <number>", "Leverage multiplier (Hyperliquid Perp, default: 10)")
     .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
-    .option("--min-return <n>", "Min return amount on settlement (Hyperliquid Perp)")
     .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
     .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
     .action(async (templateKey: string, opts) => {

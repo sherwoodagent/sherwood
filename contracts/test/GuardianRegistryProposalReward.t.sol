@@ -231,6 +231,36 @@ contract GuardianRegistryProposalRewardTest is Test {
         registry.claimProposalReward(PID);
     }
 
+    /// @notice Regression for PR #260 zero-payout guard. When `pool.amount * w`
+    ///         rounds below `approveStakeWeight` (1-wei dust pool with two
+    ///         equal-weight approvers: 1 * 20000e18 / 40000e18 == 0), every
+    ///         approver's `gross` is zero and so is `approverPayout`. The
+    ///         scope-block refactor in PR #260 added an `if (approverPayout > 0)`
+    ///         guard — this pins the behavior:
+    ///           - no transfer call (no spurious 0-amount ERC-20 event)
+    ///           - `_approverClaimed` flag still flips (idempotency preserved)
+    ///           - second claim reverts `AlreadyClaimed`
+    function test_claim_zeroPayout_dust_skipsTransferButFlagsClaimed() public {
+        _runReview(approver, approver2, address(0));
+
+        // Fund pool with 1 wei. Each of the two equal-weight approvers
+        // computes gross = 1 * 20000e18 / 40000e18 = 0 (integer division).
+        vm.prank(address(mockGov));
+        registry.fundProposalGuardianPool(PID, address(usdc), 1);
+
+        uint256 balBefore = usdc.balanceOf(approver);
+        vm.prank(approver);
+        registry.claimProposalReward(PID);
+
+        // Zero-payout guard skipped the transfer.
+        assertEq(usdc.balanceOf(approver) - balBefore, 0, "no transfer for dust share");
+
+        // Flag still flipped — second claim reverts.
+        vm.expectRevert(IGuardianRegistry.AlreadyClaimed.selector);
+        vm.prank(approver);
+        registry.claimProposalReward(PID);
+    }
+
     // ── Commission-at-settledAt (INV-V1.5-11) ──
 
     /// @notice Commission rate applied is the rate at settledAt, not claim

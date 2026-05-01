@@ -620,30 +620,39 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         // Approve-side only. `_voteStake > 0` is guaranteed whenever
         // `_votes == Approve` (voteOnProposal reverts on zero-weight voters).
         if (_votes[proposalId][msg.sender] != GuardianVoteType.Approve) revert NotApprover();
-        uint256 w = _voteStake[proposalId][msg.sender];
 
-        Review storage r = _reviews[proposalId];
-        uint256 totalW = uint256(r.approveStakeWeight);
-        // totalW >= w by construction (w is one of the weights summed into it).
-        uint256 gross = (uint256(pool.amount) * w) / totalW;
+        // Compute the four payout numbers in a scope block so all the
+        // intermediate locals (w, r, ownW, grossFromOwn, grossFromDelegated,
+        // rate) get freed before the `_safeRewardTransfer` call site.
+        // Required for `forge coverage` (no via_ir) — see #257.
+        uint256 gross;
+        uint256 commission;
+        uint256 remainder;
+        uint256 approverPayout;
+        {
+            uint256 w = _voteStake[proposalId][msg.sender];
+            Review storage r = _reviews[proposalId];
+            // approveStakeWeight >= w by construction (w is one of the weights summed into it).
+            gross = (uint256(pool.amount) * w) / uint256(r.approveStakeWeight);
 
-        // Split the approver's gross share between own-stake portion (fully
-        // to approver) and delegated-stake portion (commission split).
-        // ownW is read at `r.openedAt` — the SAME timestamp used to freeze
-        // `w` in voteOnProposal — so `w >= ownW` holds by construction (w =
-        // own@openedAt + delegated@openedAt). No clamp needed. Reading at
-        // `settledAt` instead would strand funds when an approver requests
-        // unstake mid-review (PR #242 re-review, finding I-A).
-        uint256 ownW = _stakeCheckpoints[msg.sender].upperLookupRecent(uint32(r.openedAt));
-        uint256 grossFromOwn = (gross * ownW) / w;
-        uint256 grossFromDelegated = gross - grossFromOwn;
+            // Split the approver's gross share between own-stake portion (fully
+            // to approver) and delegated-stake portion (commission split).
+            // ownW is read at `r.openedAt` — the SAME timestamp used to freeze
+            // `w` in voteOnProposal — so `w >= ownW` holds by construction (w =
+            // own@openedAt + delegated@openedAt). No clamp needed. Reading at
+            // `settledAt` instead would strand funds when an approver requests
+            // unstake mid-review (PR #242 re-review, finding I-A).
+            uint256 ownW = _stakeCheckpoints[msg.sender].upperLookupRecent(uint32(r.openedAt));
+            uint256 grossFromOwn = (gross * ownW) / w;
+            uint256 grossFromDelegated = gross - grossFromOwn;
 
-        // Commission RATE stays at settledAt (INV-V1.5-11) — only the
-        // vote-weight lookup moves to openedAt.
-        uint256 rate = _commissionCheckpoints[msg.sender].upperLookupRecent(uint32(pool.settledAt));
-        uint256 commission = (grossFromDelegated * rate) / BPS_DENOMINATOR;
-        uint256 approverPayout = grossFromOwn + commission;
-        uint256 remainder = grossFromDelegated - commission;
+            // Commission RATE stays at settledAt (INV-V1.5-11) — only the
+            // vote-weight lookup moves to openedAt.
+            uint256 rate = _commissionCheckpoints[msg.sender].upperLookupRecent(uint32(pool.settledAt));
+            commission = (grossFromDelegated * rate) / BPS_DENOMINATOR;
+            approverPayout = grossFromOwn + commission;
+            remainder = grossFromDelegated - commission;
+        }
 
         // CEI: flag + pool-seed before external transfer. Always-write (even
         // zero remainder) is cheaper in bytecode than branching; solo
