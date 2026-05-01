@@ -147,7 +147,7 @@ contract DeploySherwood is ScriptBase {
         vm.stopBroadcast();
 
         // ── Validate ──
-        _validateGovernor(effectiveOwner, d.deployer, d.governorProxy, d.factoryProxy, cfg.maxStrategyDays);
+        _validateGovernor(effectiveOwner, d.deployer, d.governorProxy, d.factoryProxy, cfg);
         _validateFactory(
             effectiveOwner,
             d.governorProxy,
@@ -359,7 +359,7 @@ contract DeploySherwood is ScriptBase {
         address deployer,
         address governorAddr,
         address factoryAddr,
-        uint256 maxDays
+        Config memory cfg
     ) internal view {
         console.log("\n=== Validating Governor ===");
         SyndicateGovernor governor = SyndicateGovernor(governorAddr);
@@ -368,16 +368,16 @@ contract DeploySherwood is ScriptBase {
         // Post-handoff `owner()` must match the multisig (or deployer
         // when handoff was skipped via SKIP_MULTISIG_HANDOFF).
         _checkAddr("gov.owner", Ownable(governorAddr).owner(), expectedOwner);
-        _checkUint("gov.votingPeriod", p.votingPeriod, 1 days);
+        _checkUint("gov.votingPeriod", p.votingPeriod, cfg.votingPeriod);
         _checkUint("gov.executionWindow", p.executionWindow, 1 days);
         _checkUint("gov.vetoThresholdBps", p.vetoThresholdBps, 4000);
         _checkUint("gov.maxPerformanceFeeBps", p.maxPerformanceFeeBps, 3000);
-        _checkUint("gov.cooldownPeriod", p.cooldownPeriod, 1 days);
-        _checkUint("gov.collaborationWindow", p.collaborationWindow, 48 hours);
+        _checkUint("gov.cooldownPeriod", p.cooldownPeriod, cfg.betaMode ? 1 hours : 1 days);
+        _checkUint("gov.collaborationWindow", p.collaborationWindow, cfg.betaMode ? 24 hours : 48 hours);
         _checkUint("gov.maxCoProposers", p.maxCoProposers, 5);
         _checkUint("gov.minStrategyDuration", p.minStrategyDuration, 1 hours);
-        _checkUint("gov.maxStrategyDuration", p.maxStrategyDuration, maxDays * 1 days);
-        _checkUint("gov.protocolFeeBps", governor.protocolFeeBps(), 200);
+        _checkUint("gov.maxStrategyDuration", p.maxStrategyDuration, cfg.maxStrategyDays * 1 days);
+        _checkUint("gov.protocolFeeBps", governor.protocolFeeBps(), cfg.protocolFeeBps);
         // protocolFeeRecipient stays at deployer at init time. Out of scope
         // for the multisig handoff (owner-only); the new multisig owner can rotate
         // it post-handoff via `setProtocolFeeRecipient`.
