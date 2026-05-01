@@ -269,9 +269,9 @@ describe('Grid capital isolation', () => {
     expect(grid.allocation).toBe(1587.50);
   });
 
-  it('pause threshold detects 20% drop', () => {
+  it('pause threshold detects 42% drop (threshold now 40%)', () => {
     const totalAlloc = 5000;
-    const currentValue = totalAlloc * 0.78; // dropped 22%
+    const currentValue = totalAlloc * 0.58; // dropped 42%
     const dropPct = 1 - (currentValue / totalAlloc);
     expect(dropPct).toBeGreaterThanOrEqual(DEFAULT_GRID_CONFIG.pauseThresholdPct);
   });

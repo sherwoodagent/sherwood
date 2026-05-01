@@ -106,8 +106,18 @@ export class GridManager {
    */
   async tick(prices: Record<string, number>, regime?: string): Promise<GridTickResult> {
     const state = await this.portfolio.load();
-    if (!state || state.paused || !this.config.enabled) {
-      return { fills: 0, roundTrips: 0, pnlUsd: 0, paused: state?.paused ?? false };
+    if (!state || !this.config.enabled) {
+      return { fills: 0, roundTrips: 0, pnlUsd: 0, paused: false };
+    }
+
+    // When paused, still run the pause/resume check — drawdown may have
+    // recovered and the grid should auto-resume via unpauseRecoveryPct.
+    if (state.paused) {
+      const resumed = this.portfolio.checkPauseThreshold(state, this.config, prices);
+      if (resumed) {
+        await this.portfolio.save(state);
+      }
+      return { fills: 0, roundTrips: 0, pnlUsd: 0, paused: state.paused };
     }
 
     // Regime-aware grid control: only pause in high-volatility (dangerous swings).

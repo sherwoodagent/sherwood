@@ -102,10 +102,10 @@ export class GridPortfolio {
     return changed;
   }
 
-  /** Check if grid should be paused (pool equity dropped below threshold).
-   *  `prices` is required to mark open buys to market — without current price,
-   *  unrealized losses on open positions are invisible. If a token's price is
-   *  missing/zero we assume zero unrealized PnL for that grid. */
+  /** Check if grid should be paused or resumed (pool equity dropped/recovered).
+   *  `prices` is required to mark open buys to market. Hysteresis: pause at
+   *  `pauseThresholdPct` drop, resume only when drop recovers below
+   *  `unpauseRecoveryPct`. Returns true iff state.paused was changed. */
   checkPauseThreshold(
     state: GridPortfolioState,
     config: GridConfig,
@@ -123,11 +123,18 @@ export class GridPortfolio {
 
     const dropPct = 1 - (currentValue / state.totalAllocation);
 
-    if (dropPct >= config.pauseThresholdPct) {
+    if (!state.paused && dropPct >= config.pauseThresholdPct) {
       state.paused = true;
-      state.pauseReason = `Grid pool dropped ${(dropPct * 100).toFixed(1)}% (threshold: ${(config.pauseThresholdPct * 100).toFixed(0)}%)`;
+      state.pauseReason = `Grid pool dropped ${(dropPct * 100).toFixed(1)}% (pause threshold: ${(config.pauseThresholdPct * 100).toFixed(0)}%, resume when ≤ ${(config.unpauseRecoveryPct * 100).toFixed(0)}%)`;
       return true;
     }
+
+    if (state.paused && dropPct <= config.unpauseRecoveryPct) {
+      state.paused = false;
+      state.pauseReason = '';
+      return true;
+    }
+
     return false;
   }
 

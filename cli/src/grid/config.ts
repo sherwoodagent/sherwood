@@ -114,6 +114,8 @@ export interface GridConfig {
   minProfitPerFillUsd: number;
   /** Pause grid if pool drops this fraction from initial allocation. */
   pauseThresholdPct: number;
+  /** Resume paused grid when drawdown recovers below this fraction (hysteresis). */
+  unpauseRecoveryPct: number;
 }
 
 export const DEFAULT_GRID_CONFIG: GridConfig = {
@@ -128,5 +130,6 @@ export const DEFAULT_GRID_CONFIG: GridConfig = {
   fullRebuildIntervalMs: 12 * 60 * 60 * 1000,   // 12h
   tokenSplit: { bitcoin: 0.45, ethereum: 0.30, solana: 0.25 },
   minProfitPerFillUsd: 0.50,
-  pauseThresholdPct: 0.20,
+  pauseThresholdPct: 0.40,                      // was 0.20 — 5x leverage means 4% adverse = 20% pool drop (daily noise)
+  unpauseRecoveryPct: 0.10,                     // resume when drawdown recovers below 10% (hysteresis)
 };
