@@ -419,6 +419,72 @@ contract VaultLiveNAVTest is Test {
         uint256 ta = vault.totalAssets();
         assertEq(ta, 1_000e6);
     }
+
+    // ──────────────────────── IMP-2: maxRedeem float cap (EIP-4626 conformance) ────────────────────────
+
+    /// @notice IMP-2 regression: `redeem(maxRedeem(user), ...)` must succeed
+    ///         even when float has been forwarded to the live-NAV adapter.
+    ///         Without the float cap, `maxRedeem` returned the user's full
+    ///         balance and `redeem` reverted with `QueueReserveBreached`
+    ///         inside `_withdraw`. Now `maxRedeem` is capped by the shares
+    ///         actually backable by available float.
+    function test_maxRedeem_capsAtFloatBackedSharesUnderLiveNAV() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(0, true);
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+        _mockActiveProposal(true);
+
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        // Live deposit forwarded the float to the adapter — vault has 0 float.
+        // Simulate partial drain instead so we can also test redeem path.
+        deal(address(usdc), address(vault), 100e6);
+        adapter.setValue(900e6, true);
+
+        uint256 mr = vault.maxRedeem(alice);
+        // The maxRedeem-shares converted back to assets must be backable by
+        // available float (no queue reserve in this test).
+        uint256 mrAssets = vault.convertToAssets(mr);
+        assertLe(mrAssets, 100e6, "maxRedeem exceeds available float");
+
+        // Critical EIP-4626 conformance: redeem(maxRedeem) must not revert.
+        if (mr > 0) {
+            vm.prank(alice);
+            vault.redeem(mr, alice, alice);
+        }
+    }
+
+    /// @notice IMP-2: when float is fully drained (all assets in adapter),
+    ///         `maxRedeem` must return 0 — there is nothing redeemable
+    ///         without first settling the proposal.
+    function test_maxRedeem_returnsZeroWhenFloatFullyDrained() public {
+        address alice = makeAddr("alice");
+        usdc.mint(alice, 1_000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        adapter.setValue(0, true);
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(adapter));
+        _mockActiveProposal(true);
+
+        vm.prank(alice);
+        vault.deposit(1_000e6, alice);
+
+        // Live-deposit forwarding drained the float; adapter holds it now.
+        adapter.setValue(1_000e6, true);
+        assertEq(usdc.balanceOf(address(vault)), 0, "float drained");
+
+        assertEq(vault.maxRedeem(alice), 0, "maxRedeem 0 when float empty");
+    }
 }
 
 /// @dev Adapter whose `positionValue()` reverts. Used to verify the

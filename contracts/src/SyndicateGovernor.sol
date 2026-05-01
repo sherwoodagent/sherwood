@@ -384,16 +384,22 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ///      vault is also the consumer of the pointer, so the validation
     ///      logically belongs there. Errors surface here through the
     ///      bubbled `AdapterNotIStrategy` revert from the vault.
-    function bindProposalAdapter(uint256 proposalId, address adapter) external {
+    /// @dev IMP-1: bind allowed only during `Draft` (collaborative
+    ///      pre-approvals) or `Pending` (lead retains full authority during
+    ///      voting), AND only while no co-proposer has approved. Once a
+    ///      co-proposer approves the proposal hash, the adapter pointer is
+    ///      locked — co-proposers approve the executeCalls/settlementCalls
+    ///      hash but NOT the adapter, so a post-approval rebind would be a
+    ///      side-channel mutation of the executed strategy.
+    function bindProposalAdapter(uint256 proposalId, address adapter) external nonReentrant {
         StrategyProposal storage proposal = _proposals[proposalId];
         // Proposer check covers the nonexistent-proposal case (proposer is
         // the zero address for unset slots and msg.sender can never be zero).
         if (msg.sender != proposal.proposer) revert NotProposer();
 
-        // Pre-execute window only. After Executed the adapter is already on
-        // the vault and the binding is meaningless. View resolution is
-        // sufficient — this path doesn't commit transitions.
-        if (uint256(_resolveStateView(proposal)) > uint256(ProposalState.Approved)) revert AdapterBindingClosed();
+        ProposalState s = _resolveStateView(proposal);
+        if (s != ProposalState.Draft && s != ProposalState.Pending) revert AdapterBindingClosed();
+        if (_approvedCount[proposalId] != 0) revert AdapterBindingClosed();
 
         // Push directly to the vault — no governor-side mapping needed (the
         // vault is per-proposal anyway, and the adapter is implicitly cleared

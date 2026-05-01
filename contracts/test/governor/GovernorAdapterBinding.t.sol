@@ -212,12 +212,22 @@ contract GovernorAdapterBindingTest is Test {
     }
 
     function test_executeProposal_preservesBoundAdapter() public {
-        uint256 proposalId = _proposeAndApprove();
+        // IMP-1: bind must happen during Draft or Pending (with no co-proposer
+        // approvals). Bind here while the proposal is still Pending, then
+        // approve and execute.
+        uint256 proposalId = _propose();
         MockStrategyAdapter adapter = new MockStrategyAdapter();
         vm.prank(agent);
         governor.bindProposalAdapter(proposalId, address(adapter));
         // Already bound on the vault before execute.
         assertEq(vault.activeStrategyAdapter(), address(adapter));
+
+        // Drive to Approved.
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.warp(vm.getBlockTimestamp() + VOTING_PERIOD + 1);
 
         governor.executeProposal(proposalId);
 
@@ -233,12 +243,20 @@ contract GovernorAdapterBindingTest is Test {
     }
 
     function test_settleProposal_implicitlyClearsAdapter() public {
-        uint256 proposalId = _proposeAndApprove();
+        // IMP-1: bind during Pending, then drive to Approved + Execute.
+        uint256 proposalId = _propose();
         MockStrategyAdapter adapter = new MockStrategyAdapter();
         // Adapter NAV would be 9_999e6 if read.
         adapter.setValue(9_999e6, true);
         vm.prank(agent);
         governor.bindProposalAdapter(proposalId, address(adapter));
+
+        vm.prank(lp1);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.prank(lp2);
+        governor.vote(proposalId, ISyndicateGovernor.VoteType.For);
+        vm.warp(vm.getBlockTimestamp() + VOTING_PERIOD + 1);
+
         governor.executeProposal(proposalId);
         assertEq(vault.activeStrategyAdapter(), address(adapter));
 
@@ -279,6 +297,70 @@ contract GovernorAdapterBindingTest is Test {
         vm.prank(agent);
         vm.expectRevert(ISyndicateVault.AdapterNotIStrategy.selector);
         governor.bindProposalAdapter(proposalId, address(ra));
+    }
+
+    // ──────────────────────── IMP-1: collaborative-approval adapter lock ────────────────────────
+
+    /// @notice IMP-1 regression: once any co-proposer approves the proposal
+    ///         hash, the lead proposer can no longer rebind the adapter.
+    ///         Co-proposers approve `executeCalls`/`settlementCalls` but not
+    ///         the adapter pointer — allowing post-approval rebinding would
+    ///         be a side-channel mutation of the executed strategy.
+    function test_bindProposalAdapter_locksAfterFirstCoProposerApproval() public {
+        // Mint NFT for co-proposer and register on vault
+        address co = makeAddr("co");
+        uint256 coNftId = agentRegistry.mint(co);
+        vm.prank(owner);
+        vault.registerAgent(coNftId, co);
+
+        ISyndicateGovernor.CoProposer[] memory cps = new ISyndicateGovernor.CoProposer[](1);
+        cps[0] = ISyndicateGovernor.CoProposer({agent: co, splitBps: 5000});
+
+        vm.prank(agent);
+        uint256 pid = governor.propose(address(vault), "ipfs://test", 1500, 7 days, _execCalls(), _settleCalls(), cps);
+
+        MockStrategyAdapter ad1 = new MockStrategyAdapter();
+        MockStrategyAdapter ad2 = new MockStrategyAdapter();
+
+        // Pre-approval (Draft, _approvedCount == 0): lead can bind freely.
+        vm.prank(agent);
+        governor.bindProposalAdapter(pid, address(ad1));
+        assertEq(vault.activeStrategyAdapter(), address(ad1));
+
+        // Co-proposer approves; with only 1 co-proposer this also transitions
+        // to Pending. We assert lock irrespective of state — the IMP-1 contract
+        // is "any co-proposer approval locks the adapter".
+        vm.prank(co);
+        governor.approveCollaboration(pid);
+
+        // After approval the adapter pointer is sealed.
+        // Single co-proposer with 5000 bps → all-approved → Pending; rebind
+        // would otherwise be allowed in Pending. The IMP-1 lock disallows it
+        // because `_approvedCount` is now nonzero (we are no longer in Draft
+        // and the Pending branch is reachable only if no co-proposer has
+        // approved … but the only path into Pending here is via
+        // approveCollaboration, which guarantees an approval). So rebind
+        // must revert with AdapterBindingClosed.
+        vm.prank(agent);
+        vm.expectRevert(ISyndicateGovernor.AdapterBindingClosed.selector);
+        governor.bindProposalAdapter(pid, address(ad2));
+
+        // Adapter pointer unchanged.
+        assertEq(vault.activeStrategyAdapter(), address(ad1));
+    }
+
+    /// @notice IMP-1 regression: once the proposal leaves `Pending`
+    ///         (i.e. enters GuardianReview / Approved / Executed), the
+    ///         adapter cannot be rebound. `_proposeAndApprove` warps past
+    ///         `voteEnd` so the proposal resolves to Approved (no review
+    ///         period in this test setup since `MockRegistryMinimal` returns
+    ///         zero from `reviewPeriod`).
+    function test_bindProposalAdapter_rejectsAfterPending() public {
+        uint256 proposalId = _proposeAndApprove();
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
+        vm.prank(agent);
+        vm.expectRevert(ISyndicateGovernor.AdapterBindingClosed.selector);
+        governor.bindProposalAdapter(proposalId, address(adapter));
     }
 }
 

@@ -651,17 +651,14 @@ contract SyndicateVault is
     ///      `redemptionsLocked()` is true (regular redeem is closed).
     ///      The bound withdrawal queue bypasses the reserve cap (see
     ///      `maxWithdraw`).
-    /// @dev I-2: this view caps by the queue-share reserve only — it does NOT
-    ///      cap by available float. During live-NAV, the vault forwards new
-    ///      deposits into the adapter so float can be near-zero while
-    ///      `totalSupply()` is large. `maxRedeem(user)` may therefore return a
-    ///      non-zero share count whose `convertToAssets` exceeds the float —
-    ///      `redeem(maxRedeem(user), ...)` will then revert with
-    ///      `QueueReserveBreached` inside `_withdraw`. Integrators that need a
-    ///      truly redeemable cap should call `maxWithdraw(user)` (which IS
-    ///      float-capped) and convert, or sanity-check via `previewRedeem`
-    ///      before submitting. v1 keeps the share-only cap to fit the bytecode
-    ///      budget; a future revision may unify both views.
+    /// @dev IMP-2: caps by both the queue-share reserve AND available float.
+    ///      During live-NAV the vault forwards new deposits into the adapter
+    ///      so float can be near-zero while `totalSupply()` is large. Without
+    ///      the float cap, `redeem(maxRedeem(user), ...)` would revert with
+    ///      `QueueReserveBreached` inside `_withdraw` — an EIP-4626 conformance
+    ///      bug. The float-share conversion uses `convertToShares(float - reserve)`
+    ///      so the returned share count corresponds to assets actually backable
+    ///      by float at the current NAV.
     function maxRedeem(address owner_) public view override returns (uint256) {
         (bool blocked,) = _lpFlowGate();
         if (paused() || blocked) return 0;
@@ -671,6 +668,14 @@ contract SyndicateVault is
         uint256 ts = totalSupply();
         if (ts == 0 || reserveShares >= ts) return 0;
         uint256 availableShares = ts - reserveShares;
+        // EIP-4626 conformance: redeem(maxRedeem(user), ...) must succeed even
+        // when float has been forwarded to the live-NAV adapter. Cap by the
+        // shares actually backable by available float.
+        uint256 reserve = reservedQueueAssets();
+        uint256 float = IERC20(asset()).balanceOf(address(this));
+        if (float <= reserve) return 0;
+        uint256 floatShares = convertToShares(float - reserve);
+        if (floatShares < availableShares) availableShares = floatShares;
         return userMax > availableShares ? availableShares : userMax;
     }
 
