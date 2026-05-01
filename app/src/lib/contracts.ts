@@ -180,7 +180,7 @@ const ROBINHOOD_TESTNET_ADDRESSES: ChainAddresses = {
 };
 
 const HYPEREVM_ADDRESSES: ChainAddresses = {
-  factory: "0x4085EEa1E6d3D20E84D8Ae14964FAb8b899DA40a",
+  factory: "0x7e7F8Ee0f451aA70be3dda66D9eeecbfc7FA48d3",
   usdc: "0xb88339CB7199b77E23DB6E890353E22632Ba630f",
   l2Registry: ZERO,
   identityRegistry: ZERO,
