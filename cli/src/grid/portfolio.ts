@@ -102,13 +102,23 @@ export class GridPortfolio {
     return changed;
   }
 
-  /** Check if grid should be paused (pool dropped below threshold). */
-  checkPauseThreshold(state: GridPortfolioState, config: GridConfig): boolean {
+  /** Check if grid should be paused (pool equity dropped below threshold).
+   *  `prices` is required to mark open buys to market — without current price,
+   *  unrealized losses on open positions are invisible. If a token's price is
+   *  missing/zero we assume zero unrealized PnL for that grid. */
+  checkPauseThreshold(
+    state: GridPortfolioState,
+    config: GridConfig,
+    prices: Record<string, number>,
+  ): boolean {
     const currentValue = state.grids.reduce((sum, g) => {
-      const openFillValue = g.openFills
-        .filter(f => !f.closed)
-        .reduce((s, f) => s + f.quantity * f.buyPrice, 0);
-      return sum + g.allocation + openFillValue;
+      const price = prices[g.token];
+      const unrealized = (price && price > 0)
+        ? g.openFills
+            .filter(f => !f.closed)
+            .reduce((s, f) => s + (price - f.buyPrice) * f.quantity * config.leverage, 0)
+        : 0;
+      return sum + g.allocation + unrealized;
     }, 0);
 
     const dropPct = 1 - (currentValue / state.totalAllocation);

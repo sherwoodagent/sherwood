@@ -150,8 +150,8 @@ export class GridManager {
       }
     }
 
-    // Check pause threshold
-    this.portfolio.checkPauseThreshold(state, this.config);
+    // Check pause threshold (uses current prices for mark-to-market)
+    this.portfolio.checkPauseThreshold(state, this.config, prices);
 
     // Persist
     await this.portfolio.save(state);
