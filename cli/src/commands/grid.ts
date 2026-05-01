@@ -283,6 +283,8 @@ export function registerGridCommand(program: Command): void {
     .option('--fee-bps <n>', 'Trading fee in basis points per fill (default 5 = 0.05%)', '5')
     .option('--no-hedge', 'Disable hedge simulation (hedge is ON by default to match live grid)')
     .option('--maintenance-pct <n>', 'Per-token maintenance margin fraction (default 0.02 = 2%, typical Hyperliquid)', '0.02')
+    .option('--pause-threshold <n>', 'Pool drop fraction that triggers pause (default 0.40, may be too lenient post leverage-fix)')
+    .option('--unpause-recovery <n>', 'Pool drop fraction below which paused grid resumes (default 0.10)')
     .option('--token-split <pairs>', 'Comma-separated token=weight pairs (must sum to 1.0). Default: equal-weight or 0.45/0.30/0.25 for BTC/ETH/SOL.')
     .action(async (opts) => {
       const now = Date.now();
@@ -311,6 +313,8 @@ export function registerGridCommand(program: Command): void {
         atrMultiplier: opts.atrMultiplier ? Number(opts.atrMultiplier) : DEFAULT_GRID_CONFIG.atrMultiplier,
         rebalanceDriftPct: opts.rebalanceDrift ? Number(opts.rebalanceDrift) : DEFAULT_GRID_CONFIG.rebalanceDriftPct,
         maintenanceMarginPct: opts.maintenancePct ? Number(opts.maintenancePct) : DEFAULT_GRID_CONFIG.maintenanceMarginPct,
+        pauseThresholdPct: opts.pauseThreshold ? Number(opts.pauseThreshold) : DEFAULT_GRID_CONFIG.pauseThresholdPct,
+        unpauseRecoveryPct: opts.unpauseRecovery ? Number(opts.unpauseRecovery) : DEFAULT_GRID_CONFIG.unpauseRecoveryPct,
       };
 
       const capital = Number(opts.capital);

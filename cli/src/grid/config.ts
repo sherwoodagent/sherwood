@@ -146,8 +146,8 @@ export const DEFAULT_GRID_CONFIG: GridConfig = {
   fullRebuildIntervalMs: 12 * 60 * 60 * 1000,   // 12h
   tokenSplit: { bitcoin: 0.45, ethereum: 0.30, solana: 0.25 },
   minProfitPerFillUsd: 0.50,
-  pauseThresholdPct: 0.40,                      // was 0.20 — 5x leverage means 4% adverse = 20% pool drop (daily noise)
-  unpauseRecoveryPct: 0.10,                     // resume when drawdown recovers below 10% (hysteresis)
+  pauseThresholdPct: 0.20,                      // post leverage-fix calibration: fires at ~4% adverse move on 5x (real dollar terms); old 0.40 required ~8% which essentially never fired before liquidation
+  unpauseRecoveryPct: 0.05,                     // hysteresis: resume when pool recovers to within 5% of initial (half of pause threshold to avoid ping-pong)
   maintenanceMarginPct: 0.02,
   maxOpenNotionalMultiple: 2.0,
   downtrendBlockPct: 0.10,
