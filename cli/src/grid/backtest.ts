@@ -279,11 +279,27 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
         const s = portfolio.getState();
         if (s) {
           const agg = portfolio.aggregateStats(s);
-          const openFillCount = s.grids.reduce((sum, g) => sum + g.openFills.filter(f => !f.closed).length, 0);
+          const openFillCount = s.grids.reduce(
+            (sum, g) => sum + g.openFills.filter(f => !f.closed).length,
+            0,
+          );
+          // Mark open positions to market at the current bar's close.
+          // Without this, drawdown is always 0 because the grid only books
+          // realized PnL on profitable closes — open underwater buys never
+          // show up in equity.
+          let unrealizedPnl = 0;
+          for (const grid of s.grids) {
+            const close = barIndex[grid.token]?.get(t)?.c;
+            if (close === undefined) continue;
+            for (const f of grid.openFills) {
+              if (f.closed) continue;
+              unrealizedPnl += (close - f.buyPrice) * f.quantity * opts.config.leverage;
+            }
+          }
           equityCurve.push({
             t,
             totalAllocation: s.totalAllocation,
-            totalPnl: agg.totalPnlUsd,
+            totalPnl: agg.totalPnlUsd + unrealizedPnl,
             totalRoundTrips: agg.totalRoundTrips,
             openFillCount,
             paused: s.paused,
