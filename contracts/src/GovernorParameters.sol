@@ -67,7 +67,7 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     bytes32 public constant PARAM_FACTORY = keccak256("factory");
     bytes32 public constant PARAM_GUARDIAN_FEE_BPS = keccak256("guardianFeeBps");
 
-    // ── Storage (ToB P2-1: moved from `SyndicateGovernor` concrete) ──
+    // ── Storage ──
 
     /// @notice Packed governance parameters (voting/execution windows, veto,
     ///         fee caps, strategy duration bounds, collaboration window).
@@ -195,7 +195,7 @@ abstract contract GovernorParameters is ISyndicateGovernor, OwnableUpgradeable {
     }
 
     /// @inheritdoc ISyndicateGovernor
-    /// @dev ToB P1-1: no recipient check — fees always route to the bound
+    /// @dev No recipient check — fees always route to the bound
     ///      `_guardianRegistry`, which is non-zero by initialize.
     function setGuardianFeeBps(uint256 newValue) external onlyOwner {
         if (newValue > MAX_GUARDIAN_FEE_BPS) revert InvalidGuardianFeeBps();

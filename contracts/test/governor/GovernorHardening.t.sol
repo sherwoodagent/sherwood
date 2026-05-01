@@ -404,7 +404,7 @@ contract GovernorHardeningTest is Test {
 
     /// @notice G-M2: propose reverts when executeCalls exceeds the cap.
     function test_propose_revertsIfExecuteCallsExceedCap() public {
-        uint256 cap = governor.MAX_CALLS_PER_PROPOSAL();
+        uint256 cap = 64; // mirror of SyndicateGovernor.MAX_CALLS_PER_PROPOSAL
         BatchExecutorLib.Call[] memory oversized = _buildOversizedCalls(cap + 1);
 
         vm.prank(leadAgent);
@@ -422,7 +422,7 @@ contract GovernorHardeningTest is Test {
 
     /// @notice G-M6: propose reverts when settlementCalls exceeds the cap.
     function test_propose_revertsIfSettlementCallsExceedCap() public {
-        uint256 cap = governor.MAX_CALLS_PER_PROPOSAL();
+        uint256 cap = 64; // mirror of SyndicateGovernor.MAX_CALLS_PER_PROPOSAL
         BatchExecutorLib.Call[] memory oversized = _buildOversizedCalls(cap + 1);
 
         vm.prank(leadAgent);
@@ -439,7 +439,7 @@ contract GovernorHardeningTest is Test {
     ///         string that would otherwise let a proposer grief gas / event
     ///         storage.
     function test_propose_revertsIfMetadataURITooLong() public {
-        uint256 cap = governor.MAX_METADATA_URI_LENGTH();
+        uint256 cap = 512; // mirror of SyndicateGovernor.MAX_METADATA_URI_LENGTH
         bytes memory tooLong = new bytes(cap + 1);
         for (uint256 i = 0; i < tooLong.length; i++) {
             tooLong[i] = "a";

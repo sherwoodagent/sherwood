@@ -34,7 +34,7 @@ contract RegisterVaults is ScriptBase {
 
         vm.startBroadcast();
 
-        // V1.5: timelock removed. setFactory applies immediately.
+        // setFactory applies immediately.
         if (governor.factory() != factoryAddr) {
             governor.setFactory(factoryAddr);
             console.log("setFactory applied");

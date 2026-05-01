@@ -32,8 +32,7 @@ interface IGovernorMinimal {
     ///         (Pending / GuardianReview / Approved / Executed). Consumed
     ///         by the rage-quit gate in `requestUnstakeOwner`. The OR check
     ///         against `getActiveProposal` below is belt-and-braces — any
-    ///         real open proposal must trip at least one of the two signals
-    ///         (PR #229 Fix 2).
+    ///         real open proposal must trip at least one of the two signals.
     function openProposalCount(address vault) external view returns (uint256);
     function getProposalView(uint256 proposalId) external view returns (ProposalView memory);
 }
@@ -54,7 +53,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     uint256 public constant EPOCH_DURATION = 7 days;
     uint256 public constant MIN_COHORT_STAKE_AT_OPEN = 50_000 * 1e18;
     uint256 public constant MAX_APPROVERS_PER_PROPOSAL = 100;
-    /// @notice ToB I-2: upper bound on blockers per proposal. Caps the O(n)
+    /// @notice Upper bound on blockers per proposal. Caps the O(n)
     ///         `BlockerAttributed` emit loop in `_emitBlockerAttribution` so
     ///         `resolveReview` cannot be gas-DoS'd. Blockers beyond the cap
     ///         revert at vote time; quorum math remains correct because
@@ -109,8 +108,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         uint128 totalStakeAtOpen;
         uint128 approveStakeWeight;
         uint128 blockStakeWeight;
-        uint64 openedAt; // V1.5: timestamp for checkpoint lookup of vote weight
-        uint128 totalDelegatedAtOpen; // V1.5: delegation half of the quorum denom
+        uint64 openedAt; // timestamp for checkpoint lookup of vote weight
+        uint128 totalDelegatedAtOpen; // delegation half of the quorum denom
     }
 
     mapping(uint256 => Review) internal _reviews;
@@ -129,8 +128,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         bool resolved;
         bool blocked;
         uint8 nonce; // bumped on open/cancel so prior block votes go stale
-        uint64 openedAt; // V1.5: timestamp for checkpoint lookup of vote weight
-        uint128 totalDelegatedAtOpen; // V1.5: delegation half of the quorum denom
+        uint64 openedAt; // timestamp for checkpoint lookup of vote weight
+        uint128 totalDelegatedAtOpen; // delegation half of the quorum denom
     }
 
     mapping(uint256 => EmergencyReview) internal _emergencyReviews;
@@ -143,9 +142,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      Moved from SyndicateGovernor to consolidate emergency state.
     mapping(uint256 => BatchExecutorLib.Call[]) internal _emergencyCalls;
 
-    // Epoch accounting (V1.5: WOOD epoch block-rewards moved to Merkl; only
-    // epochGenesis remains on-chain as the epoch-index anchor used by
-    // setCommission's raise-epoch calculation and off-chain Merkl bot.)
+    // Epoch accounting. WOOD epoch block-rewards live in Merkl off-chain;
+    // `epochGenesis` remains on-chain as the epoch-index anchor used by
+    // `setCommission`'s raise-epoch calculation and the off-chain Merkl bot.
     uint256 public epochGenesis;
 
     // Pending burn
@@ -171,7 +170,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     address public factory;
     IERC20 public wood;
 
-    // ── V1.5 vote-weight checkpoints (Task 1.2) ──
+    // ── Vote-weight checkpoints ──
     using Checkpoints for Checkpoints.Trace224;
 
     /// @dev Per-guardian own-stake history, keyed by timestamp. Pushed on every
@@ -184,7 +183,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      but indexed by timestamp for historical quorum-denominator lookups.
     Checkpoints.Trace224 internal _totalStakeCheckpoint;
 
-    // ── V1.5 delegation (Task 2.1) ──
+    // ── Delegation ──
     /// @dev Per-(delegator, delegate) locked balance. WOOD moves from the
     ///      delegator's wallet into the registry on `delegateStake`.
     mapping(address delegator => mapping(address delegate => uint256)) internal _delegations;
@@ -210,7 +209,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     /// @dev Global delegation total history for `getPastTotalDelegated`.
     Checkpoints.Trace224 internal _totalDelegatedCheckpoint;
 
-    // ── V1.5 Phase 3: DPoS commission (Task 3.1) ──
+    // ── DPoS commission ──
 
     /// @notice Max commission a delegate can charge their delegators (50%).
     uint256 public constant MAX_COMMISSION_BPS = 5000;
@@ -234,16 +233,16 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///        (last pre-epoch checkpoint)
     ///      Subsequent raises within the same epoch keep the baseline fixed,
     ///      so chained raises cannot compound past
-    ///      `baseline + MAX_COMMISSION_INCREASE_PER_EPOCH` (INV-V1.5-6).
+    ///      `baseline + MAX_COMMISSION_INCREASE_PER_EPOCH`.
     mapping(address => uint256) internal _commissionEpochBaseline;
 
     /// @dev Per-delegate commission history keyed by timestamp. Consumed by
     ///      `claimProposalReward` which looks up the rate at `settledAt` —
-    ///      closes the retroactive-raise vector (INV-V1.5-11). Also consumed
-    ///      by `setCommission` itself to derive the per-epoch raise baseline.
+    ///      closes the retroactive-raise vector. Also consumed by
+    ///      `setCommission` itself to derive the per-epoch raise baseline.
     mapping(address => Checkpoints.Trace224) internal _commissionCheckpoints;
 
-    // ── V1.5 Phase 3: per-proposal guardian-fee pool (Tasks 3.6-3.9) ──
+    // ── Per-proposal guardian-fee pool ──
 
     struct ProposalRewardPool {
         address asset;
@@ -358,7 +357,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         }
         totalGuardianStake += amount;
 
-        // V1.5: checkpoint votable stake for historical quorum lookups.
+        // Checkpoint votable stake for historical quorum lookups.
         _stakeCheckpoints[msg.sender].push(uint32(block.timestamp), uint224(newTotal));
         _totalStakeCheckpoint.push(uint32(block.timestamp), uint224(totalGuardianStake));
 
@@ -377,7 +376,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         g.unstakeRequestedAt = uint64(block.timestamp);
         totalGuardianStake -= g.stakedAmount;
 
-        // V1.5: unstake-requested stake is not votable. Push 0 so getPastStake
+        // Unstake-requested stake is not votable. Push 0 so getPastStake
         // reflects the on-cooldown state accurately.
         _stakeCheckpoints[msg.sender].push(uint32(block.timestamp), 0);
         _totalStakeCheckpoint.push(uint32(block.timestamp), uint224(totalGuardianStake));
@@ -390,8 +389,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     function cancelUnstakeGuardian() external {
         Guardian storage g = _guardians[msg.sender];
         if (g.unstakeRequestedAt == 0) revert UnstakeNotRequested();
-        // Bug B fix: if the guardian was slashed between `requestUnstakeGuardian`
-        // and now, `stakedAmount == 0` but `unstakeRequestedAt` still points at
+        // If the guardian was slashed between `requestUnstakeGuardian` and
+        // now, `stakedAmount == 0` but `unstakeRequestedAt` still points at
         // the original request. "Cancelling" here would resurrect a ghost
         // guardian with no stake. Nothing to restore → revert.
         if (g.stakedAmount == 0) revert NoActiveStake();
@@ -399,7 +398,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         g.unstakeRequestedAt = 0;
         totalGuardianStake += g.stakedAmount;
 
-        // V1.5: stake is votable again.
+        // Stake is votable again.
         _stakeCheckpoints[msg.sender].push(uint32(block.timestamp), uint224(g.stakedAmount));
         _totalStakeCheckpoint.push(uint32(block.timestamp), uint224(totalGuardianStake));
 
@@ -411,7 +410,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      deregisters the guardian entirely (struct deleted — agentId can differ on
     ///      a subsequent re-stake).
     // ──────────────────────────────────────────────────────────────
-    // V1.5 — Stake-pool delegation (Phase 2)
+    // Stake-pool delegation
     // ──────────────────────────────────────────────────────────────
 
     /// @inheritdoc IGuardianRegistry
@@ -498,7 +497,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     // ──────────────────────────────────────────────────────────────
-    // V1.5 Phase 3 — DPoS commission configuration (Task 3.1)
+    // DPoS commission configuration
     // ──────────────────────────────────────────────────────────────
 
     /// @inheritdoc IGuardianRegistry
@@ -519,13 +518,13 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         if (newBps > old) {
             uint256 curEpoch = currentEpoch();
             (bool hasHistory,,) = _commissionCheckpoints[msg.sender].latestCheckpoint();
-            // ToB review C-2: first-set is exempt from the raise cap ONLY
-            // if the delegate has no delegators yet. Previously first-set was
-            // unconditionally uncapped, allowing a delegate to accept
-            // delegations at implied 0% commission and then JIT-rug to 50% in
-            // the same block as `settledAt` — defeating rug-protection. By
-            // gating the exemption on `_delegatedInbound == 0`, legitimate
-            // delegates can still announce any opening rate before attracting
+            // First-set is exempt from the raise cap ONLY if the delegate
+            // has no delegators yet. An unconditional first-set exemption
+            // would allow a delegate to accept delegations at implied 0%
+            // commission and then JIT-rug to 50% in the same block as
+            // `settledAt` — defeating rug-protection. By gating the
+            // exemption on `_delegatedInbound == 0`, legitimate delegates
+            // can still announce any opening rate before attracting
             // delegators, but any post-delegation raise is rate-limited.
             if (!hasHistory && _delegatedInbound[msg.sender] == 0) {
                 // Pure announcement: no delegators at risk, no cap.
@@ -567,7 +566,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     // ──────────────────────────────────────────────────────────────
-    // V1.5 Phase 3 — Guardian-fee pool funding (Task 3.6)
+    // Guardian-fee pool funding
     // ──────────────────────────────────────────────────────────────
 
     /// @inheritdoc IGuardianRegistry
@@ -595,7 +594,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     // the amount that would transfer.
 
     // ──────────────────────────────────────────────────────────────
-    // V1.5 Phase 3 — Guardian-fee claim paths (Tasks 3.7 / 3.8 / 3.9)
+    // Guardian-fee claim paths
     // ──────────────────────────────────────────────────────────────
 
     /// @inheritdoc IGuardianRegistry
@@ -606,9 +605,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      approver, remainder stored for delegators to claim). A solo
     ///      approver with no delegators receives their full gross share
     ///      regardless of commission rate (closes the "solo-approver-loses-
-    ///      remainder" bug from PR #242 review, finding C-1).
+    ///      remainder" bug).
     ///      Commission rate is looked up at `settledAt` via
-    ///      `_commissionCheckpoints` (INV-V1.5-11).
+    ///      `_commissionCheckpoints`.
     ///      CEI is respected: `_approverClaimed[...] = true` is set before the
     ///      external transfer, so reentry hits `AlreadyClaimed`. No
     ///      `nonReentrant` needed.
@@ -624,7 +623,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         // Compute the four payout numbers in a scope block so all the
         // intermediate locals (w, r, ownW, grossFromOwn, grossFromDelegated,
         // rate) get freed before the `_safeRewardTransfer` call site.
-        // Required for `forge coverage` (no via_ir) — see #257.
+        // Required for `forge coverage` (no via_ir).
         uint256 gross;
         uint256 commission;
         uint256 remainder;
@@ -641,13 +640,13 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
             // `w` in voteOnProposal — so `w >= ownW` holds by construction (w =
             // own@openedAt + delegated@openedAt). No clamp needed. Reading at
             // `settledAt` instead would strand funds when an approver requests
-            // unstake mid-review (PR #242 re-review, finding I-A).
+            // unstake mid-review.
             uint256 ownW = _stakeCheckpoints[msg.sender].upperLookupRecent(uint32(r.openedAt));
             uint256 grossFromOwn = (gross * ownW) / w;
             uint256 grossFromDelegated = gross - grossFromOwn;
 
-            // Commission RATE stays at settledAt (INV-V1.5-11) — only the
-            // vote-weight lookup moves to openedAt.
+            // Commission RATE stays at settledAt — only the vote-weight
+            // lookup moves to openedAt.
             uint256 rate = _commissionCheckpoints[msg.sender].upperLookupRecent(uint32(pool.settledAt));
             commission = (grossFromDelegated * rate) / BPS_DENOMINATOR;
             approverPayout = grossFromOwn + commission;
@@ -673,7 +672,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      `claimProposalReward` (otherwise the pool is zero). Attribution
     ///      timestamp is `openedAt` — same as the approver's vote-weight
     ///      snapshot — so delegator denominator and `grossFromDelegated`
-    ///      numerator align (PR #242 re-review, finding I-B).
+    ///      numerator align.
     /// @dev Not `whenNotPaused` — bytecode reclaim. The delegator pool was
     ///      already seeded by the approver's claim (which IS paused-gated),
     ///      so value is already earmarked for delegators; pausing the pull
@@ -708,10 +707,10 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     /// @dev W-1 retry path. After the transfer-failure condition is lifted
     ///      (e.g., USDC blacklist removed), anyone can flush the escrow to the
     ///      recipient. Keyed by (proposalId, recipient, asset) so a malicious
-    ///      flush cannot redirect to an unrelated recipient — CEI pattern from
-    ///      PR #229 review cross-vault-drain fix.
+    ///      flush cannot redirect to an unrelated recipient — CEI pattern
+    ///      guards against cross-vault-drain attempts.
     ///
-    ///      M-6 note on pause semantics: `flushBurn` (WOOD slashing path) is
+    ///      Pause semantics: `flushBurn` (WOOD slashing path) is
     ///      `nonReentrant whenNotPaused` because it interacts with slashing
     ///      accounting that might need to freeze during incident review.
     ///      `flushUnclaimedApproverFee` is neither: the escrow is already
@@ -731,24 +730,21 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         // event (reclaimed bytecode).
     }
 
-    // V1.5: pending-reward views removed to reclaim bytecode. UIs can
-    // simulate via `eth_call(claimProposalReward)` / `eth_call(claimDelegator*)`
-    // which returns success/revert + consumed gas, or compute off-chain from
-    // `proposalGuardianPool` + `_voteStake` + `commissionAt` + checkpoint views.
-
-    // `unclaimedApproverFee(pid, recipient, asset)` wrapper view removed to
-    // reclaim bytecode. The public mapping `unclaimedApproverFees(bytes32)`
-    // serves as the getter — callers compute the key via
+    // The public mapping `unclaimedApproverFees(bytes32)` serves as the
+    // getter for unclaimed approver-fee escrows — callers compute the key via
     // `keccak256(abi.encode(proposalId, recipient, asset))` and query:
     //   cast call <registry> 'unclaimedApproverFees(bytes32)' <key>
     // or subscribe to `ApproverFeeEscrowed(pid, recipient, asset, amount)`
-    // events.
+    // events. Pending-reward views can be simulated via
+    // `eth_call(claimProposalReward)` / `eth_call(claimDelegator*)` or
+    // computed off-chain from `proposalGuardianPool` + `_voteStake` +
+    // `commissionAt` + checkpoint views.
 
     /// @dev Wrapped ERC20 transfer for guardian-fee claims. On failure (e.g.
     ///      USDC blacklist), records the amount in `unclaimedApproverFees`
     ///      keyed by `(proposalId, recipient, asset)` + emits
     ///      `ApproverFeeEscrowed`. Cross-proposal drain is impossible because
-    ///      the key includes `proposalId` (regression guard from PR #229 review).
+    ///      the key includes `proposalId`.
     function _safeRewardTransfer(address asset, address recipient, uint256 amount, uint256 proposalId) private {
         bool ok;
         try IERC20(asset).transfer(recipient, amount) returns (bool r) {
@@ -785,14 +781,14 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      `_voteStake[proposalId][caller]` and adds it to the chosen side's
     ///      tally. Approvers and Blockers are each capped at
     ///      `MAX_APPROVERS_PER_PROPOSAL` / `MAX_BLOCKERS_PER_PROPOSAL`
-    ///      (ToB I-2 added the Blocker cap so `_emitBlockerAttribution` stays
-    ///      O(1)). Vote-change is allowed until the final
+    ///      (the Blocker cap keeps `_emitBlockerAttribution` O(1)).
+    ///      Vote-change is allowed until the final
     ///      `LATE_VOTE_LOCKOUT_BPS` of the review window; the preserved
     ///      `_voteStake` snapshot moves with the caller, and the new-side cap
     ///      is checked BEFORE mutating the old side so a revert leaves the
     ///      prior vote intact.
     ///
-    ///      V1.5: vote weight is read from `_stakeCheckpoints[voter]` at
+    ///      Vote weight is read from `_stakeCheckpoints[voter]` at
     ///      `r.openedAt`, so both numerator (each voter's contribution) and
     ///      denominator (`r.totalStakeAtOpen`) are measured at the same
     ///      instant. Closes the top-up-before-vote bias.
@@ -846,9 +842,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
             // subsequent `_push{Approver,Blocker}` MUST NOT gain a new failure
             // mode on top of the cap — if it does, the old-side decrement
             // will have already executed, silently corrupting stake tallies.
-            // See the vote-change fragility finding on PR #229 review.
+            // See the vote-change fragility note above.
             if (existing == GuardianVoteType.Approve) {
-                // Approve → Block (ToB I-2: blockers are now capped).
+                // Approve → Block (blockers are capped).
                 if (_blockers[proposalId].length >= MAX_BLOCKERS_PER_PROPOSAL) revert NewSideFull();
                 _removeApprover(proposalId, msg.sender);
                 r.approveStakeWeight -= weight;
@@ -878,7 +874,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     }
 
     function _pushBlocker(uint256 proposalId, address g) private {
-        // ToB I-2: cap parallels MAX_APPROVERS_PER_PROPOSAL so the
+        // Cap parallels MAX_APPROVERS_PER_PROPOSAL so the
         // `BlockerAttributed` emit loop in `_emitBlockerAttribution` is
         // O(MAX_BLOCKERS_PER_PROPOSAL) — bounded gas at `resolveReview`.
         if (_blockers[proposalId].length >= MAX_BLOCKERS_PER_PROPOSAL) {
@@ -966,12 +962,12 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      prevent rage-quit around malicious executions. Immediately stamps
     ///      `unstakeRequestedAt`; WOOD stays escrowed until `claimUnstakeOwner`.
     ///
-    ///      PR #229 Fix 2: the legacy `getActiveProposal` check only covered
-    ///      the Executed state; a malicious owner could propose a draining
-    ///      strategy and rage-quit before execution. `openProposalCount` now
-    ///      tracks every non-terminal state (Pending / GuardianReview /
-    ///      Approved / Executed). The OR against `getActiveProposal` below
-    ///      is belt-and-braces so that any stale-cache window still reverts.
+    ///      `openProposalCount` tracks every non-terminal state (Pending /
+    ///      GuardianReview / Approved / Executed) — a `getActiveProposal`
+    ///      check alone would only cover Executed and let a malicious owner
+    ///      propose a draining strategy and rage-quit before execution. The
+    ///      OR against `getActiveProposal` below is belt-and-braces so any
+    ///      stale-cache window still reverts.
     function requestUnstakeOwner(address vault) external {
         OwnerStake storage s = _ownerStakes[vault];
         if (s.owner != msg.sender || s.stakedAmount == 0) revert NoActiveStake();
@@ -1139,14 +1135,14 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         if (ve == 0 || block.timestamp < ve) revert ReviewNotOpen();
 
         uint128 totalAtOpen = uint128(totalGuardianStake);
-        uint128 delegatedAtOpen = uint128(totalDelegatedStake); // V1.5
+        uint128 delegatedAtOpen = uint128(totalDelegatedStake);
         uint256 combinedAtOpen = uint256(totalAtOpen) + uint256(delegatedAtOpen);
         r.opened = true;
         r.totalStakeAtOpen = totalAtOpen;
         r.totalDelegatedAtOpen = delegatedAtOpen;
-        // V1.5 + ToB review C-1: anchor at `block.timestamp - 1`. See
-        // openEmergencyReview for rationale. Flash-delegation in the same
-        // block as openReview would otherwise inflate vote weight.
+        // Anchor at `block.timestamp - 1`. See openEmergencyReview for
+        // rationale. Flash-delegation in the same block as openReview would
+        // otherwise inflate vote weight.
         r.openedAt = uint64(block.timestamp - 1);
         if (combinedAtOpen < MIN_COHORT_STAKE_AT_OPEN) {
             r.cohortTooSmall = true;
@@ -1161,8 +1157,8 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     ///      `blocked` flag without re-slashing. Requires
     ///      `block.timestamp >= reviewEnd`. Short-circuits to `false` when
     ///      `!opened` (no activity) or `cohortTooSmall` (cold-start fallback).
-    ///      Otherwise: `denom = totalStakeAtOpen + totalDelegatedAtOpen` (V1.5
-    ///      includes delegated weight) and
+    ///      Otherwise: `denom = totalStakeAtOpen + totalDelegatedAtOpen`
+    ///      (includes delegated weight) and
     ///      `blocked = (blockStakeWeight * 10_000 >= blockQuorumBps * denom)`.
     ///      CEI: sets `resolved`/`blocked` flags BEFORE any token transfer.
     ///      When blocked, slashes all approvers' stake to BURN_ADDRESS and
@@ -1189,7 +1185,7 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
             return false;
         }
 
-        // V1.5: denominator is own stake + delegated stake at review open.
+        // Denominator is own stake + delegated stake at review open.
         uint256 denom = uint256(r.totalStakeAtOpen) + uint256(r.totalDelegatedAtOpen);
         bool blocked_ = (uint256(r.blockStakeWeight) * 10_000 >= blockQuorumBps * denom);
 
@@ -1244,22 +1240,22 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
             // request time.
             if (gs.unstakeRequestedAt == 0) {
                 totalGuardianStake -= amt;
-                // V1.5: checkpoint the post-slash votable stake. Only when the
-                // approver was still active; if unstake was requested they were
-                // already at 0-votable and the checkpoint push already happened
-                // in requestUnstakeGuardian.
+                // Checkpoint the post-slash votable stake. Only when the
+                // approver was still active; if unstake was requested they
+                // were already at 0-votable and the checkpoint push already
+                // happened in requestUnstakeGuardian.
                 _stakeCheckpoints[a].push(uint32(block.timestamp), uint224(gs.stakedAmount));
             } else if (gs.stakedAmount == 0) {
-                // Defense in depth for Bug B: a fully-slashed guardian keeps no
-                // stake — there's nothing for cancelUnstake to restore, so
-                // clear the timestamp too.
+                // Defense in depth: a fully-slashed guardian keeps no stake
+                // — there's nothing for cancelUnstake to restore, so clear
+                // the timestamp too.
                 gs.unstakeRequestedAt = 0;
             }
         }
 
         if (total == 0) return 0;
 
-        // V1.5: checkpoint the aggregate total-stake drop once after the loop.
+        // Checkpoint the aggregate total-stake drop once after the loop.
         _totalStakeCheckpoint.push(uint32(block.timestamp), uint224(totalGuardianStake));
 
         // Single burn transfer wrapped in try/catch. A malicious / broken WOOD
@@ -1276,11 +1272,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         }
     }
 
-    /// @dev V1.5: emits `BlockerAttributed(proposalId, epochId, blocker, weight)`
-    ///      for each blocker so Merkl's off-chain bot can build the epoch WOOD
-    ///      campaign's Merkle roots. Replaces V1's on-chain
-    ///      `epochGuardianBlockWeight` + `epochTotalBlockWeight` + `epochBudget`
-    ///      accounting, which moved to Merkl.
+    /// @dev Emits `BlockerAttributed(proposalId, epochId, blocker, weight)`
+    ///      for each blocker so Merkl's off-chain bot can build the epoch
+    ///      WOOD campaign's Merkle roots.
     function _emitBlockerAttribution(uint256 proposalId) private {
         uint256 epochId = (block.timestamp - epochGenesis) / EPOCH_DURATION;
         address[] storage blockers = _blockers[proposalId];
@@ -1357,9 +1351,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
     /// @dev Active-guardian-only. Block-only side (no Approve pool for
     ///      emergency reviews). One vote per guardian — double-votes revert.
     ///      Weight is the caller's current `guardianStake` at call time.
-    /// @dev V1.5: weight is read from `_stakeCheckpoints[voter]` at
-    ///      `er.openedAt`, matching the standard-review semantics. Numerator
-    ///      and denominator both measured at the same instant.
+    /// @dev Weight is read from `_stakeCheckpoints[voter]` at `er.openedAt`,
+    ///      matching the standard-review semantics. Numerator and denominator
+    ///      both measured at the same instant.
     function voteBlockEmergencySettle(uint256 proposalId) external whenNotPaused {
         EmergencyReview storage er = _emergencyReviews[proposalId];
         if (er.reviewEnd == 0 || block.timestamp >= er.reviewEnd) revert ReviewNotOpen();
@@ -1416,17 +1410,14 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         emit BurnFlushed(amt);
     }
 
-    // ── V1.5: WOOD epoch block-rewards moved to Merkl ──
+    // ── WOOD epoch block-rewards distributed via Merkl ──
     //
-    // Removed V1 on-chain machinery: `fundEpoch`, `claimEpochReward`,
-    // `sweepUnclaimed`, `pendingEpochReward`, + all per-epoch accounting
-    // storage. Merkl campaign attribution is driven by the
-    // `BlockerAttributed` event emitted in `_emitBlockerAttribution` during
-    // `resolveReview`, plus `CommissionSet` + `DelegationIncreased` /
-    // `DelegationUnstakeClaimed` events already emitted elsewhere. The
-    // Merkl funding tx is a plain WOOD transfer from the owner multisig
-    // to the Merkl distributor — indexers attribute it without any
-    // registry-side event (ToB P1-5).
+    // Merkl campaign attribution is driven by the `BlockerAttributed` event
+    // emitted in `_emitBlockerAttribution` during `resolveReview`, plus
+    // `CommissionSet` + `DelegationIncreased` / `DelegationUnstakeClaimed`
+    // events already emitted elsewhere. The Merkl funding tx is a plain
+    // WOOD transfer from the owner multisig to the Merkl distributor —
+    // indexers attribute it without any registry-side event.
 
     // ── Slash appeal ──
     /// @inheritdoc IGuardianRegistry
@@ -1548,12 +1539,9 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         return _guardians[g].stakedAmount;
     }
 
-    /// @notice Historical votable own-stake for `guardian` at `timestamp`.
-    /// @dev    V1.5: used by `voteOnProposal` / `voteBlockEmergencySettle`
-    ///         to read weight at `openedAt` instead of live stake — closes
-    ///         the top-up-before-vote bias.
-    // V2: getPastStake, getPastTotalStake, getPastDelegated, getPastTotalDelegated,
-    // getPastDelegationTo, getPastVoteWeight all removed to reclaim bytecode.
+    /// @notice Historical votable own-stake checkpoints back `voteOnProposal`
+    ///         and `voteBlockEmergencySettle` — they read weight at `openedAt`
+    ///         instead of live stake, closing the top-up-before-vote bias.
     // Off-chain callers read checkpoints via eth_getStorageAt or events.
 
     function delegationOf(address delegator, address delegate) external view returns (uint256) {
@@ -1597,5 +1585,5 @@ contract GuardianRegistry is IGuardianRegistry, OwnableUpgradeable, UUPSUpgradea
         return (block.timestamp - epochGenesis) / EPOCH_DURATION;
     }
 
-    // pendingEpochReward removed in V1.5 — claimed via Merkl (merkl.xyz).
+    // Pending epoch rewards are claimed via Merkl (merkl.xyz).
 }

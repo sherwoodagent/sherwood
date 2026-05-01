@@ -37,13 +37,11 @@ interface IGuardianRegistry {
     error EmergencyTooManyCalls();
     error EmergencyHashMismatch();
     error EmergencyAlreadyOpen();
-    // V1.5 removed: InvalidEpoch, EpochNotEnded, NothingToClaim, FundEpochLocked,
-    // SweepTooEarly — all tied to the on-chain epoch-claim path now in Merkl.
     error ProtocolPaused();
     error AlreadyPaused();
     error NotPausedOrDeadmanNotElapsed();
     error RefundCapExceeded();
-    // V1.5 delegation
+    // Delegation
     error CannotSelfDelegate();
     error InvalidDelegate();
     error InactiveDelegate();
@@ -51,7 +49,7 @@ interface IGuardianRegistry {
     error NoActiveDelegation();
     error NoUnstakeRequest();
     error UnstakeCooldownActive();
-    // V1.5 Phase 3 — commission + claim
+    // Commission + claim
     error CommissionExceedsMax();
     error CommissionRaiseExceedsLimit();
     error NoPoolFunded();
@@ -82,8 +80,8 @@ interface IGuardianRegistry {
         uint256 indexed proposalId, address indexed guardian, GuardianVoteType from, GuardianVoteType to
     );
     event ApproverCapReached(uint256 indexed proposalId);
-    /// @notice ToB I-2: emitted when a Block vote is rejected because the
-    ///         blocker array has hit `MAX_BLOCKERS_PER_PROPOSAL`. Parallels
+    /// @notice Emitted when a Block vote is rejected because the blocker
+    ///         array has hit `MAX_BLOCKERS_PER_PROPOSAL`. Parallels
     ///         `ApproverCapReached`.
     event BlockerCapReached(uint256 indexed proposalId);
     event ReviewResolved(uint256 indexed proposalId, bool blocked, uint256 slashedAmount);
@@ -174,11 +172,10 @@ interface IGuardianRegistry {
     function canCreateVault(address owner) external view returns (bool);
     function requiredOwnerBond(address vault) external view returns (uint256);
     function currentEpoch() external view returns (uint256);
-    // V1.5: pendingEpochReward removed — query Merkl API / merkl.xyz for pending rewards.
     function governor() external view returns (address);
     function factory() external view returns (address);
 
-    // ── V1.5: delegation ──
+    // ── Delegation ──
     function delegateStake(address delegate, uint256 amount) external;
     function requestUnstakeDelegation(address delegate) external;
     function cancelUnstakeDelegation(address delegate) external;
@@ -188,22 +185,22 @@ interface IGuardianRegistry {
     function delegatedInbound(address delegate) external view returns (uint256);
     function totalDelegatedStake() external view returns (uint256);
 
-    // V2: getPast* views removed to reclaim bytecode — off-chain callers
-    // read checkpoints via eth_getStorageAt or events.
+    // Off-chain callers read historical checkpoints via eth_getStorageAt or
+    // events.
 
     event DelegationIncreased(address indexed delegator, address indexed delegate, uint256 amount);
     event DelegationUnstakeRequested(address indexed delegator, address indexed delegate, uint256 at);
     event DelegationUnstakeCancelled(address indexed delegator, address indexed delegate);
     event DelegationUnstakeClaimed(address indexed delegator, address indexed delegate, uint256 amount);
 
-    // ── V1.5 Phase 3: DPoS commission ──
+    // ── DPoS commission ──
     function setCommission(uint256 newBps) external;
     function commissionOf(address delegate) external view returns (uint256);
     function commissionAt(address delegate, uint256 timestamp) external view returns (uint256);
 
     event CommissionSet(address indexed delegate, uint256 oldBps, uint256 newBps);
 
-    // ── V1.5 Phase 3: on-chain guardian-fee pool (vault assets) ──
+    // ── On-chain guardian-fee pool (vault assets) ──
     /// @notice Called by governor in `_distributeFees` after transferring the
     ///         guardian-fee slice to the registry. Stamps the pool with
     ///         `(asset, amount, settledAt)` so approvers + delegators can

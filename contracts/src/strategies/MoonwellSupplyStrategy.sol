@@ -109,8 +109,14 @@ contract MoonwellSupplyStrategy is BaseStrategy {
         _pushAllToVault(underlying);
     }
 
-    /// @notice Accept ETH from Moonwell mWETH market (which sends native ETH on redeem)
-    receive() external payable {}
+    /// @notice Accept ETH only on native-ETH markets (e.g. Moonwell mWETH which
+    ///         sends native ETH on redeem). On non-native markets (USDC, etc.)
+    ///         a 1-wei dust transfer would otherwise stick to the strategy and
+    ///         brick `_settle` permanently via `EthWrapFailed`. Reverting here
+    ///         blocks the dust attack at deposit time.
+    receive() external payable {
+        if (!isNativeEthMarket) revert EthWrapFailed();
+    }
 
     /// @notice Update params: (uint256 newSupplyAmount, uint256 newMinRedeemAmount)
     /// @dev Pass 0 to keep current value. Only proposer, only while Executed.
@@ -118,6 +124,18 @@ contract MoonwellSupplyStrategy is BaseStrategy {
         (uint256 newSupplyAmount, uint256 newMinRedeemAmount) = abi.decode(data, (uint256, uint256));
         if (newSupplyAmount > 0) supplyAmount = newSupplyAmount;
         if (newMinRedeemAmount > 0) minRedeemAmount = newMinRedeemAmount;
+    }
+
+    /// @notice Mint additional mTokens against `assets` of underlying that
+    ///         the vault has just pushed into this strategy. The vault
+    ///         performs the push via `safeTransfer` immediately before
+    ///         calling `onLiveDeposit`, so the underlying is already on
+    ///         this contract's balance — we only need to approve + mint.
+    function _onLiveDeposit(uint256 assets) internal override {
+        if (assets == 0) return;
+        IERC20(underlying).forceApprove(mToken, assets);
+        uint256 err = ICToken(mToken).mint(assets);
+        if (err != 0) revert MintFailed();
     }
 
     // ── positionValue ──

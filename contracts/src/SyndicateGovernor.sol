@@ -77,11 +77,18 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     /// @notice G-M11: upper bound on `metadataURI.length` accepted by
     ///         `propose`. 512 bytes comfortably fits ipfs / arweave / https
     ///         pointers while capping event-storage and calldata-copy griefing.
-    uint256 public constant MAX_METADATA_URI_LENGTH = 512;
+    uint256 internal constant MAX_METADATA_URI_LENGTH = 512;
     /// @notice G-M2/G-M6: upper bound on the `executeCalls` and
     ///         `settlementCalls` arrays passed to `propose`. Caps batch size
     ///         so executeGovernorBatch can't be weaponized for gas griefing.
-    uint256 public constant MAX_CALLS_PER_PROPOSAL = 64;
+    uint256 internal constant MAX_CALLS_PER_PROPOSAL = 64;
+
+    /// @notice Minimum elapsed time post-execute before the proposer can
+    ///         self-settle (skipping `strategyDuration`). Prevents the single-
+    ///         block execute → settle skim where a proposer gains
+    ///         `performanceFeeBps` on a one-block trade. Anyone other than the
+    ///         proposer still waits for `strategyDuration`.
+    uint256 internal constant MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE = 1 hours;
 
     // ── New storage (appended -- UUPS safe) ──
 
@@ -91,17 +98,15 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     /// @notice Proposal ID -> settlement (closing) calls
     mapping(uint256 => BatchExecutorLib.Call[]) private _settlementCalls;
 
-    // V1.5: _parameterChangeDelay + _pendingChanges removed (timelock
-    // eliminated in favor of owner-multisig delay).
-    // P2-1: _protocolFeeBps / _protocolFeeRecipient / _guardianFeeBps live
-    //       in `GovernorParameters`.
+    // `_protocolFeeBps` / `_protocolFeeRecipient` / `_guardianFeeBps` live in
+    // `GovernorParameters`.
 
     /// @notice Guardian registry. Set in `initialize`; required (non-zero).
-    ///         Fees always route here (ToB P1-1 — no separate recipient slot).
+    ///         Fees always route here — no separate recipient slot.
     address internal _guardianRegistry;
 
-    // ── Guardian-review storage (Task 24 / PR #229) ──
-    // V2: _emergencyCallsHashes and _emergencyCalls moved to GuardianRegistry.
+    // ── Guardian-review storage ──
+    // `_emergencyCallsHashes` and `_emergencyCalls` live in GuardianRegistry.
     // Two mapping slots reclaimed into __gap.
 
     /// @notice Per-vault count of non-terminal proposals — Pending,
@@ -110,7 +115,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ///         `_activeProposal` to block owner rage-quit while any proposal
     ///         binds the vault. Incremented on Draft -> Pending. Decremented
     ///         on the terminal edge (Rejected / Expired / Cancelled / Settled).
-    ///         Added in PR #229 Fix 2.
     mapping(address => uint256) public openProposalCount;
 
     /// @dev Escrow of fee transfers that reverted (e.g., USDC blacklist) so the
@@ -359,11 +363,10 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         StrategyProposal storage proposal = _proposals[proposalId];
         if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
 
-        // Proposer can settle anytime; everyone else waits for duration
-        if (msg.sender != proposal.proposer) {
-            if (block.timestamp < proposal.executedAt + proposal.strategyDuration) {
-                revert StrategyDurationNotElapsed();
-            }
+        uint256 minWait =
+            msg.sender == proposal.proposer ? MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE : proposal.strategyDuration;
+        if (block.timestamp < proposal.executedAt + minWait) {
+            revert StrategyDurationNotElapsed();
         }
 
         // Run the pre-committed settlement calls
@@ -372,9 +375,38 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         _finishSettlement(proposalId, proposal);
     }
 
-    // NOTE: emergencySettle removed in Task 2 — replaced by the full guardian
-    // review lifecycle in GovernorEmergency (implemented in Task 24):
-    // unstick / emergencySettleWithCalls / cancelEmergencySettle / finalizeEmergencySettle.
+    /// @inheritdoc ISyndicateGovernor
+    /// @dev Smoke-test happens inside `vault.setActiveStrategyAdapter`.
+    ///      Centralising the validation on the vault lets governor stay
+    ///      under EIP-170 (the via_ir-inlined staticcall + return-size
+    ///      check costs ~25 bytes and the vault has the headroom). The
+    ///      vault is also the consumer of the pointer, so the validation
+    ///      logically belongs there. Errors surface here through the
+    ///      bubbled `AdapterNotIStrategy` revert from the vault.
+    /// @dev IMP-1: bind allowed only during `Draft` (collaborative
+    ///      pre-approvals) or `Pending` (lead retains full authority during
+    ///      voting), AND only while no co-proposer has approved. Once a
+    ///      co-proposer approves the proposal hash, the adapter pointer is
+    ///      locked — co-proposers approve the executeCalls/settlementCalls
+    ///      hash but NOT the adapter, so a post-approval rebind would be a
+    ///      side-channel mutation of the executed strategy.
+    function bindProposalAdapter(uint256 proposalId, address adapter) external nonReentrant {
+        StrategyProposal storage proposal = _proposals[proposalId];
+        // Proposer check covers the nonexistent-proposal case (proposer is
+        // the zero address for unset slots and msg.sender can never be zero).
+        if (msg.sender != proposal.proposer) revert NotProposer();
+
+        ProposalState s = _resolveStateView(proposal);
+        if (s != ProposalState.Draft && s != ProposalState.Pending) revert AdapterBindingClosed();
+        if (_approvedCount[proposalId] != 0) revert AdapterBindingClosed();
+
+        // Push directly to the vault — no governor-side mapping needed (the
+        // vault is per-proposal anyway, and the adapter is implicitly cleared
+        // post-settle because `totalAssets` only reads it while
+        // `redemptionsLocked()`). Vault performs the I-3 smoke-test.
+        ISyndicateVault(proposal.vault).setActiveStrategyAdapter(adapter);
+        emit ProposalAdapterBound(proposalId, adapter);
+    }
 
     /// @inheritdoc ISyndicateGovernor
     function cancelProposal(uint256 proposalId) external nonReentrant {
@@ -648,6 +680,15 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         return _guardianRegistry;
     }
 
+    /// @notice Re-point the governor at a new guardian registry. Used when
+    ///         WOOD ships and the protocol migrates from the beta stub to the
+    ///         real `GuardianRegistry`. Owner-only.
+    function setGuardianRegistry(address newRegistry) external onlyOwner {
+        if (newRegistry == address(0)) revert ZeroAddress();
+        emit GuardianRegistrySet(_guardianRegistry, newRegistry);
+        _guardianRegistry = newRegistry;
+    }
+
     /// @notice Narrow proposal view consumed by the guardian registry.
     /// @dev Returns a tuple (`voteEnd`, `reviewEnd`, `vault`) encoded to match
     ///      `GuardianRegistry.IGovernorMinimal.ProposalView`. Keeps the registry
@@ -665,10 +706,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         uint256 reviewEnd;
         address vault;
     }
-
-    // V1.5: _applyProtocolFeeBpsChange + _applyAddressParam removed.
-    // GovernorParameters setters now write directly via _set* virtuals
-    // (see overrides above).
 
     // ==================== INTERNAL ====================
 
@@ -899,26 +936,22 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         address vault = proposal.vault;
         address asset = IERC4626(vault).asset();
 
-        // G-H1: asset-only measurement (see NatSpec above).
-        // casting to int256 is safe because vault balances won't exceed int256.max
+        // Asset-only measurement (see NatSpec above). Subtract the live-adapter
+        // principal forwarded during the Executed window so live-deposit
+        // principal is not counted as strategy profit.
         // forge-lint: disable-next-line(unsafe-typecast)
-        pnl = int256(IERC20(asset).balanceOf(vault)) - int256(_capitalSnapshots[proposalId]);
+        uint256 snapshot = _capitalSnapshots[proposalId] + ISyndicateVault(vault).liveAdapterPrincipal(proposalId);
+        pnl = int256(IERC20(asset).balanceOf(vault)) - int256(snapshot);
 
         // Finalize state before external transfers to prevent reentrancy on stale state
         _activeProposal[vault] = 0;
         _lastSettledAt[vault] = block.timestamp;
         proposal.state = ProposalState.Settled;
         delete _capitalSnapshots[proposalId];
-        // V2: emergency state lives on registry. If a standard settle races
-        // ahead of an open emergency review DURING the review window, cancel
-        // it so the registry can't slash the owner for a normally-settled
-        // proposal. After reviewEnd, cancelEmergency reverts (by design —
-        // the owner must face resolution), so we use try/catch to avoid
-        // bricking the standard settle path.
-        IGuardianRegistry reg = _getRegistry();
-        if (reg.isEmergencyOpen(proposalId)) {
-            try reg.cancelEmergency(proposalId) {} catch {}
-        }
+        // Open emergency reviews are NOT auto-cancelled here — they resolve
+        // naturally via `resolveEmergencyReview` at reviewEnd (slashing if the
+        // block quorum was met, no-op otherwise) so an owner who opened an
+        // adversarial emergency cannot dodge slash by racing a settle.
         _decOpen(vault);
 
         uint256 totalFee = 0;
@@ -954,9 +987,9 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
             }
         }
 
-        // V1.5: guardian fee — slice of settled PnL routed to the registry
-        // (funds per-proposal approver-reward pool). See spec §4.8.
-        // W-1-resilient: if the recipient transfer or pool-funding fails
+        // Guardian fee — slice of settled PnL routed to the registry (funds
+        // per-proposal approver-reward pool). See spec §4.8.
+        // Resilient: if the recipient transfer or pool-funding fails
         // (blacklist, misconfigured recipient, registry upgrade bug), emit
         // a diagnostic event and skip the fee so settlement cannot brick.
         // On transfer failure, the fee stays in the vault (LPs benefit).

@@ -137,6 +137,11 @@ contract Minter is Ownable, Pausable, ReentrancyGuard {
 
     event MaxEmissionRateChanged(uint256 oldRate, uint256 newRate);
 
+    /// @notice Emitted when the RewardsDistributor address is updated.
+    /// @param oldDistributor Previous distributor (zero on first set).
+    /// @param newDistributor New distributor — must be a non-zero contract.
+    event RewardsDistributorChanged(address indexed oldDistributor, address indexed newDistributor);
+
     // ==================== ERRORS ====================
 
     error EpochNotReady();
@@ -145,6 +150,8 @@ contract Minter is Ownable, Pausable, ReentrancyGuard {
     error InvalidVote();
     error VotingNotActive();
     error CircuitBreakerActive();
+    error ZeroAddress();
+    error NotAContract();
 
     // ==================== CONSTRUCTOR ====================
 
@@ -446,9 +453,17 @@ contract Minter is Ownable, Pausable, ReentrancyGuard {
         return _maxEmissionRate;
     }
 
-    /// @notice Set the RewardsDistributor address (only owner)
+    /// @notice Set the RewardsDistributor address (only owner). Reverts on
+    ///         zero-address or EOA recipients (defensive — the owner multisig
+    ///         still bears final responsibility for choosing a legitimate
+    ///         distributor contract).
+    /// @param _rewardsDistributor The new RewardsDistributor contract address.
     function setRewardsDistributor(address _rewardsDistributor) external onlyOwner {
+        if (_rewardsDistributor == address(0)) revert ZeroAddress();
+        if (_rewardsDistributor.code.length == 0) revert NotAContract();
+        address old = rewardsDistributor;
         rewardsDistributor = _rewardsDistributor;
+        emit RewardsDistributorChanged(old, _rewardsDistributor);
     }
 
     // ==================== INTERNAL ====================

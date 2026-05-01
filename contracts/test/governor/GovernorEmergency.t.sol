@@ -543,10 +543,12 @@ contract GovernorEmergencyTest is Test {
         assertEq(governor.openProposalCount(address(vault)), 0);
     }
 
-    /// @notice Regression: if `settleProposal` races ahead of an open
-    ///         emergency review, `_finishSettlement` must cancel the registry
-    ///         review so the owner's stake is not slashed on stale block votes.
-    function test_settleProposal_cancelsOpenEmergencyReview() public {
+    /// @notice MS-H2 regression: if `settleProposal` races ahead of an open
+    ///         emergency review with block votes, `_finishSettlement` must NOT
+    ///         auto-cancel the registry review. The owner cannot dodge the
+    ///         slash by racing a standard settle — `resolveEmergencyReview`
+    ///         remains callable post-settle and applies the block-quorum slash.
+    function test_settleProposal_doesNotCancelOpenEmergencyReview() public {
         uint256 pid = _createExecutedProposal(7 days);
         vm.warp(vm.getBlockTimestamp() + 7 days);
 
@@ -554,7 +556,7 @@ contract GovernorEmergencyTest is Test {
         vm.prank(owner);
         governor.emergencySettleWithCalls(pid, _customCalls());
 
-        // Both guardians vote block (60k/60k = 100% — would slash if resolved).
+        // Both guardians vote block (60k/60k = 100% — slashes if resolved).
         vm.prank(guardianA);
         registry.voteBlockEmergencySettle(pid);
         vm.prank(guardianB);
@@ -567,11 +569,20 @@ contract GovernorEmergencyTest is Test {
         governor.settleProposal(pid);
         assertEq(uint256(governor.getProposal(pid).state), uint256(ISyndicateGovernor.ProposalState.Settled));
 
-        // Emergency review must be closed — _finishSettlement cancelled it.
-        assertFalse(registry.isEmergencyOpen(pid), "emergency closed after standard settle");
+        // MS-H2: emergency review must STAY open — owner cannot dodge slash by
+        // racing a standard settle. `_finishSettlement` no longer auto-cancels.
+        assertTrue(registry.isEmergencyOpen(pid), "emergency stays open after standard settle");
 
-        // Owner stake untouched.
-        assertEq(registry.ownerStake(address(vault)), stakeBefore, "owner stake NOT slashed");
+        // Owner stake still bonded pre-resolution.
+        assertEq(registry.ownerStake(address(vault)), stakeBefore, "owner stake bonded pre-resolve");
+
+        // Anyone can resolve the emergency review at reviewEnd → block-quorum
+        // slash applies, owner stake is burned.
+        vm.warp(vm.getBlockTimestamp() + REVIEW_PERIOD + 1);
+        registry.resolveEmergencyReview(pid);
+
+        assertFalse(registry.isEmergencyOpen(pid), "emergency closed after resolveEmergencyReview");
+        assertEq(registry.ownerStake(address(vault)), 0, "owner stake slashed by block quorum");
     }
 
     function test_emergencySettleWithCalls_callsLengthExceeds_reverts() public {
@@ -678,9 +689,12 @@ contract GovernorEmergencyTest is Test {
         assertEq(uint256(governor.getProposal(pid).state), uint256(ISyndicateGovernor.ProposalState.Settled));
     }
 
-    /// @notice Standard settle races ahead of emergency review — verify
-    ///         `isEmergencyOpen` is false after settle.
-    function test_standardSettleCancelsEmergencyViaRegistry() public {
+    /// @notice MS-H2: standard settle races ahead of emergency review — verify
+    ///         `isEmergencyOpen` stays true after settle (registry not cancelled).
+    ///         The review must be resolved via `resolveEmergencyReview` after
+    ///         reviewEnd; `finalizeEmergencySettle` would revert because the
+    ///         proposal is already Settled.
+    function test_standardSettleDoesNotCancelEmergencyViaRegistry() public {
         uint256 pid = _createExecutedProposal(7 days);
         vm.warp(vm.getBlockTimestamp() + 7 days);
 
@@ -690,7 +704,12 @@ contract GovernorEmergencyTest is Test {
 
         governor.settleProposal(pid);
         assertEq(uint256(governor.getProposal(pid).state), uint256(ISyndicateGovernor.ProposalState.Settled));
-        assertFalse(registry.isEmergencyOpen(pid), "emergency closed by standard settle");
+        assertTrue(registry.isEmergencyOpen(pid), "emergency stays open after standard settle");
+
+        // Review resolves naturally at reviewEnd via permissionless call.
+        vm.warp(vm.getBlockTimestamp() + REVIEW_PERIOD + 1);
+        registry.resolveEmergencyReview(pid);
+        assertFalse(registry.isEmergencyOpen(pid), "closed after permissionless resolve");
     }
 
     /// @notice Open emergency with no blocks, finalize — calls returned from
