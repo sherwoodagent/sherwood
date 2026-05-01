@@ -17,15 +17,49 @@ import { GridPortfolio } from './portfolio.js';
 import { HyperliquidProvider } from '../providers/data/hyperliquid.js';
 import { getLatestSignals } from '../agent/technical.js';
 
+/** Decides if a level should fire at the current price.
+ *  Default checks against close; backtest checks against bar.low/high. */
+export type FillDetector = (level: GridLevel, currentPrice: number) => boolean;
+
+/** Decides if an open fill's target has been reached.
+ *  Default checks against close; backtest checks against bar.high. */
+export type CloseFillDetector = (openFill: GridFill, currentPrice: number) => boolean;
+
+/** Fetches OHLCV candles for ATR. Default delegates to HyperliquidProvider. */
+export type CandleFetcher = (
+  tokenId: string,
+  interval: '1h' | '4h' | '1d',
+  lookbackMs: number,
+) => Promise<Array<{ timestamp: number; open: number; high: number; low: number; close: number; volume: number }> | null>;
+
+const defaultFillDetector: FillDetector = (level, currentPrice) =>
+  level.side === 'buy' ? currentPrice <= level.price : currentPrice >= level.price;
+
+const defaultCloseFillDetector: CloseFillDetector = (openFill, currentPrice) =>
+  currentPrice >= openFill.targetSellPrice;
+
 export class GridManager {
   private config: GridConfig;
   private portfolio: GridPortfolio;
   private hl: HyperliquidProvider;
+  private candleFetcher: CandleFetcher;
+  private fillDetector: FillDetector;
+  private closeFillDetector: CloseFillDetector;
 
-  constructor(config: GridConfig) {
+  constructor(
+    config: GridConfig,
+    candleFetcher?: CandleFetcher,
+    fillDetector?: FillDetector,
+    closeFillDetector?: CloseFillDetector,
+    portfolio?: GridPortfolio,
+  ) {
     this.config = config;
-    this.portfolio = new GridPortfolio();
+    this.portfolio = portfolio ?? new GridPortfolio();
     this.hl = new HyperliquidProvider();
+    this.candleFetcher = candleFetcher ?? ((tokenId, interval, lookbackMs) =>
+      this.hl.getCandles(tokenId, interval, lookbackMs));
+    this.fillDetector = fillDetector ?? defaultFillDetector;
+    this.closeFillDetector = closeFillDetector ?? defaultCloseFillDetector;
   }
 
   /** Load or initialize grid state.
@@ -128,7 +162,7 @@ export class GridManager {
   /** Build a fresh grid centered on the current price using ATR. */
   private async buildGrid(grid: GridTokenState, currentPrice: number): Promise<void> {
     // Fetch ATR from HL candles
-    const candles = await this.hl.getCandles(grid.token, '4h', 14 * 24 * 60 * 60 * 1000);
+    const candles = await this.candleFetcher(grid.token, '4h', 14 * 24 * 60 * 60 * 1000);
     if (!candles || candles.length < this.config.atrPeriod) {
       console.error(chalk.dim(`  [grid] Cannot build grid for ${grid.token}: insufficient candle data`));
       return;
@@ -201,7 +235,7 @@ export class GridManager {
     for (const level of grid.levels) {
       if (level.filled) continue;
 
-      if (level.side === 'buy' && currentPrice <= level.price) {
+      if (level.side === 'buy' && this.fillDetector(level, currentPrice)) {
         level.filled = true;
         level.filledAt = now;
         fills++;
@@ -224,7 +258,7 @@ export class GridManager {
         ));
       }
 
-      if (level.side === 'sell' && currentPrice >= level.price) {
+      if (level.side === 'sell' && this.fillDetector(level, currentPrice)) {
         level.filled = true;
         level.filledAt = now;
         fills++;
@@ -245,7 +279,7 @@ export class GridManager {
     // orphaning any open fill that wasn't matched at that exact moment.
     for (const openFill of grid.openFills) {
       if (openFill.closed) continue;
-      if (currentPrice >= openFill.targetSellPrice) {
+      if (this.closeFillDetector(openFill, currentPrice)) {
         const profit = (currentPrice - openFill.buyPrice) * openFill.quantity * this.config.leverage;
         if (profit >= this.config.minProfitPerFillUsd) {
           openFill.closed = true;
