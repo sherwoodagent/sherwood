@@ -395,4 +395,53 @@ export function registerGridCommand(program: Command): void {
 
       printSweepSummary(result);
     });
+
+  // ── grid pause ──
+  grid
+    .command('pause')
+    .description('Manually pause the live grid (sets state.paused=true)')
+    .option('--reason <text>', 'Reason for the pause (shown in status output)', 'Manually paused by operator')
+    .action(async (opts) => {
+      const portfolio = new GridPortfolio();
+      const state = await portfolio.load();
+      if (!state) {
+        console.log(DIM('\n  No grid portfolio found. Nothing to pause.\n'));
+        return;
+      }
+      if (state.paused) {
+        console.log(DIM(`\n  Grid already paused: ${state.pauseReason}\n`));
+        return;
+      }
+      state.paused = true;
+      state.pauseReason = opts.reason as string;
+      await portfolio.save(state);
+      console.log();
+      console.log(chalk.yellow(`  Grid paused. Reason: ${state.pauseReason}`));
+      console.log(DIM('  Next manager.tick will be a no-op until you run `sherwood grid resume`.'));
+      console.log();
+    });
+
+  // ── grid resume ──
+  grid
+    .command('resume')
+    .description('Resume a paused grid (clears state.paused)')
+    .action(async () => {
+      const portfolio = new GridPortfolio();
+      const state = await portfolio.load();
+      if (!state) {
+        console.log(DIM('\n  No grid portfolio found. Nothing to resume.\n'));
+        return;
+      }
+      if (!state.paused) {
+        console.log(DIM('\n  Grid is not paused. Nothing to do.\n'));
+        return;
+      }
+      const wasReason = state.pauseReason;
+      state.paused = false;
+      state.pauseReason = '';
+      await portfolio.save(state);
+      console.log();
+      console.log(G(`  Grid resumed. (was paused: ${wasReason || '<unknown>'})`));
+      console.log();
+    });
 }

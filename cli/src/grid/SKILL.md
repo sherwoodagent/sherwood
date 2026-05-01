@@ -14,6 +14,10 @@ isolated capital, parallel to the directional agent.
 
 - `sherwood grid start` — start the standalone event loop.
 - `sherwood grid status` — print current grid state, fills, PnL.
+- `sherwood grid pause [--reason "..."]` — manually pause the live grid;
+  subsequent ticks become no-ops until resumed.
+- `sherwood grid resume` — clear a manual or auto-triggered pause and
+  resume normal grid operation.
 - `sherwood grid backtest --from <iso> --to <iso>` — replay historical
   Hyperliquid 1-minute bars through the grid manager and report
   PnL, round trips, drawdown. Results saved to
