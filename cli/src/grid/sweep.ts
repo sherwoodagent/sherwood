@@ -24,6 +24,8 @@ export interface SweepOpts {
   toMs: number;
   capital: number;
   tokens: string[];
+  /** Optional explicit token weights (must sum to 1.0). Defaults to equal weight. */
+  tokenSplit?: Record<string, number>;
   /** Base config; sweep params override per run. tokenSplit auto-computed. */
   baseConfig?: Partial<GridConfig>;
   /** Map of sweepable field name → list of values to try. Empty list means use base value. */
@@ -108,10 +110,15 @@ export async function runSweep(opts: SweepOpts): Promise<SweepResult> {
   const outDir = opts.outDir ?? DEFAULT_SWEEP_DIR;
   const sweepDir = join(outDir, sweepId);
 
-  // Build equal-weight tokenSplit
-  const weight = 1 / opts.tokens.length;
-  const tokenSplit: Record<string, number> = {};
-  for (const t of opts.tokens) tokenSplit[t] = weight;
+  // Build tokenSplit (explicit or equal-weight)
+  let tokenSplit: Record<string, number>;
+  if (opts.tokenSplit) {
+    tokenSplit = opts.tokenSplit;
+  } else {
+    const weight = 1 / opts.tokens.length;
+    tokenSplit = {};
+    for (const t of opts.tokens) tokenSplit[t] = weight;
+  }
 
   // Base config
   const base: GridConfig = {

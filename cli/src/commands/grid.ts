@@ -111,6 +111,29 @@ function printSweepSummary(s: SweepResult): void {
   console.log();
 }
 
+function parseTokenSplit(raw: string, tokens: string[]): Record<string, number> {
+  const split: Record<string, number> = {};
+  for (const pair of raw.split(',')) {
+    const [tok, w] = pair.split('=');
+    if (!tok || !w) throw new Error(`Bad token-split pair: '${pair}' (expected token=weight)`);
+    const weight = Number(w.trim());
+    if (!Number.isFinite(weight) || weight < 0) {
+      throw new Error(`Bad token-split weight for '${tok}': '${w}'`);
+    }
+    split[tok.trim()] = weight;
+  }
+  for (const t of tokens) {
+    if (!(t in split)) {
+      throw new Error(`--token-split missing weight for '${t}'`);
+    }
+  }
+  const sum = Object.values(split).reduce((a, b) => a + b, 0);
+  if (Math.abs(sum - 1.0) > 1e-6) {
+    throw new Error(`--token-split weights must sum to 1.0, got ${sum.toFixed(6)}`);
+  }
+  return split;
+}
+
 export function registerGridCommand(program: Command): void {
   const grid = program
     .command('grid')
@@ -260,6 +283,7 @@ export function registerGridCommand(program: Command): void {
     .option('--fee-bps <n>', 'Trading fee in basis points per fill (default 5 = 0.05%)', '5')
     .option('--no-hedge', 'Disable hedge simulation (hedge is ON by default to match live grid)')
     .option('--maintenance-pct <n>', 'Per-token maintenance margin fraction (default 0.02 = 2%, typical Hyperliquid)', '0.02')
+    .option('--token-split <pairs>', 'Comma-separated token=weight pairs (must sum to 1.0). Default: equal-weight or 0.45/0.30/0.25 for BTC/ETH/SOL.')
     .action(async (opts) => {
       const now = Date.now();
       const toMs = opts.to ? Date.parse(opts.to) : now;
@@ -269,9 +293,14 @@ export function registerGridCommand(program: Command): void {
       }
 
       const tokens = (opts.tokens as string).split(',').map(t => t.trim());
-      const weight = 1 / tokens.length;
-      const tokenSplit: Record<string, number> = {};
-      for (const t of tokens) tokenSplit[t] = weight;
+      let tokenSplit: Record<string, number>;
+      if (opts.tokenSplit) {
+        tokenSplit = parseTokenSplit(opts.tokenSplit as string, tokens);
+      } else {
+        const weight = 1 / tokens.length;
+        tokenSplit = {};
+        for (const t of tokens) tokenSplit[t] = weight;
+      }
 
       const config: GridConfig = {
         ...DEFAULT_GRID_CONFIG,
@@ -327,6 +356,7 @@ export function registerGridCommand(program: Command): void {
     .option('--rebalance-drift <list>', 'Comma-separated rebalance drift values to sweep')
     .option('--fee-bps <n>', 'Trading fee in basis points per fill (default 5)', '5')
     .option('--no-cache', 'Skip cache; always fetch fresh data')
+    .option('--token-split <pairs>', 'Comma-separated token=weight pairs (must sum to 1.0). Default: equal-weight or 0.45/0.30/0.25 for BTC/ETH/SOL.')
     .action(async (opts) => {
       const now = Date.now();
       const toMs = opts.to ? Date.parse(opts.to) : now;
@@ -348,11 +378,16 @@ export function registerGridCommand(program: Command): void {
         rebalanceDriftPct: parseList(opts.rebalanceDrift),
       };
 
+      const tokenSplit = opts.tokenSplit
+        ? parseTokenSplit(opts.tokenSplit as string, tokens)
+        : undefined;
+
       const result = await runSweep({
         fromMs,
         toMs,
         capital: Number(opts.capital),
         tokens,
+        tokenSplit,
         sweep,
         feeBps: Number(opts.feeBps),
         noCache: opts.cache === false,
