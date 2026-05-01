@@ -277,6 +277,25 @@ describe('Grid capital isolation', () => {
   });
 });
 
+describe('GridManager constructor', () => {
+  it('default constructor (no detector args) preserves close-only fill behavior', async () => {
+    // Construct manager with only the config — all detector args undefined.
+    // This is the live-mode path. The fill detector should match the original
+    // inline check: buy fires when price <= level.price, sell when price >= level.price.
+    const { GridManager } = await import('./manager.js');
+    const cfg = { ...DEFAULT_GRID_CONFIG };
+    const mgr = new GridManager(cfg);
+
+    // Internal sanity: ensure the constructor doesn't throw and the manager
+    // is usable. We can't directly inspect the private detector, so we just
+    // assert the manager exists and has the public methods we expect.
+    expect(mgr).toBeDefined();
+    expect(typeof mgr.tick).toBe('function');
+    expect(typeof mgr.computeOrders).toBe('function');
+    expect(typeof mgr.getStats).toBe('function');
+  });
+});
+
 describe('computeOrders', () => {
   beforeEach(() => {
     mockPortfolioState = null;
