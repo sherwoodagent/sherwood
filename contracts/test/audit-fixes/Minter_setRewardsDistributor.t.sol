@@ -11,10 +11,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @notice Smallest possible deployable contract — its only purpose is to have non-empty
 ///         code so it passes the `code.length > 0` gate on `setRewardsDistributor`.
-contract DummyDistributor {
-    // intentionally empty
-
-    }
+contract DummyDistributor {}
 
 /// @title Minter_setRewardsDistributor
 /// @notice Regression tests for MS-H7 (audit 2026-05-01): `Minter.setRewardsDistributor`
