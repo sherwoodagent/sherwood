@@ -186,11 +186,15 @@ export class GridManager {
       return;
     }
 
-    // Trend signal: % change from first 4h close in the lookback to last.
-    // Used by the downtrend filter to block new buys in a sustained drop.
+    // Trend signal: % change over the last 14 4h bars (~56 hours).
+    // Using only the recent window so the trend captures local direction,
+    // not all-time-vs-now (which would always be ~0 over multi-month
+    // backtests where price ends near where it started).
+    const TREND_LOOKBACK_BARS = 14;
     let trend = 0;
     if (candles.length >= 2) {
-      const first = candles[0]!.close;
+      const sliceStart = Math.max(0, candles.length - TREND_LOOKBACK_BARS);
+      const first = candles[sliceStart]!.close;
       const last = candles[candles.length - 1]!.close;
       if (first > 0) {
         trend = (last - first) / first;

@@ -226,12 +226,13 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
   const nowProvider = () => currentT;
 
   // Candle fetcher: returns 4h bars whose close ts ≤ currentT (point-in-time correct)
-  const candleFetcher: CandleFetcher = async (tokenId, interval, _lookbackMs) => {
+  const candleFetcher: CandleFetcher = async (tokenId, interval, lookbackMs) => {
     if (interval !== '4h') return null;
     const series = seriesByToken[tokenId];
     if (!series) return null;
+    const cutoff = currentT - lookbackMs;
     return series.fourHour
-      .filter(b => b.t <= currentT)
+      .filter(b => b.t <= currentT && b.t >= cutoff)
       .map(b => ({
         timestamp: b.t,
         open: b.o,
