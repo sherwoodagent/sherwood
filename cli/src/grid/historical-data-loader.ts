@@ -31,6 +31,7 @@ export interface AtrPoint {
 
 export interface LoadedSeries {
   minutes: Bar1m[];
+  fourHour: Bar1m[];
   atrSeries: AtrPoint[];
 }
 
@@ -77,7 +78,7 @@ export class HistoricalDataLoader {
     const fourHour = await this.loadInterval(coin, '4h', fromMs - ATR_WARMUP_MS, toMs);
     const atrSeries = computeAtrSeries(fourHour);
 
-    return { minutes, atrSeries };
+    return { minutes, fourHour, atrSeries };
   }
 
   /** Fetch + cache one interval. Public for unit testing. */
