@@ -246,19 +246,25 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
     for (const t of sharedTimestamps) {
       currentT = t;
 
-      // Build per-token bar.low and bar.high price maps
-      const buyPrices: Record<string, number> = {};
-      const sellPrices: Record<string, number> = {};
+      // Per-token pass order inferred from bar color (option B):
+      // green (close >= open): price went low → high → buy fills (Pass 1=low),
+      //   then close-outs may fire on the way up (Pass 2=high) — same-bar
+      //   round trip is realistic.
+      // red (close < open): price went high → low → close-outs fire first
+      //   (Pass 1=high) on pre-existing opens. New buys from Pass 2=low can't
+      //   close this bar because low < target — no same-bar round trip.
+      // Doji (close == open) treated as green.
+      const passAPrices: Record<string, number> = {};
+      const passBPrices: Record<string, number> = {};
       for (const token of opts.config.tokens) {
         const bar = barIndex[token]!.get(t)!;
-        buyPrices[token] = bar.l;
-        sellPrices[token] = bar.h;
+        const isGreen = bar.c >= bar.o;
+        passAPrices[token] = isGreen ? bar.l : bar.h;
+        passBPrices[token] = isGreen ? bar.h : bar.l;
       }
 
-      // Pass 1 (low): triggers buys
-      const r1 = await manager.tick(buyPrices);
-      // Pass 2 (high): triggers sells + closes opens
-      const r2 = await manager.tick(sellPrices);
+      const r1 = await manager.tick(passAPrices);
+      const r2 = await manager.tick(passBPrices);
 
       // Detect rebuilds — manager updates grid.stats.lastRebalanceAt
       const stateAfter = portfolio.getState();
