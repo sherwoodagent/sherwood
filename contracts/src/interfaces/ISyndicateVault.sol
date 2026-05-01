@@ -99,6 +99,10 @@ interface ISyndicateVault {
     function requestRedeem(uint256 shares, address owner_) external returns (uint256 requestId);
     function pendingQueueShares() external view returns (uint256);
     function reservedQueueAssets() external view returns (uint256);
+    /// @notice Sum of asset principal forwarded to the live-NAV adapter during
+    ///         the given proposal's Executed window. Read by the governor at
+    ///         settle so the principal is not counted as strategy profit.
+    function liveAdapterPrincipal(uint256 proposalId) external view returns (uint256);
 
     // ── Rescue ──
     function rescueEth(address payable to, uint256 amount) external;

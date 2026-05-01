@@ -77,11 +77,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     /// @notice G-M11: upper bound on `metadataURI.length` accepted by
     ///         `propose`. 512 bytes comfortably fits ipfs / arweave / https
     ///         pointers while capping event-storage and calldata-copy griefing.
-    uint256 public constant MAX_METADATA_URI_LENGTH = 512;
+    uint256 internal constant MAX_METADATA_URI_LENGTH = 512;
     /// @notice G-M2/G-M6: upper bound on the `executeCalls` and
     ///         `settlementCalls` arrays passed to `propose`. Caps batch size
     ///         so executeGovernorBatch can't be weaponized for gas griefing.
-    uint256 public constant MAX_CALLS_PER_PROPOSAL = 64;
+    uint256 internal constant MAX_CALLS_PER_PROPOSAL = 64;
 
     /// @notice Minimum elapsed time post-execute before the proposer can
     ///         self-settle (skipping `strategyDuration`). Prevents the single-
@@ -682,17 +682,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
 
     /// @notice Re-point the governor at a new guardian registry. Used when
     ///         WOOD ships and the protocol migrates from the beta stub to the
-    ///         real `GuardianRegistry`. Owner-only — owner is expected to be
-    ///         a multisig once mainnet hardening is complete.
-    /// @dev Concentrates a powerful owner power. Mid-flight proposals can
-    ///      desync (governor reads `reviewPeriod()` at vote-end and
-    ///      `resolveReview` at the GuardianReview boundary); the migration
-    ///      ceremony should drain open proposals before flipping.
+    ///         real `GuardianRegistry`. Owner-only.
     function setGuardianRegistry(address newRegistry) external onlyOwner {
         if (newRegistry == address(0)) revert ZeroAddress();
-        address old = _guardianRegistry;
+        emit GuardianRegistrySet(_guardianRegistry, newRegistry);
         _guardianRegistry = newRegistry;
-        emit GuardianRegistrySet(old, newRegistry);
     }
 
     /// @notice Narrow proposal view consumed by the guardian registry.
@@ -942,10 +936,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         address vault = proposal.vault;
         address asset = IERC4626(vault).asset();
 
-        // G-H1: asset-only measurement (see NatSpec above).
-        // casting to int256 is safe because vault balances won't exceed int256.max
+        // Asset-only measurement (see NatSpec above). Subtract the live-adapter
+        // principal forwarded during the Executed window so live-deposit
+        // principal is not counted as strategy profit.
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint256 snapshot = _capitalSnapshots[proposalId];
+        uint256 snapshot = _capitalSnapshots[proposalId] + ISyndicateVault(vault).liveAdapterPrincipal(proposalId);
         pnl = int256(IERC20(asset).balanceOf(vault)) - int256(snapshot);
 
         // Finalize state before external transfers to prevent reentrancy on stale state

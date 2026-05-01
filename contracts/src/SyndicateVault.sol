@@ -116,8 +116,14 @@ contract SyndicateVault is
     ///         `docs/superpowers/specs/2026-04-30-live-nav-async-withdrawals-design.md`.
     address private _activeStrategyAdapter;
 
-    /// @dev Reserved storage for future upgrades
-    uint256[36] private __gap;
+    /// @notice Per-proposal sum of asset principal forwarded to the live
+    ///         adapter during the proposal's Executed window. Subtracted from
+    ///         PnL at `_finishSettlement` so live-deposit principal is not
+    ///         counted as strategy profit.
+    mapping(uint256 proposalId => uint256) public liveAdapterPrincipal;
+
+    /// @dev Reserved storage for future upgrades (shrunk by 1 for liveAdapterPrincipal)
+    uint256[35] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -622,6 +628,11 @@ contract SyndicateVault is
         if (liveAdapter != address(0)) {
             IERC20(asset()).safeTransfer(liveAdapter, assets);
             IStrategy(liveAdapter).onLiveDeposit(assets);
+            // Forwarded principal is tracked per-proposal so it is not
+            // double-counted as profit at settle (PnL = balance - snapshot,
+            // and `_settle` redeems all positions including this principal).
+            uint256 pid = ISyndicateGovernor(_getGovernor()).getActiveProposal(address(this));
+            liveAdapterPrincipal[pid] += assets;
         }
     }
 
