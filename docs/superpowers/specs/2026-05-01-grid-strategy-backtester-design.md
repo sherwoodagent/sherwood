@@ -1,8 +1,8 @@
 # Grid Strategy Backtester — Design
 
-**Status:** Design approved 2026-05-01. Ready for implementation plan.
+**Status:** Design approved 2026-05-01. Implemented; see addendum at the bottom for post-build deltas.
 **Branch (target):** `feat/grid-backtest`
-**Scope:** Replay historical Hyperliquid 1-minute price data through the existing `GridManager` and report PnL, fills, drawdown for any user-specified window.
+**Scope:** Replay historical 1-minute price data through the existing `GridManager` and report PnL, fills, drawdown for any user-specified window.
 
 ## 1. Motivation
 
@@ -347,7 +347,52 @@ Options:
 - Hedge simulation (no `GridHedgeManager` invocation during backtest)
 - Parameter sweeps
 - Equity-curve plots / charts / web UI
-- Backtesting against tokens not on HL
 - Slippage / partial-fill modeling (assumes perfect fill at level price)
 - Funding-rate cost (grid is delta-neutral-ish over a round trip; v1 assumes zero funding cost)
 - Trading fees (the existing `minProfitPerFillUsd` floor is the only fee-ish model; documented as a known gap)
+
+---
+
+## Addendum — Post-build deltas (2026-05-01)
+
+Three changes made during implementation that diverge from the original §4–§6:
+
+### A. Data source: Hyperliquid → Binance
+
+The original spec used Hyperliquid's `candleSnapshot` endpoint. **Hyperliquid retains 1-minute candles only ~3 days back.** That makes 30-day or longer windows impossible.
+
+Replaced with **Binance `/api/v3/klines`** (spot, no auth). Verified: 1m candles available for 2+ years. 4h candles for the full HL retention period.
+
+Implementation impact:
+- `cli/src/grid/historical-data-loader.ts` — endpoint, request method (GET not POST), max bars/page (1000 not 5000), response shape (array-of-arrays, not object).
+- `COIN_TO_BINANCE_SYMBOL` map added (`BTC→BTCUSDT`, `ETH→ETHUSDT`, `SOL→SOLUSDT`, etc).
+- `TOKEN_TO_COIN` (CoinGecko ID → HL coin symbol) is still imported and used; the resolution chain is `bitcoin → BTC → BTCUSDT`.
+- The cache file naming and on-disk schema kept the HL coin symbol as the key (e.g. `BTC-1m-…`) for continuity — only the fetch backend changed.
+
+Live mode (`GridLoop`, `HyperliquidProvider`) is **unaffected** — it continues to use HL for live mark prices and ATR. Spot Binance vs. HL perp is a small price-discovery delta during volatile minutes; acceptable noise for a backtester.
+
+§11 row "Backtesting against tokens not on HL" is now **out of date**: any Binance USDT-spot symbol can be backtested by extending `COIN_TO_BINANCE_SYMBOL`. Removed from out-of-scope list.
+
+### B. Drawdown computed against equity, not allocation
+
+The original §6 schema had `equityCurve[].totalAllocation` (the fixed capital pool) feeding `computeDrawdown`. Bug: `state.totalAllocation` is set once at init and never updated, while round-trip profits accumulate in per-grid `g.allocation`. So drawdown was structurally always 0.
+
+Fix: `computeDrawdown` now computes equity at each point as `totalAllocation + totalPnl` and tracks peak-to-trough on equity. Field names unchanged in the JSON output.
+
+### C. Snapshot equity is mark-to-market
+
+Even after fix B, drawdown was still 0 in a 30-day BTC smoke run. Root cause: `totalPnl` in the snapshot was `agg.totalPnlUsd` — **realized only**. The grid only books PnL on profitable closes (gated by `minProfitPerFillUsd`), so realized PnL is monotonically non-decreasing by construction.
+
+Fix: at each snapshot the backtester walks open fills, prices them at the current bar's close, and adds `(close - buyPrice) × quantity × leverage` to `totalPnl` for that snapshot point. This matches the manager's leverage-aware PnL accounting.
+
+The headline `result.capital.pnlUsd` is still **realized only** (matches what an LP actually walks away with on settlement). Drawdown specifically uses the marked-to-market equity curve.
+
+Smoke run (2026-04-01 → 2026-05-01, BTC, $5k): **+$25,839.65 realized (+517%)**, **max drawdown −$5,057 (−35.86%)** on the way. The 36% unrealized DD never triggered the live `pauseThresholdPct=0.20` because the live `checkPauseThreshold` values open fills at BUY price, not current price — that's a separate blind spot in the live grid code (file as a follow-up issue if not already tracked).
+
+### D. `mkdir` uses `dirname(outPath)`, not `DEFAULT_OUT_DIR`
+
+§6 implicitly assumed JSON always writes to `~/.sherwood/grid/backtests/`. Custom `--out` paths in other directories failed with ENOENT. Fixed in PR by changing `mkdir(DEFAULT_OUT_DIR, ...)` to `mkdir(dirname(outPath), { recursive: true })`.
+
+### Live results vs. spec example
+
+The spec's §6 illustrative summary showed +16.95% on a 30-day window. Real results at default config (5x leverage, 15 levels/side, BTC) on April 2026 are wildly higher (+517%) because of the **optimistic two-pass wick-fill accounting** (already disclosed in §5: a single bar with `low ≤ buyLevel` AND `high ≥ buyLevel + spacing` records a round trip in the same minute). Compounded over 43,200 1m bars, this systematically overstates PnL. Treat the realized number as an **upper bound**; the reported drawdown is also a partial picture (snapshots are hourly by default; intra-hour wicks aren't captured in the equity curve).
