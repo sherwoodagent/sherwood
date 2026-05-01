@@ -18,6 +18,24 @@ contract MockSyndicateRegistry {
     }
 }
 
+/// @dev Minimal vault stand-in — implements IVaultMembership (`owner` + `isAgent`).
+contract MockVault {
+    address public owner;
+    mapping(address => bool) public agents;
+
+    constructor(address owner_) {
+        owner = owner_;
+    }
+
+    function setAgent(address a, bool active) external {
+        agents[a] = active;
+    }
+
+    function isAgent(address a) external view returns (bool) {
+        return agents[a];
+    }
+}
+
 /// @title StrategyFactory_auth — MS-C2 regression
 /// @notice Before MS-C2, `StrategyFactory.cloneAndInit` and
 ///         `cloneAndInitDeterministic` were fully permissionless. Anyone
@@ -42,14 +60,21 @@ contract StrategyFactoryAuthTest is Test {
     ERC20Mock public usdc;
     MockMToken public mUsdc;
 
-    address public registeredVault = makeAddr("registeredVault");
-    address public unregisteredVault = makeAddr("unregisteredVault");
+    MockVault public registeredVault;
+    MockVault public unregisteredVault;
+    address public vaultOwner = makeAddr("vaultOwner");
+    address public agentAddr = makeAddr("agent");
     address public attacker = makeAddr("attacker");
     address public proposer = makeAddr("proposer");
 
     function setUp() public {
         registry = new MockSyndicateRegistry();
-        registry.register(registeredVault, 1);
+
+        registeredVault = new MockVault(vaultOwner);
+        registeredVault.setAgent(agentAddr, true);
+        unregisteredVault = new MockVault(vaultOwner);
+
+        registry.register(address(registeredVault), 1);
 
         factory = new StrategyFactory(address(registry));
         template = new MoonwellSupplyStrategy();
@@ -70,86 +95,100 @@ contract StrategyFactoryAuthTest is Test {
 
     // ── cloneAndInit ──
 
-    /// @notice MS-C2: a random EOA cannot clone-and-bind a strategy to an
-    ///         arbitrary vault. The auth check is `msg.sender == vault`, so
-    ///         any non-vault caller fails the very first gate.
+    /// @notice MS-C2: a random EOA that is neither vault, owner, nor a
+    ///         registered agent cannot clone-and-bind a strategy.
     function test_cloneAndInit_revertsForRandomEoa() public {
         vm.prank(attacker);
         vm.expectRevert(StrategyFactory.Unauthorized.selector);
-        factory.cloneAndInit(address(template), registeredVault, proposer, _initData());
+        factory.cloneAndInit(address(template), address(registeredVault), proposer, _initData());
     }
 
-    /// @notice MS-C2: even if the attacker spoofs a vault address by deploying
-    ///         a contract at that address, an unregistered vault still fails
-    ///         the registry check.
+    /// @notice MS-C2: an unregistered vault always fails — even when the caller
+    ///         IS that vault (no spoofing the membership view).
     function test_cloneAndInit_revertsForUnregisteredVault() public {
-        // Caller IS the vault (passes check #1) but the vault is not
-        // registered with the SyndicateFactory (fails check #2).
-        vm.prank(unregisteredVault);
+        vm.prank(address(unregisteredVault));
         vm.expectRevert(StrategyFactory.VaultNotRegistered.selector);
-        factory.cloneAndInit(address(template), unregisteredVault, proposer, _initData());
+        factory.cloneAndInit(address(template), address(unregisteredVault), proposer, _initData());
     }
 
-    /// @notice MS-C2: `vault` parameter must match `msg.sender`. An attacker
-    ///         calling from their own EOA cannot pass `registeredVault` as
-    ///         the `vault` argument to bind a clone to a victim.
+    /// @notice MS-C2: an outsider cannot pass a registered vault as `vault`
+    ///         to bind a clone to a victim.
     function test_cloneAndInit_revertsWhenVaultMismatchesSender() public {
         vm.prank(attacker);
         vm.expectRevert(StrategyFactory.Unauthorized.selector);
-        factory.cloneAndInit(address(template), registeredVault, proposer, _initData());
+        factory.cloneAndInit(address(template), address(registeredVault), proposer, _initData());
     }
 
-    /// @notice Happy path: the registered vault calling on its own behalf
-    ///         succeeds. This mirrors the governor → vault delegatecall →
-    ///         StrategyFactory path where the outer msg.sender is the vault.
+    /// @notice Happy path: the vault itself (governor batch path).
     function test_cloneAndInit_succeedsForRegisteredVault() public {
-        vm.prank(registeredVault);
-        address clone = factory.cloneAndInit(address(template), registeredVault, proposer, _initData());
+        vm.prank(address(registeredVault));
+        address clone = factory.cloneAndInit(address(template), address(registeredVault), proposer, _initData());
         assertTrue(clone != address(0));
-        assertEq(MoonwellSupplyStrategy(payable(clone)).vault(), registeredVault);
+        assertEq(MoonwellSupplyStrategy(payable(clone)).vault(), address(registeredVault));
         assertEq(MoonwellSupplyStrategy(payable(clone)).proposer(), proposer);
+    }
+
+    /// @notice Happy path: the vault owner (creator pre-deploy).
+    function test_cloneAndInit_succeedsForVaultOwner() public {
+        vm.prank(vaultOwner);
+        address clone = factory.cloneAndInit(address(template), address(registeredVault), proposer, _initData());
+        assertTrue(clone != address(0));
+    }
+
+    /// @notice Happy path: a registered agent (agent pre-deploy).
+    function test_cloneAndInit_succeedsForRegisteredAgent() public {
+        vm.prank(agentAddr);
+        address clone = factory.cloneAndInit(address(template), address(registeredVault), proposer, _initData());
+        assertTrue(clone != address(0));
+    }
+
+    /// @notice MS-C2: a deregistered agent loses access.
+    function test_cloneAndInit_revertsAfterAgentDeregistered() public {
+        registeredVault.setAgent(agentAddr, false);
+        vm.prank(agentAddr);
+        vm.expectRevert(StrategyFactory.Unauthorized.selector);
+        factory.cloneAndInit(address(template), address(registeredVault), proposer, _initData());
     }
 
     // ── cloneAndInitDeterministic ──
 
-    /// @notice MS-C2: deterministic variant has the same auth gate.
     function test_cloneAndInitDeterministic_revertsForRandomEoa() public {
         vm.prank(attacker);
         vm.expectRevert(StrategyFactory.Unauthorized.selector);
-        factory.cloneAndInitDeterministic(address(template), registeredVault, proposer, _initData(), bytes32("salt"));
+        factory.cloneAndInitDeterministic(
+            address(template), address(registeredVault), proposer, _initData(), bytes32("salt")
+        );
     }
 
     function test_cloneAndInitDeterministic_revertsForUnregisteredVault() public {
-        vm.prank(unregisteredVault);
+        vm.prank(address(unregisteredVault));
         vm.expectRevert(StrategyFactory.VaultNotRegistered.selector);
-        factory.cloneAndInitDeterministic(address(template), unregisteredVault, proposer, _initData(), bytes32("salt"));
+        factory.cloneAndInitDeterministic(
+            address(template), address(unregisteredVault), proposer, _initData(), bytes32("salt")
+        );
     }
 
-    function test_cloneAndInitDeterministic_revertsWhenVaultMismatchesSender() public {
-        vm.prank(attacker);
-        vm.expectRevert(StrategyFactory.Unauthorized.selector);
-        factory.cloneAndInitDeterministic(address(template), registeredVault, proposer, _initData(), bytes32("salt"));
-    }
-
-    function test_cloneAndInitDeterministic_succeedsForRegisteredVault() public {
+    function test_cloneAndInitDeterministic_succeedsForRegisteredAgent() public {
         bytes32 salt = keccak256("strategy.salt.1");
-        vm.prank(registeredVault);
-        address clone =
-            factory.cloneAndInitDeterministic(address(template), registeredVault, proposer, _initData(), salt);
+        vm.prank(agentAddr);
+        address clone = factory.cloneAndInitDeterministic(
+            address(template), address(registeredVault), proposer, _initData(), salt
+        );
         assertTrue(clone != address(0));
-        assertEq(MoonwellSupplyStrategy(payable(clone)).vault(), registeredVault);
+        assertEq(MoonwellSupplyStrategy(payable(clone)).vault(), address(registeredVault));
     }
 
-    // ── Fuzz: no caller other than the vault itself can clone ──
+    // ── Fuzz: no random caller can clone (must be vault/owner/agent) ──
 
-    function testFuzz_cloneAndInit_revertsForAnyNonVaultCaller(address caller) public {
-        vm.assume(caller != registeredVault);
-        // Skip precompiles / zero / well-known addresses that vm.prank refuses.
+    function testFuzz_cloneAndInit_revertsForAnyUnauthorizedCaller(address caller) public {
+        vm.assume(caller != address(registeredVault));
+        vm.assume(caller != vaultOwner);
+        vm.assume(caller != agentAddr);
         vm.assume(caller != address(0));
         vm.assume(uint160(caller) > 0xff);
 
         vm.prank(caller);
         vm.expectRevert(StrategyFactory.Unauthorized.selector);
-        factory.cloneAndInit(address(template), registeredVault, proposer, _initData());
+        factory.cloneAndInit(address(template), address(registeredVault), proposer, _initData());
     }
 }

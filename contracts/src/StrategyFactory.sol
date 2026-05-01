@@ -9,6 +9,12 @@ interface ISyndicateRegistry {
     function vaultToSyndicate(address vault) external view returns (uint256);
 }
 
+/// @notice Minimal view surface for agent / owner check.
+interface IVaultMembership {
+    function isAgent(address agentAddress) external view returns (bool);
+    function owner() external view returns (address);
+}
+
 /// @title StrategyFactory
 /// @notice Atomic clone + initialize wrapper for strategy templates.
 ///
@@ -20,22 +26,20 @@ interface ISyndicateRegistry {
 ///
 ///         This factory bundles both into a single tx.
 ///
-///         MS-C2 hardening: the clone fns are gated so only a vault registered
-///         on `syndicateFactory` may clone-and-init a strategy bound to itself.
-///         The legitimate caller path is:
+///         MS-C2 hardening: the clone fns are gated so only callers authorized
+///         for `vault` can clone-and-init a strategy bound to it. Authorized
+///         callers are:
 ///
-///             SyndicateGovernor.executeProposal
-///               -> Vault.executeGovernorBatch (delegatecall BatchExecutorLib)
-///                 -> StrategyFactory.cloneAndInit(template, address(this), ...)
+///           - `vault` itself (governor execute path: governor.executeProposal
+///             -> Vault.executeGovernorBatch (delegatecall BatchExecutorLib)
+///             -> StrategyFactory.cloneAndInit(template, address(this), ...) —
+///             outer msg.sender is the vault address);
+///           - `vault.owner()` (creator pre-deploy);
+///           - `vault.isAgent(msg.sender)` (registered agent pre-deploy so an
+///             agent can stage a strategy ahead of proposal execution).
 ///
-///         Inside the delegatecall the outer `msg.sender` arriving at this
-///         factory is the vault address itself. We require:
-///
-///           1. `msg.sender == vault` — caller proves it IS the vault being
-///              bound (no third-party can bind a clone to a victim).
-///           2. `syndicateFactory.vaultToSyndicate(vault) != 0` — the vault is
-///              a real, registered SyndicateFactory vault (no rogue contract
-///              spoofing the (1) check by self-binding to a fake address).
+///         The vault must additionally be registered on `syndicateFactory` so
+///         a rogue contract cannot spoof the membership view.
 contract StrategyFactory {
     /// @notice SyndicateFactory used to verify that `vault` is a registered vault.
     /// @dev Immutable: set once at construction. A clone-fn caller-vault gate is
@@ -53,12 +57,17 @@ contract StrategyFactory {
         syndicateFactory = syndicateFactory_;
     }
 
-    /// @dev MS-C2: only a registered vault binding to itself may clone.
+    /// @dev MS-C2: caller is the vault, the vault's owner, or a registered
+    ///      agent of the vault, and the vault is a registered Sherwood vault.
     function _authClone(address vault) internal view {
-        if (msg.sender != vault) revert Unauthorized();
         if (ISyndicateRegistry(syndicateFactory).vaultToSyndicate(vault) == 0) {
             revert VaultNotRegistered();
         }
+        if (msg.sender == vault) return;
+        IVaultMembership v = IVaultMembership(vault);
+        if (msg.sender == v.owner()) return;
+        if (v.isAgent(msg.sender)) return;
+        revert Unauthorized();
     }
 
     /// @notice Clone `template` and run `initialize(vault, proposer, data)` atomically.
