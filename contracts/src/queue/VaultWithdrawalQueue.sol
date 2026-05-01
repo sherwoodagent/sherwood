@@ -60,6 +60,11 @@ contract VaultWithdrawalQueue is IVaultWithdrawalQueue, ReentrancyGuardTransient
     }
 
     /// @inheritdoc IVaultWithdrawalQueue
+    /// @dev Inherits the vault's `whenNotPaused` gate transitively: this
+    ///      function calls `vault.redeem`, which routes through `_withdraw`
+    ///      (`whenNotPaused`). When the owner pauses the vault, claims are
+    ///      blocked even if `redemptionsLocked() == false`. The `cancel` path
+    ///      remains unpaused so escrowed shares are recoverable during a pause.
     function claim(uint256 requestId) external nonReentrant returns (uint256 assets) {
         if (requestId == 0 || requestId >= _requests.length) revert RequestNotFound();
         Request storage r = _requests[requestId];
@@ -77,6 +82,9 @@ contract VaultWithdrawalQueue is IVaultWithdrawalQueue, ReentrancyGuardTransient
     }
 
     /// @inheritdoc IVaultWithdrawalQueue
+    /// @dev Unaffected by `vault.paused()` — the cancel path uses
+    ///      `IERC20.transfer` (an `_update` call) which has no pause check.
+    ///      LPs can always recover their escrowed shares.
     function cancel(uint256 requestId) external nonReentrant {
         if (requestId == 0 || requestId >= _requests.length) revert RequestNotFound();
         Request storage r = _requests[requestId];

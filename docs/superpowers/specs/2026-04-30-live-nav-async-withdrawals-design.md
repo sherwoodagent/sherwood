@@ -279,9 +279,10 @@ V1.5 is a fresh redeployment per `CLAUDE.md`, so we append slots and reduce
 | `_withdrawalQueue`     | 1     | `requestRedeem`, `reservedQueueAssets`, `claim` integration   |
 | `_activeStrategyAdapter` | 2   | `totalAssets`, `_deposit` live-forwarding, `redemptionsLocked` short-circuit |
 
-`__gap` reduction: `38 → 37 → 36`. The two slots both live on
-`SyndicateVault` storage; `WithdrawalQueue` is a separate contract with its
-own storage.
+Storage layout: two new slots appended (`_withdrawalQueue` for Phase 1,
+`_activeStrategyAdapter` for Phase 2); `__gap` reduced `38 → 36` to
+maintain layout invariants. The two slots both live on `SyndicateVault`
+storage; `WithdrawalQueue` is a separate contract with its own storage.
 
 Both slots are zero-initialized on a fresh proxy, so existing tests that
 don't touch the queue or adapter behave identically — `adapter == 0` keeps

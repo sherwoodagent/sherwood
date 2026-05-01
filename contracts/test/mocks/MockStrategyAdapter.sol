@@ -15,9 +15,22 @@ contract MockStrategyAdapter is IStrategy {
     uint256 public lastLiveDeposit;
     uint256 public liveDepositCount;
 
+    /// @notice Optional vault-authorization gate for `onLiveDeposit`. When zero
+    ///         (default), the gate is disabled and any caller is allowed —
+    ///         preserves backward compatibility with tests that prank in as
+    ///         the vault without configuring this mock. When non-zero, mirrors
+    ///         the production `BaseStrategy.onLiveDeposit` `onlyVault` check.
+    address public configuredVault;
+
     function setValue(uint256 v, bool valid_) external {
         mockValue = v;
         mockValid = valid_;
+    }
+
+    /// @notice Configure the expected vault caller for `onLiveDeposit`. Pass
+    ///         `address(0)` to disable the gate (default).
+    function setConfiguredVault(address v) external {
+        configuredVault = v;
     }
 
     function positionValue() external view returns (uint256, bool) {
@@ -50,6 +63,12 @@ contract MockStrategyAdapter is IStrategy {
     }
 
     function onLiveDeposit(uint256 assets) external {
+        // Default-disabled gate: backwards-compatible with existing tests that
+        // call this directly. When `configuredVault` is set, the gate mirrors
+        // production `BaseStrategy.onLiveDeposit` `onlyVault`.
+        if (configuredVault != address(0)) {
+            require(msg.sender == configuredVault, "MockStrategyAdapter: not vault");
+        }
         lastLiveDeposit = assets;
         liveDepositCount++;
     }
