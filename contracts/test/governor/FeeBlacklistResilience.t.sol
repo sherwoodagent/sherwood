@@ -178,6 +178,8 @@ contract FeeBlacklistResilienceTest is Test {
         vm.expectEmit(true, true, false, true);
         emit ISyndicateGovernor.FeeTransferFailed(protocolRecipient, address(usdc), 200e6);
 
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(agent);
         governor.settleProposal(proposalId);
 
@@ -204,6 +206,8 @@ contract FeeBlacklistResilienceTest is Test {
         usdc.mint(address(vault), 10_000e6);
         usdc.setBlacklisted(protocolRecipient, true);
 
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(agent);
         governor.settleProposal(proposalId);
         assertEq(governor.unclaimedFees(address(vault), protocolRecipient, address(usdc)), 200e6);
@@ -233,6 +237,8 @@ contract FeeBlacklistResilienceTest is Test {
 
         uint256 agentBalBefore = usdc.balanceOf(agent);
 
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(agent);
         governor.settleProposal(proposalId);
 
@@ -269,6 +275,8 @@ contract FeeBlacklistResilienceTest is Test {
         uint256 proposalId = _executeThroughSettle(1500, 7 days, _emptyCoProposers());
         usdc.mint(address(vault), 10_000e6);
         usdc.setBlacklisted(protocolRecipient, true);
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(agent);
         governor.settleProposal(proposalId);
         assertEq(governor.unclaimedFees(address(vault), protocolRecipient, address(usdc)), 200e6);

@@ -57,6 +57,9 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     error VaultStillStaked();
     error RegistryMismatch();
     error ZeroAddress();
+    // ── MS-H8: rotateOwner blocked while a proposal binds the vault ──
+    error ProposalActive();
+    error ProposalsOpen();
     // ── V-M7: reject zero/empty SyndicateConfig fields ──
     error InvalidSyndicateConfig();
 
@@ -366,7 +369,19 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         IGuardianRegistry reg = IGuardianRegistry(guardianRegistry);
         if (reg.hasOwnerStake(vault)) revert VaultStillStaked();
         // Registry-consistency invariant: governor and factory must share one registry.
-        if (ISyndicateGovernor(governor).guardianRegistry() != guardianRegistry) revert RegistryMismatch();
+        ISyndicateGovernor gov = ISyndicateGovernor(governor);
+        if (gov.guardianRegistry() != guardianRegistry) revert RegistryMismatch();
+        // MS-H8: forbid rotation while any proposal binds the vault. Without
+        // this guard, a factory owner could hot-swap the vault owner mid-flight,
+        // handing the new owner `pause()` (halts strategy execution) and other
+        // owner-only powers in the middle of a live proposal lifecycle. We
+        // check both `getActiveProposal` (currently-Executed) and
+        // `openProposalCount` (Pending / GuardianReview / Approved /
+        // Executed) — `getActiveProposal` is a subset of `openProposalCount`,
+        // but check both for explicit pre/post-execute coverage and a clearer
+        // revert reason when only one signal is set.
+        if (gov.getActiveProposal(vault) != 0) revert ProposalActive();
+        if (gov.openProposalCount(vault) != 0) revert ProposalsOpen();
 
         SyndicateVault(payable(vault)).rotateOwnership(newOwner);
         reg.transferOwnerStakeSlot(vault, newOwner);

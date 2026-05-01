@@ -9,18 +9,29 @@ import {BaseStrategy} from "../src/strategies/BaseStrategy.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockMToken} from "./mocks/MockMToken.sol";
 
+/// @dev Minimal SyndicateFactory stand-in that returns a non-zero
+///      `vaultToSyndicate(vault)` so legacy unit tests can exercise the
+///      happy-path clone fns through the post-MS-C2 auth gate.
+contract _MockSyndicateRegistry {
+    function vaultToSyndicate(address) external pure returns (uint256) {
+        return 1;
+    }
+}
+
 contract StrategyFactoryTest is Test {
     StrategyFactory factory;
     MoonwellSupplyStrategy template;
     ERC20Mock usdc;
     MockMToken mUsdc;
+    _MockSyndicateRegistry registry;
 
     address vault = makeAddr("vault");
     address proposer = makeAddr("proposer");
     address attacker = makeAddr("attacker");
 
     function setUp() public {
-        factory = new StrategyFactory();
+        registry = new _MockSyndicateRegistry();
+        factory = new StrategyFactory(address(registry));
         template = new MoonwellSupplyStrategy();
         usdc = new ERC20Mock("USDC", "USDC", 6);
         mUsdc = new MockMToken(address(usdc), "Moonwell USDC", "mUsdc");
@@ -28,6 +39,7 @@ contract StrategyFactoryTest is Test {
 
     function test_cloneAndInit_atomic() public {
         bytes memory initData = abi.encode(address(usdc), address(mUsdc), 1_000e6, 990e6, false);
+        vm.prank(vault);
         address clone = factory.cloneAndInit(address(template), vault, proposer, initData);
 
         MoonwellSupplyStrategy strategy = MoonwellSupplyStrategy(payable(clone));
@@ -38,6 +50,7 @@ contract StrategyFactoryTest is Test {
 
     function test_cloneAndInit_initializeAgain_reverts() public {
         bytes memory initData = abi.encode(address(usdc), address(mUsdc), 1_000e6, 990e6, false);
+        vm.prank(vault);
         address clone = factory.cloneAndInit(address(template), vault, proposer, initData);
 
         // Anyone trying to re-initialize the clone (front-run attack post-init)
@@ -51,6 +64,7 @@ contract StrategyFactoryTest is Test {
         bytes32 salt = keccak256("strategy.salt.1");
         bytes memory initData = abi.encode(address(usdc), address(mUsdc), 1_000e6, 990e6, false);
         address predicted = Clones.predictDeterministicAddress(address(template), salt, address(factory));
+        vm.prank(vault);
         address clone = factory.cloneAndInitDeterministic(address(template), vault, proposer, initData, salt);
         assertEq(clone, predicted);
     }

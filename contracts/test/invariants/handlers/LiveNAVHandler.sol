@@ -122,6 +122,12 @@ contract LiveNAVHandler is Test {
             abi.encodeWithSignature("getActiveProposal(address)"),
             abi.encode(locked ? uint256(1) : uint256(0))
         );
+        // MS-H4: deposits are also gated by `openProposalCount` — mirror lock state.
+        vm.mockCall(
+            mockGovernor,
+            abi.encodeWithSignature("openProposalCount(address)"),
+            abi.encode(locked ? uint256(1) : uint256(0))
+        );
     }
 
     function toggleAdapterValid(bool v) external {

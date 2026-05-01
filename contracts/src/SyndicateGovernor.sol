@@ -83,6 +83,27 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ///         so executeGovernorBatch can't be weaponized for gas griefing.
     uint256 public constant MAX_CALLS_PER_PROPOSAL = 64;
 
+    /// @notice MS-H1: maximum allowed PnL return multiplier vs. capital
+    ///         snapshot at execute time. Caps `_finishSettlement`'s PnL at
+    ///         `_capitalSnapshots[id] * MAX_PNL_RETURN_MULTIPLIER` so a third
+    ///         party that direct-transfers asset to the vault during Executed
+    ///         (donation) cannot inflate `pnl` and skim `performanceFeeBps` on
+    ///         the inflation. 10x is well above realistic strategy returns and
+    ///         well below realistic donation magnitudes. Donations above the
+    ///         cap stay in the vault, benefiting LPs proportional to share.
+    /// @dev `internal` to avoid emitting an auto-getter (would add ~39 bytes).
+    uint256 internal constant MAX_PNL_RETURN_MULTIPLIER = 10;
+
+    /// @notice MS-H3: minimum elapsed time post-execute before the proposer
+    ///         can self-settle (skipping `strategyDuration`). Prevents the
+    ///         single-block execute → settle skim where a proposer gains
+    ///         `performanceFeeBps` on a one-block trade. Anyone other than the
+    ///         proposer still waits for `strategyDuration`. 1 hour is short
+    ///         enough not to obstruct legitimate early-exit and long enough
+    ///         that a flash-loan-funded skim gets consumed by gas + slippage.
+    /// @dev `internal` to avoid emitting an auto-getter.
+    uint256 internal constant MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE = 1 hours;
+
     // ── New storage (appended -- UUPS safe) ──
 
     /// @notice Proposal ID -> execute (opening) calls
@@ -359,11 +380,15 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         StrategyProposal storage proposal = _proposals[proposalId];
         if (_resolveState(proposal) != ProposalState.Executed) revert ProposalNotExecuted();
 
-        // Proposer can settle anytime; everyone else waits for duration
-        if (msg.sender != proposal.proposer) {
-            if (block.timestamp < proposal.executedAt + proposal.strategyDuration) {
-                revert StrategyDurationNotElapsed();
-            }
+        // MS-H3: proposer fast-path requires at least
+        // MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE elapsed since execute, so
+        // a one-block execute → settle skim cannot capture `performanceFeeBps`
+        // on a same-block trade. Everyone else still waits the full
+        // `strategyDuration` as before.
+        uint256 minWait =
+            msg.sender == proposal.proposer ? MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE : proposal.strategyDuration;
+        if (block.timestamp < proposal.executedAt + minWait) {
+            revert StrategyDurationNotElapsed();
         }
 
         // Run the pre-committed settlement calls
@@ -935,23 +960,34 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         // G-H1: asset-only measurement (see NatSpec above).
         // casting to int256 is safe because vault balances won't exceed int256.max
         // forge-lint: disable-next-line(unsafe-typecast)
-        pnl = int256(IERC20(asset).balanceOf(vault)) - int256(_capitalSnapshots[proposalId]);
+        uint256 snapshot = _capitalSnapshots[proposalId];
+        pnl = int256(IERC20(asset).balanceOf(vault)) - int256(snapshot);
+
+        // MS-H1: cap profit at MAX_PNL_RETURN_MULTIPLIER * snapshot to prevent
+        // donation-inflated PnL. A third party who direct-transfers asset to
+        // the vault during the Executed window would otherwise show up as
+        // "profit" and let the proposer skim `performanceFeeBps` on the
+        // donation. Excess above the cap stays in the vault (benefits LPs).
+        if (pnl > 0) {
+            uint256 cap = snapshot * MAX_PNL_RETURN_MULTIPLIER;
+            if (uint256(pnl) > cap) pnl = int256(cap);
+        }
 
         // Finalize state before external transfers to prevent reentrancy on stale state
         _activeProposal[vault] = 0;
         _lastSettledAt[vault] = block.timestamp;
         proposal.state = ProposalState.Settled;
         delete _capitalSnapshots[proposalId];
-        // V2: emergency state lives on registry. If a standard settle races
-        // ahead of an open emergency review DURING the review window, cancel
-        // it so the registry can't slash the owner for a normally-settled
-        // proposal. After reviewEnd, cancelEmergency reverts (by design —
-        // the owner must face resolution), so we use try/catch to avoid
-        // bricking the standard settle path.
-        IGuardianRegistry reg = _getRegistry();
-        if (reg.isEmergencyOpen(proposalId)) {
-            try reg.cancelEmergency(proposalId) {} catch {}
-        }
+        // MS-H2: do NOT auto-cancel an open emergency review here. Auto-cancel
+        // let a vault owner who opened `emergencySettleWithCalls` and saw
+        // block-votes accruing race a `settleProposal` to wipe registry state
+        // and dodge the slash. Emergency reviews now resolve naturally:
+        // - Owner's `finalizeEmergencySettle` reverts because state == Settled.
+        // - Permissionless `resolveEmergencyReview` at reviewEnd applies the
+        //   block-quorum slash if guardians actually voted block; otherwise
+        //   the review resolves harmlessly (blocked == false, no slash).
+        // The owner can still cleanly withdraw a non-malicious emergency via
+        // `cancelEmergencySettle` while the review is open.
         _decOpen(vault);
 
         uint256 totalFee = 0;

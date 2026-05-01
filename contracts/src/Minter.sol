@@ -137,6 +137,11 @@ contract Minter is Ownable, Pausable, ReentrancyGuard {
 
     event MaxEmissionRateChanged(uint256 oldRate, uint256 newRate);
 
+    /// @notice Emitted when the RewardsDistributor address is updated.
+    /// @param oldDistributor Previous distributor (zero on first set).
+    /// @param newDistributor New distributor — must be a non-zero contract.
+    event RewardsDistributorChanged(address indexed oldDistributor, address indexed newDistributor);
+
     // ==================== ERRORS ====================
 
     error EpochNotReady();
@@ -145,6 +150,8 @@ contract Minter is Ownable, Pausable, ReentrancyGuard {
     error InvalidVote();
     error VotingNotActive();
     error CircuitBreakerActive();
+    error ZeroAddress();
+    error NotAContract();
 
     // ==================== CONSTRUCTOR ====================
 
@@ -446,9 +453,20 @@ contract Minter is Ownable, Pausable, ReentrancyGuard {
         return _maxEmissionRate;
     }
 
-    /// @notice Set the RewardsDistributor address (only owner)
+    /// @notice Set the RewardsDistributor address (only owner).
+    /// @dev MS-H7 fix: validates non-zero and that the recipient is a contract
+    ///      (`code.length > 0`) so a compromised owner cannot point freshly-minted
+    ///      and pre-approved WOOD at an EOA right before `flipEpoch`. The check is
+    ///      defensive — it does not prove the contract is the right distributor,
+    ///      only that it is not an EOA. The owner multisig still bears final
+    ///      responsibility for setting a legitimate distributor.
+    /// @param _rewardsDistributor The new RewardsDistributor contract address.
     function setRewardsDistributor(address _rewardsDistributor) external onlyOwner {
+        if (_rewardsDistributor == address(0)) revert ZeroAddress();
+        if (_rewardsDistributor.code.length == 0) revert NotAContract();
+        address old = rewardsDistributor;
         rewardsDistributor = _rewardsDistributor;
+        emit RewardsDistributorChanged(old, _rewardsDistributor);
     }
 
     // ==================== INTERNAL ====================

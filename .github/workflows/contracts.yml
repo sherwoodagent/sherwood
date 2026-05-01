@@ -69,8 +69,8 @@ jobs:
             echo "::error::could not read SyndicateVault runtime size"
             exit 1
           fi
-          if [ "$VAULT_SIZE" -gt 23000 ]; then
-            echo "::error::SyndicateVault $VAULT_SIZE > 23000 byte budget"
+          if [ "$VAULT_SIZE" -gt 23300 ]; then
+            echo "::error::SyndicateVault $VAULT_SIZE > 23300 byte budget"
             exit 1
           fi
 

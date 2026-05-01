@@ -28,6 +28,10 @@ interface ISyndicateVault {
     error GovernorNotSet();
     error ExecutorCodehashMismatch();
     error InvalidAsset();
+    /// @notice MS-H9: Revert when `transferPerformanceFee` is called with an
+    ///         `amount` that exceeds the vault's balance of `asset_`. Closes a
+    ///         missing upper-bound check on a governor-only fee transfer.
+    error AmountExceedsBalance();
     error WithdrawalQueueNotSet();
     error WithdrawalQueueAlreadySet();
     error InsufficientShares();

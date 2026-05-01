@@ -159,6 +159,8 @@ contract SyndicateGovernorTest is Test {
     function _createAndExecuteProposal(uint256 perfFeeBps, uint256 duration) internal returns (uint256 proposalId) {
         proposalId = _createApprovedProposal(perfFeeBps, duration);
         governor.executeProposal(proposalId);
+        // MS-H3: proposer self-settle requires `MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE` (1h) elapsed.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
     }
 
     // ==================== INITIALIZATION ====================

@@ -59,6 +59,8 @@ contract SyndicateFactoryTest is Test {
 
         // Mock governor.getActiveProposal() so vault deposits work (no active proposals)
         vm.mockCall(governorAddr, abi.encodeWithSignature("getActiveProposal(address)"), abi.encode(uint256(0)));
+        // MS-H4: vault `_deposit` reads `openProposalCount(address)` — mock to 0.
+        vm.mockCall(governorAddr, abi.encodeWithSignature("openProposalCount(address)"), abi.encode(uint256(0)));
         // Task 26: mock registry to pass the prepared-stake gate + bind path during create.
         vm.mockCall(
             guardianRegistryAddr, abi.encodeWithSelector(IGuardianRegistry.canCreateVault.selector), abi.encode(true)

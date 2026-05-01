@@ -60,6 +60,7 @@ contract AsyncRedeemInvariantsTest is StdInvariant, Test {
         // governor mock — start unlocked
         vm.mockCall(address(this), abi.encodeWithSignature("governor()"), abi.encode(MOCK_GOVERNOR));
         vm.mockCall(MOCK_GOVERNOR, abi.encodeWithSignature("getActiveProposal(address)"), abi.encode(uint256(0)));
+        vm.mockCall(MOCK_GOVERNOR, abi.encodeWithSignature("openProposalCount(address)"), abi.encode(uint256(0)));
 
         handler = new AsyncRedeemHandler(vault, queue, IERC20(address(usdc)), MOCK_GOVERNOR);
         targetContract(address(handler));
@@ -95,6 +96,17 @@ contract AsyncRedeemInvariantsTest is StdInvariant, Test {
             sum += vault.balanceOf(handler.actorAt(i));
         }
         assertEq(vault.totalSupply(), sum, "INV-Q3: totalSupply diverged from holder ledger");
+    }
+
+    /// @notice INV-Q4 (Q-H1) — queue's vault-share balance must be >= its claimed `pendingShares`.
+    ///         If this ever inverts, non-queue users could withdraw float that the queue's
+    ///         reserve says is reserved, draining LP claims.
+    function invariant_queueShareBalanceCoversPendingShares() public view {
+        assertGe(
+            vault.balanceOf(address(queue)),
+            queue.pendingShares(),
+            "INV-Q4: queue share balance below pendingShares"
+        );
     }
 
     /// @notice afterInvariant — sanity gate ensuring the fuzzer actually drove some flow

@@ -47,6 +47,18 @@ abstract contract BaseStrategy is IStrategy {
     State internal _state;
     bool private _initialized;
 
+    /**
+     * @notice Disables `initialize` on the template itself so an attacker
+     *         can't front-run a clone deploy with their own init.
+     * @dev Constructors are NOT executed for ERC-1167 minimal proxies, so
+     *      `Clones.clone(template)` produces a clone with `_initialized = false`,
+     *      keeping atomic `cloneAndInit` flows working. Only the template
+     *      contract — deployed via `new` — is permanently locked.
+     */
+    constructor() {
+        _initialized = true;
+    }
+
     modifier onlyProposer() {
         if (msg.sender != _proposer) revert NotProposer();
         _;

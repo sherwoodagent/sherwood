@@ -26,6 +26,13 @@ import {ScriptBase} from "./ScriptBase.sol";
  *         address + same salts = same protocol addresses on any chain.
  *
  *   Environment variables:
+ *     OWNER_MULTISIG    — REQUIRED. Multisig contract that receives ownership of
+ *                         Governor + Factory + GuardianRegistry as the final step
+ *                         of the deploy ceremony. MUST be a contract (Safe etc.) —
+ *                         deploy reverts on EOA / address(0). Closes MS-H5.
+ *     SKIP_MULTISIG_HANDOFF — Optional escape hatch for ephemeral testnet / fork
+ *                         deploys ("true"/"1" to skip). Defaults to false. Never
+ *                         use on mainnet.
  *     ENS_REGISTRAR     — L2 Registrar address (default: 0x0 = no ENS)
  *     AGENT_REGISTRY    — ERC-8004 Identity Registry (default: 0x0 = no identity)
  *     MANAGEMENT_FEE    — Management fee in bps (default: 50 = 0.5%)
@@ -93,6 +100,17 @@ contract DeploySherwood is ScriptBase {
         });
         require(cfg.woodToken != address(0), "WOOD_TOKEN not set (env or chains.json)");
 
+        // MS-H5: multisig handoff is mandatory unless explicitly skipped.
+        // CLAUDE.md asserts "owner is a multisig" — enforce that on-chain at
+        // deploy time so a single-key compromise can't take over the protocol
+        // before any user notices.
+        bool skipHandoff = vm.envOr("SKIP_MULTISIG_HANDOFF", false);
+        address ownerMultisig = vm.envOr("OWNER_MULTISIG", address(0));
+        if (!skipHandoff) {
+            require(ownerMultisig != address(0), "OWNER_MULTISIG required (or set SKIP_MULTISIG_HANDOFF=true)");
+            require(ownerMultisig.code.length > 0, "OWNER_MULTISIG must be a contract (Safe), not an EOA");
+        }
+
         vm.startBroadcast();
         Deployed memory d = deployCore(cfg);
         console.log("\nDeployer:", d.deployer);
@@ -108,15 +126,26 @@ contract DeploySherwood is ScriptBase {
         // init — no separate wiring step needed.
 
         // Seed slash appeal reserve + epoch 0 rewards (best-effort; skipped
-        // on zero amounts so testnets don't need a WOOD balance).
+        // on zero amounts so testnets don't need a WOOD balance). MUST happen
+        // before the multisig handoff — `fundSlashAppealReserve` is `onlyOwner`
+        // and the deployer is still the owner at this point.
         _seedRegistry(d.deployer, d.registryProxy, cfg);
+
+        // MS-H5: hand ownership of all three proxies to the multisig as the
+        // final on-chain action of the deploy ceremony. After this point the
+        // deployer EOA has zero authority on the protocol.
+        address effectiveOwner = d.deployer;
+        if (!skipHandoff) {
+            _handoffOwnership(d.governorProxy, d.factoryProxy, d.registryProxy, ownerMultisig);
+            effectiveOwner = ownerMultisig;
+        }
 
         vm.stopBroadcast();
 
         // ── Validate ──
-        _validateGovernor(d.deployer, d.governorProxy, d.factoryProxy, cfg.maxStrategyDays);
+        _validateGovernor(effectiveOwner, d.deployer, d.governorProxy, d.factoryProxy, cfg.maxStrategyDays);
         _validateFactory(
-            d.deployer,
+            effectiveOwner,
             d.governorProxy,
             d.factoryProxy,
             d.executorLib,
@@ -125,7 +154,7 @@ contract DeploySherwood is ScriptBase {
             cfg.agentRegistry,
             cfg.managementFeeBps
         );
-        _validateRegistry(d.registryProxy, d.governorProxy, d.factoryProxy, cfg.woodToken);
+        _validateRegistry(effectiveOwner, d.registryProxy, d.governorProxy, d.factoryProxy, cfg.woodToken);
 
         // ── Persist ──
         _writeAddresses(_chainName(), d.deployer, d.factoryProxy, d.governorProxy, d.executorLib, d.vaultImpl);
@@ -288,15 +317,40 @@ contract DeploySherwood is ScriptBase {
         return address(0);
     }
 
-    function _validateGovernor(address deployer, address governorAddr, address factoryAddr, uint256 maxDays)
+    /// @notice MS-H5: hand off ownership of all three protocol proxies to the
+    ///         configured multisig as the final on-chain action. Called inside
+    ///         the same broadcast as the deploys so a single tx-bundle delivers
+    ///         a fully-multisig-controlled protocol — there is no window where
+    ///         a single deployer key controls a live deployment.
+    /// @dev    Vault is intentionally not transferred here: vaults are owned by
+    ///         the syndicate creator (set in `SyndicateFactory.createSyndicate`)
+    ///         not by the protocol deployer. The deploy script only stamps out
+    ///         the singleton implementation, not a live vault instance.
+    function _handoffOwnership(address governorAddr, address factoryAddr, address registryAddr, address ownerMultisig)
         internal
-        view
     {
+        console.log("\n=== Multisig handoff (MS-H5) ===");
+        console.log("Transferring ownership to:", ownerMultisig);
+        Ownable(governorAddr).transferOwnership(ownerMultisig);
+        Ownable(factoryAddr).transferOwnership(ownerMultisig);
+        Ownable(registryAddr).transferOwnership(ownerMultisig);
+        console.log("Governor / Factory / Registry now owned by multisig");
+    }
+
+    function _validateGovernor(
+        address expectedOwner,
+        address deployer,
+        address governorAddr,
+        address factoryAddr,
+        uint256 maxDays
+    ) internal view {
         console.log("\n=== Validating Governor ===");
         SyndicateGovernor governor = SyndicateGovernor(governorAddr);
         ISyndicateGovernor.GovernorParams memory p = governor.getGovernorParams();
 
-        _checkAddr("gov.owner", Ownable(governorAddr).owner(), deployer);
+        // MS-H5: post-handoff `owner()` must match the multisig (or deployer
+        // when handoff was skipped via SKIP_MULTISIG_HANDOFF).
+        _checkAddr("gov.owner", Ownable(governorAddr).owner(), expectedOwner);
         _checkUint("gov.votingPeriod", p.votingPeriod, 1 days);
         _checkUint("gov.executionWindow", p.executionWindow, 1 days);
         _checkUint("gov.vetoThresholdBps", p.vetoThresholdBps, 4000);
@@ -307,6 +361,9 @@ contract DeploySherwood is ScriptBase {
         _checkUint("gov.minStrategyDuration", p.minStrategyDuration, 1 hours);
         _checkUint("gov.maxStrategyDuration", p.maxStrategyDuration, maxDays * 1 days);
         _checkUint("gov.protocolFeeBps", governor.protocolFeeBps(), 200);
+        // protocolFeeRecipient stays at deployer at init time. Out of scope
+        // for MS-H5 (which is owner-only); the new multisig owner can rotate
+        // it post-handoff via `setProtocolFeeRecipient`.
         _checkAddr("gov.protocolFeeRecipient", governor.protocolFeeRecipient(), deployer);
         // V1.5: timelock removed — factory + guardian-fee recipient are set
         // directly in step 6. Validate the live values.
@@ -320,7 +377,7 @@ contract DeploySherwood is ScriptBase {
     }
 
     function _validateFactory(
-        address deployer,
+        address expectedOwner,
         address governorAddr,
         address factoryAddr,
         address executorLibAddr,
@@ -332,7 +389,8 @@ contract DeploySherwood is ScriptBase {
         console.log("=== Validating Factory ===");
         SyndicateFactory factory = SyndicateFactory(factoryAddr);
 
-        _checkAddr("factory.owner", Ownable(factoryAddr).owner(), deployer);
+        // MS-H5: post-handoff factory owner must be the multisig.
+        _checkAddr("factory.owner", Ownable(factoryAddr).owner(), expectedOwner);
         _checkAddr("factory.governor", factory.governor(), governorAddr);
         _checkAddr("factory.executorImpl", factory.executorImpl(), executorLibAddr);
         _checkAddr("factory.vaultImpl", factory.vaultImpl(), vaultImplAddr);
@@ -343,12 +401,17 @@ contract DeploySherwood is ScriptBase {
         console.log("=== All checks passed ===");
     }
 
-    function _validateRegistry(address registryAddr, address governorAddr, address factoryAddr, address wood)
-        internal
-        view
-    {
+    function _validateRegistry(
+        address expectedOwner,
+        address registryAddr,
+        address governorAddr,
+        address factoryAddr,
+        address wood
+    ) internal view {
         console.log("=== Validating GuardianRegistry ===");
         GuardianRegistry reg = GuardianRegistry(registryAddr);
+        // MS-H5: post-handoff registry owner must be the multisig.
+        _checkAddr("registry.owner", Ownable(registryAddr).owner(), expectedOwner);
         _checkAddr("registry.governor", reg.governor(), governorAddr);
         _checkAddr("registry.factory", reg.factory(), factoryAddr);
         _checkAddr("registry.wood", address(reg.wood()), wood);

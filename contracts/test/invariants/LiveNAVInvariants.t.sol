@@ -59,6 +59,7 @@ contract LiveNAVInvariantsTest is StdInvariant, Test {
         // Mock the governor wiring — start unlocked.
         vm.mockCall(address(this), abi.encodeWithSignature("governor()"), abi.encode(MOCK_GOVERNOR));
         vm.mockCall(MOCK_GOVERNOR, abi.encodeWithSignature("getActiveProposal(address)"), abi.encode(uint256(0)));
+        vm.mockCall(MOCK_GOVERNOR, abi.encodeWithSignature("openProposalCount(address)"), abi.encode(uint256(0)));
 
         handler = new LiveNAVHandler(vault, queue, IERC20(address(usdc)), MOCK_GOVERNOR);
         targetContract(address(handler));

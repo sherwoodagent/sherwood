@@ -260,7 +260,8 @@ contract GovernorAdapterBindingTest is Test {
         governor.executeProposal(proposalId);
         assertEq(vault.activeStrategyAdapter(), address(adapter));
 
-        // Proposer can settle anytime
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(agent);
         governor.settleProposal(proposalId);
 

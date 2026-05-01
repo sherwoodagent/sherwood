@@ -383,9 +383,11 @@ contract SyndicateVault is
     }
 
     /// @inheritdoc ISyndicateVault
+    /// @dev MS-H9: cap `amount` by the vault's current balance of `asset_`.
     function transferPerformanceFee(address asset_, address to, uint256 amount) external onlyGovernor {
         if (asset_ != asset()) revert InvalidAsset();
         if (to == address(0)) revert ZeroAddress();
+        if (amount > IERC20(asset_).balanceOf(address(this))) revert AmountExceedsBalance();
         IERC20(asset_).safeTransfer(to, amount);
     }
 
@@ -522,6 +524,16 @@ contract SyndicateVault is
         return (true, address(0));
     }
 
+    /// @dev MS-H4: returns true while any non-terminal proposal binds the
+    ///      vault (Pending..Executed). Used by `_deposit` to close the
+    ///      late-deposit window where a depositor mid-vote would be silently
+    ///      pulled into a strategy by `executeProposal`. Public view dropped
+    ///      to fit the CI size gate; off-chain readers can call
+    ///      `governor.openProposalCount(vault)` directly.
+    function _depositsLocked() private view returns (bool) {
+        return ISyndicateGovernor(_getGovernor()).openProposalCount(address(this)) != 0;
+    }
+
     // ── I-1: nonReentrant guards on the public 4626 entry-points ──
     //
     // `_deposit` forwards capital into the active adapter via `safeTransfer`
@@ -589,8 +601,22 @@ contract SyndicateVault is
         override
         whenNotPaused
     {
+        // MS-H4: close the late-deposit window. `_lpFlowGate` only blocks
+        // during Executed; without this prefix check a depositor during
+        // Pending / GuardianReview / Approved would be silently pulled into a
+        // strategy they never voted on by the next `executeProposal`. The
+        // live-NAV adapter only activates once execution starts, so during
+        // Pending..Approved we treat the proposal as a hard deposit lock.
+        // `_lpFlowGate` then handles Executed: blocked=true if no valid
+        // adapter, blocked=false (with `liveAdapter`) if adapter reports
+        // valid — preserving the live-NAV unlock from PR #864e5fe.
         (bool blocked, address liveAdapter) = _lpFlowGate();
-        if (blocked) revert DepositsLocked();
+        // MS-H4: close the late-deposit window. `_lpFlowGate` only blocked
+        // during Executed; we additionally block whenever a non-terminal
+        // proposal binds the vault and there is no live-NAV adapter to
+        // accept the deposit. The `liveAdapter == 0` precondition lets the
+        // existing live-NAV unlock pass through unchanged (PR #864e5fe).
+        if (liveAdapter == address(0) && (blocked || _depositsLocked())) revert DepositsLocked();
         if (!_openDeposits && !_approvedDepositors.contains(receiver)) revert NotApprovedDepositor();
         super._deposit(caller, receiver, assets, shares);
 
