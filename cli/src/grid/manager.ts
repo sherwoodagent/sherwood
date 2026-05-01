@@ -245,10 +245,13 @@ export class GridManager {
     // exceeds the configured multiple of effective capital. Existing fills
     // can still close (sell levels and close-outs unaffected). Set
     // `maxOpenNotionalMultiple = Infinity` to disable.
+    // Cap measures ENTRY notional (qty × buyPrice), not mark-to-market.
+    // Mark-to-market shrinks as price falls, which would loosen the cap
+    // exactly when we need it to bite (downtrends accumulating buys).
     const exposureCap = grid.allocation * this.config.leverage * this.config.maxOpenNotionalMultiple;
     const currentOpenNotional = grid.openFills
       .filter(f => !f.closed)
-      .reduce((s, f) => s + f.quantity * currentPrice, 0);
+      .reduce((s, f) => s + f.quantity * f.buyPrice, 0);
     const buyExposureFull = currentOpenNotional >= exposureCap;
 
     // Step 1: Fill unfilled grid levels (buy when price drops, sell is just accounting)
