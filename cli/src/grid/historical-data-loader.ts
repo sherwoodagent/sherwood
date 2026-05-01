@@ -1,8 +1,8 @@
 /**
  * Historical data loader for the grid backtester.
  *
- * Fetches and caches 1-minute and 4-hour candles from Hyperliquid's
- * candleSnapshot endpoint. Pre-computes ATR(14) for the 4-hour series.
+ * Fetches and caches 1-minute and 4-hour candles from Binance's /api/v3/klines
+ * endpoint. Pre-computes ATR(14) for the 4-hour series.
  * Cache lives at ~/.sherwood/grid/backtest-cache/.
  */
 
@@ -12,7 +12,7 @@ import { homedir } from 'node:os';
 import { TOKEN_TO_COIN } from '../providers/data/hyperliquid.js';
 import { calculateATR } from '../agent/technical.js';
 
-const HYPERLIQUID_BASE = 'https://api.hyperliquid.xyz/info';
+const BINANCE_BASE = 'https://api.binance.com/api/v3/klines';
 const DEFAULT_CACHE_DIR = join(homedir(), '.sherwood', 'grid', 'backtest-cache');
 
 export interface Bar1m {
@@ -46,7 +46,19 @@ const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const ONE_MIN_MS = 60 * 1000;
 const ATR_PERIOD = 14;
 const ATR_WARMUP_MS = ATR_PERIOD * FOUR_HOURS_MS;
-const HL_MAX_BARS_PER_REQUEST = 5000;
+const MAX_BARS_PER_REQUEST = 1000;
+
+/** Maps HL coin symbol → Binance USDT-spot symbol. */
+const COIN_TO_BINANCE_SYMBOL: Record<string, string> = {
+  BTC: 'BTCUSDT',
+  ETH: 'ETHUSDT',
+  SOL: 'SOLUSDT',
+  ARB: 'ARBUSDT',
+  LINK: 'LINKUSDT',
+  AAVE: 'AAVEUSDT',
+  UNI: 'UNIUSDT',
+  DOGE: 'DOGEUSDT',
+};
 
 export class HistoricalDataLoader {
   private cacheDir: string;
@@ -72,7 +84,7 @@ export class HistoricalDataLoader {
 
     const minutes = await this.loadInterval(coin, '1m', fromMs, toMs);
     if (minutes.length === 0) {
-      throw new Error(`no data for ${coinTokenId} in window — token may not be listed yet on HL`);
+      throw new Error(`no data for ${coinTokenId} in window — check symbol mapping or date range`);
     }
 
     const fourHour = await this.loadInterval(coin, '4h', fromMs - ATR_WARMUP_MS, toMs);
@@ -139,7 +151,7 @@ export class HistoricalDataLoader {
     return join(this.cacheDir, `${coin}-${interval}-${fromMs}-${toMs}.json`);
   }
 
-  /** Paginate `candleSnapshot` until we cover [fromMs, toMs]. Dedup on merge. */
+  /** Paginate Binance klines until we cover [fromMs, toMs]. Dedup on merge. */
   private async fetchPaginated(
     coin: string,
     interval: '1m' | '4h',
@@ -147,7 +159,7 @@ export class HistoricalDataLoader {
     toMs: number,
   ): Promise<Bar1m[]> {
     const intervalMs = interval === '1m' ? ONE_MIN_MS : FOUR_HOURS_MS;
-    const pageSpanMs = HL_MAX_BARS_PER_REQUEST * intervalMs;
+    const pageSpanMs = MAX_BARS_PER_REQUEST * intervalMs;
     const seen = new Set<number>();
     const all: Bar1m[] = [];
 
@@ -201,28 +213,26 @@ export class HistoricalDataLoader {
     startTime: number,
     endTime: number,
   ): Promise<Bar1m[]> {
-    const res = await this.fetchImpl(HYPERLIQUID_BASE, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'candleSnapshot',
-        req: { coin, interval, startTime, endTime },
-      }),
-    });
-    if (!res.ok) throw new Error(`HL ${res.status}: ${await res.text()}`);
+    const symbol = COIN_TO_BINANCE_SYMBOL[coin];
+    if (!symbol) throw new Error(`No Binance symbol for coin: ${coin}`);
 
-    const raw = await res.json() as Array<{
-      t: number; T: number; o: string; h: string; l: string; c: string; v: string;
-    }>;
+    const url = `${BINANCE_BASE}?symbol=${symbol}&interval=${interval}` +
+      `&startTime=${startTime}&endTime=${endTime}&limit=${MAX_BARS_PER_REQUEST}`;
+    const res = await this.fetchImpl(url);
+    if (!res.ok) throw new Error(`Binance ${res.status}: ${await res.text()}`);
+
+    const raw = await res.json() as Array<[
+      number, string, string, string, string, string, ...unknown[]
+    ]>;
     if (!Array.isArray(raw)) return [];
 
     return raw.map(c => ({
-      t: c.t,
-      o: Number(c.o),
-      h: Number(c.h),
-      l: Number(c.l),
-      c: Number(c.c),
-      v: Number(c.v),
+      t: c[0],
+      o: Number(c[1]),
+      h: Number(c[2]),
+      l: Number(c[3]),
+      c: Number(c[4]),
+      v: Number(c[5]),
     })).filter(b =>
       Number.isFinite(b.o) && Number.isFinite(b.h) && Number.isFinite(b.l) && Number.isFinite(b.c)
     );

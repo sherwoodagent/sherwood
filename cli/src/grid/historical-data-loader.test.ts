@@ -41,20 +41,21 @@ describe('HistoricalDataLoader', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('pagination: makes N requests for a span larger than HL_MAX_BARS_PER_REQUEST', async () => {
-    // 1m interval, page span = 5000 minutes. Request 12000 minutes → 3 pages.
+  it('pagination: makes N requests for a span larger than MAX_BARS_PER_REQUEST', async () => {
+    // 1m interval, page span = 1000 minutes. Request 12000 minutes → 12 pages.
     const fromMs = 0;
     const toMs = 12000 * 60_000;
 
-    const fetchMock = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(init.body as string);
-      const start: number = body.req.startTime;
-      const end: number = body.req.endTime;
-      // Return one bar per minute in [start, end), capped at 5000 bars.
-      const bars: Array<{ t: number; o: string; h: string; l: string; c: string; v: string; T: number }> = [];
+    const fetchMock = vi.fn().mockImplementation(async (urlOrReq: string | Request) => {
+      const url = typeof urlOrReq === 'string' ? urlOrReq : urlOrReq.url;
+      const params = new URLSearchParams(url.split('?')[1] ?? '');
+      const start = Number(params.get('startTime'));
+      const end = Number(params.get('endTime'));
+      // Return one bar per minute in [start, end), capped at 1000 bars (Binance limit).
+      const bars: Array<[number, string, string, string, string, string, number]> = [];
       let t = start;
-      while (t < end && bars.length < 5000) {
-        bars.push({ t, T: t + 60_000, o: '100', h: '101', l: '99', c: '100.5', v: '1' });
+      while (t < end && bars.length < 1000) {
+        bars.push([t, '100', '101', '99', '100.5', '1', t + 60_000]);
         t += 60_000;
       }
       return new Response(JSON.stringify(bars), { status: 200 });
@@ -66,7 +67,7 @@ describe('HistoricalDataLoader', () => {
     });
 
     const bars = await loader.loadInterval('BTC', '1m', fromMs, toMs);
-    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(12);
     // 12000 unique minutes
     expect(bars.length).toBe(12000);
     // Strictly increasing timestamps, no dupes
@@ -76,18 +77,18 @@ describe('HistoricalDataLoader', () => {
   });
 
   it('boundary dedup: overlapping pages do not produce duplicate timestamps', async () => {
-    // Force HL to return overlapping bars at page boundary
+    // Force Binance to return overlapping bars at page boundary
     let callCount = 0;
-    const fetchMock = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+    const fetchMock = vi.fn().mockImplementation(async (urlOrReq: string | Request) => {
       callCount++;
-      const body = JSON.parse(init.body as string);
-      const start: number = body.req.startTime;
-      // Each page returns 100 bars starting at `start`, but second call also includes start-60_000 (overlap).
-      const bars: Array<{ t: number; o: string; h: string; l: string; c: string; v: string; T: number }> = [];
+      const url = typeof urlOrReq === 'string' ? urlOrReq : urlOrReq.url;
+      const params = new URLSearchParams(url.split('?')[1] ?? '');
+      const start = Number(params.get('startTime'));
+      const bars: Array<[number, string, string, string, string, string, number]> = [];
       const begin = callCount === 2 ? start - 60_000 : start;
       for (let i = 0; i < 100; i++) {
         const t = begin + i * 60_000;
-        bars.push({ t, T: t + 60_000, o: '1', h: '1', l: '1', c: '1', v: '1' });
+        bars.push([t, '1', '1', '1', '1', '1', t + 60_000]);
       }
       return new Response(JSON.stringify(bars), { status: 200 });
     });
@@ -121,18 +122,20 @@ describe('HistoricalDataLoader', () => {
     expect(Number.isFinite(lastAtr)).toBe(true);
 
     // Use load() with mocked fetch returning 1m + 4h
-    const fetchMock = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(init.body as string);
-      if (body.req.interval === '1m') {
+    const fetchMock = vi.fn().mockImplementation(async (urlOrReq: string | Request) => {
+      const url = typeof urlOrReq === 'string' ? urlOrReq : urlOrReq.url;
+      const params = new URLSearchParams(url.split('?')[1] ?? '');
+      const interval = params.get('interval');
+      if (interval === '1m') {
+        const t = 49 * 4 * 3600_000;
         return new Response(JSON.stringify([
-          { t: 49 * 4 * 3600_000, T: 49 * 4 * 3600_000 + 60_000, o: '100', h: '100', l: '100', c: '100', v: '0' },
+          [t, '100', '100', '100', '100', '0', t + 60_000],
         ]), { status: 200 });
       }
       // 4h
-      return new Response(JSON.stringify(bars.map(b => ({
-        t: b.t, T: b.t + 4 * 3600_000,
-        o: String(b.o), h: String(b.h), l: String(b.l), c: String(b.c), v: String(b.v),
-      }))), { status: 200 });
+      return new Response(JSON.stringify(bars.map(b => [
+        b.t, String(b.o), String(b.h), String(b.l), String(b.c), String(b.v), b.t + 4 * 3600_000,
+      ])), { status: 200 });
     });
     const loader = new HistoricalDataLoader({
       cacheDir: join(tmpCache, 'cross'),
