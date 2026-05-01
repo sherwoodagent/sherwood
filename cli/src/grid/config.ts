@@ -116,6 +116,9 @@ export interface GridConfig {
   pauseThresholdPct: number;
   /** Resume paused grid when drawdown recovers below this fraction (hysteresis). */
   unpauseRecoveryPct: number;
+  /** Per-token maintenance margin fraction. Backtester uses this to model
+   *  exchange liquidation. Default 0.02 = 2% (typical Hyperliquid). */
+  maintenanceMarginPct: number;
 }
 
 export const DEFAULT_GRID_CONFIG: GridConfig = {
@@ -132,4 +135,5 @@ export const DEFAULT_GRID_CONFIG: GridConfig = {
   minProfitPerFillUsd: 0.50,
   pauseThresholdPct: 0.40,                      // was 0.20 — 5x leverage means 4% adverse = 20% pool drop (daily noise)
   unpauseRecoveryPct: 0.10,                     // resume when drawdown recovers below 10% (hysteresis)
+  maintenanceMarginPct: 0.02,
 };

@@ -241,6 +241,39 @@ describe('runBacktest fees', () => {
   });
 });
 
+describe('runBacktest liquidation', () => {
+  it('liquidates token on severe downtrend and halts when all tokens dead', async () => {
+    const fromMs = 0;
+    const toMs = 100 * 3600_000;
+    // Steep crash — 50% drop over the window
+    const priceAt = (t: number) => {
+      const progress = (t - fromMs) / (toMs - fromMs);
+      const mid = 60000 - progress * 30000;
+      return { o: mid + 5, h: mid + 10, l: mid - 10, c: mid };
+    };
+    const series = buildSyntheticSeries({ fromMs, toMs, priceAt, fourHourAtr: 1500 });
+    const cfg: GridConfig = {
+      ...DEFAULT_GRID_CONFIG,
+      tokens: ['bitcoin'],
+      tokenSplit: { bitcoin: 1.0 },
+      minProfitPerFillUsd: 0,
+    };
+    const loader = makeFakeLoader({ bitcoin: series });
+
+    const result = await runBacktest({
+      fromMs, toMs, capital: 5000, config: cfg, loader,
+      outPath: '', feeBps: 0, hedge: false,
+    });
+
+    expect(result.liquidations.events.length).toBe(1);
+    expect(result.liquidations.events[0]!.token).toBe('bitcoin');
+    expect(result.liquidations.haltedAt).not.toBeNull();
+    // Equity curve should not extend past haltedAt (the loop break ends early)
+    const lastEquityT = result.equityCurve[result.equityCurve.length - 1]!.t;
+    expect(lastEquityT).toBeLessThanOrEqual(result.liquidations.haltedAt!);
+  });
+});
+
 describe('runBacktest hedge', () => {
   it('hedge offsets some downside on a downtrend', async () => {
     const fromMs = 0;

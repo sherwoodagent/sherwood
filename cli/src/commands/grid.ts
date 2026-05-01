@@ -57,6 +57,18 @@ function printSummary(r: BacktestResult): void {
     const tokPnl = t.pnlUsd >= 0 ? G(`+$${t.pnlUsd.toFixed(2)}`) : chalk.red(`-$${Math.abs(t.pnlUsd).toFixed(2)}`);
     console.log(W(`    ${t.token.padEnd(10)} $${t.allocation.initial.toFixed(0).padStart(6)} → $${t.allocation.final.toFixed(0).padStart(6)}  ${tokPnl}  RTs=${t.roundTrips}  fills=${t.fills}`));
   }
+  if (r.liquidations.events.length > 0) {
+    console.log();
+    console.log(BOLD('  Liquidations:'));
+    for (const ev of r.liquidations.events) {
+      const date = new Date(ev.timestamp).toISOString().slice(0, 10);
+      console.log(W(`    ${ev.token.padEnd(10)} ${date}  unrealized=$${ev.unrealizedPnlAtLiquidation.toFixed(0)}  threshold=$${ev.thresholdUsd.toFixed(0)}`));
+    }
+    if (r.liquidations.haltedAt !== null) {
+      const haltDate = new Date(r.liquidations.haltedAt).toISOString().slice(0, 10);
+      console.log(chalk.red.bold(`    RUN HALTED on ${haltDate} — all tokens liquidated.`));
+    }
+  }
   console.log();
   console.log(W(`  Wall time:     ${(r.durationMs / 1000).toFixed(1)}s`));
   console.log(DIM('─'.repeat(64)));
@@ -246,6 +258,7 @@ export function registerGridCommand(program: Command): void {
     .option('--out <path>', 'Override output path')
     .option('--fee-bps <n>', 'Trading fee in basis points per fill (default 5 = 0.05%)', '5')
     .option('--no-hedge', 'Disable hedge simulation (hedge is ON by default to match live grid)')
+    .option('--maintenance-pct <n>', 'Per-token maintenance margin fraction (default 0.02 = 2%, typical Hyperliquid)', '0.02')
     .action(async (opts) => {
       const now = Date.now();
       const toMs = opts.to ? Date.parse(opts.to) : now;
@@ -267,6 +280,7 @@ export function registerGridCommand(program: Command): void {
         levelsPerSide: opts.levels ? Number(opts.levels) : DEFAULT_GRID_CONFIG.levelsPerSide,
         atrMultiplier: opts.atrMultiplier ? Number(opts.atrMultiplier) : DEFAULT_GRID_CONFIG.atrMultiplier,
         rebalanceDriftPct: opts.rebalanceDrift ? Number(opts.rebalanceDrift) : DEFAULT_GRID_CONFIG.rebalanceDriftPct,
+        maintenanceMarginPct: opts.maintenancePct ? Number(opts.maintenancePct) : DEFAULT_GRID_CONFIG.maintenanceMarginPct,
       };
 
       const capital = Number(opts.capital);

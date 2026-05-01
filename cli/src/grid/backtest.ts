@@ -81,6 +81,18 @@ export interface BacktestResult {
     adjustments: number;                // total hedge adjustments across the run
     finalOpenPositions: number;         // count of open shorts at end
   };
+  liquidations: {
+    /** Per-token liquidation events. */
+    events: Array<{
+      token: string;
+      timestamp: number;
+      tokenAllocation: number;
+      unrealizedPnlAtLiquidation: number;
+      thresholdUsd: number;
+    }>;
+    /** When all configured tokens are liquidated, the run terminates here. Null if not all liquidated. */
+    haltedAt: number | null;
+  };
   totals: {
     roundTrips: number;
     fills: number;
@@ -281,6 +293,14 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
   const lastRebalanceAt: Record<string, number> = {};
   for (const t of opts.config.tokens) lastRebalanceAt[t] = 0;
 
+  // Liquidation tracking. A token is liquidated when its unrealized PnL
+  // exceeds the calibrated maintenance threshold; once liquidated, the
+  // token's grid is frozen (existing opens cleared as realized losses, no
+  // new fills allowed). When all tokens are liquidated the run halts.
+  const liquidatedTokens = new Set<string>();
+  const liquidationEvents: BacktestResult['liquidations']['events'] = [];
+  let haltedAt: number | null = null;
+
   // Equity curve
   const equityCurve: EquityPoint[] = [];
   let pausedSteps = 0;
@@ -355,6 +375,83 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
             lastSeenFills[grid.token] = grid.stats.totalFills;
           }
         }
+      }
+
+      // Liquidation check: per token, sum unrealized PnL on its open fills
+      // and compare against the calibrated threshold.
+      // Threshold is in the backtester's overstated unrealized-PnL units (see
+      // the leverage double-count caveat).
+      const stateLiq = portfolio.getState();
+      if (stateLiq && haltedAt === null) {
+        const lev = opts.config.leverage;
+        const maint = opts.config.maintenanceMarginPct;
+        // Calibrated threshold: real-world liquidation occurs at
+        // (1/lev - maint) adverse move; in our overstated PnL units that is
+        // -allocation * lev * (1 - lev*maint).
+        const liquidationCoefficient = lev * (1 - lev * maint);
+        for (const grid of stateLiq.grids) {
+          if (liquidatedTokens.has(grid.token)) continue;
+          const close = barIndex[grid.token]?.get(t)?.c;
+          if (close === undefined) continue;
+          let unrealized = 0;
+          for (const f of grid.openFills) {
+            if (f.closed) continue;
+            unrealized += (close - f.buyPrice) * f.quantity * lev;
+          }
+          const tokenAlloc = initialAllocations[grid.token] ?? 0;
+          const threshold = -tokenAlloc * liquidationCoefficient;
+          if (tokenAlloc > 0 && unrealized <= threshold) {
+            // Realize the loss and freeze the grid for this token.
+            grid.stats.totalPnlUsd += unrealized;
+            grid.stats.todayPnlUsd += unrealized;
+            grid.allocation += unrealized; // bookkeeping; allocation now near-zero
+            for (const f of grid.openFills) {
+              if (!f.closed) {
+                f.closed = true;
+                f.closedAt = t;
+                f.pnlUsd = (close - f.buyPrice) * f.quantity * lev;
+              }
+            }
+            // Drop the level grid so manager doesn't fire new fills
+            grid.levels = [];
+            liquidatedTokens.add(grid.token);
+            liquidationEvents.push({
+              token: grid.token,
+              timestamp: t,
+              tokenAllocation: tokenAlloc,
+              unrealizedPnlAtLiquidation: unrealized,
+              thresholdUsd: threshold,
+            });
+            // Stderr notice (always, not gated on verbose — this is a serious event)
+            process.stderr.write(
+              `  [backtest] LIQUIDATED ${grid.token} at t=${new Date(t).toISOString()}: unrealized=$${unrealized.toFixed(0)} (threshold=$${threshold.toFixed(0)})\n`
+            );
+          }
+        }
+        // If all configured tokens are liquidated, halt the run
+        if (liquidatedTokens.size === opts.config.tokens.length) {
+          haltedAt = t;
+          process.stderr.write(`  [backtest] All tokens liquidated; halting run at t=${new Date(t).toISOString()}\n`);
+        }
+      }
+
+      if (haltedAt !== null) {
+        // Capture a final snapshot at halt, then break
+        const sFinal = portfolio.getState();
+        if (sFinal) {
+          const aggFinal = portfolio.aggregateStats(sFinal);
+          const ofcFinal = sFinal.grids.reduce((sum, g) => sum + g.openFills.filter(f => !f.closed).length, 0);
+          const runningFeesFinal = Object.values(feesByToken).reduce((a, b) => a + b, 0);
+          equityCurve.push({
+            t,
+            totalAllocation: sFinal.totalAllocation,
+            totalPnl: aggFinal.totalPnlUsd - runningFeesFinal + hedgeRealized + hedgeUnrealized,
+            totalRoundTrips: aggFinal.totalRoundTrips,
+            openFillCount: ofcFinal,
+            paused: sFinal.paused,
+          });
+        }
+        break;
       }
 
       // Snapshot
@@ -470,6 +567,10 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
       unrealizedPnlUsd: hedgeUnrealized,
       adjustments: hedgeAdjustments,
       finalOpenPositions: hedgeStatus ? hedgeStatus.positions.length : 0,
+    },
+    liquidations: {
+      events: liquidationEvents,
+      haltedAt,
     },
     totals: {
       roundTrips: agg.totalRoundTrips,
