@@ -49,6 +49,8 @@ export interface SweepRunSummary {
   drawdown: { maxUsd: number; maxPct: number };
   /** Net PnL pct divided by max(abs(drawdown pct), 1). Higher = better risk-adjusted. */
   riskAdjusted: number;
+  /** True if no full liquidation halt occurred. Per-token liquidations still count as survived if not all tokens died. */
+  survived: boolean;
   durationMs: number;
 }
 
@@ -155,6 +157,7 @@ export async function runSweep(opts: SweepOpts): Promise<SweepResult> {
     const ddPct = Math.abs(result.drawdown.maxPct * 100);
     const pnlPct = result.capital.pnlPct * 100;
     const riskAdjusted = pnlPct / Math.max(ddPct, 1);
+    const survived = result.liquidations.haltedAt === null;
 
     runs.push({
       index: i,
@@ -170,11 +173,17 @@ export async function runSweep(opts: SweepOpts): Promise<SweepResult> {
       },
       drawdown: result.drawdown,
       riskAdjusted,
+      survived,
       durationMs: result.durationMs,
     });
   }
 
-  runs.sort((a, b) => b.riskAdjusted - a.riskAdjusted);
+  runs.sort((a, b) => {
+    // Survivors first
+    if (a.survived !== b.survived) return a.survived ? -1 : 1;
+    // Then by risk-adjusted desc
+    return b.riskAdjusted - a.riskAdjusted;
+  });
 
   const finishedAt = Date.now();
   const sweep: SweepResult = {

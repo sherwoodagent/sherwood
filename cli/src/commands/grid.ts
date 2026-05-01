@@ -87,11 +87,12 @@ function printSweepSummary(s: SweepResult): void {
   console.log(W(`  Wall:      ${(s.durationMs / 1000).toFixed(1)}s`));
   console.log(DIM('─'.repeat(96)));
   console.log();
-  console.log(BOLD('  Rank  Lev  Levels  ATR×  Drift  RTs    NetPnL$       NetPnL%   DD%      Risk-Adj'));
-  console.log(DIM('  ' + '─'.repeat(94)));
+  console.log(BOLD('  Rank  Surv  Lev  Levels  ATR×  Drift  RTs    NetPnL$       NetPnL%   DD%      Risk-Adj'));
+  console.log(DIM('  ' + '─'.repeat(102)));
   for (let i = 0; i < s.runs.length; i++) {
     const r = s.runs[i]!;
     const rank = String(i + 1).padStart(4);
+    const surv = r.survived ? G(' ✓ ') : chalk.red(' ✗ ');
     const lev = String(r.config.leverage ?? '').padStart(3);
     const lvls = String(r.config.levelsPerSide ?? '').padStart(6);
     const atr = String(r.config.atrMultiplier ?? '').padStart(4);
@@ -102,9 +103,9 @@ function printSweepSummary(s: SweepResult): void {
     const ddPct = `${(r.drawdown.maxPct * 100).toFixed(1)}%`.padStart(8);
     const ra = r.riskAdjusted.toFixed(2).padStart(8);
     const pnlColor = r.capital.pnlUsd >= 0 ? G : chalk.red;
-    console.log(`  ${rank}  ${lev}  ${lvls}  ${atr}  ${drift}  ${rts}  ${pnlColor(netPnl)}  ${pnlColor(netPct)}  ${ddPct}  ${ra}`);
+    console.log(`  ${rank}  ${surv}  ${lev}  ${lvls}  ${atr}  ${drift}  ${rts}  ${pnlColor(netPnl)}  ${pnlColor(netPct)}  ${ddPct}  ${ra}`);
   }
-  console.log(DIM('  ' + '─'.repeat(94)));
+  console.log(DIM('  ' + '─'.repeat(102)));
   console.log();
   console.log(W(`  Saved: ${s.sweepId}/sweep.json + per-run JSONs in ~/.sherwood/grid/sweeps/`));
   console.log();

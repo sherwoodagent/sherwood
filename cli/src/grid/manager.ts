@@ -241,11 +241,24 @@ export class GridManager {
 
     if (spacing <= 0) return { fills: 0, roundTrips: 0, pnlUsd: 0 };
 
+    // Max-exposure cap: stop placing new BUY fills when total open notional
+    // exceeds the configured multiple of effective capital. Existing fills
+    // can still close (sell levels and close-outs unaffected). Set
+    // `maxOpenNotionalMultiple = Infinity` to disable.
+    const exposureCap = grid.allocation * this.config.leverage * this.config.maxOpenNotionalMultiple;
+    const currentOpenNotional = grid.openFills
+      .filter(f => !f.closed)
+      .reduce((s, f) => s + f.quantity * currentPrice, 0);
+    const buyExposureFull = currentOpenNotional >= exposureCap;
+
     // Step 1: Fill unfilled grid levels (buy when price drops, sell is just accounting)
     for (const level of grid.levels) {
       if (level.filled) continue;
 
       if (level.side === 'buy' && this.fillDetector(level, currentPrice)) {
+        if (buyExposureFull) {
+          continue;  // skip — would exceed max open exposure
+        }
         level.filled = true;
         level.filledAt = now;
         fills++;

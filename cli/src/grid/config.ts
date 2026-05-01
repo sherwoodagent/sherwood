@@ -119,6 +119,11 @@ export interface GridConfig {
   /** Per-token maintenance margin fraction. Backtester uses this to model
    *  exchange liquidation. Default 0.02 = 2% (typical Hyperliquid). */
   maintenanceMarginPct: number;
+  /** Max open notional per token as a multiple of (allocation × leverage).
+   *  When exceeded, new buy fills are refused (existing fills can still
+   *  close as sells). Caps unbounded accumulation across rebuilds in
+   *  downtrends. Default 2.0 (allows up to 2 grid generations). */
+  maxOpenNotionalMultiple: number;
 }
 
 export const DEFAULT_GRID_CONFIG: GridConfig = {
@@ -136,4 +141,5 @@ export const DEFAULT_GRID_CONFIG: GridConfig = {
   pauseThresholdPct: 0.40,                      // was 0.20 — 5x leverage means 4% adverse = 20% pool drop (daily noise)
   unpauseRecoveryPct: 0.10,                     // resume when drawdown recovers below 10% (hysteresis)
   maintenanceMarginPct: 0.02,
+  maxOpenNotionalMultiple: 2.0,
 };
