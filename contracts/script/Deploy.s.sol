@@ -11,6 +11,7 @@ import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../src/SyndicateFactory.sol";
 import {SyndicateGovernor} from "../src/SyndicateGovernor.sol";
 import {GuardianRegistry} from "../src/GuardianRegistry.sol";
+import {MinimalGuardianRegistry} from "../src/MinimalGuardianRegistry.sol";
 import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
 import {ScriptBase} from "./ScriptBase.sol";
 
@@ -69,9 +70,13 @@ contract DeploySherwood is ScriptBase {
         uint256 managementFeeBps;
         uint256 protocolFeeBps;
         uint256 maxStrategyDays;
+        uint256 votingPeriod;
         address woodToken;
         uint256 slashAppealSeed;
         uint256 epochZeroSeed;
+        // Beta mode: stub guardian registry, no WOOD, no multisig handoff,
+        // 1h votingPeriod default. Toggled via the BETA_MODE env.
+        bool betaMode;
     }
 
     struct Deployed {
@@ -84,27 +89,28 @@ contract DeploySherwood is ScriptBase {
     }
 
     function run() external {
+        bool betaMode = vm.envOr("BETA_MODE", false);
         Config memory cfg = Config({
             ensRegistrar: vm.envOr("ENS_REGISTRAR", address(0)),
             agentRegistry: vm.envOr("AGENT_REGISTRY", address(0)),
             managementFeeBps: vm.envOr("MANAGEMENT_FEE", uint256(50)),
             protocolFeeBps: vm.envOr("PROTOCOL_FEE", uint256(200)),
             maxStrategyDays: vm.envOr("MAX_STRATEGY_DAYS", uint256(14)),
-            // WOOD_TOKEN is required — registry.initialize reverts on address(0).
-            // Falls back to the chains/{chainId}.json entry when the env var is
-            // unset, so deploys can reuse a previously-deployed WOOD without
-            // manual exporting.
+            votingPeriod: vm.envOr("VOTING_PERIOD", betaMode ? uint256(1 hours) : uint256(1 days)),
+            // WOOD_TOKEN is required for prod (full GuardianRegistry).
+            // Beta mode uses a stub registry (no WOOD), so WOOD_TOKEN is ignored.
             woodToken: vm.envOr("WOOD_TOKEN", _tryReadAddress("WOOD_TOKEN")),
             slashAppealSeed: vm.envOr("SLASH_APPEAL_SEED", DEFAULT_SLASH_APPEAL_SEED),
-            epochZeroSeed: vm.envOr("EPOCH_ZERO_SEED", DEFAULT_EPOCH_ZERO_SEED)
+            epochZeroSeed: vm.envOr("EPOCH_ZERO_SEED", DEFAULT_EPOCH_ZERO_SEED),
+            betaMode: betaMode
         });
-        require(cfg.woodToken != address(0), "WOOD_TOKEN not set (env or chains.json)");
+        if (!cfg.betaMode) {
+            require(cfg.woodToken != address(0), "WOOD_TOKEN not set (env or chains.json)");
+        }
 
-        // Multisig handoff is mandatory unless explicitly skipped.
-        // CLAUDE.md asserts "owner is a multisig" — enforce that on-chain at
-        // deploy time so a single-key compromise can't take over the protocol
-        // before any user notices.
-        bool skipHandoff = vm.envOr("SKIP_MULTISIG_HANDOFF", false);
+        // Multisig handoff is mandatory in prod. Beta mode keeps the deployer
+        // as protocol owner because the multisig is not yet stood up.
+        bool skipHandoff = cfg.betaMode || vm.envOr("SKIP_MULTISIG_HANDOFF", false);
         address ownerMultisig = vm.envOr("OWNER_MULTISIG", address(0));
         if (!skipHandoff) {
             require(ownerMultisig != address(0), "OWNER_MULTISIG required (or set SKIP_MULTISIG_HANDOFF=true)");
@@ -122,18 +128,16 @@ contract DeploySherwood is ScriptBase {
         console.log("FactoryProxy:", d.factoryProxy);
         console.log("Governor.setFactory applied");
 
-        // P1-1: guardian fee recipient pinned to `_guardianRegistry` at
-        // init — no separate wiring step needed.
+        // Seed slash appeal reserve + epoch 0 rewards (prod only — beta uses a
+        // stub registry with no `fundSlashAppealReserve`). Best-effort: skipped
+        // on zero amounts. MUST run before the multisig handoff while the
+        // deployer is still the owner.
+        if (!cfg.betaMode) {
+            _seedRegistry(d.deployer, d.registryProxy, cfg);
+        }
 
-        // Seed slash appeal reserve + epoch 0 rewards (best-effort; skipped
-        // on zero amounts so testnets don't need a WOOD balance). MUST happen
-        // before the multisig handoff — `fundSlashAppealReserve` is `onlyOwner`
-        // and the deployer is still the owner at this point.
-        _seedRegistry(d.deployer, d.registryProxy, cfg);
-
-        // Hand ownership of all three proxies to the multisig as the
-        // final on-chain action of the deploy ceremony. After this point the
-        // deployer EOA has zero authority on the protocol.
+        // Multisig handoff: prod hands all three proxies to the multisig.
+        // Beta keeps the deployer as protocol owner (no multisig yet).
         address effectiveOwner = d.deployer;
         if (!skipHandoff) {
             _handoffOwnership(d.governorProxy, d.factoryProxy, d.registryProxy, ownerMultisig);
@@ -154,7 +158,9 @@ contract DeploySherwood is ScriptBase {
             cfg.agentRegistry,
             cfg.managementFeeBps
         );
-        _validateRegistry(effectiveOwner, d.registryProxy, d.governorProxy, d.factoryProxy, cfg.woodToken);
+        if (!cfg.betaMode) {
+            _validateRegistry(effectiveOwner, d.registryProxy, d.governorProxy, d.factoryProxy, cfg.woodToken);
+        }
 
         // ── Persist ──
         _writeAddresses(_chainName(), d.deployer, d.factoryProxy, d.governorProxy, d.executorLib, d.vaultImpl);
@@ -179,15 +185,27 @@ contract DeploySherwood is ScriptBase {
         d.executorLib = c3.deploy(SALT_EXECUTOR, abi.encodePacked(type(BatchExecutorLib).creationCode));
         d.vaultImpl = c3.deploy(SALT_VAULT_IMPL, abi.encodePacked(type(SyndicateVault).creationCode));
 
-        address predictedRegistryProxy = c3.addressOf(SALT_REGISTRY_PROXY);
+        address registryAddr;
+        if (cfg.betaMode) {
+            // Beta: stub registry, no proxy, no WOOD. Deployed BEFORE governor
+            // so we can pass it directly into governor init.
+            registryAddr = address(new MinimalGuardianRegistry());
+        } else {
+            registryAddr = c3.addressOf(SALT_REGISTRY_PROXY);
+        }
+
         address govImpl = c3.deploy(SALT_GOVERNOR_IMPL, abi.encodePacked(type(SyndicateGovernor).creationCode));
-        d.governorProxy = _deployGovernorProxy(c3, govImpl, d.deployer, predictedRegistryProxy, cfg);
+        d.governorProxy = _deployGovernorProxy(c3, govImpl, d.deployer, registryAddr, cfg);
 
         address predictedFactoryProxy = c3.addressOf(SALT_FACTORY_PROXY);
-        address registryImpl = c3.deploy(SALT_REGISTRY_IMPL, abi.encodePacked(type(GuardianRegistry).creationCode));
-        d.registryProxy =
-            _deployRegistryProxy(c3, registryImpl, d.deployer, d.governorProxy, predictedFactoryProxy, cfg);
-        require(d.registryProxy == predictedRegistryProxy, "registry addr mismatch");
+        if (!cfg.betaMode) {
+            address registryImpl = c3.deploy(SALT_REGISTRY_IMPL, abi.encodePacked(type(GuardianRegistry).creationCode));
+            d.registryProxy =
+                _deployRegistryProxy(c3, registryImpl, d.deployer, d.governorProxy, predictedFactoryProxy, cfg);
+            require(d.registryProxy == registryAddr, "registry addr mismatch");
+        } else {
+            d.registryProxy = registryAddr;
+        }
 
         address factoryImpl = c3.deploy(SALT_FACTORY_IMPL, abi.encodePacked(type(SyndicateFactory).creationCode));
         d.factoryProxy = _deployFactoryProxy(c3, factoryImpl, d, cfg);
@@ -208,12 +226,12 @@ contract DeploySherwood is ScriptBase {
             (
                 ISyndicateGovernor.InitParams({
                     owner: deployer,
-                    votingPeriod: 1 days,
+                    votingPeriod: cfg.votingPeriod,
                     executionWindow: 1 days,
                     vetoThresholdBps: 4000,
                     maxPerformanceFeeBps: 3000,
-                    cooldownPeriod: 1 days,
-                    collaborationWindow: 48 hours,
+                    cooldownPeriod: cfg.betaMode ? 1 hours : 1 days,
+                    collaborationWindow: cfg.betaMode ? 24 hours : 48 hours,
                     maxCoProposers: 5,
                     minStrategyDuration: 1 hours,
                     maxStrategyDuration: cfg.maxStrategyDays * 1 days,

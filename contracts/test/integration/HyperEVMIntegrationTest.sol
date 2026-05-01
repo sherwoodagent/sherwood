@@ -97,9 +97,11 @@ abstract contract HyperEVMIntegrationTest is Test {
             managementFeeBps: 50,
             protocolFeeBps: 200,
             maxStrategyDays: 14,
+            votingPeriod: 1 days,
             woodToken: address(wood),
             slashAppealSeed: 0,
-            epochZeroSeed: 0
+            epochZeroSeed: 0,
+            betaMode: false
         });
         // `deployCore` constructs a Create3Factory owned by `msg.sender` and
         // then calls `c3.deploy(...)` from inside itself — so the owner must be
