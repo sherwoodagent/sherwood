@@ -8,7 +8,7 @@
  */
 
 import { writeFile, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { GridManager, type CandleFetcher } from './manager.js';
@@ -358,7 +358,7 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
   // Write JSON output (skip if outPath is empty string)
   if (opts.outPath !== '') {
     const outPath = opts.outPath ?? join(DEFAULT_OUT_DIR, `${runId}.json`);
-    await mkdir(DEFAULT_OUT_DIR, { recursive: true });
+    await mkdir(dirname(outPath), { recursive: true });
     await writeFile(outPath, JSON.stringify(result, null, 2), 'utf-8');
   }
 
