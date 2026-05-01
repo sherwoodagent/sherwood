@@ -58,18 +58,22 @@ contract VaultLiveNAVTest is Test {
     }
 
     function test_setActiveStrategyAdapter_setsAndEmits() public {
+        // I-3: must be a real IStrategy contract — the smoke-test rejects
+        // EOAs / non-IStrategy targets at bind time.
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
         vm.expectEmit(true, false, false, true, address(vault));
-        emit ISyndicateVault.ActiveStrategyAdapterSet(MOCK_ADAPTER);
+        emit ISyndicateVault.ActiveStrategyAdapterSet(address(adapter));
         vm.prank(MOCK_GOVERNOR);
-        vault.setActiveStrategyAdapter(MOCK_ADAPTER);
+        vault.setActiveStrategyAdapter(address(adapter));
 
-        assertEq(vault.activeStrategyAdapter(), MOCK_ADAPTER);
+        assertEq(vault.activeStrategyAdapter(), address(adapter));
     }
 
     function test_setActiveStrategyAdapter_zeroAddressUnbindsAndEmits() public {
-        // Bind first.
+        // Bind first — smoke-test passes for the real adapter.
+        MockStrategyAdapter adapter = new MockStrategyAdapter();
         vm.prank(MOCK_GOVERNOR);
-        vault.setActiveStrategyAdapter(MOCK_ADAPTER);
+        vault.setActiveStrategyAdapter(address(adapter));
 
         vm.expectEmit(false, false, false, false, address(vault));
         emit ISyndicateVault.ActiveStrategyAdapterCleared();
@@ -80,12 +84,31 @@ contract VaultLiveNAVTest is Test {
     }
 
     function test_setActiveStrategyAdapter_overwritesExisting() public {
+        MockStrategyAdapter a1 = new MockStrategyAdapter();
+        MockStrategyAdapter a2 = new MockStrategyAdapter();
         vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(a1));
+        vm.prank(MOCK_GOVERNOR);
+        vault.setActiveStrategyAdapter(address(a2));
+        assertEq(vault.activeStrategyAdapter(), address(a2));
+    }
+
+    /// @notice I-3: EOA / non-IStrategy adapters are rejected at bind time
+    ///         by `setActiveStrategyAdapter`. Catches obvious mistakes
+    ///         before the runtime backstops kick in.
+    function test_setActiveStrategyAdapter_rejectsEOA() public {
+        vm.prank(MOCK_GOVERNOR);
+        vm.expectRevert(ISyndicateVault.AdapterNotIStrategy.selector);
         vault.setActiveStrategyAdapter(MOCK_ADAPTER);
-        address next = address(0xBEEF);
+    }
+
+    /// @notice I-3: contracts whose `positionValue()` reverts are rejected
+    ///         at bind time by `setActiveStrategyAdapter`.
+    function test_setActiveStrategyAdapter_rejectsRevertingContract() public {
+        RevertingAdapter ra = new RevertingAdapter();
         vm.prank(MOCK_GOVERNOR);
-        vault.setActiveStrategyAdapter(next);
-        assertEq(vault.activeStrategyAdapter(), next);
+        vm.expectRevert(ISyndicateVault.AdapterNotIStrategy.selector);
+        vault.setActiveStrategyAdapter(address(ra));
     }
 
     /// @dev Make `redemptionsLocked()` return true so the adapter NAV is read.
@@ -366,5 +389,42 @@ contract VaultLiveNAVTest is Test {
         // Stale adapter pointer must be ignored — float-only NAV.
         assertEq(vault.activeStrategyAdapter(), address(adapter));
         assertEq(vault.totalAssets(), 1_000e6);
+    }
+
+    // ──────────────────────── I-3: try/catch backstop on totalAssets ────────────────────────
+
+    /// @notice I-3 regression: a reverting adapter must NOT brick `totalAssets`
+    ///         even if it slips past the bind-time smoke-test (e.g. adapter
+    ///         self-destructs or upgrades to a reverting impl after binding).
+    ///         Vault falls back to float-only so every ERC-4626 conversion path
+    ///         (`previewDeposit` / `convertTo*` / `maxWithdraw`) keeps working.
+    /// @dev    Bypasses `setActiveStrategyAdapter` (which would reject a
+    ///         reverting adapter at bind time) by writing slot 11 —
+    ///         `_activeStrategyAdapter` — directly via `vm.store`. This is
+    ///         the only way to simulate "passed smoke-test then degraded".
+    function test_totalAssets_revertingAdapterFallsBackToFloat() public {
+        RevertingAdapter ra = new RevertingAdapter();
+
+        // Slot 11 — see `forge inspect SyndicateVault storage`.
+        vm.store(address(vault), bytes32(uint256(11)), bytes32(uint256(uint160(address(ra)))));
+        assertEq(vault.activeStrategyAdapter(), address(ra), "adapter pointer wired via vm.store");
+
+        _mockActiveProposal(true);
+
+        // Synthetic float — bypass `_deposit` (which would also call into the
+        // reverting adapter via `_lpFlowGate`) by funding the vault directly.
+        deal(address(usdc), address(vault), 1_000e6);
+
+        // Should not revert; should report float-only.
+        uint256 ta = vault.totalAssets();
+        assertEq(ta, 1_000e6);
+    }
+}
+
+/// @dev Adapter whose `positionValue()` reverts. Used to verify the
+///      try/catch backstop in `totalAssets` and `_lpFlowGate` (I-3).
+contract RevertingAdapter {
+    function positionValue() external pure returns (uint256, bool) {
+        revert("nope");
     }
 }

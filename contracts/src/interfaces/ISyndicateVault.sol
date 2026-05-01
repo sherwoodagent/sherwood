@@ -33,6 +33,13 @@ interface ISyndicateVault {
     error InsufficientShares();
     error RedemptionsNotLocked();
     error QueueReserveBreached();
+    /// @notice I-3: Revert from `setActiveStrategyAdapter` if the candidate
+    ///         adapter is an EOA, a contract without bytecode, or a contract
+    ///         whose `positionValue()` reverts / returns malformed data.
+    ///         Bubbles back through `governor.bindProposalAdapter`. Without
+    ///         this smoke-test a malformed adapter would brick
+    ///         `vault.totalAssets()` and every LP entrypoint until settle.
+    error AdapterNotIStrategy();
 
     // ── Init Params ──
     struct InitParams {

@@ -415,7 +415,24 @@ contract SyndicateVault is
     ///      pre-execute. Pass `address(0)` to unbind. The pointer is implicitly
     ///      ignored after settle because `totalAssets` only reads it while
     ///      `redemptionsLocked()` returns true (lock-gated read).
+    /// @dev I-3: smoke-test the adapter at bind time. EOA / no-bytecode /
+    ///      reverting `positionValue` / non-IStrategy ABI all surface as
+    ///      `AdapterNotIStrategy`. Runtime backstops in `totalAssets` and
+    ///      `_lpFlowGate` cover post-bind degradation; this rejects obvious
+    ///      mistakes early so the proposer sees a clean error. Lives on the
+    ///      vault rather than the governor: vault is the consumer of the
+    ///      pointer, validation logically belongs here, and the governor
+    ///      is bytecode-pressed — vault has the headroom.
     function setActiveStrategyAdapter(address adapter) external onlyGovernor {
+        if (adapter != address(0)) {
+            // Low-level staticcall — typed `try IStrategy(adapter).positionValue()`
+            // emits a Solidity extcodesize precheck that reverts outside the
+            // try/catch on EOA targets. Folding EOA detection into a return-size
+            // check (`(uint256, bool)` ABI = 64 bytes) covers EOAs and bad ABIs
+            // in one branch.
+            (bool ok, bytes memory ret) = adapter.staticcall(abi.encodeWithSelector(IStrategy.positionValue.selector));
+            if (!ok || ret.length < 64) revert AdapterNotIStrategy();
+        }
         _activeStrategyAdapter = adapter;
         if (adapter == address(0)) emit ActiveStrategyAdapterCleared();
         else emit ActiveStrategyAdapterSet(adapter);
@@ -491,13 +508,47 @@ contract SyndicateVault is
     ///          the adapter so it starts earning yield immediately. Outside
     ///          the active window or when the adapter is invalid this is
     ///          `address(0)` so the caller skips the forward.
+    /// @dev I-3: a reverting `positionValue()` (e.g. EOA bound, buggy adapter)
+    ///      is treated as `blocked=true` so a malicious/broken adapter can't
+    ///      brick LP flow with an unhandled revert. Pairs with the `totalAssets`
+    ///      try/catch fallback below.
     function _lpFlowGate() private view returns (bool blocked, address liveAdapter) {
         if (!redemptionsLocked()) return (false, address(0));
         address adapter = _activeStrategyAdapter;
         if (adapter == address(0)) return (true, address(0));
-        (, bool valid) = IStrategy(adapter).positionValue();
-        if (!valid) return (true, address(0));
-        return (false, adapter);
+        try IStrategy(adapter).positionValue() returns (uint256, bool valid) {
+            if (valid) return (false, adapter);
+        } catch {}
+        return (true, address(0));
+    }
+
+    // ── I-1: nonReentrant guards on the public 4626 entry-points ──
+    //
+    // `_deposit` forwards capital into the active adapter via `safeTransfer`
+    // followed by `IStrategy.onLiveDeposit`. A malicious adapter could re-enter
+    // `vault.deposit` between the transfer and the adapter accounting the
+    // assets — at that recursive moment `positionValue()` undercounts the
+    // in-flight assets, letting the recursive deposit mint shares against a
+    // deflated NAV. `nonReentrant` on the public deposit/mint paths closes the
+    // window. `withdraw`/`redeem` get the same modifier for symmetry: the
+    // queue-side `claim` already takes its own lock and `requestRedeem` is
+    // already guarded, so a no-cost defence-in-depth here is cheap once
+    // `ReentrancyGuardTransient` is wired in.
+
+    function deposit(uint256 assets, address receiver) public override nonReentrant returns (uint256) {
+        return super.deposit(assets, receiver);
+    }
+
+    function mint(uint256 shares, address receiver) public override nonReentrant returns (uint256) {
+        return super.mint(shares, receiver);
+    }
+
+    function withdraw(uint256 assets, address receiver, address owner_) public override nonReentrant returns (uint256) {
+        return super.withdraw(assets, receiver, owner_);
+    }
+
+    function redeem(uint256 shares, address receiver, address owner_) public override nonReentrant returns (uint256) {
+        return super.redeem(shares, receiver, owner_);
     }
 
     /// @inheritdoc ERC4626Upgradeable
@@ -511,12 +562,22 @@ contract SyndicateVault is
     ///      call (saved bytecode on the governor; see
     ///      `docs/superpowers/specs/2026-04-30-live-nav-async-withdrawals-design.md`
     ///      §5 Phase 2 NAV Math).
+    /// @dev I-3: a reverting `positionValue()` falls back to float-only so a
+    ///      malicious or buggy adapter can't brick this view (and every
+    ///      ERC-4626 conversion path that depends on it). The bind-time
+    ///      smoke-test in `setActiveStrategyAdapter` is the first line of
+    ///      defence; this try/catch is the runtime backstop for adapters
+    ///      that degrade after binding (e.g. self-destruct, upgrade to a
+    ///      reverting impl).
     function totalAssets() public view override returns (uint256) {
         uint256 float = IERC20(asset()).balanceOf(address(this));
         address adapter = _activeStrategyAdapter;
         if (adapter == address(0) || !redemptionsLocked()) return float;
-        (uint256 value, bool valid) = IStrategy(adapter).positionValue();
-        return valid ? float + value : float;
+        try IStrategy(adapter).positionValue() returns (uint256 value, bool valid) {
+            return valid ? float + value : float;
+        } catch {
+            return float;
+        }
     }
 
     /// @dev Block deposits when paused or depositor not approved.
@@ -590,6 +651,17 @@ contract SyndicateVault is
     ///      `redemptionsLocked()` is true (regular redeem is closed).
     ///      The bound withdrawal queue bypasses the reserve cap (see
     ///      `maxWithdraw`).
+    /// @dev I-2: this view caps by the queue-share reserve only — it does NOT
+    ///      cap by available float. During live-NAV, the vault forwards new
+    ///      deposits into the adapter so float can be near-zero while
+    ///      `totalSupply()` is large. `maxRedeem(user)` may therefore return a
+    ///      non-zero share count whose `convertToAssets` exceeds the float —
+    ///      `redeem(maxRedeem(user), ...)` will then revert with
+    ///      `QueueReserveBreached` inside `_withdraw`. Integrators that need a
+    ///      truly redeemable cap should call `maxWithdraw(user)` (which IS
+    ///      float-capped) and convert, or sanity-check via `previewRedeem`
+    ///      before submitting. v1 keeps the share-only cap to fit the bytecode
+    ///      budget; a future revision may unify both views.
     function maxRedeem(address owner_) public view override returns (uint256) {
         (bool blocked,) = _lpFlowGate();
         if (paused() || blocked) return 0;

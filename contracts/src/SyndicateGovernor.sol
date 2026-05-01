@@ -377,6 +377,13 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     // unstick / emergencySettleWithCalls / cancelEmergencySettle / finalizeEmergencySettle.
 
     /// @inheritdoc ISyndicateGovernor
+    /// @dev I-3: smoke-test happens inside `vault.setActiveStrategyAdapter`.
+    ///      Centralising the validation on the vault lets governor stay
+    ///      under EIP-170 (the via_ir-inlined staticcall + return-size
+    ///      check costs ~25 bytes and the vault has the headroom). The
+    ///      vault is also the consumer of the pointer, so the validation
+    ///      logically belongs there. Errors surface here through the
+    ///      bubbled `AdapterNotIStrategy` revert from the vault.
     function bindProposalAdapter(uint256 proposalId, address adapter) external {
         StrategyProposal storage proposal = _proposals[proposalId];
         // Proposer check covers the nonexistent-proposal case (proposer is
@@ -387,10 +394,11 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         // the vault and the binding is meaningless. View resolution is
         // sufficient — this path doesn't commit transitions.
         if (uint256(_resolveStateView(proposal)) > uint256(ProposalState.Approved)) revert AdapterBindingClosed();
+
         // Push directly to the vault — no governor-side mapping needed (the
         // vault is per-proposal anyway, and the adapter is implicitly cleared
         // post-settle because `totalAssets` only reads it while
-        // `redemptionsLocked()`).
+        // `redemptionsLocked()`). Vault performs the I-3 smoke-test.
         ISyndicateVault(proposal.vault).setActiveStrategyAdapter(adapter);
         emit ProposalAdapterBound(proposalId, adapter);
     }

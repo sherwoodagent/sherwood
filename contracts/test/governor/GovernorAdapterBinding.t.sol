@@ -252,4 +252,40 @@ contract GovernorAdapterBindingTest is Test {
         // Behaviorally cleared — totalAssets returns float, not adapter NAV.
         assertEq(vault.totalAssets(), 100_000e6);
     }
+
+    // ──────────────────────── I-3: smoke-test on bindProposalAdapter ────────────────────────
+
+    /// @notice I-3 regression: an EOA passed as adapter must be rejected at
+    ///         bind time. The vault's `setActiveStrategyAdapter` does a
+    ///         low-level staticcall + return-size check that catches EOAs
+    ///         (zero returndata) along with non-IStrategy contracts.
+    /// @dev    The revert bubbles from `vault.setActiveStrategyAdapter` back
+    ///         through `governor.bindProposalAdapter` to the test caller.
+    function test_bindProposalAdapter_rejectsEOA() public {
+        uint256 proposalId = _propose();
+        address eoa = makeAddr("eoa");
+        vm.prank(agent);
+        vm.expectRevert(ISyndicateVault.AdapterNotIStrategy.selector);
+        governor.bindProposalAdapter(proposalId, eoa);
+    }
+
+    /// @notice I-3 regression: a contract whose `positionValue()` reverts
+    ///         (or doesn't exist) must be rejected at bind time. Without
+    ///         this guard the bound adapter would brick `totalAssets()`
+    ///         and every LP entrypoint until the proposal settles.
+    function test_bindProposalAdapter_rejectsRevertingContract() public {
+        uint256 proposalId = _propose();
+        RevertingAdapter ra = new RevertingAdapter();
+        vm.prank(agent);
+        vm.expectRevert(ISyndicateVault.AdapterNotIStrategy.selector);
+        governor.bindProposalAdapter(proposalId, address(ra));
+    }
+}
+
+/// @dev Adapter whose `positionValue()` reverts. Used to verify the
+///      I-3 smoke-test in `bindProposalAdapter`.
+contract RevertingAdapter {
+    function positionValue() external pure returns (uint256, bool) {
+        revert("nope");
+    }
 }

@@ -58,8 +58,10 @@ jobs:
             exit 1
           fi
 
-          # Vault: ~22.4k bytes after live-NAV onLiveDeposit forwarding.
-          # 22,500 byte gate gives ~2kb EIP-170 headroom and still catches
+          # Vault: ~22.5k bytes after live-NAV onLiveDeposit forwarding +
+          # I-1 nonReentrant overrides + I-3 adapter smoke-test (relocated
+          # from the governor to keep the governor under EIP-170).
+          # 23,000 byte gate gives ~1.5kb EIP-170 headroom and still catches
           # a runaway addition before it tips the 24,576 hard cap.
           VAULT_SIZE=$(echo "$SIZES_JSON" | jq -r '.SyndicateVault.runtime_size // empty')
           echo "SyndicateVault runtime size: $VAULT_SIZE bytes"
@@ -67,8 +69,8 @@ jobs:
             echo "::error::could not read SyndicateVault runtime size"
             exit 1
           fi
-          if [ "$VAULT_SIZE" -gt 22500 ]; then
-            echo "::error::SyndicateVault $VAULT_SIZE > 22500 byte budget"
+          if [ "$VAULT_SIZE" -gt 23000 ]; then
+            echo "::error::SyndicateVault $VAULT_SIZE > 23000 byte budget"
             exit 1
           fi
 
