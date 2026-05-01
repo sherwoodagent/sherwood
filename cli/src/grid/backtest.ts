@@ -223,6 +223,23 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
   // Initialize portfolio with starting capital
   await manager.init(opts.capital);
 
+  // Snapshot initial per-token allocation. The backtester resets each
+  // grid.allocation to this value after every step to prevent runaway
+  // exponential compounding (manager.ts:259 does `grid.allocation += profit`,
+  // which the LIVE grid uses to size up future orders. In a frictionless
+  // backtest with ~50 RTs/day at 5x leverage that compounds to absurd PnL
+  // over multi-month windows. Realized PnL is still tracked correctly in
+  // grid.stats.totalPnlUsd, which is independent of grid.allocation.)
+  const initialAllocations: Record<string, number> = {};
+  {
+    const initState = portfolio.getState();
+    if (initState) {
+      for (const grid of initState.grids) {
+        initialAllocations[grid.token] = grid.allocation;
+      }
+    }
+  }
+
   // Track rebuild count via portfolio state (manager updates grid.stats.lastRebalanceAt)
   let totalRebuilds = 0;
   const lastRebalanceAt: Record<string, number> = {};
@@ -274,6 +291,17 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
             totalRebuilds++;
             lastRebalanceAt[grid.token] = grid.stats.lastRebalanceAt;
           }
+        }
+      }
+
+      // Reset allocation to initial — see initialAllocations comment above.
+      // Must run AFTER rebuild detection (uses lastRebalanceAt unchanged) and
+      // BEFORE the snapshot (so equity curve reflects fixed-allocation, not
+      // compounded one).
+      if (stateAfter) {
+        for (const grid of stateAfter.grids) {
+          const init = initialAllocations[grid.token];
+          if (init !== undefined) grid.allocation = init;
         }
       }
 
