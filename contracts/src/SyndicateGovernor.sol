@@ -83,17 +83,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
     ///         so executeGovernorBatch can't be weaponized for gas griefing.
     uint256 public constant MAX_CALLS_PER_PROPOSAL = 64;
 
-    /// @notice MS-H1: maximum allowed PnL return multiplier vs. capital
-    ///         snapshot at execute time. Caps `_finishSettlement`'s PnL at
-    ///         `_capitalSnapshots[id] * MAX_PNL_RETURN_MULTIPLIER` so a third
-    ///         party that direct-transfers asset to the vault during Executed
-    ///         (donation) cannot inflate `pnl` and skim `performanceFeeBps` on
-    ///         the inflation. 10x is well above realistic strategy returns and
-    ///         well below realistic donation magnitudes. Donations above the
-    ///         cap stay in the vault, benefiting LPs proportional to share.
-    /// @dev `internal` to avoid emitting an auto-getter (would add ~39 bytes).
-    uint256 internal constant MAX_PNL_RETURN_MULTIPLIER = 10;
-
     /// @notice MS-H3: minimum elapsed time post-execute before the proposer
     ///         can self-settle (skipping `strategyDuration`). Prevents the
     ///         single-block execute → settle skim where a proposer gains
@@ -962,16 +951,6 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         // forge-lint: disable-next-line(unsafe-typecast)
         uint256 snapshot = _capitalSnapshots[proposalId];
         pnl = int256(IERC20(asset).balanceOf(vault)) - int256(snapshot);
-
-        // MS-H1: cap profit at MAX_PNL_RETURN_MULTIPLIER * snapshot to prevent
-        // donation-inflated PnL. A third party who direct-transfers asset to
-        // the vault during the Executed window would otherwise show up as
-        // "profit" and let the proposer skim `performanceFeeBps` on the
-        // donation. Excess above the cap stays in the vault (benefits LPs).
-        if (pnl > 0) {
-            uint256 cap = snapshot * MAX_PNL_RETURN_MULTIPLIER;
-            if (uint256(pnl) > cap) pnl = int256(cap);
-        }
 
         // Finalize state before external transfers to prevent reentrancy on stale state
         _activeProposal[vault] = 0;
