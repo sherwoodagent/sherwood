@@ -751,11 +751,17 @@ async function fetchSyndicatesForChain(
 
 // ── Public API ─────────────────────────────────────────────
 
+// Chains hidden from listings (e.g. awaiting redeployment).
+// Per-chain syndicate pages still resolve via resolveSyndicateBySubdomain.
+const LISTING_DISABLED_CHAINS = new Set<number>([8453]);
+
 export async function getActiveSyndicates(): Promise<SyndicateDisplay[]> {
   const results = await Promise.all(
-    Object.entries(CHAINS).map(([chainId, entry]) =>
-      fetchSyndicatesForChain(Number(chainId), entry),
-    ),
+    Object.entries(CHAINS)
+      .filter(([chainId]) => !LISTING_DISABLED_CHAINS.has(Number(chainId)))
+      .map(([chainId, entry]) =>
+        fetchSyndicatesForChain(Number(chainId), entry),
+      ),
   );
 
   // Flatten and sort newest first (by id descending as proxy for createdAt)
