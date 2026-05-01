@@ -21,6 +21,7 @@ isolated capital, parallel to the directional agent.
   `~/.sherwood/grid/backtest-cache/`. See
   `docs/superpowers/specs/2026-05-01-grid-strategy-backtester-design.md`
   for the full design.
+  Hedge simulation is ON by default (matches live grid); use `--no-hedge` to disable.
 - `sherwood grid sweep --from <iso> --to <iso> --leverage 2,4,5 --levels 10,15,20`
   — runs N backtests across a Cartesian product of parameter values,
   shares one cache, prints a ranked comparison table.

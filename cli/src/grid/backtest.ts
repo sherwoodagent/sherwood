@@ -15,6 +15,7 @@ import { GridManager, type CandleFetcher } from './manager.js';
 import { BacktestPortfolio } from './backtest-portfolio.js';
 import { HistoricalDataLoader, type Bar1m, type AtrPoint } from './historical-data-loader.js';
 import { type GridConfig } from './config.js';
+import { BacktestHedgeManager } from './backtest-hedge.js';
 
 const DEFAULT_OUT_DIR = join(homedir(), '.sherwood', 'grid', 'backtests');
 
@@ -35,6 +36,8 @@ export interface BacktestOpts {
   loader?: HistoricalDataLoader;
   /** Trading fee in basis points per fill. Default 5 (typical maker). */
   feeBps?: number;
+  /** Simulate the GridHedgeManager. Default true (matches live grid). */
+  hedge?: boolean;
 }
 
 export interface EquityPoint {
@@ -70,6 +73,13 @@ export interface BacktestResult {
     bps: number;
     totalUsd: number;
     perFill: number;       // avg fee per fill in USD (across tokens, weighted)
+  };
+  hedge: {
+    enabled: boolean;
+    realizedPnlUsd: number;
+    unrealizedPnlUsd: number;          // at end of run
+    adjustments: number;                // total hedge adjustments across the run
+    finalOpenPositions: number;         // count of open shorts at end
   };
   totals: {
     roundTrips: number;
@@ -260,6 +270,12 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
   const lastSeenFills: Record<string, number> = {};
   for (const token of opts.config.tokens) lastSeenFills[token] = 0;
 
+  const hedgeEnabled = opts.hedge ?? true;
+  const hedge = new BacktestHedgeManager(nowProvider);
+  let hedgeAdjustments = 0;
+  let hedgeRealized = 0;
+  let hedgeUnrealized = 0;
+
   // Track rebuild count via portfolio state (manager updates grid.stats.lastRebalanceAt)
   let totalRebuilds = 0;
   const lastRebalanceAt: Record<string, number> = {};
@@ -316,6 +332,20 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
 
       if (r1.paused || r2.paused) pausedSteps++;
 
+      // Hedge tick: uses bar.close prices and the manager's open-fill exposure.
+      if (hedgeEnabled) {
+        const hedgePrices: Record<string, number> = {};
+        for (const token of opts.config.tokens) {
+          const bar = barIndex[token]!.get(t)!;
+          hedgePrices[token] = bar.c;
+        }
+        const exposure = manager.getOpenFillExposure();
+        const hedgeResult = await hedge.tick(exposure, hedgePrices, t);
+        hedgeAdjustments += hedgeResult.adjustments;
+        hedgeRealized = hedgeResult.totalRealizedPnl;
+        hedgeUnrealized = hedgeResult.unrealizedPnl;
+      }
+
       // Accrue per-step fees: any new fills this step pay notionalPerFill × bps / 10_000
       if (stateAfter) {
         for (const grid of stateAfter.grids) {
@@ -354,7 +384,7 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
           equityCurve.push({
             t,
             totalAllocation: s.totalAllocation,
-            totalPnl: agg.totalPnlUsd + unrealizedPnl - runningFees,
+            totalPnl: agg.totalPnlUsd + unrealizedPnl - runningFees + hedgeRealized + hedgeUnrealized,
             totalRoundTrips: agg.totalRoundTrips,
             openFillCount,
             paused: s.paused,
@@ -395,6 +425,10 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
   const grossPnl = agg.totalPnlUsd;
   const netPnl = grossPnl - totalFeesUsd;
 
+  const hedgeStatus = hedgeEnabled ? hedge.getStatus() : null;
+  const hedgePnl = hedgeRealized + hedgeUnrealized;
+  const finalNetPnl = netPnl + hedgePnl;
+
   // Per-token rebuild count not preserved separately; total in totals.rebuilds.
   const perToken = finalState.grids.map(g => ({
     token: g.token,
@@ -420,15 +454,22 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
     config: opts.config,
     capital: {
       initialUsd: opts.capital,
-      finalUsd: opts.capital + netPnl,
-      pnlUsd: netPnl,
-      pnlPct: netPnl / opts.capital,
+      finalUsd: opts.capital + finalNetPnl,
+      pnlUsd: finalNetPnl,
+      pnlPct: finalNetPnl / opts.capital,
       grossPnlUsd: grossPnl,
     },
     fees: {
       bps: feeBps,
       totalUsd: totalFeesUsd,
       perFill: avgFeePerFill,
+    },
+    hedge: {
+      enabled: hedgeEnabled,
+      realizedPnlUsd: hedgeRealized,
+      unrealizedPnlUsd: hedgeUnrealized,
+      adjustments: hedgeAdjustments,
+      finalOpenPositions: hedgeStatus ? hedgeStatus.positions.length : 0,
     },
     totals: {
       roundTrips: agg.totalRoundTrips,

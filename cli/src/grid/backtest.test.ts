@@ -130,7 +130,7 @@ describe('runBacktest replay (synthetic prices)', () => {
     };
     const loader = makeFakeLoader({ bitcoin: series });
     const result = await runBacktest({
-      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 0,
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 0, hedge: false,
     });
     expect(result.totals.roundTrips).toBe(0);
   });
@@ -153,7 +153,7 @@ describe('runBacktest replay (synthetic prices)', () => {
     };
     const loader = makeFakeLoader({ bitcoin: series });
     const result = await runBacktest({
-      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 0,
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 0, hedge: false,
     });
     expect(result.totals.roundTrips).toBeGreaterThan(0);
     expect(result.capital.pnlUsd).toBeGreaterThan(0);
@@ -177,7 +177,7 @@ describe('runBacktest output', () => {
     const loader = makeFakeLoader({ bitcoin: series });
     const outPath = join(tmpOut, 'result.json');
     const result = await runBacktest({
-      fromMs, toMs, capital: 5000, config: cfg, loader, outPath, feeBps: 0,
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath, feeBps: 0, hedge: false,
     });
     const written = await import('node:fs/promises').then(fs => fs.readFile(outPath, 'utf-8'));
     const parsed = JSON.parse(written);
@@ -201,7 +201,7 @@ describe('runBacktest output', () => {
     const loader = makeFakeLoader({ bitcoin: series });
     const result = await runBacktest({
       fromMs, toMs, capital: 5000, config: cfg, loader,
-      snapshotEveryMinutes: 60, outPath: '', feeBps: 0,
+      snapshotEveryMinutes: 60, outPath: '', feeBps: 0, hedge: false,
     });
     // 100h × 60 min/h = 6000 minutes; one snapshot per hour = ~100 + final
     expect(result.equityCurve.length).toBeGreaterThanOrEqual(99);
@@ -227,10 +227,10 @@ describe('runBacktest fees', () => {
     };
     const loader = makeFakeLoader({ bitcoin: series });
     const noFees = await runBacktest({
-      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 0,
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 0, hedge: false,
     });
     const withFees = await runBacktest({
-      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 100, // 1%
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 100, hedge: false, // 1%
     });
     expect(withFees.capital.grossPnlUsd).toBeCloseTo(noFees.capital.grossPnlUsd, 6);
     expect(withFees.fees.totalUsd).toBeGreaterThan(0);
@@ -239,4 +239,46 @@ describe('runBacktest fees', () => {
       noFees.capital.grossPnlUsd - withFees.fees.totalUsd, 4,
     );
   });
+});
+
+describe('runBacktest hedge', () => {
+  it('hedge offsets some downside on a downtrend', async () => {
+    const fromMs = 0;
+    const toMs = 100 * 3600_000;
+    // Slow steady downtrend: price drops $200 over the window
+    const priceAt = (t: number) => {
+      const progress = (t - fromMs) / (toMs - fromMs);
+      const mid = 60000 - progress * 200;
+      return { o: mid + 5, h: mid + 10, l: mid - 10, c: mid };
+    };
+    const series = buildSyntheticSeries({ fromMs, toMs, priceAt, fourHourAtr: 100 });
+    const cfg: GridConfig = {
+      ...DEFAULT_GRID_CONFIG,
+      tokens: ['bitcoin'],
+      tokenSplit: { bitcoin: 1.0 },
+      minProfitPerFillUsd: 0,
+    };
+    const loader = makeFakeLoader({ bitcoin: series });
+
+    const noHedge = await runBacktest({
+      fromMs, toMs, capital: 5000, config: cfg, loader,
+      outPath: '', feeBps: 0, hedge: false,
+    });
+    const withHedge = await runBacktest({
+      fromMs, toMs, capital: 5000, config: cfg, loader,
+      outPath: '', feeBps: 0, hedge: true,
+    });
+
+    // Hedge should have made adjustments
+    expect(withHedge.hedge.enabled).toBe(true);
+    expect(withHedge.hedge.adjustments).toBeGreaterThan(0);
+
+    // Hedge realized OR unrealized should be positive on a downtrend
+    // (short profits when price drops)
+    const hedgePnl = withHedge.hedge.realizedPnlUsd + withHedge.hedge.unrealizedPnlUsd;
+    expect(hedgePnl).toBeGreaterThan(0);
+
+    // Drawdown with hedge should not be worse than without (some offsetting)
+    expect(Math.abs(withHedge.drawdown.maxPct)).toBeLessThanOrEqual(Math.abs(noHedge.drawdown.maxPct) * 1.05);
+  }, 30_000); // two 100h backtests — allow 30s
 });
