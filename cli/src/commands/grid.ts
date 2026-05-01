@@ -151,6 +151,7 @@ export function registerGridCommand(program: Command): void {
     .option('--live', 'enable live execution (places real orders on Hyperliquid)')
     .option('--asset-indices <pairs>', 'comma-separated token=index pairs (e.g. bitcoin=3,ethereum=4,solana=5)')
     .option('--strategy <address>', 'on-chain strategy contract address (enables on-chain executor)')
+    .option('--token-split <pairs>', 'Comma-separated token=weight pairs (must sum to 1.0). Default: equal-weight.')
     .action(async (opts) => {
       const capital = parseFloat(opts.capital);
       const cycleMs = parseInt(opts.cycle, 10) * 1000;
@@ -177,11 +178,16 @@ export function registerGridCommand(program: Command): void {
         throw new Error('--strategy requires --live');
       }
 
-      // Build equal-weight token split
-      const weight = 1 / tokens.length;
-      const tokenSplit: Record<string, number> = {};
-      for (const t of tokens) {
-        tokenSplit[t] = weight;
+      // Build token split (explicit if provided, else equal-weight)
+      let tokenSplit: Record<string, number>;
+      if (opts.tokenSplit) {
+        tokenSplit = parseTokenSplit(opts.tokenSplit as string, tokens);
+      } else {
+        const weight = 1 / tokens.length;
+        tokenSplit = {};
+        for (const t of tokens) {
+          tokenSplit[t] = weight;
+        }
       }
 
       console.log();
