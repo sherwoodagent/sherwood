@@ -83,10 +83,10 @@ export class GridPortfolio {
     return this.state;
   }
 
-  /** Reset daily counters if UTC day boundary crossed. */
-  resetDailyStats(state: GridPortfolioState): boolean {
-    const now = Date.now();
-    const todayMidnight = new Date();
+  /** Reset daily counters if UTC day boundary crossed. `now` is injectable
+   *  so the backtester can drive resets off backtest time, not wall-clock. */
+  resetDailyStats(state: GridPortfolioState, now: number = Date.now()): boolean {
+    const todayMidnight = new Date(now);
     todayMidnight.setUTCHours(0, 0, 0, 0);
     const todayMs = todayMidnight.getTime();
 
