@@ -249,7 +249,7 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
   // sells + closes opens). Default close-only detector then fires at
   // the right times. No per-token detector context required.
   const portfolio = new BacktestPortfolio(nowProvider);
-  const manager = new GridManager(opts.config, candleFetcher, undefined, undefined, portfolio);
+  const manager = new GridManager(opts.config, candleFetcher, undefined, undefined, portfolio, nowProvider);
 
   // Initialize portfolio with starting capital
   await manager.init(opts.capital);

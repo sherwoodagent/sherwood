@@ -74,6 +74,8 @@ export interface GridTokenState {
   atr: number;
   /** Trend at last grid build: (latest_4h_close - lookback_first_4h_close) / lookback_first_4h_close. */
   trend: number;
+  /** Last time grid.trend was refreshed mid-tick (separate from buildGrid). */
+  lastTrendRefreshAt: number;
 }
 
 export interface GridPortfolioState {

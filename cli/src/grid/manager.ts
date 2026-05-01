@@ -45,6 +45,7 @@ export class GridManager {
   private candleFetcher: CandleFetcher;
   private fillDetector: FillDetector;
   private closeFillDetector: CloseFillDetector;
+  private nowProvider: () => number;
 
   constructor(
     config: GridConfig,
@@ -52,6 +53,7 @@ export class GridManager {
     fillDetector?: FillDetector,
     closeFillDetector?: CloseFillDetector,
     portfolio?: GridPortfolio,
+    nowProvider?: () => number,
   ) {
     this.config = config;
     this.portfolio = portfolio ?? new GridPortfolio();
@@ -60,6 +62,7 @@ export class GridManager {
       this.hl.getCandles(tokenId, interval, lookbackMs));
     this.fillDetector = fillDetector ?? defaultFillDetector;
     this.closeFillDetector = closeFillDetector ?? defaultCloseFillDetector;
+    this.nowProvider = nowProvider ?? (() => Date.now());
   }
 
   /** Load or initialize grid state.
@@ -86,6 +89,7 @@ export class GridManager {
           centerPrice: 0,
           atr: 0,
           trend: 0,
+          lastTrendRefreshAt: 0,
         });
         addedAllocation += alloc;
         console.error(`  [grid] Added new token grid: ${token} ($${alloc.toFixed(0)} allocation)`);
@@ -143,6 +147,11 @@ export class GridManager {
       const price = prices[grid.token];
       if (!price || price <= 0) continue;
 
+      // Refresh trend at most once per hour. Lets the downtrend filter
+      // respond to fast crashes between scheduled rebuilds (12h cadence).
+      // No-op when buildGrid runs this same tick — it overwrites trend anyway.
+      await this.maybeRefreshTrend(grid);
+
       // Build grid on first tick or after full rebuild interval
       if (grid.levels.length === 0 || this.needsFullRebuild(grid)) {
         await this.buildGrid(grid, price);
@@ -168,6 +177,27 @@ export class GridManager {
     await this.portfolio.save(state);
 
     return { fills: totalFills, roundTrips: totalRoundTrips, pnlUsd: totalPnl, paused: false };
+  }
+
+  /** Hourly refresh of `grid.trend` from recent 4h candles. Called from
+   *  tick() so the downtrend filter sees fresh data between buildGrid runs. */
+  private async maybeRefreshTrend(grid: GridTokenState): Promise<void> {
+    const now = this.nowProvider();
+    const ONE_HOUR = 60 * 60 * 1000;
+    if (now - grid.lastTrendRefreshAt < ONE_HOUR) return;
+
+    // 14 4h bars = 56h lookback (matches buildGrid window).
+    const candles = await this.candleFetcher(grid.token, '4h', 14 * 4 * 60 * 60 * 1000);
+    if (!candles || candles.length < 2) return;
+
+    const TREND_LOOKBACK_BARS = 14;
+    const sliceStart = Math.max(0, candles.length - TREND_LOOKBACK_BARS);
+    const first = candles[sliceStart]!.close;
+    const last = candles[candles.length - 1]!.close;
+    if (first <= 0) return;
+
+    grid.trend = (last - first) / first;
+    grid.lastTrendRefreshAt = now;
   }
 
   /** Build a fresh grid centered on the current price using ATR. */
