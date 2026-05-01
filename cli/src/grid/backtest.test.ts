@@ -130,7 +130,7 @@ describe('runBacktest replay (synthetic prices)', () => {
     };
     const loader = makeFakeLoader({ bitcoin: series });
     const result = await runBacktest({
-      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '',
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 0,
     });
     expect(result.totals.roundTrips).toBe(0);
   });
@@ -153,7 +153,7 @@ describe('runBacktest replay (synthetic prices)', () => {
     };
     const loader = makeFakeLoader({ bitcoin: series });
     const result = await runBacktest({
-      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '',
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 0,
     });
     expect(result.totals.roundTrips).toBeGreaterThan(0);
     expect(result.capital.pnlUsd).toBeGreaterThan(0);
@@ -177,7 +177,7 @@ describe('runBacktest output', () => {
     const loader = makeFakeLoader({ bitcoin: series });
     const outPath = join(tmpOut, 'result.json');
     const result = await runBacktest({
-      fromMs, toMs, capital: 5000, config: cfg, loader, outPath,
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath, feeBps: 0,
     });
     const written = await import('node:fs/promises').then(fs => fs.readFile(outPath, 'utf-8'));
     const parsed = JSON.parse(written);
@@ -201,10 +201,42 @@ describe('runBacktest output', () => {
     const loader = makeFakeLoader({ bitcoin: series });
     const result = await runBacktest({
       fromMs, toMs, capital: 5000, config: cfg, loader,
-      snapshotEveryMinutes: 60, outPath: '',
+      snapshotEveryMinutes: 60, outPath: '', feeBps: 0,
     });
     // 100h × 60 min/h = 6000 minutes; one snapshot per hour = ~100 + final
     expect(result.equityCurve.length).toBeGreaterThanOrEqual(99);
     expect(result.equityCurve.length).toBeLessThanOrEqual(101);
+  });
+});
+
+describe('runBacktest fees', () => {
+  it('subtracts fees from net PnL but preserves gross', async () => {
+    const fromMs = 0;
+    const toMs = 100 * 3600_000;
+    const priceAt = (t: number) => {
+      const phase = (t / 3600_000) * 0.3;
+      const mid = 60000 + Math.sin(phase) * 150;
+      return { o: mid - 5, h: mid + 5, l: mid - 5, c: mid + 5 };
+    };
+    const series = buildSyntheticSeries({ fromMs, toMs, priceAt, fourHourAtr: 100 });
+    const cfg: GridConfig = {
+      ...DEFAULT_GRID_CONFIG,
+      tokens: ['bitcoin'],
+      tokenSplit: { bitcoin: 1.0 },
+      minProfitPerFillUsd: 0,
+    };
+    const loader = makeFakeLoader({ bitcoin: series });
+    const noFees = await runBacktest({
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 0,
+    });
+    const withFees = await runBacktest({
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 100, // 1%
+    });
+    expect(withFees.capital.grossPnlUsd).toBeCloseTo(noFees.capital.grossPnlUsd, 6);
+    expect(withFees.fees.totalUsd).toBeGreaterThan(0);
+    expect(withFees.capital.pnlUsd).toBeLessThan(noFees.capital.pnlUsd);
+    expect(withFees.capital.pnlUsd).toBeCloseTo(
+      noFees.capital.grossPnlUsd - withFees.fees.totalUsd, 4,
+    );
   });
 });

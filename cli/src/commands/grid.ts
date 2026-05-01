@@ -34,6 +34,8 @@ function printSummary(r: BacktestResult): void {
   console.log(DIM('─'.repeat(64)));
   console.log(W(`  Window:        ${r.window.fromIso.slice(0, 10)} → ${r.window.toIso.slice(0, 10)}  (${days.toFixed(0)} days)`));
   console.log(W(`  Capital:       $${r.capital.initialUsd.toLocaleString()} → $${r.capital.finalUsd.toFixed(2)}  (${pnlSign}$${pnlAbs}, ${pnlSign}${pnlPctStr}%)`));
+  console.log(W(`  Gross PnL:     $${r.capital.grossPnlUsd.toFixed(2)} (before fees)`));
+  console.log(W(`  Fees (${r.fees.bps}bps): -$${r.fees.totalUsd.toFixed(2)}  ($${r.fees.perFill.toFixed(4)}/fill)`));
   console.log(W(`  Round trips:   ${r.totals.roundTrips}  (${rtPerDay}/day)`));
   console.log(W(`  Fills:         ${r.totals.fills}  (${fillPerDay}/day)`));
   console.log(W(`  Rebuilds:      ${r.totals.rebuilds}`));
@@ -197,6 +199,7 @@ export function registerGridCommand(program: Command): void {
     .option('--verbose', 'Print manager fill logs during replay')
     .option('--no-cache', 'Skip cache; always fetch fresh data')
     .option('--out <path>', 'Override output path')
+    .option('--fee-bps <n>', 'Trading fee in basis points per fill (default 5 = 0.05%)', '5')
     .action(async (opts) => {
       const now = Date.now();
       const toMs = opts.to ? Date.parse(opts.to) : now;
@@ -242,6 +245,7 @@ export function registerGridCommand(program: Command): void {
         verbose: !!opts.verbose,
         noCache: opts.cache === false,
         outPath: opts.out,
+        feeBps: Number(opts.feeBps),
       });
 
       printSummary(result);

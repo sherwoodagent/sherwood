@@ -33,6 +33,8 @@ export interface BacktestOpts {
   outPath?: string;
   /** Inject for tests — defaults to a real HistoricalDataLoader. */
   loader?: HistoricalDataLoader;
+  /** Trading fee in basis points per fill. Default 5 (typical maker). */
+  feeBps?: number;
 }
 
 export interface EquityPoint {
@@ -60,8 +62,14 @@ export interface BacktestResult {
   capital: {
     initialUsd: number;
     finalUsd: number;
-    pnlUsd: number;
-    pnlPct: number;
+    pnlUsd: number;        // NET of fees
+    pnlPct: number;        // NET of fees
+    grossPnlUsd: number;   // before fees (= old pnlUsd value)
+  };
+  fees: {
+    bps: number;
+    totalUsd: number;
+    perFill: number;       // avg fee per fill in USD (across tokens, weighted)
   };
   totals: {
     roundTrips: number;
@@ -240,6 +248,20 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
     }
   }
 
+  // Pre-compute per-token notional-per-fill (used for running fee accrual)
+  const feeBps = opts.feeBps ?? 5;
+  const notionalPerFillByToken: Record<string, number> = {};
+  for (const token of opts.config.tokens) {
+    const tokenInitial = initialAllocations[token] ?? 0;
+    notionalPerFillByToken[token] = (tokenInitial * opts.config.leverage) / opts.config.levelsPerSide;
+  }
+
+  // Running fee accumulators (kept in sync with equity curve)
+  const feesByToken: Record<string, number> = {};
+  for (const token of opts.config.tokens) feesByToken[token] = 0;
+  const lastSeenFills: Record<string, number> = {};
+  for (const token of opts.config.tokens) lastSeenFills[token] = 0;
+
   // Track rebuild count via portfolio state (manager updates grid.stats.lastRebalanceAt)
   let totalRebuilds = 0;
   const lastRebalanceAt: Record<string, number> = {};
@@ -307,6 +329,17 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
 
       if (r1.paused || r2.paused) pausedSteps++;
 
+      // Accrue per-step fees: any new fills this step pay notionalPerFill × bps / 10_000
+      if (stateAfter) {
+        for (const grid of stateAfter.grids) {
+          const newFills = grid.stats.totalFills - lastSeenFills[grid.token]!;
+          if (newFills > 0) {
+            feesByToken[grid.token]! += newFills * (notionalPerFillByToken[grid.token] ?? 0) * feeBps / 10_000;
+            lastSeenFills[grid.token] = grid.stats.totalFills;
+          }
+        }
+      }
+
       // Snapshot
       cycleCount++;
       if (cycleCount % snapshotEvery === 0 || cycleCount === totalSteps) {
@@ -330,10 +363,11 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
               unrealizedPnl += (close - f.buyPrice) * f.quantity * opts.config.leverage;
             }
           }
+          const runningFees = Object.values(feesByToken).reduce((a, b) => a + b, 0);
           equityCurve.push({
             t,
             totalAllocation: s.totalAllocation,
-            totalPnl: agg.totalPnlUsd + unrealizedPnl,
+            totalPnl: agg.totalPnlUsd + unrealizedPnl - runningFees,
             totalRoundTrips: agg.totalRoundTrips,
             openFillCount,
             paused: s.paused,
@@ -366,6 +400,14 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
     initialPerToken[token] = opts.capital * (opts.config.tokenSplit[token] ?? 0);
   }
 
+  // Fee totals from running accumulators (co-evolves with equity curve)
+  const totalFeesUsd = Object.values(feesByToken).reduce((a, b) => a + b, 0);
+  const totalFills = finalState.grids.reduce((s, g) => s + g.stats.totalFills, 0);
+  const avgFeePerFill = totalFills > 0 ? totalFeesUsd / totalFills : 0;
+
+  const grossPnl = agg.totalPnlUsd;
+  const netPnl = grossPnl - totalFeesUsd;
+
   // Per-token rebuild count not preserved separately; total in totals.rebuilds.
   const perToken = finalState.grids.map(g => ({
     token: g.token,
@@ -391,9 +433,15 @@ export async function runBacktest(opts: BacktestOpts): Promise<BacktestResult> {
     config: opts.config,
     capital: {
       initialUsd: opts.capital,
-      finalUsd: opts.capital + agg.totalPnlUsd,
-      pnlUsd: agg.totalPnlUsd,
-      pnlPct: agg.totalPnlUsd / opts.capital,
+      finalUsd: opts.capital + netPnl,
+      pnlUsd: netPnl,
+      pnlPct: netPnl / opts.capital,
+      grossPnlUsd: grossPnl,
+    },
+    fees: {
+      bps: feeBps,
+      totalUsd: totalFeesUsd,
+      perFill: avgFeePerFill,
     },
     totals: {
       roundTrips: agg.totalRoundTrips,
