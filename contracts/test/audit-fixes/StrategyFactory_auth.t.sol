@@ -119,13 +119,13 @@ contract StrategyFactoryAuthTest is Test {
         factory.cloneAndInit(address(template), address(registeredVault), proposer, _initData());
     }
 
-    /// @notice Happy path: the vault itself (governor batch path).
-    function test_cloneAndInit_succeedsForRegisteredVault() public {
+    /// @notice MS-C2: the vault itself cannot pre-deploy (strategies must be
+    ///         pre-deployed by owner/agent — the governor does not deploy
+    ///         strategies during executeProposal).
+    function test_cloneAndInit_revertsWhenVaultIsCaller() public {
         vm.prank(address(registeredVault));
-        address clone = factory.cloneAndInit(address(template), address(registeredVault), proposer, _initData());
-        assertTrue(clone != address(0));
-        assertEq(MoonwellSupplyStrategy(payable(clone)).vault(), address(registeredVault));
-        assertEq(MoonwellSupplyStrategy(payable(clone)).proposer(), proposer);
+        vm.expectRevert(StrategyFactory.Unauthorized.selector);
+        factory.cloneAndInit(address(template), address(registeredVault), proposer, _initData());
     }
 
     /// @notice Happy path: the vault owner (creator pre-deploy).
@@ -181,7 +181,6 @@ contract StrategyFactoryAuthTest is Test {
     // ── Fuzz: no random caller can clone (must be vault/owner/agent) ──
 
     function testFuzz_cloneAndInit_revertsForAnyUnauthorizedCaller(address caller) public {
-        vm.assume(caller != address(registeredVault));
         vm.assume(caller != vaultOwner);
         vm.assume(caller != agentAddr);
         vm.assume(caller != address(0));

@@ -26,17 +26,14 @@ interface IVaultMembership {
 ///
 ///         This factory bundles both into a single tx.
 ///
-///         MS-C2 hardening: the clone fns are gated so only callers authorized
-///         for `vault` can clone-and-init a strategy bound to it. Authorized
-///         callers are:
+///         MS-C2 hardening: strategies must always be pre-deployed by the
+///         vault's creator or a registered agent BEFORE proposal execution.
+///         The governor itself does not deploy strategies during execute —
+///         proposals reference an already-cloned-and-initialized strategy
+///         address. Authorized callers are:
 ///
-///           - `vault` itself (governor execute path: governor.executeProposal
-///             -> Vault.executeGovernorBatch (delegatecall BatchExecutorLib)
-///             -> StrategyFactory.cloneAndInit(template, address(this), ...) —
-///             outer msg.sender is the vault address);
 ///           - `vault.owner()` (creator pre-deploy);
-///           - `vault.isAgent(msg.sender)` (registered agent pre-deploy so an
-///             agent can stage a strategy ahead of proposal execution).
+///           - `vault.isAgent(msg.sender)` (registered agent pre-deploy).
 ///
 ///         The vault must additionally be registered on `syndicateFactory` so
 ///         a rogue contract cannot spoof the membership view.
@@ -57,13 +54,13 @@ contract StrategyFactory {
         syndicateFactory = syndicateFactory_;
     }
 
-    /// @dev MS-C2: caller is the vault, the vault's owner, or a registered
-    ///      agent of the vault, and the vault is a registered Sherwood vault.
+    /// @dev MS-C2: caller is the vault's owner or a registered agent of the
+    ///      vault, and the vault is a registered Sherwood vault. Strategies
+    ///      are always pre-deployed; the governor does not deploy at execute.
     function _authClone(address vault) internal view {
         if (ISyndicateRegistry(syndicateFactory).vaultToSyndicate(vault) == 0) {
             revert VaultNotRegistered();
         }
-        if (msg.sender == vault) return;
         IVaultMembership v = IVaultMembership(vault);
         if (msg.sender == v.owner()) return;
         if (v.isAgent(msg.sender)) return;
