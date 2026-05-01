@@ -156,5 +156,5 @@ export const DEFAULT_GRID_CONFIG: GridConfig = {
   maintenanceMarginPct: 0.02,
   maxOpenNotionalMultiple: 2.0,
   downtrendBlockPct: 0.10,
-  stopLossPct: 0.30,
+  stopLossPct: 0.10,                            // empirical Nov-May: 10% saves the strategy (-4%); 30% lets liquidations through (-37%)
 };
