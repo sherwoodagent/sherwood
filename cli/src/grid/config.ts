@@ -72,6 +72,8 @@ export interface GridTokenState {
   centerPrice: number;
   /** ATR at last build. */
   atr: number;
+  /** Trend at last grid build: (latest_4h_close - lookback_first_4h_close) / lookback_first_4h_close. */
+  trend: number;
 }
 
 export interface GridPortfolioState {
@@ -124,6 +126,10 @@ export interface GridConfig {
    *  close as sells). Caps unbounded accumulation across rebuilds in
    *  downtrends. Default 2.0 (allows up to 2 grid generations). */
   maxOpenNotionalMultiple: number;
+  /** Block new buy fills when trend over the ATR lookback is below this
+   *  threshold. Default 0.10 (10% drop in 56h = clear downtrend → don't
+   *  buy into the falling knife). Set to 0 to disable filter. */
+  downtrendBlockPct: number;
 }
 
 export const DEFAULT_GRID_CONFIG: GridConfig = {
@@ -142,4 +148,5 @@ export const DEFAULT_GRID_CONFIG: GridConfig = {
   unpauseRecoveryPct: 0.10,                     // resume when drawdown recovers below 10% (hysteresis)
   maintenanceMarginPct: 0.02,
   maxOpenNotionalMultiple: 2.0,
+  downtrendBlockPct: 0.10,
 };

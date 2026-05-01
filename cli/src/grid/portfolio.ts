@@ -64,6 +64,7 @@ export class GridPortfolio {
       stats: emptyStats(),
       centerPrice: 0,
       atr: 0,
+      trend: 0,
     }));
 
     const state: GridPortfolioState = {

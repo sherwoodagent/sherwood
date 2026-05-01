@@ -24,6 +24,7 @@ vi.mock('./portfolio.js', () => ({
         stats: { totalRoundTrips: 0, totalPnlUsd: 0, todayPnlUsd: 0, totalFills: 0, todayFills: 0, lastDailyReset: 0, lastRebalanceAt: 0 },
         centerPrice: 0,
         atr: 0,
+        trend: 0,
       }));
       mockPortfolioState = { totalAllocation: capital, grids, paused: false, pauseReason: '', initializedAt: Date.now() };
     }
@@ -77,6 +78,7 @@ function makeGrid(overrides?: Partial<GridTokenState>): GridTokenState {
     stats: emptyStats(),
     centerPrice: 85000,
     atr: 1200,
+    trend: 0,
     ...overrides,
   };
 }

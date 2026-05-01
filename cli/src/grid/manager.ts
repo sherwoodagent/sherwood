@@ -85,6 +85,7 @@ export class GridManager {
           stats: { totalRoundTrips: 0, totalPnlUsd: 0, todayPnlUsd: 0, totalFills: 0, todayFills: 0, lastDailyReset: 0, lastRebalanceAt: 0 },
           centerPrice: 0,
           atr: 0,
+          trend: 0,
         });
         addedAllocation += alloc;
         console.error(`  [grid] Added new token grid: ${token} ($${alloc.toFixed(0)} allocation)`);
@@ -185,6 +186,17 @@ export class GridManager {
       return;
     }
 
+    // Trend signal: % change from first 4h close in the lookback to last.
+    // Used by the downtrend filter to block new buys in a sustained drop.
+    let trend = 0;
+    if (candles.length >= 2) {
+      const first = candles[0]!.close;
+      const last = candles[candles.length - 1]!.close;
+      if (first > 0) {
+        trend = (last - first) / first;
+      }
+    }
+
     const range = atr * this.config.atrMultiplier;
     const spacing = range / this.config.levelsPerSide;
     const effectiveCapital = grid.allocation * this.config.leverage;
@@ -217,12 +229,13 @@ export class GridManager {
     grid.levels = levels;
     grid.centerPrice = currentPrice;
     grid.atr = atr;
+    grid.trend = trend;
     grid.stats.lastRebalanceAt = Date.now();
 
     console.error(chalk.dim(
       `  [grid] Built ${grid.token} grid: center=$${currentPrice.toFixed(2)} ` +
       `ATR=$${atr.toFixed(2)} range=$${(currentPrice - range).toFixed(2)}-$${(currentPrice + range).toFixed(2)} ` +
-      `spacing=$${spacing.toFixed(2)} qty=${quantity.toFixed(6)}`
+      `spacing=$${spacing.toFixed(2)} qty=${quantity.toFixed(6)} trend=${(trend * 100).toFixed(1)}%`
     ));
   }
 
@@ -254,6 +267,11 @@ export class GridManager {
       .reduce((s, f) => s + f.quantity * f.buyPrice, 0);
     const buyExposureFull = currentOpenNotional >= exposureCap;
 
+    // Downtrend filter: block new buy fills if the grid was built during a
+    // sustained drop (trend < -downtrendBlockPct). Re-evaluated each rebuild
+    // so buys resume when trend recovers. Set downtrendBlockPct=0 to disable.
+    const inDowntrend = this.config.downtrendBlockPct > 0 && grid.trend < -this.config.downtrendBlockPct;
+
     // Step 1: Fill unfilled grid levels (buy when price drops, sell is just accounting)
     for (const level of grid.levels) {
       if (level.filled) continue;
@@ -261,6 +279,9 @@ export class GridManager {
       if (level.side === 'buy' && this.fillDetector(level, currentPrice)) {
         if (buyExposureFull) {
           continue;  // skip — would exceed max open exposure
+        }
+        if (inDowntrend) {
+          continue;  // skip — sustained downtrend, don't buy into the knife
         }
         level.filled = true;
         level.filledAt = now;
