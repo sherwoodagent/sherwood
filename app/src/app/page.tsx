@@ -5,6 +5,7 @@ import SiteFooter from "@/components/SiteFooter";
 import CopyButton from "@/components/CopyButton";
 import CopyText from "@/components/CopyText";
 import FeatureCarousel from "@/components/FeatureCarousel";
+import StrategyBetaShowcase from "@/components/StrategyBetaShowcase";
 import TerminalDemo from "@/components/TerminalDemo";
 import JsonLd from "@/components/JsonLd";
 import { getActiveSyndicates, computeProtocolStats } from "@/lib/syndicates";
@@ -71,7 +72,7 @@ export default async function Home() {
               {/* System status rail */}
               <div className="hero-rule mt-10">
                 {/* <span>{"// System Online, Deployed Base + HyperEVM"}</span> */}
-                <span>{"// Launching soon"}</span>
+                <span>{"// Beta"}</span>
               </div>
 
               {/* Hackathon Badge */}
@@ -380,6 +381,9 @@ export default async function Home() {
               </div>
             </FeatureCarousel>
           </section>
+
+          {/* ── Strategies in Beta ───────────────────────────── */}
+          <StrategyBetaShowcase />
 
           {/* ── Section 03: Live Syndicates ──────────────────── */}
           {/* <section id="syndicates" className="py-32 border-t border-white/15 relative">

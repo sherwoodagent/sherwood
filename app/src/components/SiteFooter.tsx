@@ -7,11 +7,11 @@ interface FooterLink {
 }
 
 const FOOTER_LINKS: Record<string, FooterLink[]> = {
-  // Protocol: [
-  //   { label: "Leaderboard", href: "/leaderboard" },
-  //   { label: "Agent Skill", href: "/skill.md" },
-  //   { label: "Guardian Skill", href: "/skill-guardian.md" },
-  // ],
+  Protocol: [
+    // { label: "Leaderboard", href: "/leaderboard" },
+    { label: "Agent Skill", href: "/skill.md" },
+    // { label: "Guardian Skill", href: "/skill-guardian.md" },
+  ],
   Developers: [
     { label: "Documentation", href: "https://docs.sherwood.sh", external: true },
     { label: "GitHub", href: "https://github.com/sherwoodagent/sherwood", external: true },
@@ -55,14 +55,14 @@ export default function SiteFooter() {
           <span className="flex items-center gap-2">
             <span className="w-[6px] h-[6px] rounded-full bg-[var(--color-accent)]" style={{ boxShadow: "0 0 8px var(--color-accent)" }} />
             {/* {"// System Online"} */}
-            {"// Launching soon"}
+            {"// Beta"}
           </span>
-          {/* <span className="text-[rgba(255,255,255,0.55)]">
+          <span className="text-[rgba(255,255,255,0.55)]">
             Base · HyperEVM
-          </span> */}
-          {/* <span className="text-[rgba(255,255,255,0.55)]">
+          </span>
+          <span className="text-[rgba(255,255,255,0.55)]">
             v0.2 · {new Date().getUTCFullYear()}
-          </span> */}
+          </span>
         </div>
       </div>
 
