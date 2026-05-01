@@ -21,6 +21,10 @@ isolated capital, parallel to the directional agent.
   `~/.sherwood/grid/backtest-cache/`. See
   `docs/superpowers/specs/2026-05-01-grid-strategy-backtester-design.md`
   for the full design.
+- `sherwood grid sweep --from <iso> --to <iso> --leverage 2,4,5 --levels 10,15,20`
+  — runs N backtests across a Cartesian product of parameter values,
+  shares one cache, prints a ranked comparison table.
+  Saves to `~/.sherwood/grid/sweeps/{sweepId}/`.
 - Grid does not run inside the directional agent loop. It has its own
   binary entry point and its own portfolio file.
 

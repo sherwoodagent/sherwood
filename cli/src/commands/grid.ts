@@ -13,6 +13,7 @@ import { DEFAULT_GRID_CONFIG } from '../grid/config.js';
 import { runBacktest } from '../grid/backtest.js';
 import type { BacktestResult } from '../grid/backtest.js';
 import type { GridConfig } from '../grid/config.js';
+import { runSweep, type SweepResult, type SweepableField } from '../grid/sweep.js';
 
 const DIM = chalk.gray;
 const G = chalk.green;
@@ -51,6 +52,42 @@ function printSummary(r: BacktestResult): void {
   console.log();
   console.log(W(`  Wall time:     ${(r.durationMs / 1000).toFixed(1)}s`));
   console.log(DIM('─'.repeat(64)));
+}
+
+function printSweepSummary(s: SweepResult): void {
+  const days = s.window.days;
+  console.log();
+  console.log(G.bold(`  Grid Sweep — ${s.sweepId}`));
+  console.log(DIM('─'.repeat(96)));
+  console.log(W(`  Window:    ${new Date(s.window.fromMs).toISOString().slice(0, 10)} → ${new Date(s.window.toMs).toISOString().slice(0, 10)}  (${days.toFixed(0)} days)`));
+  console.log(W(`  Tokens:    ${s.tokens.join(', ')}`));
+  console.log(W(`  Capital:   $${s.capital.toLocaleString()}`));
+  console.log(W(`  Fees:      ${s.feeBps} bps/fill`));
+  console.log(W(`  Runs:      ${s.runs.length}`));
+  console.log(W(`  Wall:      ${(s.durationMs / 1000).toFixed(1)}s`));
+  console.log(DIM('─'.repeat(96)));
+  console.log();
+  console.log(BOLD('  Rank  Lev  Levels  ATR×  Drift  RTs    NetPnL$       NetPnL%   DD%      Risk-Adj'));
+  console.log(DIM('  ' + '─'.repeat(94)));
+  for (let i = 0; i < s.runs.length; i++) {
+    const r = s.runs[i]!;
+    const rank = String(i + 1).padStart(4);
+    const lev = String(r.config.leverage ?? '').padStart(3);
+    const lvls = String(r.config.levelsPerSide ?? '').padStart(6);
+    const atr = String(r.config.atrMultiplier ?? '').padStart(4);
+    const drift = String(r.config.rebalanceDriftPct ?? '').padStart(5);
+    const rts = String(r.totals.roundTrips).padStart(5);
+    const netPnl = `$${r.capital.pnlUsd.toFixed(0)}`.padStart(11);
+    const netPct = `${(r.capital.pnlPct * 100).toFixed(1)}%`.padStart(8);
+    const ddPct = `${(r.drawdown.maxPct * 100).toFixed(1)}%`.padStart(8);
+    const ra = r.riskAdjusted.toFixed(2).padStart(8);
+    const pnlColor = r.capital.pnlUsd >= 0 ? G : chalk.red;
+    console.log(`  ${rank}  ${lev}  ${lvls}  ${atr}  ${drift}  ${rts}  ${pnlColor(netPnl)}  ${pnlColor(netPct)}  ${ddPct}  ${ra}`);
+  }
+  console.log(DIM('  ' + '─'.repeat(94)));
+  console.log();
+  console.log(W(`  Saved: ${s.sweepId}/sweep.json + per-run JSONs in ~/.sherwood/grid/sweeps/`));
+  console.log();
 }
 
 export function registerGridCommand(program: Command): void {
@@ -249,5 +286,53 @@ export function registerGridCommand(program: Command): void {
       });
 
       printSummary(result);
+    });
+
+  // ── grid sweep ──
+  grid
+    .command('sweep')
+    .description('Run a parameter sweep over multiple grid configurations')
+    .option('--from <iso>', 'Window start (ISO date). Default: 30d ago.')
+    .option('--to <iso>', 'Window end (ISO date). Default: now.')
+    .option('--capital <usd>', 'Starting capital in USD', '5000')
+    .option('--tokens <list>', 'Comma-separated token list', 'bitcoin,ethereum,solana')
+    .option('--leverage <list>', 'Comma-separated leverage values to sweep')
+    .option('--levels <list>', 'Comma-separated levels-per-side values to sweep')
+    .option('--atr-multiplier <list>', 'Comma-separated ATR multiplier values to sweep')
+    .option('--rebalance-drift <list>', 'Comma-separated rebalance drift values to sweep')
+    .option('--fee-bps <n>', 'Trading fee in basis points per fill (default 5)', '5')
+    .option('--no-cache', 'Skip cache; always fetch fresh data')
+    .action(async (opts) => {
+      const now = Date.now();
+      const toMs = opts.to ? Date.parse(opts.to) : now;
+      const fromMs = opts.from ? Date.parse(opts.from) : (now - 30 * 24 * 3600_000);
+      if (Number.isNaN(toMs) || Number.isNaN(fromMs)) {
+        throw new Error('--from / --to must be ISO dates (e.g. 2026-04-01)');
+      }
+      const tokens = (opts.tokens as string).split(',').map(t => t.trim());
+
+      const parseList = (s: string | undefined): number[] | undefined => {
+        if (!s) return undefined;
+        return s.split(',').map(v => Number(v.trim())).filter(n => Number.isFinite(n));
+      };
+
+      const sweep: Partial<Record<SweepableField, number[]>> = {
+        leverage: parseList(opts.leverage),
+        levelsPerSide: parseList(opts.levels),
+        atrMultiplier: parseList(opts.atrMultiplier),
+        rebalanceDriftPct: parseList(opts.rebalanceDrift),
+      };
+
+      const result = await runSweep({
+        fromMs,
+        toMs,
+        capital: Number(opts.capital),
+        tokens,
+        sweep,
+        feeBps: Number(opts.feeBps),
+        noCache: opts.cache === false,
+      });
+
+      printSweepSummary(result);
     });
 }
