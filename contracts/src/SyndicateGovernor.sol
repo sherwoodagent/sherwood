@@ -680,6 +680,21 @@ contract SyndicateGovernor is GovernorParameters, GovernorEmergency, UUPSUpgrade
         return _guardianRegistry;
     }
 
+    /// @notice Re-point the governor at a new guardian registry. Used when
+    ///         WOOD ships and the protocol migrates from the beta stub to the
+    ///         real `GuardianRegistry`. Owner-only — owner is expected to be
+    ///         a multisig once mainnet hardening is complete.
+    /// @dev Concentrates a powerful owner power. Mid-flight proposals can
+    ///      desync (governor reads `reviewPeriod()` at vote-end and
+    ///      `resolveReview` at the GuardianReview boundary); the migration
+    ///      ceremony should drain open proposals before flipping.
+    function setGuardianRegistry(address newRegistry) external onlyOwner {
+        if (newRegistry == address(0)) revert ZeroAddress();
+        address old = _guardianRegistry;
+        _guardianRegistry = newRegistry;
+        emit GuardianRegistrySet(old, newRegistry);
+    }
+
     /// @notice Narrow proposal view consumed by the guardian registry.
     /// @dev Returns a tuple (`voteEnd`, `reviewEnd`, `vault`) encoded to match
     ///      `GuardianRegistry.IGovernorMinimal.ProposalView`. Keeps the registry

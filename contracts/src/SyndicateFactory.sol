@@ -168,6 +168,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     event UpgradesEnabledUpdated(bool enabled);
     event OwnerRotated(address indexed vault, address indexed newOwner);
     event WithdrawalQueueDeployed(address indexed vault, address indexed queue);
+    event GuardianRegistrySet(address indexed oldRegistry, address indexed newRegistry);
 
     struct InitParams {
         address owner;
@@ -350,6 +351,17 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     function setUpgradesEnabled(bool enabled) external onlyOwner {
         upgradesEnabled = enabled;
         emit UpgradesEnabledUpdated(enabled);
+    }
+
+    /// @notice Re-point the factory at a new guardian registry. Used when WOOD
+    ///         ships and the protocol migrates from the beta stub to the real
+    ///         `GuardianRegistry`. The governor and factory MUST share the same
+    ///         registry; flip both in the same multisig batch.
+    function setGuardianRegistry(address newRegistry) external onlyOwner {
+        if (newRegistry == address(0)) revert InvalidGuardianRegistry();
+        address old = guardianRegistry;
+        guardianRegistry = newRegistry;
+        emit GuardianRegistrySet(old, newRegistry);
     }
 
     /// @notice Transfer a vault's ownership to `newOwner` and rebind the owner-stake

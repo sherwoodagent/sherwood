@@ -209,6 +209,8 @@ interface ISyndicateGovernor {
 
     event EmergencySettled(uint256 indexed proposalId, address indexed vault, int256 pnl, uint256 customCallCount);
 
+    event GuardianRegistrySet(address indexed oldRegistry, address indexed newRegistry);
+
     // ── Fee-distribution resilience events (W-1) ──
     /// @notice Emitted when a per-recipient fee transfer in `_distributeFees` /
     ///         `_distributeAgentFee` reverts (e.g., USDC blacklist). The amount
