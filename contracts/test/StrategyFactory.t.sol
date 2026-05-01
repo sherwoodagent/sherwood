@@ -83,8 +83,7 @@ contract StrategyFactoryTest is Test {
         bytes memory initData = abi.encode(address(usdc), address(mUsdc), 1_000e6, 990e6, false);
         address predicted = Clones.predictDeterministicAddress(address(template), salt, address(factory));
         vm.prank(vaultOwner);
-        address clone =
-            factory.cloneAndInitDeterministic(address(template), address(vault), proposer, initData, salt);
+        address clone = factory.cloneAndInitDeterministic(address(template), address(vault), proposer, initData, salt);
         assertEq(clone, predicted);
     }
 }

@@ -103,9 +103,7 @@ contract AsyncRedeemInvariantsTest is StdInvariant, Test {
     ///         reserve says is reserved, draining LP claims.
     function invariant_queueShareBalanceCoversPendingShares() public view {
         assertGe(
-            vault.balanceOf(address(queue)),
-            queue.pendingShares(),
-            "INV-Q4: queue share balance below pendingShares"
+            vault.balanceOf(address(queue)), queue.pendingShares(), "INV-Q4: queue share balance below pendingShares"
         );
     }
 

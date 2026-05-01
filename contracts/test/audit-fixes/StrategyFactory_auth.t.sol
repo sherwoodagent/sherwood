@@ -171,9 +171,8 @@ contract StrategyFactoryAuthTest is Test {
     function test_cloneAndInitDeterministic_succeedsForRegisteredAgent() public {
         bytes32 salt = keccak256("strategy.salt.1");
         vm.prank(agentAddr);
-        address clone = factory.cloneAndInitDeterministic(
-            address(template), address(registeredVault), proposer, _initData(), salt
-        );
+        address clone =
+            factory.cloneAndInitDeterministic(address(template), address(registeredVault), proposer, _initData(), salt);
         assertTrue(clone != address(0));
         assertEq(MoonwellSupplyStrategy(payable(clone)).vault(), address(registeredVault));
     }
