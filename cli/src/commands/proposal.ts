@@ -453,15 +453,18 @@ export function registerProposalCommands(program: Command): void {
   //
   // Binds a strategy clone to a proposal so the vault can read live NAV
   // (positionValue) while the proposal is active — unlocks deposits and
-  // immediate withdraws during execution. MUST be called by the proposer
-  // BEFORE the voting period ends; once Approved/Executed the binding
-  // window is closed (per SyndicateGovernor.bindProposalAdapter).
+  // immediate withdraws during execution. Proposer-only. Allowed in
+  // `Draft` (collaborative proposals pre-approval) or `Pending` (lead
+  // retains authority during voting), and only while no co-proposer has
+  // approved (`_approvedCount == 0`). Once any co-proposer approves, or
+  // the proposal moves past Pending, the binding window is closed (per
+  // SyndicateGovernor.bindProposalAdapter, IMP-1).
   // `strategy propose` calls this automatically on success; this command
   // is the escape hatch for proposals submitted before live NAV existed
   // or with --skip-bind.
   proposal
     .command("bind-adapter")
-    .description("Bind a strategy clone to a proposal for live NAV (proposer-only, Pending state)")
+    .description("Bind a strategy clone to a proposal for live NAV (proposer-only, Draft or Pending, before any co-proposer approval)")
     .requiredOption("--id <proposalId>", "Proposal ID")
     .requiredOption("--adapter <address>", "Strategy clone address")
     .action(async (opts) => {
