@@ -103,7 +103,13 @@ The grid runs in two modes:
 ### Prerequisites for live mode
 
 1. Deploy `HyperliquidGridStrategy` clone via a Sherwood proposal
-2. Strategy's `_execute()` pulls vault USDC and parks it on HyperCore margin
+2. Strategy's `_execute()` pulls vault USDC, **auto-finalizes for HyperCore on
+   first run** (safe defaults: USDC token = 0, `FirstStorageSlot` variant
+   matching ERC-1167 clones), then parks USDC on HyperCore margin via
+   `sendUsdClassTransfer`. Override the defaults with
+   `strategy.finalizeForHyperCore(token, variant, createNonce)` from the
+   proposer **before** opening the proposal only if the clone was deployed
+   with a non-default method (plain CREATE, UUPS proxy, non-USDC token).
 3. Keeper EOA = proposer EOA (only the proposer can call `updateParams`)
 4. Set `HYPERLIQUID_PRIVATE_KEY` to the proposer's key
 5. Run `sherwood grid start --live ...` — the loop will compute orders each tick and submit them
