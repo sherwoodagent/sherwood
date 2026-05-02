@@ -46,6 +46,14 @@ const ACTION_PLACE_GRID = 1;
 const ACTION_CANCEL_ALL = 2;
 const ACTION_CANCEL_AND_PLACE = 3;
 
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  if (size <= 0) throw new Error(`chunk size must be > 0 (got ${size})`);
+  if (arr.length === 0) return [];
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 const GRID_ORDER_COMPONENTS = [
   { name: 'assetIndex', type: 'uint32' },
   { name: 'isBuy', type: 'bool' },
@@ -60,9 +68,25 @@ export class OnchainGridExecutor {
   private placedCloids: Map<string, bigint[]> = new Map();
   private meta: Map<string, HLAssetMeta> | null = null;
   private busy = false;
+  /** On-chain `maxOrdersPerTick`; cached at load(). Used to chunk batches so
+   *  the strategy never reverts with TooManyOrders(actual, max). */
+  private maxOrdersPerTick: number | null = null;
 
   constructor(cfg: OnchainGridExecutorConfig) {
     this.cfg = cfg;
+  }
+
+  /** Read the strategy's per-call order cap and cache it. */
+  private async fetchMaxOrdersPerTick(): Promise<number> {
+    if (this.maxOrdersPerTick !== null) return this.maxOrdersPerTick;
+    const pub = getPublicClient();
+    const value = await pub.readContract({
+      address: this.cfg.strategyAddress,
+      abi: HYPERLIQUID_GRID_STRATEGY_ABI,
+      functionName: 'maxOrdersPerTick',
+    });
+    this.maxOrdersPerTick = Number(value);
+    return this.maxOrdersPerTick;
   }
 
   /** Load persisted state. Call once before the first execute(). */
@@ -91,6 +115,7 @@ export class OnchainGridExecutor {
       }
     }
     if (!this.meta) this.meta = await hlGetMeta();
+    await this.fetchMaxOrdersPerTick();
   }
 
   /**
@@ -163,8 +188,8 @@ export class OnchainGridExecutor {
 
         try {
           if (wantCancel && wantPlace) {
-            const tx = await this.cancelAndPlace(token, assetIndex, orders, meta);
-            txs.push(tx);
+            const txArr = await this.cancelAndPlace(token, assetIndex, orders, meta);
+            txs.push(...txArr);
             cancelled += 1;
             placed += orders.length;
           } else if (wantCancel) {
@@ -172,8 +197,8 @@ export class OnchainGridExecutor {
             txs.push(tx);
             cancelled += 1;
           } else if (wantPlace) {
-            const tx = await this.placeGrid(token, assetIndex, orders, meta);
-            txs.push(tx);
+            const txArr = await this.placeGrid(token, assetIndex, orders, meta);
+            txs.push(...txArr);
             placed += orders.length;
           }
           await this.save();
@@ -230,21 +255,36 @@ export class OnchainGridExecutor {
     return { encoded, cloids };
   }
 
+  /**
+   * Place orders, chunking into batches of ≤ maxOrdersPerTick per tx.
+   * Each chunk uses its own nonce so CLOIDs stay unique across chunks.
+   * placedCloids is committed once after the last chunk lands; if any
+   * chunk reverts, the partial cloids stay tracked via the per-chunk save.
+   */
   private async placeGrid(
     token: string,
     assetIndex: number,
     orders: GridOrderPlan['ordersToPlace'],
     meta: HLAssetMeta,
-  ): Promise<Hex> {
-    const nonce = this.bumpNonce(token);
-    const { encoded, cloids } = this.encodeOrders(assetIndex, orders, meta, nonce);
-    const data = encodeAbiParameters(
-      [{ type: 'uint8' }, { type: 'tuple[]', components: [...GRID_ORDER_COMPONENTS] }],
-      [ACTION_PLACE_GRID, encoded],
-    );
-    const tx = await this.send(data); // throws if reverts
-    this.placedCloids.set(token, cloids); // commit only on success
-    return tx;
+  ): Promise<Hex[]> {
+    const max = await this.fetchMaxOrdersPerTick();
+    const chunks = chunkArray(orders, max);
+    const txs: Hex[] = [];
+    const allCloids: bigint[] = [...(this.placedCloids.get(token) ?? [])];
+    for (const chunk of chunks) {
+      const nonce = this.bumpNonce(token);
+      const { encoded, cloids } = this.encodeOrders(assetIndex, chunk, meta, nonce);
+      const data = encodeAbiParameters(
+        [{ type: 'uint8' }, { type: 'tuple[]', components: [...GRID_ORDER_COMPONENTS] }],
+        [ACTION_PLACE_GRID, encoded],
+      );
+      const tx = await this.send(data); // throws if reverts
+      txs.push(tx);
+      allCloids.push(...cloids);
+      this.placedCloids.set(token, allCloids); // commit incrementally so cancel-on-restart sees what landed
+      await this.save();
+    }
+    return txs;
   }
 
   private async cancelAll(token: string, assetIndex: number): Promise<Hex> {
@@ -264,27 +304,57 @@ export class OnchainGridExecutor {
     return tx;
   }
 
+  /**
+   * Atomic cancel-old + place-new on rebalance. When `orders` exceeds
+   * maxOrdersPerTick, the first chunk uses ACTION_CANCEL_AND_PLACE (so the
+   * old orders are cleared in the same tx as the first wave of new orders);
+   * subsequent chunks use ACTION_PLACE_GRID. Atomicity holds for chunk #1;
+   * after that there's a brief window where some new orders are live before
+   * the rest are placed — acceptable for a 60s rebuild cycle.
+   */
   private async cancelAndPlace(
     token: string,
     assetIndex: number,
     orders: GridOrderPlan['ordersToPlace'],
     meta: HLAssetMeta,
-  ): Promise<Hex> {
+  ): Promise<Hex[]> {
+    const max = await this.fetchMaxOrdersPerTick();
+    const chunks = chunkArray(orders, max);
     const oldCloids = this.placedCloids.get(token) ?? [];
-    const newNonce = this.bumpNonce(token);
-    const { encoded, cloids: newCloids } = this.encodeOrders(assetIndex, orders, meta, newNonce);
-    const data = encodeAbiParameters(
-      [
-        { type: 'uint8' },
-        { type: 'uint32' },
-        { type: 'uint128[]' },
-        { type: 'tuple[]', components: [...GRID_ORDER_COMPONENTS] },
-      ],
-      [ACTION_CANCEL_AND_PLACE, assetIndex, oldCloids, encoded],
-    );
-    const tx = await this.send(data); // throws if reverts
-    this.placedCloids.set(token, newCloids); // commit only on success
-    return tx;
+    const txs: Hex[] = [];
+    const allNewCloids: bigint[] = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]!;
+      const newNonce = this.bumpNonce(token);
+      const { encoded, cloids } = this.encodeOrders(assetIndex, chunk, meta, newNonce);
+      let data: Hex;
+      if (i === 0) {
+        // First chunk swaps old → new in one tx.
+        data = encodeAbiParameters(
+          [
+            { type: 'uint8' },
+            { type: 'uint32' },
+            { type: 'uint128[]' },
+            { type: 'tuple[]', components: [...GRID_ORDER_COMPONENTS] },
+          ],
+          [ACTION_CANCEL_AND_PLACE, assetIndex, oldCloids, encoded],
+        );
+      } else {
+        data = encodeAbiParameters(
+          [{ type: 'uint8' }, { type: 'tuple[]', components: [...GRID_ORDER_COMPONENTS] }],
+          [ACTION_PLACE_GRID, encoded],
+        );
+      }
+      const tx = await this.send(data); // throws if reverts
+      txs.push(tx);
+      allNewCloids.push(...cloids);
+      // After chunk #0 the old cloids are already cancelled on-chain — record
+      // only the new cloids that have landed so far.
+      this.placedCloids.set(token, [...allNewCloids]);
+      await this.save();
+    }
+    return txs;
   }
 
   /**

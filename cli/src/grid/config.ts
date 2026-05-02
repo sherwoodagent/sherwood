@@ -72,6 +72,10 @@ export interface GridTokenState {
   centerPrice: number;
   /** ATR at last build. */
   atr: number;
+  /** Trend at last grid build: (latest_4h_close - lookback_first_4h_close) / lookback_first_4h_close. */
+  trend: number;
+  /** Last time grid.trend was refreshed mid-tick (separate from buildGrid). */
+  lastTrendRefreshAt: number;
 }
 
 export interface GridPortfolioState {
@@ -114,6 +118,26 @@ export interface GridConfig {
   minProfitPerFillUsd: number;
   /** Pause grid if pool drops this fraction from initial allocation. */
   pauseThresholdPct: number;
+  /** Resume paused grid when drawdown recovers below this fraction (hysteresis). */
+  unpauseRecoveryPct: number;
+  /** Per-token maintenance margin fraction. Backtester uses this to model
+   *  exchange liquidation. Default 0.02 = 2% (typical Hyperliquid). */
+  maintenanceMarginPct: number;
+  /** Max open notional per token as a multiple of (allocation × leverage).
+   *  When exceeded, new buy fills are refused (existing fills can still
+   *  close as sells). Caps unbounded accumulation across rebuilds in
+   *  downtrends. Default 2.0 (allows up to 2 grid generations). */
+  maxOpenNotionalMultiple: number;
+  /** Block new buy fills when trend over the ATR lookback is below this
+   *  threshold. Default 0.10 (10% drop in 56h = clear downtrend → don't
+   *  buy into the falling knife). Set to 0 to disable filter. */
+  downtrendBlockPct: number;
+  /** Force-close any open buy if currentPrice drops this fraction below
+   *  buyPrice. Per-position stop-loss: limits how much any single fill can
+   *  contribute to the cross-margin pool's drawdown. Default 0.10 (10%
+   *  adverse from entry — empirical Nov–May: 10% saves the strategy at -4%,
+   *  30% lets liquidations through at -37%). 0 = disabled. */
+  stopLossPct: number;
 }
 
 export const DEFAULT_GRID_CONFIG: GridConfig = {
@@ -128,5 +152,10 @@ export const DEFAULT_GRID_CONFIG: GridConfig = {
   fullRebuildIntervalMs: 12 * 60 * 60 * 1000,   // 12h
   tokenSplit: { bitcoin: 0.45, ethereum: 0.30, solana: 0.25 },
   minProfitPerFillUsd: 0.50,
-  pauseThresholdPct: 0.20,
+  pauseThresholdPct: 0.20,                      // post leverage-fix calibration: fires at ~4% adverse move on 5x (real dollar terms); old 0.40 required ~8% which essentially never fired before liquidation
+  unpauseRecoveryPct: 0.05,                     // hysteresis: resume when pool recovers to within 5% of initial (half of pause threshold to avoid ping-pong)
+  maintenanceMarginPct: 0.02,
+  maxOpenNotionalMultiple: 2.0,
+  downtrendBlockPct: 0.10,
+  stopLossPct: 0.10,                            // empirical Nov-May: 10% saves the strategy (-4%); 30% lets liquidations through (-37%)
 };

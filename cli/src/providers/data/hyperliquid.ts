@@ -33,7 +33,7 @@ interface OiCacheEntry {
 const OI_STALE_MS = 30 * 60 * 1000; // 30 minutes
 
 // Map CoinGecko token IDs to Hyperliquid coin names
-const TOKEN_TO_COIN: Record<string, string> = {
+export const TOKEN_TO_COIN: Record<string, string> = {
   bitcoin: 'BTC',
   ethereum: 'ETH',
   solana: 'SOL',

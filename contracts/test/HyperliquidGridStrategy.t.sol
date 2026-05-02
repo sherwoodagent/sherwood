@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {HyperliquidGridStrategy} from "../src/strategies/HyperliquidGridStrategy.sol";
 import {BaseStrategy} from "../src/strategies/BaseStrategy.sol";
 import {MockCoreWriter} from "./mocks/MockCoreWriter.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
+import {FinalizeVariant} from "../src/hyperliquid/L1Write.sol";
 
 contract HyperliquidGridStrategyTest is Test {
     HyperliquidGridStrategy public template;
@@ -200,6 +201,52 @@ contract HyperliquidGridStrategyTest is Test {
             abi.encodeWithSelector(HyperliquidGridStrategy.OrderTooLarge.selector, 200_000e6, MAX_ORDER_SIZE)
         );
         strategy.updateParams(data);
+    }
+
+    // ── HyperCore finalization ──
+
+    function test_finalizeForHyperCore_emitsAndForwardsToL1Write() public {
+        assertFalse(strategy.hyperCoreFinalized());
+        vm.expectEmit(true, true, true, true, address(strategy));
+        emit HyperliquidGridStrategy.HyperCoreFinalized(0, FinalizeVariant.FirstStorageSlot, 0);
+        vm.prank(proposer);
+        strategy.finalizeForHyperCore(0, FinalizeVariant.FirstStorageSlot, 0);
+        assertTrue(strategy.hyperCoreFinalized());
+    }
+
+    function test_finalizeForHyperCore_revertsIfNotProposer() public {
+        vm.prank(attacker);
+        vm.expectRevert(BaseStrategy.NotProposer.selector);
+        strategy.finalizeForHyperCore(0, FinalizeVariant.FirstStorageSlot, 0);
+    }
+
+    function test_execute_selfHeals_finalizesForHyperCoreOnFirstRun() public {
+        assertFalse(strategy.hyperCoreFinalized());
+        vm.expectEmit(true, true, true, true, address(strategy));
+        emit HyperliquidGridStrategy.HyperCoreFinalized(0, FinalizeVariant.FirstStorageSlot, 0);
+        vm.prank(vault);
+        strategy.execute();
+        assertTrue(strategy.hyperCoreFinalized());
+    }
+
+    function test_execute_skipsAutoFinalize_whenManuallyFinalized() public {
+        // Proposer manually finalizes with a non-default variant first.
+        vm.prank(proposer);
+        strategy.finalizeForHyperCore(7, FinalizeVariant.CustomStorageSlot, 42);
+        assertTrue(strategy.hyperCoreFinalized());
+
+        // _execute should NOT emit a second HyperCoreFinalized event.
+        vm.recordLogs();
+        vm.prank(vault);
+        strategy.execute();
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+        bytes32 sig = keccak256("HyperCoreFinalized(uint64,uint8,uint64)");
+        for (uint256 i = 0; i < entries.length; i++) {
+            assertTrue(
+                entries[i].topics.length == 0 || entries[i].topics[0] != sig,
+                "auto-finalize fired despite manual finalize"
+            );
+        }
     }
 
     function test_sweepToVault_repeatableForPartialArrivals() public {

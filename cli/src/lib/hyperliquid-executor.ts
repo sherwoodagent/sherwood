@@ -243,7 +243,10 @@ export async function hlGetMeta(): Promise<Map<string, HLAssetMeta>> {
     // Hyperliquid convention: pxDecimals = 6 - szDecimals (so price * 10^pxDecimals fits uint64).
     // Reference: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint#perpetuals-metadata
     const pxDecimals = 6 - u.szDecimals;
-    fresh.set(u.name, { name: u.name, szDecimals: u.szDecimals, pxDecimals });
+    // The Hermes HL skill returns full names ("BTC-PERP", "ETH-PERP") but
+    // callers look up by ticker ("BTC", "ETH"). Strip the suffix to match.
+    const ticker = u.name.replace(/-(PERP|SPOT)$/i, '');
+    fresh.set(ticker, { name: u.name, szDecimals: u.szDecimals, pxDecimals });
   }
   _metaCache = fresh;
   _metaCachedAt = Date.now();

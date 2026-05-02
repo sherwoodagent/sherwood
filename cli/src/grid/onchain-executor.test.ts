@@ -9,6 +9,10 @@ vi.mock('../lib/client.js', () => ({
   }),
   getPublicClient: vi.fn(() => ({
     waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' as const })),
+    readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'maxOrdersPerTick') return 6;
+      throw new Error(`unmocked readContract: ${functionName}`);
+    }),
   })),
 }));
 
@@ -93,6 +97,60 @@ describe('OnchainGridExecutor', () => {
     });
     expect(result.placed).toBe(0);
     expect(result.errors.length).toBe(1);
+  });
+
+  it('chunks placeGrid into ≤ maxOrdersPerTick orders per tx', async () => {
+    const { OnchainGridExecutor } = await import('./onchain-executor.js');
+    const exec = new OnchainGridExecutor({
+      strategyAddress: '0x0000000000000000000000000000000000000001',
+      assetIndices: { bitcoin: 3 },
+    });
+    // 14 orders with maxOrdersPerTick=6 → 3 txs (6, 6, 2).
+    const orders = Array.from({ length: 14 }, (_, i) => ({
+      token: 'bitcoin',
+      isBuy: i % 2 === 0,
+      price: 76000 + i * 100,
+      quantity: 0.01,
+    }));
+    const result = await exec.execute({
+      ordersToPlace: orders,
+      assetsToCancel: [],
+      needsRebalance: false,
+    });
+    expect(result.placed).toBe(14);
+    expect(result.errors).toEqual([]);
+    expect(sentTxs.length).toBe(3);
+  });
+
+  it('chunks cancelAndPlace: first tx is CANCEL_AND_PLACE, rest are PLACE_GRID', async () => {
+    const { OnchainGridExecutor } = await import('./onchain-executor.js');
+    const exec = new OnchainGridExecutor({
+      strategyAddress: '0x0000000000000000000000000000000000000001',
+      assetIndices: { bitcoin: 3 },
+    });
+    // Seed prior placedCloids by running one place tick first.
+    await exec.execute({
+      ordersToPlace: [{ token: 'bitcoin', isBuy: true, price: 76000, quantity: 0.01 }],
+      assetsToCancel: [],
+      needsRebalance: false,
+    });
+    sentTxs.length = 0;
+
+    // Now rebuild with 10 orders → ceil(10/6) = 2 chunks. First = CANCEL_AND_PLACE, second = PLACE_GRID.
+    const orders = Array.from({ length: 10 }, (_, i) => ({
+      token: 'bitcoin',
+      isBuy: i % 2 === 0,
+      price: 77000 + i * 100,
+      quantity: 0.01,
+    }));
+    const result = await exec.execute({
+      ordersToPlace: orders,
+      assetsToCancel: ['bitcoin'],
+      needsRebalance: true,
+    });
+    expect(result.placed).toBe(10);
+    expect(result.cancelled).toBe(1);
+    expect(sentTxs.length).toBe(2);
   });
 
   it('records error when HL meta missing for asset', async () => {
