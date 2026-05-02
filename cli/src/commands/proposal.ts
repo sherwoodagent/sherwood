@@ -27,6 +27,7 @@ import {
   propose,
   vote,
   executeProposal,
+  bindProposalAdapter,
   settleProposal,
   emergencySettle,
   getExecuteCalls,
@@ -440,6 +441,41 @@ export function registerProposalCommands(program: Command): void {
         const voteSpinner = ora({ text: W("Submitting vote..."), color: "green" }).start();
         const hash = await vote(proposalId, support);
         voteSpinner.succeed(G("Vote cast"));
+        console.log(DIM(`  ${getExplorerUrl(hash)}`));
+        console.log();
+      } catch (err) {
+        console.error(chalk.red(`\n  ✖ ${formatContractError(err)}`));
+        process.exit(1);
+      }
+    });
+
+  // ── proposal bind-adapter ──
+  //
+  // Binds a strategy clone to a proposal so the vault can read live NAV
+  // (positionValue) while the proposal is active — unlocks deposits and
+  // immediate withdraws during execution. MUST be called by the proposer
+  // BEFORE the voting period ends; once Approved/Executed the binding
+  // window is closed (per SyndicateGovernor.bindProposalAdapter).
+  // `strategy propose` calls this automatically on success; this command
+  // is the escape hatch for proposals submitted before live NAV existed
+  // or with --skip-bind.
+  proposal
+    .command("bind-adapter")
+    .description("Bind a strategy clone to a proposal for live NAV (proposer-only, Pending state)")
+    .requiredOption("--id <proposalId>", "Proposal ID")
+    .requiredOption("--adapter <address>", "Strategy clone address")
+    .action(async (opts) => {
+      try {
+        const proposalId = parseBigIntArg(opts.id, "proposal ID");
+        if (!isAddress(opts.adapter)) {
+          console.error(chalk.red("Invalid adapter address"));
+          process.exit(1);
+        }
+        const adapter = opts.adapter as Address;
+
+        const spinner = ora("Binding adapter...").start();
+        const hash = await bindProposalAdapter(proposalId, adapter);
+        spinner.succeed(G("Adapter bound — live deposits/withdraws enabled"));
         console.log(DIM(`  ${getExplorerUrl(hash)}`));
         console.log();
       } catch (err) {
