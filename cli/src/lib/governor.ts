@@ -54,9 +54,15 @@ export interface BatchCall {
   value: bigint;
 }
 
+// Must match Solidity ISyndicateGovernor.ProposalState ordering. PR #229
+// inserted GuardianReview at index 2, shifting every subsequent state by
+// one. Without this fix, the CLI mislabels Approved (3) as Rejected,
+// Executed (6) as Settled, etc. — and `proposal execute` rejects valid
+// approved proposals.
 export const PROPOSAL_STATES = [
   "Draft",
   "Pending",
+  "GuardianReview",
   "Approved",
   "Rejected",
   "Expired",
@@ -68,12 +74,13 @@ export const PROPOSAL_STATES = [
 export const PROPOSAL_STATE = {
   Draft: 0,
   Pending: 1,
-  Approved: 2,
-  Rejected: 3,
-  Expired: 4,
-  Executed: 5,
-  Settled: 6,
-  Cancelled: 7,
+  GuardianReview: 2,
+  Approved: 3,
+  Rejected: 4,
+  Expired: 5,
+  Executed: 6,
+  Settled: 7,
+  Cancelled: 8,
 } as const;
 
 export const VOTE_TYPE = {

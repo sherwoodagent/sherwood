@@ -305,10 +305,15 @@ export default async function ProposalsPage({
   // (see src/lib/active-strategy.ts). This page now focuses on voting
   // queue + history + agent stats.
 
+  // Split active proposals by stage so LPs can tell at a glance whether
+  // a vote is still open (Voting Queue) vs already passed and awaiting
+  // an executor (Ready to Execute). Mixing both under one heading hid
+  // the call-to-action.
   const votingQueue = governor.proposals.filter(
-    (p) =>
-      p.computedState === ProposalState.Pending ||
-      p.computedState === ProposalState.Approved,
+    (p) => p.computedState === ProposalState.Pending,
+  );
+  const readyToExecute = governor.proposals.filter(
+    (p) => p.computedState === ProposalState.Approved,
   );
 
   return (
@@ -405,7 +410,7 @@ export default async function ProposalsPage({
             />
           )}
 
-          {/* Voting Queue */}
+          {/* Voting Queue — proposals still accepting For/Against votes */}
           {votingQueue.length > 0 && (
             <div style={{ marginTop: "1.5rem" }}>
               <div
@@ -424,6 +429,36 @@ export default async function ProposalsPage({
                   governorAddress={governor.governorAddress}
                   params={governor.params}
                   assetDecimals={data.assetDecimals}
+                  assetSymbol={data.assetSymbol}
+                  addressNames={addressNames}
+                  disabled={isMock}
+                  chainId={!isMock ? data.chainId : undefined}
+                  explorerUrl={!isMock ? getAddresses(data.chainId).blockExplorer : undefined}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Ready to Execute — vote passed, awaiting executor before deadline */}
+          {readyToExecute.length > 0 && (
+            <div style={{ marginTop: "1.5rem" }}>
+              <div
+                className="panel-title"
+                style={{ marginBottom: "1rem" }}
+              >
+                <span>Ready to Execute</span>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: "10px", letterSpacing: "0.15em" }}>
+                  {readyToExecute.length} APPROVED
+                </span>
+              </div>
+              {readyToExecute.map((p) => (
+                <ProposalCard
+                  key={p.id.toString()}
+                  proposal={p}
+                  governorAddress={governor.governorAddress}
+                  params={governor.params}
+                  assetDecimals={data.assetDecimals}
+                  assetSymbol={data.assetSymbol}
                   addressNames={addressNames}
                   disabled={isMock}
                   chainId={!isMock ? data.chainId : undefined}

@@ -7,8 +7,16 @@ import {
   type GovernorParams,
   ProposalState,
   formatTimeRemaining,
+  formatDuration,
+  ipfsToHttpUrl,
 } from "@/lib/governor-data";
-import { truncateAddress, formatBps, formatShares, shareDecimals } from "@/lib/contracts";
+import {
+  truncateAddress,
+  formatBps,
+  formatShares,
+  shareDecimals,
+  formatAsset,
+} from "@/lib/contracts";
 import VoteButton from "./VoteButton";
 import ExecutionCallPreview from "./ExecutionCallPreview";
 import SwapRiskWarning from "./SwapRiskWarning";
@@ -30,6 +38,7 @@ interface ProposalCardProps {
   governorAddress: Address;
   params: GovernorParams;
   assetDecimals: number;
+  assetSymbol?: string;
   addressNames?: Record<string, string>;
   /** When true, voting UI is replaced with a demo-mode notice. */
   disabled?: boolean;
@@ -38,23 +47,52 @@ interface ProposalCardProps {
   explorerUrl?: string;
 }
 
+const DESC_PREVIEW_CHARS = 280;
+
+/** Render `1714588800` → `2026-05-02 14:00 UTC`. */
+function formatUtc(ts: bigint): string {
+  if (ts === 0n) return "—";
+  const d = new Date(Number(ts) * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+}
+
+/** Truncate a CID for display: `Qm…ABCD` keeps the last 4 chars. */
+function shortCid(uri: string): string {
+  const cid = uri.startsWith("ipfs://") ? uri.slice(7) : uri;
+  if (cid.length <= 12) return cid;
+  return `${cid.slice(0, 6)}…${cid.slice(-4)}`;
+}
+
 export default function ProposalCard({
   proposal,
   governorAddress,
   params,
   assetDecimals,
+  assetSymbol,
   addressNames,
   disabled = false,
   chainId,
   explorerUrl,
 }: ProposalCardProps) {
   const [optimistic, setOptimistic] = useState<OptimisticVote | null>(null);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   const title =
     proposal.metadata?.title || `Proposal #${proposal.id.toString()}`;
   const description = proposal.metadata?.description?.trim() || "";
-  const truncatedDescription =
-    description.length > 180 ? `${description.slice(0, 177)}...` : description;
+  const isLong = description.length > DESC_PREVIEW_CHARS;
+  const visibleDescription =
+    isLong && !descExpanded
+      ? `${description.slice(0, DESC_PREVIEW_CHARS - 1).trimEnd()}…`
+      : description;
+
+  // Mock proposals use placeholder URIs ("ipfs://mock", "ipfs://mock2") that
+  // will 404 on the gateway — skip the link rather than dangling the user.
+  const ipfsUrl = !proposal.metadataURI.includes("mock")
+    ? ipfsToHttpUrl(proposal.metadataURI)
+    : null;
 
   // Apply optimistic delta to the on-chain numbers so the vote bar updates
   // instantly on submit. The actual chain values get re-fetched on
@@ -86,9 +124,27 @@ export default function ProposalCard({
   const timerLabel =
     deadline > 0n ? formatTimeRemaining(deadline) : "—";
   const idStr = String(proposal.id).padStart(2, "0");
+  const anchor = `prop-${proposal.id.toString()}`;
+
+  async function copyShareLink() {
+    try {
+      const url = `${window.location.origin}${window.location.pathname}#${anchor}`;
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1500);
+    } catch {
+      // clipboard unavailable — silently no-op
+    }
+  }
+
+  // Strategy params row: surface the proposal-level constants (duration,
+  // capital, vote-end) the proposer committed to. These were previously
+  // only visible deep in the History footer or not at all.
+  const showCapital = proposal.capitalSnapshot > 0n;
+  const showExecuteBy = isApproved && proposal.executeBy > 0n;
 
   return (
-    <div className="sh-card--prop">
+    <div className="sh-card--prop" id={anchor}>
       {/* Left ID rail */}
       <div className="sh-card--prop__id">
         <span className="sh-card--prop__id-label">Prop</span>
@@ -114,21 +170,93 @@ export default function ProposalCard({
                 <span className="sh-card--prop__meta-val">{timerLabel}</span>
               </span>
             </div>
-            {truncatedDescription && (
+
+            {/* Strategy parameters — duration / capital / absolute timestamps */}
+            <div className="sh-card--prop__params">
+              <span title="Strategy duration committed by the proposer">
+                <span className="sh-card--prop__meta-key">Duration</span>
+                <span className="sh-card--prop__meta-val">
+                  {formatDuration(proposal.strategyDuration)}
+                </span>
+              </span>
+              {showCapital && (
+                <span title="Vault balance snapshot at execution">
+                  <span className="sh-card--prop__meta-key">Capital</span>
+                  <span className="sh-card--prop__meta-val">
+                    {formatAsset(proposal.capitalSnapshot, assetDecimals)}
+                    {assetSymbol ? ` ${assetSymbol}` : ""}
+                  </span>
+                </span>
+              )}
+              <span title={`Voting closes at ${formatUtc(proposal.voteEnd)}`}>
+                <span className="sh-card--prop__meta-key">Voting ends</span>
+                <span className="sh-card--prop__meta-val">
+                  {formatUtc(proposal.voteEnd)}
+                </span>
+              </span>
+              {showExecuteBy && (
+                <span title={`Execution deadline at ${formatUtc(proposal.executeBy)}`}>
+                  <span className="sh-card--prop__meta-key">Execute by</span>
+                  <span className="sh-card--prop__meta-val">
+                    {formatUtc(proposal.executeBy)}
+                  </span>
+                </span>
+              )}
+            </div>
+
+            {description && (
               <div className="sh-card--prop__desc font-[family-name:var(--font-plus-jakarta)]">
-                {truncatedDescription}
+                {visibleDescription}
+                {isLong && (
+                  <button
+                    type="button"
+                    onClick={() => setDescExpanded((v) => !v)}
+                    className="sh-card--prop__readmore"
+                    aria-expanded={descExpanded}
+                  >
+                    {descExpanded ? "Show less" : "Read more"}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* IPFS link — voters who want to verify the raw metadata
+                bypass the parsed title/description. Hidden for mock URIs
+                that wouldn't resolve. */}
+            {ipfsUrl && (
+              <div className="sh-card--prop__ipfs">
+                <span className="sh-card--prop__meta-key">Metadata</span>
+                <a
+                  href={ipfsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="sh-card--prop__ipfs-link"
+                  title={proposal.metadataURI}
+                >
+                  ipfs://{shortCid(proposal.metadataURI)} ↗
+                </a>
               </div>
             )}
           </div>
-          <span
-            className="tag-bracket"
-            style={{
-              flexShrink: 0,
-              color: isApproved ? "var(--color-accent)" : "#eab308",
-            }}
-          >
-            {isPending ? "Voting" : "Approved"}
-          </span>
+          <div className="sh-card--prop__head-right">
+            <span
+              className="tag-bracket"
+              style={{
+                color: isApproved ? "var(--color-accent)" : "#eab308",
+              }}
+            >
+              {isPending ? "Voting" : "Approved"}
+            </span>
+            <button
+              type="button"
+              onClick={copyShareLink}
+              className="sh-card--prop__share"
+              title="Copy direct link to this proposal"
+              aria-label="Copy proposal link"
+            >
+              {shareCopied ? "copied" : "↗ link"}
+            </button>
+          </div>
         </div>
 
         {/* Vote progress */}

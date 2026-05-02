@@ -90,23 +90,35 @@ export interface GovernorData {
 
 // ── IPFS Metadata ──────────────────────────────────────────
 
+// Public default — also reachable from the browser. Server-side callers can
+// override with PINATA_GATEWAY for authenticated/dedicated gateways.
+const PUBLIC_PINATA_GATEWAY = "https://sherwood.mypinata.cloud";
 const PINATA_GATEWAY =
-  process.env.PINATA_GATEWAY || "https://sherwood.mypinata.cloud";
+  process.env.PINATA_GATEWAY ||
+  process.env.NEXT_PUBLIC_PINATA_GATEWAY ||
+  PUBLIC_PINATA_GATEWAY;
+
+/**
+ * Resolve an IPFS URI (`ipfs://Qm…`, raw CID, or http URL) to an HTTPS gateway
+ * URL. Returns null when the URI is empty / unrecognized so callers can skip
+ * rendering a broken link. Safe to import from client components — falls back
+ * to the public gateway when no env var is set.
+ */
+export function ipfsToHttpUrl(uri: string | undefined | null): string | null {
+  if (!uri) return null;
+  if (uri.startsWith("ipfs://")) return `${PINATA_GATEWAY}/ipfs/${uri.slice(7)}`;
+  if (uri.startsWith("Qm") || uri.startsWith("bafy"))
+    return `${PINATA_GATEWAY}/ipfs/${uri}`;
+  if (uri.startsWith("http")) return uri;
+  return null;
+}
 
 async function fetchProposalMetadata(
   uri: string,
 ): Promise<ProposalMetadata | null> {
   try {
-    let url: string;
-    if (uri.startsWith("ipfs://")) {
-      url = `${PINATA_GATEWAY}/ipfs/${uri.slice(7)}`;
-    } else if (uri.startsWith("Qm") || uri.startsWith("bafy")) {
-      url = `${PINATA_GATEWAY}/ipfs/${uri}`;
-    } else if (uri.startsWith("http")) {
-      url = uri;
-    } else {
-      return null;
-    }
+    const url = ipfsToHttpUrl(uri);
+    if (!url) return null;
 
     const res = await fetch(url, { next: { revalidate: 300 } });
     if (!res.ok) return null;
