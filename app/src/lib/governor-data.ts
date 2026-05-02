@@ -14,20 +14,24 @@ import {
 
 // ── Types ──────────────────────────────────────────────────
 
+// Must match Solidity `ISyndicateGovernor.ProposalState` ordering.
+// GuardianReview was inserted at index 2 in PR #229 (guardian review lifecycle).
 export enum ProposalState {
   Draft = 0,
   Pending = 1,
-  Approved = 2,
-  Rejected = 3,
-  Expired = 4,
-  Executed = 5,
-  Settled = 6,
-  Cancelled = 7,
+  GuardianReview = 2,
+  Approved = 3,
+  Rejected = 4,
+  Expired = 5,
+  Executed = 6,
+  Settled = 7,
+  Cancelled = 8,
 }
 
 export const PROPOSAL_STATE_LABELS: Record<ProposalState, string> = {
   [ProposalState.Draft]: "Draft",
   [ProposalState.Pending]: "Pending",
+  [ProposalState.GuardianReview]: "Guardian Review",
   [ProposalState.Approved]: "Approved",
   [ProposalState.Rejected]: "Rejected",
   [ProposalState.Expired]: "Expired",
