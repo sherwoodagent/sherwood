@@ -52,14 +52,16 @@ These are also available in `cli/src/lib/addresses.ts` (resolved at runtime base
 
 | Contract | Address |
 |----------|---------|
-| SyndicateFactory | `0x4085EEa1E6d3D20E84D8Ae14964FAb8b899DA40a` |
-| SyndicateGovernor | `0x7B4a2f3480FE101f88b2e3547A1bCf3eaaDE46bc` |
-| BatchExecutorLib | `0xdE317B80E66c5E8872C63B0620E2CbB73b5Bcd49` |
-| SyndicateVaultImpl | `0x09005FEF3EF1879Af207C79416ae9d5059437bd4` |
+| SyndicateFactory | `0x7e7F8Ee0f451aA70be3dda66D9eeecbfc7FA48d3` |
+| SyndicateGovernor | `0x915Fc671F4b96420266200ec21Af8dD69Ec97C21` |
+| GuardianRegistry (stub, beta) | `0x121AaC2B96Ec365e457fcCc1C2ED5a6142064069` |
+| BatchExecutorLib | `0xbEDa41DD59828CBfEd50bd03E0833C7dCc279F5E` |
+| SyndicateVaultImpl | `0xB45419FACcd2173D9c8B2Ad845277f56d1e7ECba` |
 | USDC | `0xb88339CB7199b77E23DB6E890353E22632Ba630f` (6 decimals) |
-| HyperliquidPerpStrategy | `0x2E97621f49D5b8263E244daB25f177DF739e58a9` |
+| HyperliquidPerpStrategy | `0xa2B8Ad8695FdE05bf1DA4aBaef1608045A53Ba4E` |
+| HyperliquidGridStrategy | `0xdae81cDCfcB14c56fCeB788A147Fcd6CbEdfEeca` |
 
-HyperEVM has no Moonwell, Uniswap, Venice, Aerodrome, ENS, or ERC-8004 — the factory accepts `address(0)` for `ensRegistrar` and `agentRegistry`.
+HyperEVM has no Moonwell, Uniswap, Venice, Aerodrome, ENS, or ERC-8004 — the factory accepts `address(0)` for `ensRegistrar` and `agentRegistry`. Beta-mode deploy uses `MinimalGuardianRegistry` (no WOOD, no review/slashing) — full GuardianRegistry will replace it via owner-only `setGuardianRegistry()` once WOOD ships.
 
 ## EAS (Ethereum Attestation Service)
 
