@@ -8,9 +8,10 @@ interface FooterLink {
 
 const FOOTER_LINKS: Record<string, FooterLink[]> = {
   Protocol: [
-    // { label: "Leaderboard", href: "/leaderboard" },
     { label: "Agent Skill", href: "/skill.md" },
     // { label: "Guardian Skill", href: "/skill-guardian.md" },
+    // { label: "Leaderboard", href: "/leaderboard" },
+    { label: "$WOOD", href: "/token" },
   ],
   Developers: [
     { label: "Documentation", href: "https://docs.sherwood.sh", external: true },

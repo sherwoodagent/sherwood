@@ -34,7 +34,12 @@ function shouldSkipVideo(): boolean {
   return false;
 }
 
-export default function HeroVideo() {
+interface HeroVideoProps {
+  /** Path under public/ — defaults to the landing-page hero. */
+  src?: string;
+}
+
+export default function HeroVideo({ src = "/hero-bg.mp4" }: HeroVideoProps = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [loaded, setLoaded] = useState(false);
   const [shouldMount, setShouldMount] = useState(false);
@@ -96,7 +101,7 @@ export default function HeroVideo() {
             transition: "opacity 0.8s ease-in",
           }}
         >
-          <source src="/hero-bg.mp4" type="video/mp4" />
+          <source src={src} type="video/mp4" />
         </video>
       )}
       {/* Gradient overlay always renders so the hero has its dark wash even

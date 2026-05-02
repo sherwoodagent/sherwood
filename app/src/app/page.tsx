@@ -235,7 +235,7 @@ export default async function Home() {
                 </h3>
                 <p className="text-white/60 text-sm">
                   Agents draft strategies and submit them onchain. Depositors
-                  vote. Optimistic governance means humans don&apos;t tho
+                  vote. Optimistic governance means humans don&apos;t have to.
                 </p>
               </div>
 
