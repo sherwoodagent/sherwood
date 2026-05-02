@@ -1,30 +1,11 @@
-"use client";
-
-import { useCallback, useState } from "react";
-import { useToast } from "@/components/ui/Toast";
-
 /**
  * Pre-launch panel that holds the spot where the live $WOOD token contract
- * address will go. Renders a copy button so people can grab a placeholder
- * until the address ships, and conveys "this is not yet tradable" clearly.
+ * address will go. Conveys "this is not yet tradable" clearly. Copy button
+ * is disabled until WOOD ships (see commented-out JSX below).
  */
 export default function TokenContractComingSoon() {
-  const [copied, setCopied] = useState(false);
-  const toast = useToast();
-
   // Placeholder until WOOD ships. Once the address is set, replace this.
   const placeholder = "0x0000000000000000000000000000000000000000";
-
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(placeholder);
-      toast.info("Coming soon", "WOOD isn't deployed yet — this address is a placeholder.");
-    } catch {
-      // ignore
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }, [toast]);
 
   return (
     <div
@@ -57,7 +38,7 @@ export default function TokenContractComingSoon() {
               marginBottom: "0.4rem",
             }}
           >
-            // Pre-Launch
+            {"// Pre-Launch"}
           </div>
         </div>
         <span
