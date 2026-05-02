@@ -64,6 +64,8 @@ export class GridPortfolio {
       stats: emptyStats(),
       centerPrice: 0,
       atr: 0,
+      trend: 0,
+      lastTrendRefreshAt: 0,
     }));
 
     const state: GridPortfolioState = {
@@ -83,10 +85,10 @@ export class GridPortfolio {
     return this.state;
   }
 
-  /** Reset daily counters if UTC day boundary crossed. */
-  resetDailyStats(state: GridPortfolioState): boolean {
-    const now = Date.now();
-    const todayMidnight = new Date();
+  /** Reset daily counters if UTC day boundary crossed. `now` is injectable
+   *  so the backtester can drive resets off backtest time, not wall-clock. */
+  resetDailyStats(state: GridPortfolioState, now: number = Date.now()): boolean {
+    const todayMidnight = new Date(now);
     todayMidnight.setUTCHours(0, 0, 0, 0);
     const todayMs = todayMidnight.getTime();
 
@@ -102,22 +104,40 @@ export class GridPortfolio {
     return changed;
   }
 
-  /** Check if grid should be paused (pool dropped below threshold). */
-  checkPauseThreshold(state: GridPortfolioState, config: GridConfig): boolean {
+  /** Check if grid should be paused or resumed (pool equity dropped/recovered).
+   *  `prices` is required to mark open buys to market. Hysteresis: pause at
+   *  `pauseThresholdPct` drop, resume only when drop recovers below
+   *  `unpauseRecoveryPct`. Returns true iff state.paused was changed. */
+  checkPauseThreshold(
+    state: GridPortfolioState,
+    config: GridConfig,
+    prices: Record<string, number>,
+  ): boolean {
     const currentValue = state.grids.reduce((sum, g) => {
-      const openFillValue = g.openFills
-        .filter(f => !f.closed)
-        .reduce((s, f) => s + f.quantity * f.buyPrice, 0);
-      return sum + g.allocation + openFillValue;
+      const price = prices[g.token];
+      // quantity already leveraged at build time — see manager.simulateFills.
+      const unrealized = (price && price > 0)
+        ? g.openFills
+            .filter(f => !f.closed)
+            .reduce((s, f) => s + (price - f.buyPrice) * f.quantity, 0)
+        : 0;
+      return sum + g.allocation + unrealized;
     }, 0);
 
     const dropPct = 1 - (currentValue / state.totalAllocation);
 
-    if (dropPct >= config.pauseThresholdPct) {
+    if (!state.paused && dropPct >= config.pauseThresholdPct) {
       state.paused = true;
-      state.pauseReason = `Grid pool dropped ${(dropPct * 100).toFixed(1)}% (threshold: ${(config.pauseThresholdPct * 100).toFixed(0)}%)`;
+      state.pauseReason = `Grid pool dropped ${(dropPct * 100).toFixed(1)}% (pause threshold: ${(config.pauseThresholdPct * 100).toFixed(0)}%, resume when ≤ ${(config.unpauseRecoveryPct * 100).toFixed(0)}%)`;
       return true;
     }
+
+    if (state.paused && dropPct <= config.unpauseRecoveryPct) {
+      state.paused = false;
+      state.pauseReason = '';
+      return true;
+    }
+
     return false;
   }
 

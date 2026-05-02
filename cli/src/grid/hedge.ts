@@ -56,7 +56,7 @@ export interface HedgeState {
   lastDailyReset: number;
 }
 
-interface OpenFillExposure {
+export interface OpenFillExposure {
   token: string;
   totalQuantity: number;
   totalNotional: number;
@@ -76,7 +76,7 @@ export interface HedgeTickResult {
 export class GridHedgeManager {
   private state: HedgeState | null = null;
 
-  async load(): Promise<HedgeState> {
+  async load(now: number = Date.now()): Promise<HedgeState> {
     if (this.state) return this.state;
     try {
       const raw = await readFile(HEDGE_STATE_PATH, 'utf-8');
@@ -86,16 +86,16 @@ export class GridHedgeManager {
         positions: [],
         totalRealizedPnl: 0,
         todayRealizedPnl: 0,
-        lastDailyReset: Date.now(),
+        lastDailyReset: now,
       };
     }
 
-    // Reset daily PnL at UTC midnight
-    const todayMidnight = new Date();
+    // Reset daily PnL at UTC midnight (uses `now` so backtester can drive it)
+    const todayMidnight = new Date(now);
     todayMidnight.setUTCHours(0, 0, 0, 0);
     if (this.state.lastDailyReset < todayMidnight.getTime()) {
       this.state.todayRealizedPnl = 0;
-      this.state.lastDailyReset = Date.now();
+      this.state.lastDailyReset = now;
     }
 
     return this.state;
@@ -119,8 +119,9 @@ export class GridHedgeManager {
   async tick(
     openFills: OpenFillExposure[],
     prices: Record<string, number>,
+    now: number = Date.now(),
   ): Promise<HedgeTickResult> {
-    const state = await this.load();
+    const state = await this.load(now);
     let adjustments = 0;
     let unrealizedPnl = 0;
 

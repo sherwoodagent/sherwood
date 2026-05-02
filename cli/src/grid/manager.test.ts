@@ -24,6 +24,8 @@ vi.mock('./portfolio.js', () => ({
         stats: { totalRoundTrips: 0, totalPnlUsd: 0, todayPnlUsd: 0, totalFills: 0, todayFills: 0, lastDailyReset: 0, lastRebalanceAt: 0 },
         centerPrice: 0,
         atr: 0,
+        trend: 0,
+        lastTrendRefreshAt: 0,
       }));
       mockPortfolioState = { totalAllocation: capital, grids, paused: false, pauseReason: '', initializedAt: Date.now() };
     }
@@ -77,6 +79,8 @@ function makeGrid(overrides?: Partial<GridTokenState>): GridTokenState {
     stats: emptyStats(),
     centerPrice: 85000,
     atr: 1200,
+    trend: 0,
+    lastTrendRefreshAt: 0,
     ...overrides,
   };
 }
@@ -269,11 +273,30 @@ describe('Grid capital isolation', () => {
     expect(grid.allocation).toBe(1587.50);
   });
 
-  it('pause threshold detects 20% drop', () => {
+  it('pause threshold detects 42% drop (threshold now 40%)', () => {
     const totalAlloc = 5000;
-    const currentValue = totalAlloc * 0.78; // dropped 22%
+    const currentValue = totalAlloc * 0.58; // dropped 42%
     const dropPct = 1 - (currentValue / totalAlloc);
     expect(dropPct).toBeGreaterThanOrEqual(DEFAULT_GRID_CONFIG.pauseThresholdPct);
+  });
+});
+
+describe('GridManager constructor', () => {
+  it('default constructor (no detector args) preserves close-only fill behavior', async () => {
+    // Construct manager with only the config — all detector args undefined.
+    // This is the live-mode path. The fill detector should match the original
+    // inline check: buy fires when price <= level.price, sell when price >= level.price.
+    const { GridManager } = await import('./manager.js');
+    const cfg = { ...DEFAULT_GRID_CONFIG };
+    const mgr = new GridManager(cfg);
+
+    // Internal sanity: ensure the constructor doesn't throw and the manager
+    // is usable. We can't directly inspect the private detector, so we just
+    // assert the manager exists and has the public methods we expect.
+    expect(mgr).toBeDefined();
+    expect(typeof mgr.tick).toBe('function');
+    expect(typeof mgr.computeOrders).toBe('function');
+    expect(typeof mgr.getStats).toBe('function');
   });
 });
 

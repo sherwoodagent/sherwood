@@ -5,7 +5,7 @@ import {BaseStrategy} from "./BaseStrategy.sol";
 import {IStrategy} from "../interfaces/IStrategy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {L1Write, TimeInForce, NO_CLOID} from "../hyperliquid/L1Write.sol";
+import {L1Write, TimeInForce, NO_CLOID, FinalizeVariant} from "../hyperliquid/L1Write.sol";
 import {L1Read, Position, SpotBalance, AccountMarginSummary} from "../hyperliquid/L1Read.sol";
 
 /**
@@ -24,6 +24,14 @@ import {L1Read, Position, SpotBalance, AccountMarginSummary} from "../hyperliqui
  *   Settlement: _settle() force-closes all positions on tracked assets +
  *   requests async USD transfer back to spot. sweepToVault() pushes USDC
  *   back to the vault when it arrives.
+ *
+ *   HyperCore note: contract addresses (unlike EOAs) need explicit
+ *   registration before bridged-token transfers auto-credit HC spot.
+ *   `_execute()` self-heals on first run with safe defaults for ERC-1167
+ *   clones (token = USDC, variant = FirstStorageSlot). For non-default
+ *   deployments (plain CREATE, UUPS proxy, non-USDC tokens), the proposer
+ *   should call `finalizeForHyperCore(...)` once before opening the
+ *   proposal that triggers `_execute()`, to override the defaults.
  */
 contract HyperliquidGridStrategy is BaseStrategy {
     using SafeERC20 for IERC20;
@@ -35,6 +43,7 @@ contract HyperliquidGridStrategy is BaseStrategy {
     event Settled();
     event FundsSwept(uint256 amount);
     event LeverageUpdated(uint32 asset, uint32 leverage);
+    event HyperCoreFinalized(uint64 token, FinalizeVariant variant, uint64 createNonce);
 
     // ── Errors ──
     error InvalidAmount();
@@ -69,6 +78,11 @@ contract HyperliquidGridStrategy is BaseStrategy {
     mapping(uint32 => bool) public isAssetWhitelisted;
     bool public settled;
     uint256 public cumulativeSwept;
+    /// @notice True once this contract has been registered with HyperCore so
+    ///         bridged-token transfers auto-credit HC spot. Set by either the
+    ///         explicit `finalizeForHyperCore` proposer call, or the implicit
+    ///         self-heal in `_execute()` on first run.
+    bool public hyperCoreFinalized;
 
     struct GridOrder {
         uint32 assetIndex;
@@ -114,6 +128,32 @@ contract HyperliquidGridStrategy is BaseStrategy {
         }
     }
 
+    /**
+     * @notice Override the default HyperCore finalization with non-default
+     *         variant/token/createNonce. **Optional** — `_execute()` will
+     *         self-heal on first run using safe defaults
+     *         (`token=0`, `FirstStorageSlot`, `createNonce=0`) suitable for
+     *         the canonical SyndicateFactory ERC-1167 clone case.
+     *
+     *         Call this BEFORE the proposal that triggers `_execute()` only
+     *         if the deployment method differs from the default (e.g. plain
+     *         CREATE or a custom storage layout) or if a non-USDC token
+     *         needs to be finalized.
+     *
+     * @param token        HyperCore token index (USDC = 0).
+     * @param variant      Deployment-method variant:
+     *                       Create (1)            — contract deployed via plain CREATE
+     *                       FirstStorageSlot (2)  — typical ERC-1167 clone (default)
+     *                       CustomStorageSlot (3) — UUPS / custom proxy
+     * @param createNonce  Deployer nonce when the contract was created
+     *                     (only consulted for the Create variant; pass 0 otherwise).
+     */
+    function finalizeForHyperCore(uint64 token, FinalizeVariant variant, uint64 createNonce) external onlyProposer {
+        L1Write.sendFinalizeEvmContract(token, variant, createNonce);
+        hyperCoreFinalized = true;
+        emit HyperCoreFinalized(token, variant, createNonce);
+    }
+
     function _execute() internal override {
         uint256 amountIn = depositAmount;
         if (amountIn == 0) {
@@ -121,6 +161,17 @@ contract HyperliquidGridStrategy is BaseStrategy {
         }
         if (amountIn == 0) revert InvalidAmount();
         if (amountIn > type(uint64).max) revert DepositAmountTooLarge();
+
+        // Self-heal: if the proposer didn't call finalizeForHyperCore manually
+        // with a non-default variant, register this contract with HyperCore
+        // using safe defaults (USDC = token 0, FirstStorageSlot for ERC-1167
+        // clones). Without this, the ERC20 transfer below lands on HyperEVM
+        // only and `sendUsdClassTransfer` runs against zero HC spot balance.
+        if (!hyperCoreFinalized) {
+            L1Write.sendFinalizeEvmContract(0, FinalizeVariant.FirstStorageSlot, 0);
+            hyperCoreFinalized = true;
+            emit HyperCoreFinalized(0, FinalizeVariant.FirstStorageSlot, 0);
+        }
 
         _pullFromVault(address(asset), amountIn);
 
