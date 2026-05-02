@@ -4,8 +4,10 @@ import { useState } from "react";
 import { useAccount, useReadContract } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { formatUnits, type Address } from "viem";
-import { ERC20_ABI, SYNDICATE_VAULT_ABI } from "@/lib/contracts";
+import { ERC20_ABI, SYNDICATE_VAULT_ABI, ISTRATEGY_ABI } from "@/lib/contracts";
 import DepositModal from "./DepositModal";
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 
 interface DepositButtonProps {
   vault: Address;
@@ -59,6 +61,33 @@ export default function DepositButton({
       ? liveRedemptionsLocked
       : initialRedemptionsLocked;
 
+  // Live NAV gate — when a strategy proposal is active, the vault now
+  // accepts deposits if the bound adapter reports `valid=true` from
+  // positionValue() (per CLAUDE.md "Live NAV via strategy adapter").
+  // We must mirror that gate in the UI so previewDeposit pricing matches
+  // what the contract will actually mint.
+  const { data: activeAdapter } = useReadContract({
+    address: vault,
+    abi: SYNDICATE_VAULT_ABI,
+    functionName: "activeStrategyAdapter",
+    chainId,
+    query: { enabled: redemptionsLocked },
+  });
+  const adapterAddress =
+    typeof activeAdapter === "string" && activeAdapter !== ZERO_ADDRESS
+      ? (activeAdapter as Address)
+      : undefined;
+  const { data: positionData } = useReadContract({
+    address: adapterAddress,
+    abi: ISTRATEGY_ABI,
+    functionName: "positionValue",
+    chainId,
+    query: { enabled: !!adapterAddress, refetchInterval: 30_000 },
+  });
+  const liveNAVAvailable = Array.isArray(positionData)
+    ? Boolean(positionData[1])
+    : false;
+
   // Pre-flight wallet balance — disable the button if the user holds none of
   // the deposit asset, with a clear inline reason. Avoids opening the modal
   // just to discover "insufficient funds".
@@ -102,27 +131,28 @@ export default function DepositButton({
     );
   }
 
-  // Active strategy — must block deposits.
+  // Active strategy WITHOUT live NAV — must block deposits.
   //
-  // ERC-4626 share math during an active strategy is broken from the
-  // depositor's perspective: vault.totalAssets() is drained (capital sits
-  // in the strategy contract) but vault.totalSupply() still reflects all
-  // outstanding shares. previewDeposit() therefore prices new shares at
-  // a near-zero asset/supply ratio and mints far more than the depositor
-  // is paying for (e.g. 1 USDC → 150 shares observed onchain).
+  // When a strategy adapter is bound and reports `valid=true` from
+  // positionValue(), the vault knows the deployed capital's current
+  // worth and prices shares correctly via totalAssets() = float +
+  // adapter.positionValue(). Both the vault's deposit() and the
+  // previewDeposit() preview the user sees stay sound.
   //
-  // The vault contract should also revert deposit() while
-  // redemptionsLocked is true (per CLAUDE.md), but we guard at the UI
-  // level too so users never see the inflated previewDeposit number or
-  // sign a tx that's going to either revert or mint inflated shares.
-  if (redemptionsLocked) {
+  // Without that signal (legacy templates, perp / off-chain strategies,
+  // or a clone that pre-dates positionValue()) totalAssets() is just
+  // the float — drained near zero by execute() — while totalSupply
+  // still reflects all outstanding shares. previewDeposit then mints
+  // far more shares than the depositor is paying for, and the vault
+  // reverts at submit time. Keep the UI guard for that case.
+  if (redemptionsLocked && !liveNAVAvailable) {
     return (
       <div className="btn-disabled-wrap">
         <button
           className="btn-action"
           disabled
           style={{ opacity: 0.4, cursor: "not-allowed" }}
-          title="Deposits are blocked while a strategy is executing"
+          title="Deposits are blocked while a strategy without live NAV is executing"
         >
           [ DEPOSITS LOCKED ]
         </button>

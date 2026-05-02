@@ -1165,7 +1165,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
       }
 
       // Lazy import governor to avoid pulling it in for --write-calls path
-      const { propose } = await import("../lib/governor.js");
+      const { propose, bindProposalAdapter } = await import("../lib/governor.js");
       const { pinJSON } = await import("../lib/ipfs.js");
       const { parseDuration } = await import("../lib/governor.js");
 
@@ -1200,11 +1200,13 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
       }
 
       const proposeSpinner = ora("Submitting proposal...").start();
+      let createdProposalId: bigint | null = null;
       try {
         const { hash, proposalId } = await propose(
           vault, metadataURI, performanceFeeBps, strategyDuration,
           executeCalls, settleCalls,
         );
+        createdProposalId = proposalId;
         proposeSpinner.succeed(`Proposal #${proposalId} created`);
         console.log(`Proposal #${proposalId}`);
         console.log(chalk.dim(`  Tx: ${getExplorerUrl(hash)}`));
@@ -1213,6 +1215,26 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
         proposeSpinner.fail("Proposal failed");
         console.error(chalk.red(formatContractError(err)));
         process.exit(1);
+      }
+
+      // Bind the strategy clone to the proposal so the vault can read
+      // live NAV during execution — unlocks deposits/withdraws while the
+      // strategy is active. MUST happen now (Pending state); the bind
+      // window closes the moment a co-proposer approves or the vote
+      // passes. Bind is best-effort: if the strategy doesn't implement
+      // positionValue (legacy clones, perp-only), the vault's smoke test
+      // rejects it and we fall back to queue-only redemptions.
+      if (createdProposalId !== null) {
+        const bindSpinner = ora("Binding adapter for live NAV...").start();
+        try {
+          const bindHash = await bindProposalAdapter(createdProposalId, clone);
+          bindSpinner.succeed("Adapter bound — live deposits/withdraws enabled during strategy");
+          console.log(chalk.dim(`  Tx: ${getExplorerUrl(bindHash)}`));
+        } catch (err) {
+          bindSpinner.warn(
+            `Adapter bind skipped (${formatContractError(err)}) — strategy will use queue-only redemptions`,
+          );
+        }
       }
 
       if (templateKey === "venice-inference") {
