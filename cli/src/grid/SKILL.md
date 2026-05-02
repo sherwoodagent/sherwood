@@ -42,8 +42,8 @@ Authoritative values live in `cli/src/grid/config.ts:DEFAULT_GRID_CONFIG`.
 | tokens               | `bitcoin`, `ethereum`, `solana`             | CoinGecko IDs                               |
 | allocationPct        | 0.50                                        | 50% of total portfolio carved out for grid  |
 | leverage             | 5                                           | was 4 — +25% profit per round-trip          |
-| levelsPerSide        | 15                                          | 15 buy levels below + 15 sell levels above  |
-| atrMultiplier        | 2                                           | grid range = price ± (2 × ATR)              |
+| levelsPerSide        | 12                                          | disjoint-window sweep winner — lowest MaxDD (18% vs 21-22% at lvls=10) |
+| atrMultiplier        | 3                                           | grid range = price ± (3 × ATR); ATR×3 dominates ATR×2 across all tested windows (lower fee burn) |
 | atrPeriod            | 14                                          |                                             |
 | rebalanceDriftPct    | 0.40                                        | was 0.55 — rebuild faster when price drifts |
 | fullRebuildIntervalMs| 12 h                                        | full grid rebuild cadence                   |

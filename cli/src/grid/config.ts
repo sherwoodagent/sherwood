@@ -145,8 +145,8 @@ export const DEFAULT_GRID_CONFIG: GridConfig = {
   tokens: ['bitcoin', 'ethereum', 'solana'],
   allocationPct: 0.50,
   leverage: 5,                                  // was 4 — +25% profit per RT
-  levelsPerSide: 15,
-  atrMultiplier: 2,
+  levelsPerSide: 12,                            // disjoint-window winner — lowest MaxDD (18% vs 21-22%) at modest avg PnL trade-off
+  atrMultiplier: 3,                             // ATR×3 dominates ATR×2 across all tested windows (lower fee burn)
   atrPeriod: 14,
   rebalanceDriftPct: 0.40,                      // was 0.55 — rebalance faster, keep levels near price
   fullRebuildIntervalMs: 12 * 60 * 60 * 1000,   // 12h
