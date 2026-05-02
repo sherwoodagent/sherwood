@@ -50,6 +50,8 @@ Authoritative values live in `cli/src/grid/config.ts:DEFAULT_GRID_CONFIG`.
 | tokenSplit           | BTC 0.45 / ETH 0.30 / SOL 0.25              | must sum to 1.0                             |
 | minProfitPerFillUsd  | 0.50                                        | fee-floor for skipping unprofitable fills   |
 | pauseThresholdPct    | 0.20                                        | pause grid if pool drops 20% from start     |
+| downtrendBlockPct    | 0.10                                        | trend < −10% over 56h → block new buys + asymmetric grid (1 buy / N sells) |
+| stopLossPct          | 0.10                                        | force-close any open buy 10% below entry; empirical Nov–May: 10% saves strategy at −4%, 30% lets liquidations through at −37% |
 
 ## Capital Accounting
 
@@ -86,6 +88,20 @@ Each 1-min cycle (`grid/loop.ts`):
   cost for tighter level spacing around current price.
 - `tokenSplit` is rebalance-on-rebuild, not continuous — drift inside a
   cycle does not get rebalanced until the next full rebuild.
+- **Per-fill stop-loss (issue #269).** Each open buy is force-closed when
+  current price drops `stopLossPct` (default 10%) below its entry. Without
+  the stop-loss, the grid can accumulate enough underwater exposure across
+  rebuilds in a sustained crash to wipe the cross-margin pool even at low
+  leverage. Empirical Nov–May: `0.10` ends a worst-case window at −4%;
+  `0.30` lets liquidations through at −37%. Set `stopLossPct = 0` to
+  disable (not recommended in live mode).
+- **Asymmetric grid in confirmed downtrend (issue #269).** When `trend <
+  −downtrendBlockPct` at grid-build time, only 1 buy level is placed (just
+  below current price, to allow re-entry on chop reversal) while the full
+  N sell levels are placed so existing inventory can still exit on rallies.
+  Trend is refreshed hourly from recent 4h candles, so the asymmetry can
+  re-engage between scheduled 12h rebuilds. Set `downtrendBlockPct = 0` to
+  disable both the buy block and the asymmetry.
 
 ## Live Deployment (Hyperliquid)
 

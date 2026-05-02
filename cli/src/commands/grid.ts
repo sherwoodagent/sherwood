@@ -292,7 +292,7 @@ export function registerGridCommand(program: Command): void {
     .option('--pause-threshold <n>', 'Pool drop fraction that triggers pause (default 0.40, may be too lenient post leverage-fix)')
     .option('--unpause-recovery <n>', 'Pool drop fraction below which paused grid resumes (default 0.10)')
     .option('--token-split <pairs>', 'Comma-separated token=weight pairs (must sum to 1.0). Default: equal-weight or 0.45/0.30/0.25 for BTC/ETH/SOL.')
-    .option('--stop-loss <n>', 'Per-fill stop-loss fraction (default 0.30 = 30%, 0 disables)')
+    .option('--stop-loss <n>', 'Per-fill stop-loss fraction (default 0.10 = 10%, 0 disables)')
     .action(async (opts) => {
       const now = Date.now();
       const toMs = opts.to ? Date.parse(opts.to) : now;

@@ -315,6 +315,42 @@ describe('runBacktest liquidation', () => {
     const worstCaseFullLoss = -result.capital.initialUsd;
     expect(result.capital.pnlUsd).toBeGreaterThan(worstCaseFullLoss);
   });
+
+  // Issue #269 acceptance criterion #4: with the production stop-loss in
+  // place, a synthetic sustained downtrend at 1× leverage must NOT
+  // liquidate. Pins both `leverage` and `stopLossPct` to the production
+  // defaults so a future regression in either gets caught here.
+  it('sustained downtrend at 1× leverage with production stopLossPct does NOT liquidate (#269)', async () => {
+    const fromMs = 0;
+    const toMs = 400 * 3600_000;
+    // Same gentle 40% drop over 400h as the test above — gives the stop-loss
+    // many crossings to fire on without the speed-of-crash being the variable.
+    const priceAt = (t: number) => {
+      const progress = (t - fromMs) / (toMs - fromMs);
+      const mid = 60000 - progress * 24000;
+      return { o: mid + 5, h: mid + 10, l: mid - 10, c: mid };
+    };
+    const series = buildSyntheticSeries({ fromMs, toMs, priceAt, fourHourAtr: 300 });
+    const cfg: GridConfig = {
+      ...DEFAULT_GRID_CONFIG,
+      tokens: ['bitcoin'],
+      tokenSplit: { bitcoin: 1.0 },
+      minProfitPerFillUsd: 0,
+      leverage: 1,
+      stopLossPct: DEFAULT_GRID_CONFIG.stopLossPct,  // 0.10 production default
+    };
+    const loader = makeFakeLoader({ bitcoin: series });
+    const result = await runBacktest({
+      fromMs, toMs, capital: 5000, config: cfg, loader, outPath: '', feeBps: 0, hedge: false,
+    });
+    // Pin to production default — if someone changes it, this test should
+    // re-run under the new value and either pass or surface the regression.
+    expect(cfg.stopLossPct).toBe(0.10);
+    expect(cfg.leverage).toBe(1);
+    // Acceptance: no liquidation events, run did not halt.
+    expect(result.liquidations.events).toEqual([]);
+    expect(result.liquidations.haltedAt).toBeNull();
+  });
 });
 
 describe('runBacktest hedge', () => {

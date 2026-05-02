@@ -134,8 +134,9 @@ export interface GridConfig {
   downtrendBlockPct: number;
   /** Force-close any open buy if currentPrice drops this fraction below
    *  buyPrice. Per-position stop-loss: limits how much any single fill can
-   *  contribute to the cross-margin pool's drawdown. Default 0.30 (30%
-   *  adverse from entry). 0 = disabled. */
+   *  contribute to the cross-margin pool's drawdown. Default 0.10 (10%
+   *  adverse from entry — empirical Nov–May: 10% saves the strategy at -4%,
+   *  30% lets liquidations through at -37%). 0 = disabled. */
   stopLossPct: number;
 }
 
