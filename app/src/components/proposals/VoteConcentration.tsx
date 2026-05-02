@@ -37,14 +37,31 @@ interface VoterRow {
   share: number; // 0..1
 }
 
-// Block count is chain-agnostic; the calendar window varies (Base ≈ 7d,
-// HyperEVM is shorter). Bounded for predictable RPC cost; older votes
-// aren't shown.
-const BLOCK_WINDOW = 60_000n;
-// Max blocks per getLogs request — public RPCs (Base, etc.) reject wider ranges.
-const CHUNK_SIZE = 2_000n;
-// Parallel requests per batch — keeps RPC-friendly while cutting wall-clock time.
-const CONCURRENCY = 5;
+// Per-chain RPC limits. HyperEVM's public RPC enforces a much tighter
+// `getLogs` block range than Base, so a one-size-fits-all 60k window
+// timed out / 429'd reliably. Default profile is the conservative one
+// for unknown chains.
+interface RpcLimits {
+  window: bigint;
+  chunk: bigint;
+  concurrency: number;
+}
+const RPC_LIMITS: Record<number, RpcLimits> = {
+  8453: { window: 60_000n, chunk: 2_000n, concurrency: 5 }, // Base
+  84532: { window: 60_000n, chunk: 2_000n, concurrency: 5 }, // Base Sepolia
+  999: { window: 5_000n, chunk: 500n, concurrency: 3 }, // HyperEVM
+};
+const DEFAULT_LIMITS: RpcLimits = { window: 10_000n, chunk: 1_000n, concurrency: 3 };
+
+// One-shot retry for transient 429 / network blips.
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch {
+    await new Promise((r) => setTimeout(r, 250));
+    return await fn();
+  }
+}
 
 export default function VoteConcentration({
   governorAddress,
@@ -54,9 +71,9 @@ export default function VoteConcentration({
   addressNames,
 }: VoteConcentrationProps) {
   const client = usePublicClient({ chainId });
+  // `null` = still loading or unavailable. We hide the panel in either case,
+  // so a single nullable state keeps the render simple.
   const [rows, setRows] = useState<VoterRow[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [errored, setErrored] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,33 +81,35 @@ export default function VoteConcentration({
 
     (async () => {
       try {
-        setLoading(true);
-        setErrored(false);
+        const limits = RPC_LIMITS[chainId] ?? DEFAULT_LIMITS;
         const head = await client.getBlockNumber();
-        const windowStart = head > BLOCK_WINDOW ? head - BLOCK_WINDOW : 0n;
+        const windowStart = head > limits.window ? head - limits.window : 0n;
 
         // Build chunk ranges to stay within public RPC block-range limits.
         const ranges: { from: bigint; to: bigint }[] = [];
-        for (let from = windowStart; from <= head; from += CHUNK_SIZE + 1n) {
-          const to = from + CHUNK_SIZE > head ? head : from + CHUNK_SIZE;
+        for (let from = windowStart; from <= head; from += limits.chunk + 1n) {
+          const to = from + limits.chunk > head ? head : from + limits.chunk;
           ranges.push({ from, to });
         }
 
-        // Fetch in parallel batches (CONCURRENCY at a time), aborting on unmount.
+        // Fetch in parallel batches, aborting on unmount. Each request gets
+        // one retry — single transient 429s shouldn't kill the panel.
         type LogEntry = Awaited<ReturnType<typeof client.getLogs<typeof VOTE_CAST_EVENT>>>[number];
         const logs: LogEntry[] = [];
-        for (let i = 0; i < ranges.length; i += CONCURRENCY) {
+        for (let i = 0; i < ranges.length; i += limits.concurrency) {
           if (cancelled) return;
-          const batch = ranges.slice(i, i + CONCURRENCY);
+          const batch = ranges.slice(i, i + limits.concurrency);
           const results = await Promise.all(
             batch.map((r) =>
-              client.getLogs({
-                address: governorAddress,
-                event: VOTE_CAST_EVENT,
-                args: { proposalId },
-                fromBlock: r.from,
-                toBlock: r.to,
-              }),
+              withRetry(() =>
+                client.getLogs({
+                  address: governorAddress,
+                  event: VOTE_CAST_EVENT,
+                  args: { proposalId },
+                  fromBlock: r.from,
+                  toBlock: r.to,
+                }),
+              ),
             ),
           );
           for (const chunk of results) logs.push(...chunk);
@@ -124,22 +143,25 @@ export default function VoteConcentration({
           .sort((a, b) => Number(b.weight - a.weight))
           .slice(0, 5);
 
-        if (!cancelled) {
-          setRows(list);
-          setLoading(false);
-        }
+        if (!cancelled) setRows(list);
       } catch {
-        if (!cancelled) {
-          setErrored(true);
-          setLoading(false);
-        }
+        // Hide the panel on RPC failure (chains with tight log windows,
+        // 429s after retry, etc). The vote bar above already shows the
+        // aggregate For/Against — a stale "unavailable" widget is noise.
+        if (!cancelled) setRows([]);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [client, governorAddress, proposalId]);
+  }, [client, governorAddress, proposalId, chainId]);
+
+  // Hide the panel entirely when we have nothing useful to show. The card
+  // already surfaces aggregate For/Against in the vote bar — a failed or
+  // empty top-voters widget is pure visual noise. (Skip-render also covers
+  // chains whose RPC can't satisfy getLogs at all.)
+  if (!rows || rows.length === 0) return null;
 
   return (
     <details className="exec-preview">
@@ -147,18 +169,9 @@ export default function VoteConcentration({
         <span className="exec-preview__label">
           <Term k="veto-threshold">Vote concentration</Term>
         </span>
-        <span className="exec-preview__count">
-          {loading
-            ? "loading…"
-            : errored
-              ? "unavailable"
-              : rows && rows.length > 0
-                ? `top ${rows.length}`
-                : "no votes yet"}
-        </span>
+        <span className="exec-preview__count">{`top ${rows.length}`}</span>
       </summary>
-      {!loading && !errored && rows && rows.length > 0 && (
-        <div className="exec-preview__body">
+      <div className="exec-preview__body">
           <div
             style={{
               fontSize: 11,
@@ -216,18 +229,7 @@ export default function VoteConcentration({
               </div>
             );
           })}
-        </div>
-      )}
-      {!loading && errored && (
-        <div className="exec-preview__empty">
-          Could not read VoteCast logs (RPC error or block-range limit).
-        </div>
-      )}
-      {!loading && !errored && rows && rows.length === 0 && (
-        <div className="exec-preview__empty">
-          No votes cast yet — or the proposal predates the log scan window.
-        </div>
-      )}
+      </div>
     </details>
   );
 }

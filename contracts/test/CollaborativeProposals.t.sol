@@ -228,7 +228,8 @@ contract CollaborativeProposalsTest is Test {
         usdc.mint(address(vault), 10_000e6);
         uint256 leadBalBefore = usdc.balanceOf(leadAgent);
 
-        // Proposer settles early
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(leadAgent);
         governor.settleProposal(proposalId);
 
@@ -364,7 +365,8 @@ contract CollaborativeProposalsTest is Test {
         uint256 co1BalBefore = usdc.balanceOf(coAgent1);
         uint256 co2BalBefore = usdc.balanceOf(coAgent2);
 
-        // Proposer settles early
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(leadAgent);
         governor.settleProposal(proposalId);
 
@@ -382,6 +384,8 @@ contract CollaborativeProposalsTest is Test {
         usdc.mint(address(vault), 10_000e6);
         uint256 ownerBalBefore = usdc.balanceOf(owner);
 
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(leadAgent);
         governor.settleProposal(proposalId);
 
@@ -394,6 +398,8 @@ contract CollaborativeProposalsTest is Test {
         uint256 leadBalBefore = usdc.balanceOf(leadAgent);
         uint256 co1BalBefore = usdc.balanceOf(coAgent1);
 
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(leadAgent);
         governor.settleProposal(proposalId);
 
@@ -432,6 +438,8 @@ contract CollaborativeProposalsTest is Test {
         uint256 co1BalBefore = usdc.balanceOf(coAgent1);
         uint256 co2BalBefore = usdc.balanceOf(coAgent2);
 
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(leadAgent);
         governor.settleProposal(proposalId);
 
@@ -501,6 +509,8 @@ contract CollaborativeProposalsTest is Test {
 
         uint256 leadBefore = usdc.balanceOf(leadAgent);
         uint256 co1Before = usdc.balanceOf(coAgent1);
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(leadAgent);
         governor.settleProposal(proposalId);
 
@@ -528,6 +538,8 @@ contract CollaborativeProposalsTest is Test {
         uint256 co1BalBefore = usdc.balanceOf(coAgent1);
         uint256 co2BalBefore = usdc.balanceOf(coAgent2);
 
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
         vm.prank(leadAgent);
         governor.settleProposal(proposalId);
 

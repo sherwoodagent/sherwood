@@ -250,7 +250,10 @@ contract VaultSolvencyHandler is Test {
             usdc.transfer(sink, toBurn);
         }
 
-        // Settle as proposer (anytime). MUST NOT revert — a settle revert
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
+
+        // Settle as proposer. MUST NOT revert — a settle revert
         // is exactly the bug class INV-15 hunts (fee-distribution math
         // exploding on a realized loss, share-accounting drift, etc.).
         // Reraise with the underlying selector so the fuzzer surfaces a

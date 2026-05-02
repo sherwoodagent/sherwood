@@ -123,7 +123,7 @@ export default async function Home() {
           </article>
 
           {/* ── Live Stats ────────────────────────────────────── */}
-          {/* {syndicates.length > 0 && (() => {
+          {syndicates.length > 0 && (() => {
             const stats = computeProtocolStats(syndicates);
             return (
               <div
@@ -147,7 +147,7 @@ export default async function Home() {
                 </div>
               </div>
             );
-          })()} */}
+          })()}
 
           {/* ── The Problem ────────────────────────────────────── */}
           <section className="py-32 border-t border-white/15 relative">
@@ -386,7 +386,7 @@ export default async function Home() {
           <StrategyBetaShowcase />
 
           {/* ── Section 03: Live Syndicates ──────────────────── */}
-          {/* <section id="syndicates" className="py-32 border-t border-white/15 relative">
+          <section id="syndicates" className="py-32 border-t border-white/15 relative">
             <div className="section-header">
               <span className="font-[family-name:var(--font-plus-jakarta)] text-[var(--color-accent)] text-xs">
                 {"//"}
@@ -468,7 +468,7 @@ export default async function Home() {
                 View Leaderboard &rarr;
               </Link>
             </div>
-          </section> */}
+          </section>
 
           {/* ── Security ─────────────────────────────────────── */}
           <section className="py-20 border-t border-white/15 relative">

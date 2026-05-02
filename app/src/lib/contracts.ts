@@ -180,7 +180,7 @@ const ROBINHOOD_TESTNET_ADDRESSES: ChainAddresses = {
 };
 
 const HYPEREVM_ADDRESSES: ChainAddresses = {
-  factory: "0x4085EEa1E6d3D20E84D8Ae14964FAb8b899DA40a",
+  factory: "0x7e7F8Ee0f451aA70be3dda66D9eeecbfc7FA48d3",
   usdc: "0xb88339CB7199b77E23DB6E890353E22632Ba630f",
   l2Registry: ZERO,
   identityRegistry: ZERO,
@@ -490,6 +490,15 @@ export const SYNDICATE_VAULT_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "bool" }],
+  },
+  // Live NAV — set by governor.bindProposalAdapter while a strategy
+  // proposal is active. address(0) = no live NAV (queue-only path).
+  {
+    name: "activeStrategyAdapter",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
   },
   {
     name: "managementFeeBps",

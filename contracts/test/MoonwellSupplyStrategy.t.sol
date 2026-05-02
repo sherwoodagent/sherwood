@@ -452,4 +452,60 @@ contract MoonwellSupplyStrategyTest is Test {
         vm.prank(vault);
         strategy.execute();
     }
+
+    // ==================== ON-LIVE-DEPOSIT ====================
+
+    /// @notice The vault pushes new capital to the strategy mid-position;
+    ///         `onLiveDeposit` mints additional mTokens against it so the
+    ///         deposit starts earning yield immediately.
+    function test_onLiveDeposit_mintsAdditionalMTokens() public {
+        _executeStrategy();
+
+        uint256 mBalBefore = mUsdc.balanceOf(address(strategy));
+        assertEq(mBalBefore, SUPPLY_AMOUNT, "pre-condition: 1:1 mint on execute");
+
+        // Push model: vault transfers underlying to the strategy first, then
+        // calls the hook (mirroring `SyndicateVault._deposit`).
+        uint256 topUp = 25_000e6;
+        vm.prank(vault);
+        usdc.transfer(address(strategy), topUp);
+
+        vm.prank(vault);
+        strategy.onLiveDeposit(topUp);
+
+        uint256 mBalAfter = mUsdc.balanceOf(address(strategy));
+        assertEq(mBalAfter, mBalBefore + topUp, "additional mTokens minted at 1:1 rate");
+        // Strategy spent the pushed underlying — no leftover float.
+        assertEq(usdc.balanceOf(address(strategy)), 0, "no idle underlying after mint");
+    }
+
+    function test_onLiveDeposit_onlyVault() public {
+        _executeStrategy();
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert(BaseStrategy.NotVault.selector);
+        strategy.onLiveDeposit(1e6);
+    }
+
+    /// @notice `onLiveDeposit` is a no-op outside the `Executed` state so
+    ///         late-arriving forwards (e.g. settle race) cannot mint.
+    function test_onLiveDeposit_noopBeforeExecute() public {
+        // Pre-execute state. Push some assets and call the hook — strategy
+        // should leave the float untouched (no mint, no revert).
+        vm.prank(vault);
+        usdc.transfer(address(strategy), 1_000e6);
+
+        vm.prank(vault);
+        strategy.onLiveDeposit(1_000e6);
+
+        assertEq(mUsdc.balanceOf(address(strategy)), 0, "no mint pre-execute");
+        assertEq(usdc.balanceOf(address(strategy)), 1_000e6, "asset preserved");
+    }
+
+    function test_onLiveDeposit_zeroIsNoop() public {
+        _executeStrategy();
+        uint256 mBalBefore = mUsdc.balanceOf(address(strategy));
+        vm.prank(vault);
+        strategy.onLiveDeposit(0);
+        assertEq(mUsdc.balanceOf(address(strategy)), mBalBefore, "no mint on zero");
+    }
 }

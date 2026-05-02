@@ -223,7 +223,10 @@ contract FeeBlacklistHandler is Test {
         uint256[4] memory balsBefore = _recipientBalances();
         uint256[4] memory escrowBefore = _recipientEscrow();
 
-        // Settle as proposer (anytime). MUST NOT revert on blacklist —
+        // MS-H3: proposer self-settle requires MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
+
+        // Settle as proposer. MUST NOT revert on blacklist —
         // any revert here is a real INV-47 violation. Capture revert and
         // surface via assert so the harness produces a counterexample.
         vm.prank(leadAgent);

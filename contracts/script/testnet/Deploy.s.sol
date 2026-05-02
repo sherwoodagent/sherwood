@@ -125,8 +125,8 @@ contract DeployTestnet is ScriptBase {
         require(address(factory) == predictedFactoryProxy, "factory addr mismatch");
         console.log("SyndicateFactory:", address(factory));
 
-        // 6. Wire governor → factory. V1.5: setters apply immediately.
-        //    P1-1: guardian fee recipient pinned at init — no separate wiring.
+        // 6. Wire governor → factory. Setters apply immediately.
+        //    Guardian fee recipient pinned at init — no separate wiring.
         SyndicateGovernor(governorProxy).setFactory(address(factory));
 
         vm.stopBroadcast();

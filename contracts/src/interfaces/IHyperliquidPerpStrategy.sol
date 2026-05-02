@@ -21,7 +21,6 @@ interface IHyperliquidPerpStrategy is IStrategy {
     // ── Views ──
     function asset() external view returns (address);
     function depositAmount() external view returns (uint256);
-    function minReturnAmount() external view returns (uint256);
     function perpAssetIndex() external view returns (uint32);
     function leverage() external view returns (uint32);
     function hasActiveStopLoss() external view returns (bool);

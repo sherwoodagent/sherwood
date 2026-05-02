@@ -7,6 +7,7 @@ import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
 import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
+import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
@@ -158,6 +159,8 @@ contract SyndicateGovernorTest is Test {
     function _createAndExecuteProposal(uint256 perfFeeBps, uint256 duration) internal returns (uint256 proposalId) {
         proposalId = _createApprovedProposal(perfFeeBps, duration);
         governor.executeProposal(proposalId);
+        // MS-H3: proposer self-settle requires `MIN_STRATEGY_DURATION_BEFORE_SELF_SETTLE` (1h) elapsed.
+        vm.warp(vm.getBlockTimestamp() + 1 hours + 1);
     }
 
     // ==================== INITIALIZATION ====================
@@ -536,8 +539,13 @@ contract SyndicateGovernorTest is Test {
 
     function test_redemptionLock_withdrawReverts() public {
         _createAndExecuteProposal(1500, 7 days);
+        // While `redemptionsLocked()` is true the vault advertises
+        // `maxWithdraw == 0`, so OZ's standard pre-check surfaces the
+        // canonical EIP-4626 revert first. The inner `RedemptionsLocked`
+        // guard remains as defence-in-depth.
+        assertEq(vault.maxWithdraw(lp1), 0);
         vm.prank(lp1);
-        vm.expectRevert(ISyndicateVault.RedemptionsLocked.selector);
+        vm.expectPartialRevert(ERC4626Upgradeable.ERC4626ExceededMaxWithdraw.selector);
         vault.withdraw(1_000e6, lp1, lp1);
     }
 

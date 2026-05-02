@@ -19,7 +19,7 @@ import { updateSyndicate, saveState } from "../state.js";
 import { getProposalSpec } from "../proposal-specs.js";
 import type { SimLogger } from "../logger.js";
 
-const ACTIVE_STATES = ["Draft", "Pending", "Approved", "Executed"];
+const ACTIVE_STATES = ["Draft", "Pending", "GuardianReview", "Approved", "Executed"];
 
 export interface LifecycleResult {
   executed: number;
@@ -30,11 +30,13 @@ export interface LifecycleResult {
 
 /**
  * Parse `proposal list` table output to extract proposal IDs and on-chain states.
+ * State names must include GuardianReview (PR #229) — otherwise the regex
+ * silently drops proposals stuck in that state from lifecycle accounting.
  */
 function parseProposalList(output: string): Array<{ id: number; state: string }> {
   const results: Array<{ id: number; state: string }> = [];
   const states = [
-    "Draft", "Pending", "Approved", "Executed",
+    "Draft", "Pending", "GuardianReview", "Approved", "Executed",
     "Settled", "Rejected", "Expired", "Cancelled",
   ];
   for (const state of states) {

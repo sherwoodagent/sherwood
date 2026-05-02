@@ -6,6 +6,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
 import {SyndicateFactory} from "../src/SyndicateFactory.sol";
+import {VaultWithdrawalQueue} from "../src/queue/VaultWithdrawalQueue.sol";
 import {IGuardianRegistry} from "../src/interfaces/IGuardianRegistry.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockL2Registrar} from "./mocks/MockL2Registrar.sol";
@@ -58,6 +59,8 @@ contract SyndicateFactoryTest is Test {
 
         // Mock governor.getActiveProposal() so vault deposits work (no active proposals)
         vm.mockCall(governorAddr, abi.encodeWithSignature("getActiveProposal(address)"), abi.encode(uint256(0)));
+        // MS-H4: vault `_deposit` reads `openProposalCount(address)` — mock to 0.
+        vm.mockCall(governorAddr, abi.encodeWithSignature("openProposalCount(address)"), abi.encode(uint256(0)));
         // Task 26: mock registry to pass the prepared-stake gate + bind path during create.
         vm.mockCall(
             guardianRegistryAddr, abi.encodeWithSelector(IGuardianRegistry.canCreateVault.selector), abi.encode(true)
@@ -653,5 +656,18 @@ contract SyndicateFactoryTest is Test {
         // getAllActiveSyndicates also clamps to MAX_PAGE_LIMIT.
         SyndicateFactory.Syndicate[] memory all = factory.getAllActiveSyndicates();
         assertEq(all.length, 100, "getAllActiveSyndicates clamped to MAX_PAGE_LIMIT");
+    }
+
+    // ==================== Task 6: WITHDRAWAL QUEUE DEPLOY + BIND ====================
+
+    /// @notice Task 6: factory must deploy a `VaultWithdrawalQueue` per vault and
+    ///         bind it via `setWithdrawalQueue` atomically inside `createSyndicate`.
+    function test_createSyndicate_deploysAndBindsWithdrawalQueue() public {
+        vm.prank(creator1);
+        (, address syndicateVault) = factory.createSyndicate(creator1AgentId, _defaultConfig());
+
+        address q = SyndicateVault(payable(syndicateVault)).withdrawalQueue();
+        assertTrue(q != address(0), "queue not bound");
+        assertEq(VaultWithdrawalQueue(q).vault(), syndicateVault, "queue's vault mismatch");
     }
 }

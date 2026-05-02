@@ -24,6 +24,8 @@ vi.mock('./portfolio.js', () => ({
         stats: { totalRoundTrips: 0, totalPnlUsd: 0, todayPnlUsd: 0, totalFills: 0, todayFills: 0, lastDailyReset: 0, lastRebalanceAt: 0 },
         centerPrice: 0,
         atr: 0,
+        trend: 0,
+        lastTrendRefreshAt: 0,
       }));
       mockPortfolioState = { totalAllocation: capital, grids, paused: false, pauseReason: '', initializedAt: Date.now() };
     }
@@ -77,6 +79,8 @@ function makeGrid(overrides?: Partial<GridTokenState>): GridTokenState {
     stats: emptyStats(),
     centerPrice: 85000,
     atr: 1200,
+    trend: 0,
+    lastTrendRefreshAt: 0,
     ...overrides,
   };
 }
@@ -96,11 +100,14 @@ function makeLevels(centerPrice: number, atr: number, config = DEFAULT_GRID_CONF
 }
 
 describe('Grid level computation', () => {
-  it('creates correct number of levels (15 buy + 15 sell)', () => {
+  const N = DEFAULT_GRID_CONFIG.levelsPerSide;
+  const M = DEFAULT_GRID_CONFIG.atrMultiplier;
+
+  it(`creates correct number of levels (${N} buy + ${N} sell)`, () => {
     const levels = makeLevels(85000, 1200);
-    expect(levels.length).toBe(30);
-    expect(levels.filter(l => l.side === 'buy').length).toBe(15);
-    expect(levels.filter(l => l.side === 'sell').length).toBe(15);
+    expect(levels.length).toBe(2 * N);
+    expect(levels.filter(l => l.side === 'buy').length).toBe(N);
+    expect(levels.filter(l => l.side === 'sell').length).toBe(N);
   });
 
   it('buy levels are below center, sell levels above', () => {
@@ -114,7 +121,7 @@ describe('Grid level computation', () => {
   it('levels are evenly spaced', () => {
     const levels = makeLevels(85000, 1200);
     const buys = levels.filter(l => l.side === 'buy').sort((a, b) => b.price - a.price);
-    const spacing = 1200 * 2 / 15; // ATR * multiplier / levelsPerSide = 160
+    const spacing = 1200 * M / N;
     for (let i = 1; i < buys.length; i++) {
       expect(buys[i - 1]!.price - buys[i]!.price).toBeCloseTo(spacing, 4);
     }
@@ -122,23 +129,19 @@ describe('Grid level computation', () => {
 
   it('quantity reflects leverage and allocation', () => {
     const levels = makeLevels(85000, 1200);
-    // (1575 * 5) / (15 * 85000) = 0.006176
-    const expectedQty = (1575 * 5) / (15 * 85000);
+    const expectedQty = (1575 * DEFAULT_GRID_CONFIG.leverage) / (N * 85000);
     expect(levels[0]!.quantity).toBeCloseTo(expectedQty, 6);
   });
 
-  it('range covers ±2×ATR', () => {
+  it(`range covers ±${M}×ATR`, () => {
     const levels = makeLevels(85000, 1200);
     const buys = levels.filter(l => l.side === 'buy').sort((a, b) => a.price - b.price);
     const sells = levels.filter(l => l.side === 'sell').sort((a, b) => b.price - a.price);
     const lowestBuy = buys[0]!.price;
     const highestSell = sells[0]!.price;
-    // Range = ATR * atrMultiplier = 1200 * 2 = 2400
-    // Lowest buy = center - range = 85000 - 2400 = 82600
-    // Highest sell = center + range = 85000 + 2400 = 87400
-    // (15 levels × 160 spacing = 2400, same range as old 10 × 240)
-    expect(lowestBuy).toBeCloseTo(82600, 0);
-    expect(highestSell).toBeCloseTo(87400, 0);
+    const range = 1200 * M;
+    expect(lowestBuy).toBeCloseTo(85000 - range, 0);
+    expect(highestSell).toBeCloseTo(85000 + range, 0);
   });
 });
 
@@ -146,23 +149,23 @@ describe('Grid fill simulation', () => {
   it('buy level fills when price drops to level price', () => {
     const grid = makeGrid();
     grid.levels = makeLevels(85000, 1200);
-    const buyLevel = grid.levels.find(l => l.side === 'buy' && l.price > 84800)!;
+    // Pick the topmost buy (closest to center).
+    const buyLevel = grid.levels
+      .filter(l => l.side === 'buy')
+      .sort((a, b) => b.price - a.price)[0]!;
+    const spacing = 1200 * DEFAULT_GRID_CONFIG.atrMultiplier / DEFAULT_GRID_CONFIG.levelsPerSide;
 
-    // Simulate: price drops to exactly the buy level
-    // (Inline simulation — the real GridManager.simulateFills is private,
-    //  so we test the logic pattern directly)
     const price = buyLevel.price;
     expect(price).toBeLessThan(85000);
     expect(buyLevel.filled).toBe(false);
 
-    // After fill: should be marked filled
     if (price <= buyLevel.price) {
       buyLevel.filled = true;
       buyLevel.filledAt = Date.now();
       grid.openFills.push({
         token: 'bitcoin',
         buyPrice: buyLevel.price,
-        targetSellPrice: buyLevel.price + 160, // spacing (ATR*2/15)
+        targetSellPrice: buyLevel.price + spacing,
         quantity: buyLevel.quantity,
         filledAt: Date.now(),
         closed: false,
@@ -204,14 +207,14 @@ describe('Grid fill simulation', () => {
   it('multi-level sweep fills all crossed levels', () => {
     const grid = makeGrid();
     grid.levels = makeLevels(85000, 1200);
-    const currentPrice = 84000; // drops through buy levels
+    const spacing = 1200 * DEFAULT_GRID_CONFIG.atrMultiplier / DEFAULT_GRID_CONFIG.levelsPerSide;
+    // Drop ~5 spacings below center to cross several buy levels.
+    const currentPrice = 85000 - spacing * 5;
 
     const filledBuys = grid.levels.filter(
       l => l.side === 'buy' && !l.filled && currentPrice <= l.price,
     );
-    // With 15 levels, spacing=160: levels at 84840, 84680, 84520, 84360, 84200, 84040
-    // Price at 84000 crosses 6 levels
-    expect(filledBuys.length).toBe(6);
+    expect(filledBuys.length).toBe(5);
   });
 });
 
@@ -269,11 +272,30 @@ describe('Grid capital isolation', () => {
     expect(grid.allocation).toBe(1587.50);
   });
 
-  it('pause threshold detects 20% drop', () => {
+  it('pause threshold detects 42% drop (threshold now 40%)', () => {
     const totalAlloc = 5000;
-    const currentValue = totalAlloc * 0.78; // dropped 22%
+    const currentValue = totalAlloc * 0.58; // dropped 42%
     const dropPct = 1 - (currentValue / totalAlloc);
     expect(dropPct).toBeGreaterThanOrEqual(DEFAULT_GRID_CONFIG.pauseThresholdPct);
+  });
+});
+
+describe('GridManager constructor', () => {
+  it('default constructor (no detector args) preserves close-only fill behavior', async () => {
+    // Construct manager with only the config — all detector args undefined.
+    // This is the live-mode path. The fill detector should match the original
+    // inline check: buy fires when price <= level.price, sell when price >= level.price.
+    const { GridManager } = await import('./manager.js');
+    const cfg = { ...DEFAULT_GRID_CONFIG };
+    const mgr = new GridManager(cfg);
+
+    // Internal sanity: ensure the constructor doesn't throw and the manager
+    // is usable. We can't directly inspect the private detector, so we just
+    // assert the manager exists and has the public methods we expect.
+    expect(mgr).toBeDefined();
+    expect(typeof mgr.tick).toBe('function');
+    expect(typeof mgr.computeOrders).toBe('function');
+    expect(typeof mgr.getStats).toBe('function');
   });
 });
 

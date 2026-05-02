@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {HyperliquidGridStrategy} from "../src/strategies/HyperliquidGridStrategy.sol";
 import {BaseStrategy} from "../src/strategies/BaseStrategy.sol";
 import {MockCoreWriter} from "./mocks/MockCoreWriter.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
+import {FinalizeVariant} from "../src/hyperliquid/L1Write.sol";
 
 contract HyperliquidGridStrategyTest is Test {
     HyperliquidGridStrategy public template;
@@ -18,7 +19,6 @@ contract HyperliquidGridStrategyTest is Test {
     address public attacker = makeAddr("attacker");
 
     uint256 constant DEPOSIT = 10_000e6;
-    uint256 constant MIN_RETURN = 9_900e6;
     uint32 constant LEVERAGE = 5;
     uint256 constant MAX_ORDER_SIZE = 100_000e6;
     uint32 constant MAX_ORDERS = 32;
@@ -41,8 +41,7 @@ contract HyperliquidGridStrategyTest is Test {
         assets[1] = ETH_ASSET;
         assets[2] = SOL_ASSET;
 
-        bytes memory initData =
-            abi.encode(address(usdc), DEPOSIT, MIN_RETURN, LEVERAGE, MAX_ORDER_SIZE, MAX_ORDERS, assets);
+        bytes memory initData = abi.encode(address(usdc), DEPOSIT, LEVERAGE, MAX_ORDER_SIZE, MAX_ORDERS, assets);
         strategy.initialize(vault, proposer, initData);
 
         usdc.mint(vault, 100_000e6);
@@ -190,17 +189,6 @@ contract HyperliquidGridStrategyTest is Test {
         strategy.sweepToVault();
     }
 
-    function test_sweepToVault_revertsIfBelowMinReturn() public {
-        _execAndPrep();
-        vm.prank(vault);
-        strategy.settle();
-        // Drain strategy so balance < MIN_RETURN
-        vm.prank(address(strategy));
-        usdc.transfer(attacker, DEPOSIT - 1000e6); // leave 1000e6 < 9900e6
-        vm.expectRevert(abi.encodeWithSelector(HyperliquidGridStrategy.InsufficientReturn.selector, 1000e6, MIN_RETURN));
-        strategy.sweepToVault();
-    }
-
     function test_updateParams_placeGrid_revertsOnOrderTooLarge() public {
         _execAndPrep();
         HyperliquidGridStrategy.GridOrder[] memory orders = new HyperliquidGridStrategy.GridOrder[](1);
@@ -213,6 +201,52 @@ contract HyperliquidGridStrategyTest is Test {
             abi.encodeWithSelector(HyperliquidGridStrategy.OrderTooLarge.selector, 200_000e6, MAX_ORDER_SIZE)
         );
         strategy.updateParams(data);
+    }
+
+    // ── HyperCore finalization ──
+
+    function test_finalizeForHyperCore_emitsAndForwardsToL1Write() public {
+        assertFalse(strategy.hyperCoreFinalized());
+        vm.expectEmit(true, true, true, true, address(strategy));
+        emit HyperliquidGridStrategy.HyperCoreFinalized(0, FinalizeVariant.FirstStorageSlot, 0);
+        vm.prank(proposer);
+        strategy.finalizeForHyperCore(0, FinalizeVariant.FirstStorageSlot, 0);
+        assertTrue(strategy.hyperCoreFinalized());
+    }
+
+    function test_finalizeForHyperCore_revertsIfNotProposer() public {
+        vm.prank(attacker);
+        vm.expectRevert(BaseStrategy.NotProposer.selector);
+        strategy.finalizeForHyperCore(0, FinalizeVariant.FirstStorageSlot, 0);
+    }
+
+    function test_execute_selfHeals_finalizesForHyperCoreOnFirstRun() public {
+        assertFalse(strategy.hyperCoreFinalized());
+        vm.expectEmit(true, true, true, true, address(strategy));
+        emit HyperliquidGridStrategy.HyperCoreFinalized(0, FinalizeVariant.FirstStorageSlot, 0);
+        vm.prank(vault);
+        strategy.execute();
+        assertTrue(strategy.hyperCoreFinalized());
+    }
+
+    function test_execute_skipsAutoFinalize_whenManuallyFinalized() public {
+        // Proposer manually finalizes with a non-default variant first.
+        vm.prank(proposer);
+        strategy.finalizeForHyperCore(7, FinalizeVariant.CustomStorageSlot, 42);
+        assertTrue(strategy.hyperCoreFinalized());
+
+        // _execute should NOT emit a second HyperCoreFinalized event.
+        vm.recordLogs();
+        vm.prank(vault);
+        strategy.execute();
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+        bytes32 sig = keccak256("HyperCoreFinalized(uint64,uint8,uint64)");
+        for (uint256 i = 0; i < entries.length; i++) {
+            assertTrue(
+                entries[i].topics.length == 0 || entries[i].topics[0] != sig,
+                "auto-finalize fired despite manual finalize"
+            );
+        }
     }
 
     function test_sweepToVault_repeatableForPartialArrivals() public {
@@ -228,24 +262,5 @@ contract HyperliquidGridStrategyTest is Test {
         uint256 vaultBefore = usdc.balanceOf(vault);
         strategy.sweepToVault();
         assertEq(usdc.balanceOf(vault), vaultBefore + 5_000e6);
-    }
-
-    function test_sweepToVault_dustRaceCannotBypassMinReturn() public {
-        _execAndPrep();
-        vm.prank(vault);
-        strategy.settle();
-        // Drain to dust
-        vm.prank(address(strategy));
-        usdc.transfer(attacker, DEPOSIT - 100e6); // leave 100 USDC
-
-        // Attacker tries to sweep dust (100 USDC < 9900 minReturn)
-        vm.expectRevert(abi.encodeWithSelector(HyperliquidGridStrategy.InsufficientReturn.selector, 100e6, MIN_RETURN));
-        strategy.sweepToVault();
-
-        // More USDC arrives bringing total to over minReturn
-        usdc.mint(address(strategy), 10_000e6); // total 10,100
-        // Now sweep succeeds — cumulativeSwept (0) + bal (10,100) >= 9,900
-        strategy.sweepToVault();
-        assertEq(strategy.cumulativeSwept(), 10_100e6);
     }
 }

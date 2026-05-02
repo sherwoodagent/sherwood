@@ -14,6 +14,22 @@ isolated capital, parallel to the directional agent.
 
 - `sherwood grid start` — start the standalone event loop.
 - `sherwood grid status` — print current grid state, fills, PnL.
+- `sherwood grid pause [--reason "..."]` — manually pause the live grid;
+  subsequent ticks become no-ops until resumed.
+- `sherwood grid resume` — clear a manual or auto-triggered pause and
+  resume normal grid operation.
+- `sherwood grid backtest --from <iso> --to <iso>` — replay historical
+  Hyperliquid 1-minute bars through the grid manager and report
+  PnL, round trips, drawdown. Results saved to
+  `~/.sherwood/grid/backtests/{runId}.json`. Cached fetches at
+  `~/.sherwood/grid/backtest-cache/`. See
+  `docs/superpowers/specs/2026-05-01-grid-strategy-backtester-design.md`
+  for the full design.
+  Hedge simulation is ON by default (matches live grid); use `--no-hedge` to disable.
+- `sherwood grid sweep --from <iso> --to <iso> --leverage 2,4,5 --levels 10,15,20`
+  — runs N backtests across a Cartesian product of parameter values,
+  shares one cache, prints a ranked comparison table.
+  Saves to `~/.sherwood/grid/sweeps/{sweepId}/`.
 - Grid does not run inside the directional agent loop. It has its own
   binary entry point and its own portfolio file.
 
@@ -26,14 +42,16 @@ Authoritative values live in `cli/src/grid/config.ts:DEFAULT_GRID_CONFIG`.
 | tokens               | `bitcoin`, `ethereum`, `solana`             | CoinGecko IDs                               |
 | allocationPct        | 0.50                                        | 50% of total portfolio carved out for grid  |
 | leverage             | 5                                           | was 4 — +25% profit per round-trip          |
-| levelsPerSide        | 15                                          | 15 buy levels below + 15 sell levels above  |
-| atrMultiplier        | 2                                           | grid range = price ± (2 × ATR)              |
+| levelsPerSide        | 12                                          | disjoint-window sweep winner — lowest MaxDD (18% vs 21-22% at lvls=10) |
+| atrMultiplier        | 3                                           | grid range = price ± (3 × ATR); ATR×3 dominates ATR×2 across all tested windows (lower fee burn) |
 | atrPeriod            | 14                                          |                                             |
 | rebalanceDriftPct    | 0.40                                        | was 0.55 — rebuild faster when price drifts |
 | fullRebuildIntervalMs| 12 h                                        | full grid rebuild cadence                   |
 | tokenSplit           | BTC 0.45 / ETH 0.30 / SOL 0.25              | must sum to 1.0                             |
 | minProfitPerFillUsd  | 0.50                                        | fee-floor for skipping unprofitable fills   |
 | pauseThresholdPct    | 0.20                                        | pause grid if pool drops 20% from start     |
+| downtrendBlockPct    | 0.10                                        | trend < −10% over 56h → block new buys + asymmetric grid (1 buy / N sells) |
+| stopLossPct          | 0.10                                        | force-close any open buy 10% below entry; empirical Nov–May: 10% saves strategy at −4%, 30% lets liquidations through at −37% |
 
 ## Capital Accounting
 
@@ -70,6 +88,20 @@ Each 1-min cycle (`grid/loop.ts`):
   cost for tighter level spacing around current price.
 - `tokenSplit` is rebalance-on-rebuild, not continuous — drift inside a
   cycle does not get rebalanced until the next full rebuild.
+- **Per-fill stop-loss (issue #269).** Each open buy is force-closed when
+  current price drops `stopLossPct` (default 10%) below its entry. Without
+  the stop-loss, the grid can accumulate enough underwater exposure across
+  rebuilds in a sustained crash to wipe the cross-margin pool even at low
+  leverage. Empirical Nov–May: `0.10` ends a worst-case window at −4%;
+  `0.30` lets liquidations through at −37%. Set `stopLossPct = 0` to
+  disable (not recommended in live mode).
+- **Asymmetric grid in confirmed downtrend (issue #269).** When `trend <
+  −downtrendBlockPct` at grid-build time, only 1 buy level is placed (just
+  below current price, to allow re-entry on chop reversal) while the full
+  N sell levels are placed so existing inventory can still exit on rallies.
+  Trend is refreshed hourly from recent 4h candles, so the asymmetry can
+  re-engage between scheduled 12h rebuilds. Set `downtrendBlockPct = 0` to
+  disable both the buy block and the asymmetry.
 
 ## Live Deployment (Hyperliquid)
 
@@ -87,7 +119,13 @@ The grid runs in two modes:
 ### Prerequisites for live mode
 
 1. Deploy `HyperliquidGridStrategy` clone via a Sherwood proposal
-2. Strategy's `_execute()` pulls vault USDC and parks it on HyperCore margin
+2. Strategy's `_execute()` pulls vault USDC, **auto-finalizes for HyperCore on
+   first run** (safe defaults: USDC token = 0, `FirstStorageSlot` variant
+   matching ERC-1167 clones), then parks USDC on HyperCore margin via
+   `sendUsdClassTransfer`. Override the defaults with
+   `strategy.finalizeForHyperCore(token, variant, createNonce)` from the
+   proposer **before** opening the proposal only if the clone was deployed
+   with a non-default method (plain CREATE, UUPS proxy, non-USDC token).
 3. Keeper EOA = proposer EOA (only the proposer can call `updateParams`)
 4. Set `HYPERLIQUID_PRIVATE_KEY` to the proposer's key
 5. Run `sherwood grid start --live ...` — the loop will compute orders each tick and submit them

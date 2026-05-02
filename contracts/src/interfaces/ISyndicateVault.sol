@@ -28,6 +28,21 @@ interface ISyndicateVault {
     error GovernorNotSet();
     error ExecutorCodehashMismatch();
     error InvalidAsset();
+    /// @notice `transferPerformanceFee` was called with an `amount` exceeding
+    ///         the vault's balance of `asset_`.
+    error AmountExceedsBalance();
+    error WithdrawalQueueNotSet();
+    error WithdrawalQueueAlreadySet();
+    error InsufficientShares();
+    error RedemptionsNotLocked();
+    error QueueReserveBreached();
+    /// @notice I-3: Revert from `setActiveStrategyAdapter` if the candidate
+    ///         adapter is an EOA, a contract without bytecode, or a contract
+    ///         whose `positionValue()` reverts / returns malformed data.
+    ///         Bubbles back through `governor.bindProposalAdapter`. Without
+    ///         this smoke-test a malformed adapter would brick
+    ///         `vault.totalAssets()` and every LP entrypoint until settle.
+    error AdapterNotIStrategy();
 
     // ── Init Params ──
     struct InitParams {
@@ -75,6 +90,19 @@ interface ISyndicateVault {
     function governor() external view returns (address);
     function redemptionsLocked() external view returns (bool);
     function managementFeeBps() external view returns (uint256);
+    function activeStrategyAdapter() external view returns (address);
+    function setActiveStrategyAdapter(address adapter) external; // governor-only; pass address(0) to unbind
+
+    // ── Async Withdrawal Queue ──
+    function setWithdrawalQueue(address queue) external; // factory-only, set-once
+    function withdrawalQueue() external view returns (address);
+    function requestRedeem(uint256 shares, address owner_) external returns (uint256 requestId);
+    function pendingQueueShares() external view returns (uint256);
+    function reservedQueueAssets() external view returns (uint256);
+    /// @notice Sum of asset principal forwarded to the live-NAV adapter during
+    ///         the given proposal's Executed window. Read by the governor at
+    ///         settle so the principal is not counted as strategy profit.
+    function liveAdapterPrincipal(uint256 proposalId) external view returns (uint256);
 
     // ── Rescue ──
     function rescueEth(address payable to, uint256 amount) external;
@@ -101,4 +129,8 @@ interface ISyndicateVault {
     ///      Aerodrome / Uniswap). Emitting here gives a first-class
     ///      vault-level execution marker.
     event GovernorBatchExecuted(address indexed governor, uint256 callCount);
+    event WithdrawalQueueSet(address indexed queue);
+    event RedeemRequested(uint256 indexed requestId, address indexed owner, uint256 shares);
+    event ActiveStrategyAdapterSet(address indexed adapter);
+    event ActiveStrategyAdapterCleared();
 }

@@ -103,11 +103,13 @@ Live contract sizes from `forge build --sizes` (2026-04):
 
 | Contract | Runtime | Notes |
 |---|---|---|
-| SyndicateGovernor | 24,255 | **321-byte EIP-170 margin** (post-PR #256 `_initPendingProposal` extraction) |
-| SyndicateFactory | 11,665 | ample headroom |
+| SyndicateGovernor | 24,524 | **52-byte EIP-170 margin** (post Phase 2 adapter binding; tight — re-measure before any edit) |
+| SyndicateFactory | 14,600 | grew with `VaultWithdrawalQueue` deploy at `createSyndicate` (Phase 1 async-redeem) |
 | GuardianRegistry | 24,306 | **270-byte EIP-170 margin** (post-PR #252 review fix) |
-| SyndicateVault | 19,881 | ample headroom (CI gate at 22,000) |
-| WoodToken | 15,788 | ERC20Votes + OFT multi-inherit (Phase 1 V1.5) |
+| SyndicateVault | 22,399 | CI gate bumped to 22,500; live-NAV adapter slot + lock-aware deposit/withdraw + `onLiveDeposit` forwarding (Phase 2) |
+| VaultWithdrawalQueue | 2,502 | per-vault async redemption escrow (Phase 1 live-NAV / async-withdrawals) |
+| MoonwellSupplyStrategy | 3,659 | absorbs mid-strategy LP deposits via `onLiveDeposit` override (Phase 2) |
+| WoodToken | 15,850 | ERC20Votes + OFT multi-inherit (Phase 1 V1.5) |
 
 - **SyndicateVault** — ERC-4626 vault with ERC20Votes for governance. Standard `redeem()`/`withdraw()` for LP exits (no custom ragequit). `_decimalsOffset()` = `asset.decimals()` for first-depositor inflation protection (shares have 12 decimals for USDC). Deposits and `rescueERC20` are blocked during active proposals (`redemptionsLocked()`).
 - **SyndicateGovernor** — Proposal lifecycle, optimistic voting, execution, settlement, collaborative proposals. Inherits `GovernorParameters` (abstract) for parameter setters/timelock and `GovernorEmergency` (abstract) for `unstick` / `emergencySettleWithCalls` / `cancelEmergencySettle` / `finalizeEmergencySettle`. The `GovernorEmergency` extraction plus `via_ir` keep the runtime under 24,550 bytes with the guardian-review changes.
@@ -117,6 +119,25 @@ Live contract sizes from `forge build --sizes` (2026-04):
 - **SyndicateFactory** — UUPS upgradeable factory. Deploys vault + registers it with the governor. `governor` and `guardianRegistry` are both **set-once at init** (no `setGovernor` — removed to close V-H2; governor upgrades must go through a UUPS upgrade of the governor proxy itself). `createSyndicate` requires the creator to have called `guardianRegistry.prepareOwnerStake` first; `bindOwnerStake` binds the prepared stake to the new vault atomically. `rotateOwner(vault, newOwner)` provides a slot-transfer recovery path for a dead-key vault owner. Owner-configurable: `setVaultImpl`, `setCreationFee`, `setManagementFeeBps`, `setUpgradesEnabled`.
 - **BatchExecutorLib** — Stateless 63-line contract for `delegatecall`-based batch execution. The "delegatecall to BatchExecutorLib only" invariant **is enforced in code** via V-C2: `SyndicateVault.initialize` stamps `_expectedExecutorCodehash = executorImpl.codehash`, and `executeGovernorBatch` reverts with `ExecutorCodehashMismatch` if the pinned codehash drifts at call time.
 - **Strategy Templates** — `BaseStrategy` (abstract) + `MoonwellSupplyStrategy` + `AerodromeLPStrategy`. ERC-1167 clonable. Vault calls `execute()`/`settle()` via batch.
+
+### Async withdrawal queue
+
+- **VaultWithdrawalQueue** — per-vault, deployed by the factory at `createSyndicate` time. Bound on the vault via factory-only `setWithdrawalQueue`.
+- LPs call `vault.requestRedeem(shares, owner)` ONLY while `redemptionsLocked() == true` (a strategy proposal is active). Shares are escrowed in the queue (no burn). Each request gets a `requestId` and lives in `Request{owner, shares, requestedAt, claimed, cancelled}`.
+- Anyone calls `queue.claim(requestId)` once `redemptionsLocked() == false` — the queue calls `vault.redeem(shares, owner, address(queue))`, the vault burns the queued shares and forwards underlying assets to the original owner.
+- Queue owners can `cancel(requestId)` any time before claim — shares are returned to them.
+- Vault tracks `pendingQueueShares()` and `reservedQueueAssets()`. Standard `withdraw`/`redeem` from non-queue callers is capped via `maxWithdraw`/`maxRedeem` overrides so queue claims cannot be starved. The queue address is special-cased to bypass these caps.
+- `_withdraw` keeps a `caller != _withdrawalQueue` reserve guard as defense-in-depth.
+
+### Live NAV via strategy adapter (V2)
+
+- **Adapter binding flow** — Proposer creates a strategy clone, then before execute calls `governor.bindProposalAdapter(proposalId, adapter)`. The governor pushes the address synchronously onto `vault._activeStrategyAdapter` via `setActiveStrategyAdapter`. No governor-side mapping is kept (size-aware redesign — every byte counts at the 24,524-byte governor runtime).
+- **Bind window closes at Approved** — `bindProposalAdapter` is gated to `Draft || Pending` AND `_approvedCount == 0`. Once a co-proposer approves OR the vote ends, binding is permanently impossible — the proposal will execute without live NAV and deposits/withdraws stay locked for its duration. `sherwood strategy propose` auto-binds the freshly-cloned adapter (CLI v0.53.0+, PR #271); `sherwood proposal bind-adapter --id N --adapter 0x…` is the escape hatch for proposals submitted before that change. There is no recovery path for proposals already Approved without an adapter — they must run their course or be cancelled+reproposed.
+- **Implicit clear via lock state** — The vault's `totalAssets` ignores `_activeStrategyAdapter` whenever `!redemptionsLocked()`. After settle, the slot retains the last-bound address but it has zero observable effect. Re-bind on the next proposal overwrites it.
+- **Live NAV math** — `totalAssets() = float + (adapter == 0 || !locked ? 0 : (valid ? value : 0))`. Standard OZ ERC-4626 virtual-shares math is unchanged.
+- **Lock relaxation** — `_deposit` and `_withdraw` revert only when `redemptionsLocked() && !_liveNAVAvailable()`. When live NAV is available, both are unlocked. `requestRedeem` still requires `redemptionsLocked() == true` (queue path) and works regardless of adapter validity.
+- **`onLiveDeposit` hook** — `vault._deposit` forwards new assets via `IStrategy(adapter).onLiveDeposit(assets)` after `super._deposit`. Default in `BaseStrategy` is a no-op; `MoonwellSupplyStrategy` overrides to mint additional mTokens. Push-and-call: vault `safeTransfer`s the assets to the adapter, then calls `onLiveDeposit` (no `transferFrom` allowance flow).
+- **Strategy support matrix** — see `docs/superpowers/specs/2026-04-30-live-nav-async-withdrawals-design.md` §6. Currently only `MoonwellSupplyStrategy` is wired for live NAV; other adapters inherit the default no-op and the vault falls back to queue-only behavior under their proposals.
 
 ### Governor Key Concepts
 
@@ -128,7 +149,8 @@ Live contract sizes from `forge build --sizes` (2026-04):
 - **Guardian fee (V1.5)** — `guardianFeeBps` (max 5% / 500 bps) + `guardianFeeRecipient` (set to GuardianRegistry at deploy). On successful settle, a slice is transferred to the registry which stamps `_proposalGuardianPool[proposalId]`. Approvers claim via `registry.claimProposalReward(pid)` (DPoS commission split); delegators via `registry.claimDelegatorProposalReward(delegate, pid)`. W-1 escrow handles USDC-blacklist-style transfer failures (`flushUnclaimedApproverFee` retries). Fixes the approve-bias problem (V1 only rewarded blockers).
 - **Four emergency entrypoints** (on `GovernorEmergency`): (1) `unstick()` — owner-instant, pre-committed calls only, no new calldata; (2) `emergencySettleWithCalls(calls)` — commits calldata hash and opens a guardian-reviewed window (default 24h); (3) `finalizeEmergencySettle(calls)` — after review window, executes if not blocked or reverts if guardians reached block quorum (owner stake burned); (4) `cancelEmergencySettle()` — owner withdraws a pending emergency settle during the review window.
 - **Standard settlement** still happens via `settleProposal` — proposer anytime, anyone after strategy duration.
-- **Vault reads governor from factory** — no `setGovernor` on vault, no lock/unlock storage. `redemptionsLocked()` checks `governor.getActiveProposal()` directly.
+- **Vault reads governor from factory** — no `setGovernor` on vault, no lock/unlock storage. `redemptionsLocked()` checks `governor.getActiveProposal()` directly. Lock state is the single source of truth for the active-strategy adapter slot: `totalAssets()` and the deposit/withdraw lock-relaxation only consult `_activeStrategyAdapter` while `redemptionsLocked() == true` (Phase 2 — see "Live NAV via strategy adapter" below).
+- **Live NAV via strategy adapter (V2)** — Proposers may call `governor.bindProposalAdapter(proposalId, adapter)` before execute to bind an `IStrategy` clone whose `positionValue() returns (uint256 value, bool valid)` is queryable. The vault reads the adapter inside `totalAssets()` and gates the read on `redemptionsLocked()` so stale pointers are silently ignored after settle. When the adapter reports `valid=true`, `_deposit` and `_withdraw` are unlocked even during an active proposal — share price is queryable so LPs can enter/exit at fair NAV. The vault also forwards new deposits to the adapter via `IStrategy.onLiveDeposit(assets)` so capital starts earning immediately. Strategies without a live NAV (Mamo / Venice / off-chain perps) return `(0, false)` and the vault falls back to the queue path.
 
 ### Guardian Review Lifecycle
 
@@ -159,6 +181,12 @@ Full spec: `docs/superpowers/specs/2026-04-21-guardian-delegation-v1.5-design.md
 - **W-1 escrow on guardian-fee claims.** `_safeRewardTransfer` wraps `IERC20.transfer` in try/catch; on failure (e.g. USDC blacklist) the amount is escrowed in `_unclaimedApproverFees[keccak256(pid, recipient, asset)]`. `flushUnclaimedApproverFee` retries after blacklist lifts. **Key includes `proposalId`** — cross-proposal drain impossible (regression guard from PR #229 review finding class).
 - **WOOD = OFT + ERC20Votes + ERC20Permit.** Multi-inherits all three (`WoodToken.sol`). Preserves LayerZero cross-chain while enabling ERC20Votes delegation for Snapshot-style off-chain governance UX. Timestamp-mode clock (EIP-6372) so checkpoint domain matches registry.
 - **No on-chain parameter timelock.** Removed as part of V1.5 — owner multisig enforces delay externally. See Governor Key Concepts.
+
+## App (Next.js dashboard)
+
+- No `typecheck` script in `app/package.json`. Run `node_modules/.bin/tsc --noEmit` before pushing app changes.
+- `npm run lint` (eslint). Pre-existing warning in `AgentStats.tsx` (unused `formatBps` import) is unrelated noise — ignore unless you touch that file.
+- `npm run dev` boots on `:3000`. Reown WalletConnect 403 in the dev console is a missing project-ID env var, not a regression.
 
 ## CLI
 
@@ -270,6 +298,7 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 - `forge coverage` runs again as of PR #229 (struct-literal refactor in `SyndicateGovernor.propose`). Prior stack-too-deep workaround no longer needed.
 - First invariant harness shipped in PR #229 at `test/invariants/` using `StdInvariant` + a handler contract (guardian WOOD conservation, stake accounting). 4 more priority invariants (#226 INV-2 / -3 / -11 / -15) still outstanding.
 - Pre-mainnet punch list: issues **#225 (bugs)** and **#226 (process/design)**. Canonical consolidated tracker: **`docs/pre-mainnet-punchlist.md`** — every fix PR should reference the ref code (e.g. `fixes V-C1`, `closes G-C4`) and mark the punch list row closed. New findings go into the issues first, then propagate to the tracker.
+- **CLI/contract enum sync**: when changing Solidity's `ProposalState` ordering, also update `cli/src/lib/governor.ts` (`PROPOSAL_STATES` array + `PROPOSAL_STATE` map) AND `cli/src/simulation/phases/10-lifecycle.ts` (parser + `ACTIVE_STATES`). `app/src/lib/governor-data.ts` already mirrors. PR #229 inserted `GuardianReview` at index 2 and the CLI was missed for ~2 months — `proposal execute` rejected valid Approved proposals as "Rejected" until v0.52.1. Treat the enum as a cross-package contract.
 
 ## Key Addresses (Base)
 

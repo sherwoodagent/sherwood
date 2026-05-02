@@ -17,15 +17,52 @@ import { GridPortfolio } from './portfolio.js';
 import { HyperliquidProvider } from '../providers/data/hyperliquid.js';
 import { getLatestSignals } from '../agent/technical.js';
 
+/** Decides if a level should fire at the current price.
+ *  Default checks against close; backtest checks against bar.low/high. */
+export type FillDetector = (level: GridLevel, currentPrice: number) => boolean;
+
+/** Decides if an open fill's target has been reached.
+ *  Default checks against close; backtest checks against bar.high. */
+export type CloseFillDetector = (openFill: GridFill, currentPrice: number) => boolean;
+
+/** Fetches OHLCV candles for ATR. Default delegates to HyperliquidProvider. */
+export type CandleFetcher = (
+  tokenId: string,
+  interval: '1h' | '4h' | '1d',
+  lookbackMs: number,
+) => Promise<Array<{ timestamp: number; open: number; high: number; low: number; close: number; volume: number }> | null>;
+
+const defaultFillDetector: FillDetector = (level, currentPrice) =>
+  level.side === 'buy' ? currentPrice <= level.price : currentPrice >= level.price;
+
+const defaultCloseFillDetector: CloseFillDetector = (openFill, currentPrice) =>
+  currentPrice >= openFill.targetSellPrice;
+
 export class GridManager {
   private config: GridConfig;
   private portfolio: GridPortfolio;
   private hl: HyperliquidProvider;
+  private candleFetcher: CandleFetcher;
+  private fillDetector: FillDetector;
+  private closeFillDetector: CloseFillDetector;
+  private nowProvider: () => number;
 
-  constructor(config: GridConfig) {
+  constructor(
+    config: GridConfig,
+    candleFetcher?: CandleFetcher,
+    fillDetector?: FillDetector,
+    closeFillDetector?: CloseFillDetector,
+    portfolio?: GridPortfolio,
+    nowProvider?: () => number,
+  ) {
     this.config = config;
-    this.portfolio = new GridPortfolio();
+    this.portfolio = portfolio ?? new GridPortfolio();
     this.hl = new HyperliquidProvider();
+    this.candleFetcher = candleFetcher ?? ((tokenId, interval, lookbackMs) =>
+      this.hl.getCandles(tokenId, interval, lookbackMs));
+    this.fillDetector = fillDetector ?? defaultFillDetector;
+    this.closeFillDetector = closeFillDetector ?? defaultCloseFillDetector;
+    this.nowProvider = nowProvider ?? (() => Date.now());
   }
 
   /** Load or initialize grid state.
@@ -51,6 +88,8 @@ export class GridManager {
           stats: { totalRoundTrips: 0, totalPnlUsd: 0, todayPnlUsd: 0, totalFills: 0, todayFills: 0, lastDailyReset: 0, lastRebalanceAt: 0 },
           centerPrice: 0,
           atr: 0,
+          trend: 0,
+          lastTrendRefreshAt: 0,
         });
         addedAllocation += alloc;
         console.error(`  [grid] Added new token grid: ${token} ($${alloc.toFixed(0)} allocation)`);
@@ -72,8 +111,18 @@ export class GridManager {
    */
   async tick(prices: Record<string, number>, regime?: string): Promise<GridTickResult> {
     const state = await this.portfolio.load();
-    if (!state || state.paused || !this.config.enabled) {
-      return { fills: 0, roundTrips: 0, pnlUsd: 0, paused: state?.paused ?? false };
+    if (!state || !this.config.enabled) {
+      return { fills: 0, roundTrips: 0, pnlUsd: 0, paused: false };
+    }
+
+    // When paused, still run the pause/resume check — drawdown may have
+    // recovered and the grid should auto-resume via unpauseRecoveryPct.
+    if (state.paused) {
+      const resumed = this.portfolio.checkPauseThreshold(state, this.config, prices);
+      if (resumed) {
+        await this.portfolio.save(state);
+      }
+      return { fills: 0, roundTrips: 0, pnlUsd: 0, paused: state.paused };
     }
 
     // Regime-aware grid control: only pause in high-volatility (dangerous swings).
@@ -98,6 +147,11 @@ export class GridManager {
       const price = prices[grid.token];
       if (!price || price <= 0) continue;
 
+      // Refresh trend at most once per hour. Lets the downtrend filter
+      // respond to fast crashes between scheduled rebuilds (12h cadence).
+      // No-op when buildGrid runs this same tick — it overwrites trend anyway.
+      await this.maybeRefreshTrend(grid);
+
       // Build grid on first tick or after full rebuild interval
       if (grid.levels.length === 0 || this.needsFullRebuild(grid)) {
         await this.buildGrid(grid, price);
@@ -116,8 +170,8 @@ export class GridManager {
       }
     }
 
-    // Check pause threshold
-    this.portfolio.checkPauseThreshold(state, this.config);
+    // Check pause threshold (uses current prices for mark-to-market)
+    this.portfolio.checkPauseThreshold(state, this.config, prices);
 
     // Persist
     await this.portfolio.save(state);
@@ -125,10 +179,31 @@ export class GridManager {
     return { fills: totalFills, roundTrips: totalRoundTrips, pnlUsd: totalPnl, paused: false };
   }
 
+  /** Hourly refresh of `grid.trend` from recent 4h candles. Called from
+   *  tick() so the downtrend filter sees fresh data between buildGrid runs. */
+  private async maybeRefreshTrend(grid: GridTokenState): Promise<void> {
+    const now = this.nowProvider();
+    const ONE_HOUR = 60 * 60 * 1000;
+    if (now - grid.lastTrendRefreshAt < ONE_HOUR) return;
+
+    // 14 4h bars = 56h lookback (matches buildGrid window).
+    const candles = await this.candleFetcher(grid.token, '4h', 14 * 4 * 60 * 60 * 1000);
+    if (!candles || candles.length < 2) return;
+
+    const TREND_LOOKBACK_BARS = 14;
+    const sliceStart = Math.max(0, candles.length - TREND_LOOKBACK_BARS);
+    const first = candles[sliceStart]!.close;
+    const last = candles[candles.length - 1]!.close;
+    if (first <= 0) return;
+
+    grid.trend = (last - first) / first;
+    grid.lastTrendRefreshAt = now;
+  }
+
   /** Build a fresh grid centered on the current price using ATR. */
   private async buildGrid(grid: GridTokenState, currentPrice: number): Promise<void> {
     // Fetch ATR from HL candles
-    const candles = await this.hl.getCandles(grid.token, '4h', 14 * 24 * 60 * 60 * 1000);
+    const candles = await this.candleFetcher(grid.token, '4h', 14 * 24 * 60 * 60 * 1000);
     if (!candles || candles.length < this.config.atrPeriod) {
       console.error(chalk.dim(`  [grid] Cannot build grid for ${grid.token}: insufficient candle data`));
       return;
@@ -141,6 +216,21 @@ export class GridManager {
       return;
     }
 
+    // Trend signal: % change over the last 14 4h bars (~56 hours).
+    // Using only the recent window so the trend captures local direction,
+    // not all-time-vs-now (which would always be ~0 over multi-month
+    // backtests where price ends near where it started).
+    const TREND_LOOKBACK_BARS = 14;
+    let trend = 0;
+    if (candles.length >= 2) {
+      const sliceStart = Math.max(0, candles.length - TREND_LOOKBACK_BARS);
+      const first = candles[sliceStart]!.close;
+      const last = candles[candles.length - 1]!.close;
+      if (first > 0) {
+        trend = (last - first) / first;
+      }
+    }
+
     const range = atr * this.config.atrMultiplier;
     const spacing = range / this.config.levelsPerSide;
     const effectiveCapital = grid.allocation * this.config.leverage;
@@ -148,8 +238,16 @@ export class GridManager {
 
     const levels: GridLevel[] = [];
 
-    // Buy levels below current price
-    for (let i = 1; i <= this.config.levelsPerSide; i++) {
+    // Asymmetric grid in confirmed downtrend: skip most buy levels so the
+    // grid stops adding exposure to a falling knife. Keep ONE buy level just
+    // below current price so the grid can re-enter on a chop reversal once
+    // trend recovers (otherwise we'd never re-engage). Sell levels still
+    // place fully so existing inventory can exit on rallies.
+    const inDowntrend = this.config.downtrendBlockPct > 0
+      && trend < -this.config.downtrendBlockPct;
+    const buyCount = inDowntrend ? 1 : this.config.levelsPerSide;
+
+    for (let i = 1; i <= buyCount; i++) {
       levels.push({
         price: currentPrice - spacing * i,
         side: 'buy',
@@ -173,12 +271,14 @@ export class GridManager {
     grid.levels = levels;
     grid.centerPrice = currentPrice;
     grid.atr = atr;
+    grid.trend = trend;
     grid.stats.lastRebalanceAt = Date.now();
 
     console.error(chalk.dim(
       `  [grid] Built ${grid.token} grid: center=$${currentPrice.toFixed(2)} ` +
       `ATR=$${atr.toFixed(2)} range=$${(currentPrice - range).toFixed(2)}-$${(currentPrice + range).toFixed(2)} ` +
-      `spacing=$${spacing.toFixed(2)} qty=${quantity.toFixed(6)}`
+      `spacing=$${spacing.toFixed(2)} qty=${quantity.toFixed(6)} trend=${(trend * 100).toFixed(1)}%` +
+      `${inDowntrend ? ' [DOWNTREND: 1 buy / ' + this.config.levelsPerSide + ' sells]' : ''}`
     ));
   }
 
@@ -197,11 +297,35 @@ export class GridManager {
 
     if (spacing <= 0) return { fills: 0, roundTrips: 0, pnlUsd: 0 };
 
+    // Max-exposure cap: stop placing new BUY fills when total open notional
+    // exceeds the configured multiple of effective capital. Existing fills
+    // can still close (sell levels and close-outs unaffected). Set
+    // `maxOpenNotionalMultiple = Infinity` to disable.
+    // Cap measures ENTRY notional (qty × buyPrice), not mark-to-market.
+    // Mark-to-market shrinks as price falls, which would loosen the cap
+    // exactly when we need it to bite (downtrends accumulating buys).
+    const exposureCap = grid.allocation * this.config.leverage * this.config.maxOpenNotionalMultiple;
+    const currentOpenNotional = grid.openFills
+      .filter(f => !f.closed)
+      .reduce((s, f) => s + f.quantity * f.buyPrice, 0);
+    const buyExposureFull = currentOpenNotional >= exposureCap;
+
+    // Downtrend filter: block new buy fills if the grid was built during a
+    // sustained drop (trend < -downtrendBlockPct). Re-evaluated each rebuild
+    // so buys resume when trend recovers. Set downtrendBlockPct=0 to disable.
+    const inDowntrend = this.config.downtrendBlockPct > 0 && grid.trend < -this.config.downtrendBlockPct;
+
     // Step 1: Fill unfilled grid levels (buy when price drops, sell is just accounting)
     for (const level of grid.levels) {
       if (level.filled) continue;
 
-      if (level.side === 'buy' && currentPrice <= level.price) {
+      if (level.side === 'buy' && this.fillDetector(level, currentPrice)) {
+        if (buyExposureFull) {
+          continue;  // skip — would exceed max open exposure
+        }
+        if (inDowntrend) {
+          continue;  // skip — sustained downtrend, don't buy into the knife
+        }
         level.filled = true;
         level.filledAt = now;
         fills++;
@@ -224,7 +348,7 @@ export class GridManager {
         ));
       }
 
-      if (level.side === 'sell' && currentPrice >= level.price) {
+      if (level.side === 'sell' && this.fillDetector(level, currentPrice)) {
         level.filled = true;
         level.filledAt = now;
         fills++;
@@ -245,8 +369,12 @@ export class GridManager {
     // orphaning any open fill that wasn't matched at that exact moment.
     for (const openFill of grid.openFills) {
       if (openFill.closed) continue;
-      if (currentPrice >= openFill.targetSellPrice) {
-        const profit = (currentPrice - openFill.buyPrice) * openFill.quantity * this.config.leverage;
+      if (this.closeFillDetector(openFill, currentPrice)) {
+        // PnL = price_change × quantity. quantity is already the leveraged
+        // contract size (effectiveCapital / (levels × price) at build), so
+        // multiplying by leverage again would double-count. The realized
+        // dollar PnL here is the same as a real futures position would book.
+        const profit = (currentPrice - openFill.buyPrice) * openFill.quantity;
         if (profit >= this.config.minProfitPerFillUsd) {
           openFill.closed = true;
           openFill.pnlUsd = profit;
@@ -260,6 +388,31 @@ export class GridManager {
 
           console.error(chalk.green(
             `  [grid] ROUND-TRIP ${grid.token}: buy $${openFill.buyPrice.toFixed(2)} → sell $${currentPrice.toFixed(2)} = +$${profit.toFixed(2)}`
+          ));
+        }
+      }
+    }
+
+    // Step 3: stop-loss — force-close any open buy whose unrealized loss
+    // crosses the configured threshold. Acts as a per-position circuit
+    // breaker. Without this, the grid can accumulate enough underwater
+    // exposure across rebuilds to wipe the cross-margin pool even at
+    // low leverage (issue #269). Disabled if stopLossPct = 0.
+    if (this.config.stopLossPct > 0) {
+      for (const openFill of grid.openFills) {
+        if (openFill.closed) continue;
+        const stopPrice = openFill.buyPrice * (1 - this.config.stopLossPct);
+        if (currentPrice <= stopPrice) {
+          const realizedLoss = (currentPrice - openFill.buyPrice) * openFill.quantity;
+          openFill.closed = true;
+          openFill.pnlUsd = realizedLoss;
+          openFill.closedAt = now;
+          pnlUsd += realizedLoss;  // negative
+          grid.stats.totalPnlUsd += realizedLoss;
+          grid.stats.todayPnlUsd += realizedLoss;
+          grid.allocation += realizedLoss;  // pool shrinks; positive contributors do the same
+          console.error(chalk.red(
+            `  [grid] STOP-LOSS ${grid.token}: buy $${openFill.buyPrice.toFixed(2)} → close $${currentPrice.toFixed(2)} = $${realizedLoss.toFixed(2)}`
           ));
         }
       }

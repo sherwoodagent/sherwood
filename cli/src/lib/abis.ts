@@ -75,6 +75,15 @@ export const SYNDICATE_VAULT_ABI = [
     ],
     outputs: [],
   },
+  // Live NAV — adapter slot pushed by governor.bindProposalAdapter while
+  // a strategy proposal is active. address(0) when no adapter is bound.
+  {
+    name: "activeStrategyAdapter",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
   // Agent management
   {
     name: "registerAgent",
@@ -932,6 +941,20 @@ export const SYNDICATE_GOVERNOR_ABI = [
     inputs: [{ name: "proposalId", type: "uint256" }],
     outputs: [],
   },
+  // Live NAV — bind a strategy clone to the vault so totalAssets() can
+  // include its positionValue() while the proposal is active. Unlocks
+  // deposits/withdraws during execution. Optional; address(0) keeps the
+  // legacy queue-only behavior.
+  {
+    name: "bindProposalAdapter",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "proposalId", type: "uint256" },
+      { name: "adapter", type: "address" },
+    ],
+    outputs: [],
+  },
   {
     name: "settleProposal",
     type: "function",
@@ -1410,13 +1433,6 @@ export const HYPERLIQUID_PERP_STRATEGY_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "bool" }],
-  },
-  {
-    name: "minReturnAmount",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
   },
 ] as const;
 

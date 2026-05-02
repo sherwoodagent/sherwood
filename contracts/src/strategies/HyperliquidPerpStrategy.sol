@@ -42,13 +42,11 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     error InvalidAction();
     error DepositAmountTooLarge();
     error NotSweepable();
-    error InsufficientReturn(uint256 actual, uint256 minimum);
     error MaxTradesExceeded();
     error PositionTooLarge(uint256 actual, uint256 max);
 
     // ── Action types ──
     // Legacy single-asset actions (use perpAssetIndex from storage):
-    uint8 constant ACTION_UPDATE_MIN_RETURN = 0;
     uint8 constant ACTION_OPEN_LONG = 1;
     uint8 constant ACTION_CLOSE_POSITION = 2;
     uint8 constant ACTION_UPDATE_STOP_LOSS = 3; // reduce-only sell (for longs)
@@ -69,15 +67,13 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     // ── Storage (per-clone) ──
     IERC20 public asset;
     uint256 public depositAmount;
-    uint256 public minReturnAmount;
     uint32 public perpAssetIndex;
     uint32 public leverage;
     bool public leverageSentToCore; // Whether leverage has been set on HyperCore
     bool public hasActiveStopLoss; // Whether a GTC stop-loss is currently live
     bool public settled; // Whether _settle() has been called
     /// @dev Cumulative USDC pushed back to the vault across all sweepToVault() calls.
-    ///      Replaces the prior `bool swept` (which let a permissionless dust race
-    ///      bypass minReturnAmount on subsequent calls — fixes #255 S-C6).
+    ///      Off-chain accounting only — does not gate withdrawals.
     uint256 public cumulativeSwept;
     uint256 public maxPositionSize; // Max USDC in a single position (on-chain risk cap)
     uint32 public maxTradesPerDay; // Rate limit on trading actions per day
@@ -94,18 +90,17 @@ contract HyperliquidPerpStrategy is BaseStrategy {
         return "Hyperliquid Perp";
     }
 
-    /// @notice Decode: (address asset, uint256 depositAmount, uint256 minReturnAmount, uint32 perpAssetIndex, uint32 leverage, uint256 maxPositionSize, uint32 maxTradesPerDay)
+    /// @notice Decode: (address asset, uint256 depositAmount, uint32 perpAssetIndex, uint32 leverage, uint256 maxPositionSize, uint32 maxTradesPerDay)
     /// @dev depositAmount_ == 0 means "use the vault's full asset balance at execute time" (dynamic-all mode).
     function _initialize(bytes calldata data) internal override {
         (
             address asset_,
             uint256 depositAmount_,
-            uint256 minReturnAmount_,
             uint32 perpAssetIndex_,
             uint32 leverage_,
             uint256 maxPositionSize_,
             uint32 maxTradesPerDay_
-        ) = abi.decode(data, (address, uint256, uint256, uint32, uint32, uint256, uint32));
+        ) = abi.decode(data, (address, uint256, uint32, uint32, uint256, uint32));
 
         if (asset_ == address(0)) revert ZeroAddress();
         if (depositAmount_ > type(uint64).max) revert DepositAmountTooLarge();
@@ -115,7 +110,6 @@ contract HyperliquidPerpStrategy is BaseStrategy {
 
         asset = IERC20(asset_);
         depositAmount = depositAmount_;
-        minReturnAmount = minReturnAmount_;
         perpAssetIndex = perpAssetIndex_;
         leverage = leverage_;
         maxPositionSize = maxPositionSize_;
@@ -149,7 +143,6 @@ contract HyperliquidPerpStrategy is BaseStrategy {
 
     /// @notice Proposer-driven trading actions via precompiles
     /// @dev Decode format depends on action type:
-    ///   action=0: (uint8 action, uint256 newMinReturn)
     ///   action=1: (uint8 action, uint64 limitPx, uint64 sz, uint64 stopLossPx, uint64 stopLossSz)
     ///   action=2: (uint8 action, uint64 limitPx, uint64 sz)
     ///   action=3: (uint8 action, uint64 triggerPx, uint64 sz)
@@ -163,7 +156,7 @@ contract HyperliquidPerpStrategy is BaseStrategy {
         if (data.length < 32) revert InvalidAction();
         uint8 action = abi.decode(data[:32], (uint8));
 
-        // Daily trade counter (actions 1/2/3 only — not action 0)
+        // Daily trade counter — every recognised action counts as a trade.
         if (action >= ACTION_OPEN_LONG) {
             if (block.timestamp / 1 days != lastTradeReset / 1 days) {
                 tradesToday = 0;
@@ -173,10 +166,7 @@ contract HyperliquidPerpStrategy is BaseStrategy {
             if (tradesToday > maxTradesPerDay) revert MaxTradesExceeded();
         }
 
-        if (action == ACTION_UPDATE_MIN_RETURN) {
-            (, uint256 newMinReturn) = abi.decode(data, (uint8, uint256));
-            minReturnAmount = newMinReturn;
-        } else if (action == ACTION_OPEN_LONG) {
+        if (action == ACTION_OPEN_LONG) {
             (, uint64 limitPx, uint64 sz, uint64 stopLossPx, uint64 stopLossSz) =
                 abi.decode(data, (uint8, uint64, uint64, uint64, uint64));
 
@@ -349,23 +339,19 @@ contract HyperliquidPerpStrategy is BaseStrategy {
     }
 
     /// @notice Push USDC back to the vault after async transfer completes.
-    /// @dev Callable by anyone — funds only go to the vault, no griefing vector.
-    ///      Can be called multiple times to handle partial async arrivals.
-    ///      Enforces `minReturnAmount` cumulatively until threshold met (#255 S-C6).
-    ///      Prevents the dust race where an attacker triggers the first sweep with
-    ///      1 USDC of arrived funds, bypassing the LP minReturn guarantee for
-    ///      subsequent arrivals.
+    /// @dev Permissionless — funds only go to the vault, no diversion possible.
+    ///      Repeatable for partial async arrivals. NO minReturnAmount guard:
+    ///      a strategy that loses money must still be able to return whatever
+    ///      remains. The cumulative tracker (`cumulativeSwept`) records totals
+    ///      for off-chain monitoring but does not gate withdrawals.
+    /// @dev Closes #255 S-C6: minReturnAmount removed (was permanently locking funds on lossy strategies).
     function sweepToVault() external {
         if (!settled) revert NotSweepable();
 
         uint256 bal = IERC20(asset).balanceOf(address(this));
         if (bal == 0) revert InvalidAmount();
 
-        uint256 newTotal = cumulativeSwept + bal;
-        if (minReturnAmount > 0 && newTotal < minReturnAmount) {
-            revert InsufficientReturn(newTotal, minReturnAmount);
-        }
-        cumulativeSwept = newTotal;
+        cumulativeSwept += bal;
 
         uint256 vaultBefore = IERC20(asset).balanceOf(vault());
         _pushAllToVault(address(asset));
