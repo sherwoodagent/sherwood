@@ -33,6 +33,7 @@ contract DeployTemplates is ScriptBase {
     string constant WSTETH_KEY = "WSTETH_MOONWELL_TEMPLATE";
     string constant MAMO_KEY = "MAMO_YIELD_TEMPLATE";
     string constant HYPERLIQUID_KEY = "HYPERLIQUID_PERP_TEMPLATE";
+    string constant HYPERLIQUID_GRID_KEY = "HYPERLIQUID_GRID_TEMPLATE";
 
     struct Templates {
         address moonwell;
@@ -41,6 +42,7 @@ contract DeployTemplates is ScriptBase {
         address wsteth;
         address mamo;
         address hyperliquid;
+        address hyperliquidGrid;
     }
 
     function run() external {
@@ -56,6 +58,7 @@ contract DeployTemplates is ScriptBase {
         t.wsteth = _tryReadAddress(json, WSTETH_KEY);
         t.mamo = _tryReadAddress(json, MAMO_KEY);
         t.hyperliquid = _tryReadAddress(json, HYPERLIQUID_KEY);
+        t.hyperliquidGrid = _tryReadAddress(json, HYPERLIQUID_GRID_KEY);
 
         bool isHyperEvm = block.chainid == 999;
         bool anyDeployed = false;
@@ -143,8 +146,20 @@ contract DeployTemplates is ScriptBase {
             } else {
                 console.log("  Skipped  HyperliquidPerpStrategy:  %s (already deployed)", t.hyperliquid);
             }
+
+            if (_needsDeploy(t.hyperliquidGrid)) {
+                if (t.hyperliquidGrid != address(0)) {
+                    console.log("  Stale    HyperliquidGridStrategy:  %s (no code, redeploying)", t.hyperliquidGrid);
+                }
+                t.hyperliquidGrid = address(new HyperliquidGridStrategy());
+                console.log("  Deployed HyperliquidGridStrategy:  %s", t.hyperliquidGrid);
+                anyDeployed = true;
+            } else {
+                console.log("  Skipped  HyperliquidGridStrategy:  %s (already deployed)", t.hyperliquidGrid);
+            }
         } else {
             console.log("  Skipped  HyperliquidPerpStrategy:  N/A (not on HyperEVM, chainId=%s)", block.chainid);
+            console.log("  Skipped  HyperliquidGridStrategy:  N/A (not on HyperEVM, chainId=%s)", block.chainid);
         }
 
         vm.stopBroadcast();
@@ -154,6 +169,7 @@ contract DeployTemplates is ScriptBase {
         if (anyDeployed) {
             if (isHyperEvm) {
                 vm.writeJson(vm.toString(t.hyperliquid), path, string.concat(".", HYPERLIQUID_KEY));
+                vm.writeJson(vm.toString(t.hyperliquidGrid), path, string.concat(".", HYPERLIQUID_GRID_KEY));
             } else {
                 vm.writeJson(vm.toString(t.moonwell), path, string.concat(".", MOONWELL_KEY));
                 vm.writeJson(vm.toString(t.aerodrome), path, string.concat(".", AERODROME_KEY));
@@ -207,9 +223,14 @@ contract DeployTemplates is ScriptBase {
             require(t.hyperliquid.code.length > 0, "HyperliquidPerpStrategy: no code");
             console.log("  HyperliquidPerpStrategy: code OK (%s bytes)", t.hyperliquid.code.length);
 
+            require(t.hyperliquidGrid.code.length > 0, "HyperliquidGridStrategy: no code");
+            console.log("  HyperliquidGridStrategy: code OK (%s bytes)", t.hyperliquidGrid.code.length);
+
             _validateName(t.hyperliquid, "Hyperliquid Perp", "HyperliquidPerpStrategy");
+            _validateName(t.hyperliquidGrid, "Hyperliquid Grid", "HyperliquidGridStrategy");
 
             require(IStrategy(t.hyperliquid).vault() == address(0), "HyperliquidPerpStrategy: already initialized");
+            require(IStrategy(t.hyperliquidGrid).vault() == address(0), "HyperliquidGridStrategy: already initialized");
         } else {
             require(t.moonwell.code.length > 0, "MoonwellSupplyStrategy: no code");
             console.log("  MoonwellSupplyStrategy:  code OK (%s bytes)", t.moonwell.code.length);
@@ -227,6 +248,7 @@ contract DeployTemplates is ScriptBase {
             console.log("  MamoYieldStrategy:       code OK (%s bytes)", t.mamo.code.length);
 
             console.log("  HyperliquidPerpStrategy: skipped (not on HyperEVM)");
+            console.log("  HyperliquidGridStrategy: skipped (not on HyperEVM)");
 
             _validateName(t.moonwell, "Moonwell Supply", "MoonwellSupplyStrategy");
             _validateName(t.aerodrome, "Aerodrome LP", "AerodromeLPStrategy");

@@ -9,36 +9,67 @@ import {BaseStrategy} from "../src/strategies/BaseStrategy.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockMToken} from "./mocks/MockMToken.sol";
 
+/// @dev Minimal SyndicateFactory stand-in that returns a non-zero
+///      `vaultToSyndicate(vault)` so legacy unit tests can exercise the
+///      happy-path clone fns through the post-MS-C2 auth gate.
+contract _MockSyndicateRegistry {
+    function vaultToSyndicate(address) external pure returns (uint256) {
+        return 1;
+    }
+}
+
+/// @dev Minimal vault stand-in that exposes IVaultMembership (`owner`,
+///      `isAgent`). Strategies are pre-deployed by the vault owner, so the
+///      tests prank as the owner.
+contract _MockVault {
+    address public owner;
+    mapping(address => bool) public agents;
+
+    constructor(address owner_) {
+        owner = owner_;
+    }
+
+    function isAgent(address a) external view returns (bool) {
+        return agents[a];
+    }
+}
+
 contract StrategyFactoryTest is Test {
     StrategyFactory factory;
     MoonwellSupplyStrategy template;
     ERC20Mock usdc;
     MockMToken mUsdc;
+    _MockSyndicateRegistry registry;
+    _MockVault vault;
 
-    address vault = makeAddr("vault");
+    address vaultOwner = makeAddr("vaultOwner");
     address proposer = makeAddr("proposer");
     address attacker = makeAddr("attacker");
 
     function setUp() public {
-        factory = new StrategyFactory();
+        registry = new _MockSyndicateRegistry();
+        factory = new StrategyFactory(address(registry));
         template = new MoonwellSupplyStrategy();
         usdc = new ERC20Mock("USDC", "USDC", 6);
         mUsdc = new MockMToken(address(usdc), "Moonwell USDC", "mUsdc");
+        vault = new _MockVault(vaultOwner);
     }
 
     function test_cloneAndInit_atomic() public {
         bytes memory initData = abi.encode(address(usdc), address(mUsdc), 1_000e6, 990e6, false);
-        address clone = factory.cloneAndInit(address(template), vault, proposer, initData);
+        vm.prank(vaultOwner);
+        address clone = factory.cloneAndInit(address(template), address(vault), proposer, initData);
 
         MoonwellSupplyStrategy strategy = MoonwellSupplyStrategy(payable(clone));
-        assertEq(strategy.vault(), vault);
+        assertEq(strategy.vault(), address(vault));
         assertEq(strategy.proposer(), proposer);
         assertEq(strategy.supplyAmount(), 1_000e6);
     }
 
     function test_cloneAndInit_initializeAgain_reverts() public {
         bytes memory initData = abi.encode(address(usdc), address(mUsdc), 1_000e6, 990e6, false);
-        address clone = factory.cloneAndInit(address(template), vault, proposer, initData);
+        vm.prank(vaultOwner);
+        address clone = factory.cloneAndInit(address(template), address(vault), proposer, initData);
 
         // Anyone trying to re-initialize the clone (front-run attack post-init)
         // is rejected by the existing _initialized flag.
@@ -51,7 +82,8 @@ contract StrategyFactoryTest is Test {
         bytes32 salt = keccak256("strategy.salt.1");
         bytes memory initData = abi.encode(address(usdc), address(mUsdc), 1_000e6, 990e6, false);
         address predicted = Clones.predictDeterministicAddress(address(template), salt, address(factory));
-        address clone = factory.cloneAndInitDeterministic(address(template), vault, proposer, initData, salt);
+        vm.prank(vaultOwner);
+        address clone = factory.cloneAndInitDeterministic(address(template), address(vault), proposer, initData, salt);
         assertEq(clone, predicted);
     }
 }

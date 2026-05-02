@@ -14,6 +14,7 @@ import {ISyndicateVault} from "./interfaces/ISyndicateVault.sol";
 import {ISyndicateGovernor} from "./interfaces/ISyndicateGovernor.sol";
 import {IGuardianRegistry} from "./interfaces/IGuardianRegistry.sol";
 import {IL2Registrar} from "./interfaces/IL2Registrar.sol";
+import {VaultWithdrawalQueue} from "./queue/VaultWithdrawalQueue.sol";
 
 /**
  * @title SyndicateFactory
@@ -56,7 +57,8 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     error VaultStillStaked();
     error RegistryMismatch();
     error ZeroAddress();
-    // ── V-M7: reject zero/empty SyndicateConfig fields ──
+    error ProposalActive();
+    error ProposalsOpen();
     error InvalidSyndicateConfig();
 
     struct SyndicateConfig {
@@ -165,6 +167,8 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     event VaultUpgraded(address indexed vault, address indexed newImpl);
     event UpgradesEnabledUpdated(bool enabled);
     event OwnerRotated(address indexed vault, address indexed newOwner);
+    event WithdrawalQueueDeployed(address indexed vault, address indexed queue);
+    event GuardianRegistrySet(address indexed oldRegistry, address indexed newRegistry);
 
     struct InitParams {
         address owner;
@@ -260,6 +264,13 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
 
         vault = address(new ERC1967Proxy(vaultImpl, initData));
 
+        // Deploy the per-vault async withdrawal queue and bind it. The vault checks
+        // `msg.sender == _factory`, so we must call `setWithdrawalQueue` from this
+        // (factory) context.
+        VaultWithdrawalQueue queue = new VaultWithdrawalQueue(vault);
+        ISyndicateVault(vault).setWithdrawalQueue(address(queue));
+        emit WithdrawalQueueDeployed(vault, address(queue));
+
         // Register vault with the governor so it can receive proposals
         ISyndicateGovernor(governor).addVault(vault);
 
@@ -342,6 +353,17 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         emit UpgradesEnabledUpdated(enabled);
     }
 
+    /// @notice Re-point the factory at a new guardian registry. Used when WOOD
+    ///         ships and the protocol migrates from the beta stub to the real
+    ///         `GuardianRegistry`. The governor and factory MUST share the same
+    ///         registry; flip both in the same multisig batch.
+    function setGuardianRegistry(address newRegistry) external onlyOwner {
+        if (newRegistry == address(0)) revert InvalidGuardianRegistry();
+        address old = guardianRegistry;
+        guardianRegistry = newRegistry;
+        emit GuardianRegistrySet(old, newRegistry);
+    }
+
     /// @notice Transfer a vault's ownership to `newOwner` and rebind the owner-stake
     ///         slot in the guardian registry.
     /// @dev Owner-only. Requires the old owner to have already unstaked
@@ -357,7 +379,12 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         IGuardianRegistry reg = IGuardianRegistry(guardianRegistry);
         if (reg.hasOwnerStake(vault)) revert VaultStillStaked();
         // Registry-consistency invariant: governor and factory must share one registry.
-        if (ISyndicateGovernor(governor).guardianRegistry() != guardianRegistry) revert RegistryMismatch();
+        ISyndicateGovernor gov = ISyndicateGovernor(governor);
+        if (gov.guardianRegistry() != guardianRegistry) revert RegistryMismatch();
+        // Forbid rotation while any proposal binds the vault — otherwise the
+        // new owner inherits `pause()` and other owner-only powers mid-flight.
+        if (gov.getActiveProposal(vault) != 0) revert ProposalActive();
+        if (gov.openProposalCount(vault) != 0) revert ProposalsOpen();
 
         SyndicateVault(payable(vault)).rotateOwnership(newOwner);
         reg.transferOwnerStakeSlot(vault, newOwner);
@@ -405,7 +432,7 @@ contract SyndicateFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     /// @dev    Backed by `_activeSyndicateIds` (EnumerableSet) so reads are
     ///         O(limit) instead of O(syndicateCount). `limit` is hard-capped at
     ///         `MAX_PAGE_LIMIT` to guarantee the call stays well below block
-    ///         gas even as the set grows. Closes V-C4.
+    ///         gas even as the set grows.
     /// @param offset Starting index (0-based) into the active-set
     /// @param limit  Maximum number of results to return; clamped to `MAX_PAGE_LIMIT`
     /// @return result Array of active syndicates (in insertion order with swap-pop gaps filled)

@@ -47,6 +47,18 @@ abstract contract BaseStrategy is IStrategy {
     State internal _state;
     bool private _initialized;
 
+    /**
+     * @notice Disables `initialize` on the template itself so an attacker
+     *         can't front-run a clone deploy with their own init.
+     * @dev Constructors are NOT executed for ERC-1167 minimal proxies, so
+     *      `Clones.clone(template)` produces a clone with `_initialized = false`,
+     *      keeping atomic `cloneAndInit` flows working. Only the template
+     *      contract — deployed via `new` — is permanently locked.
+     */
+    constructor() {
+        _initialized = true;
+    }
+
     modifier onlyProposer() {
         if (msg.sender != _proposer) revert NotProposer();
         _;
@@ -118,6 +130,15 @@ abstract contract BaseStrategy is IStrategy {
         return _positionValue();
     }
 
+    /// @inheritdoc IStrategy
+    /// @dev Default no-op — strategies that can absorb mid-position
+    ///      capital override `_onLiveDeposit`. Only callable by the vault and
+    ///      only while the strategy is `Executed`.
+    function onLiveDeposit(uint256 assets) external virtual onlyVault {
+        if (_state != State.Executed) return;
+        _onLiveDeposit(assets);
+    }
+
     // ── Internal helpers ──
 
     /// @notice Pull tokens from the vault into this strategy
@@ -157,5 +178,15 @@ abstract contract BaseStrategy is IStrategy {
     ///         an onchain value override this with their implementation.
     function _positionValue() internal view virtual returns (uint256, bool) {
         return (0, false);
+    }
+
+    /// @notice Override to route new vault deposits into the live position.
+    ///         Default: no-op. Only invoked while the strategy is `Executed`.
+    function _onLiveDeposit(
+        uint256 /*assets*/
+    )
+        internal
+        virtual {
+        // default: do nothing
     }
 }

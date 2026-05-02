@@ -33,6 +33,7 @@ import * as wstethBuilder from "../strategies/wsteth-moonwell-template.js";
 import * as mamoBuilder from "../strategies/mamo-yield-template.js";
 import * as portfolioBuilder from "../strategies/portfolio-template.js";
 import * as hyperliquidPerpBuilder from "../strategies/hyperliquid-perp-template.js";
+import * as hyperliquidGridBuilder from "../strategies/hyperliquid-grid-template.js";
 
 import { concat, numberToHex, size } from "viem";
 
@@ -256,6 +257,12 @@ const TEMPLATES: TemplateDef[] = [
     key: "hyperliquid-perp",
     description: "Leveraged perp trading on Hyperliquid via HyperEVM precompiles",
     addressKey: "HYPERLIQUID_PERP",
+  },
+  {
+    name: "Hyperliquid Grid",
+    key: "hyperliquid-grid",
+    description: "ATR-based grid trading on Hyperliquid via HyperEVM precompiles",
+    addressKey: "HYPERLIQUID_GRID",
   },
 ];
 
@@ -548,6 +555,24 @@ async function buildInitDataForTemplate(
     };
   }
 
+  if (templateKey === "hyperliquid-grid") {
+    const token = (opts.token as string) || "USDC";
+    const asset = resolveToken(token);
+    const decimals = token.toUpperCase() === "USDC" ? 6 : 18;
+    const depositAmount = opts.amount ? parseUnits(opts.amount as string, decimals) : 0n;
+    const leverage = Number((opts.leverage as string) || "5");
+    const maxOrderSize = parseUnits((opts.maxOrderSize as string) || "10000", decimals);
+    const maxOrdersPerTick = Number((opts.maxOrdersPerTick as string) || "20");
+    const assetIndices = ((opts.assetIndices as string) || "0")
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => !Number.isNaN(n));
+    return {
+      initData: hyperliquidGridBuilder.buildInitData(asset, depositAmount, leverage, maxOrderSize, maxOrdersPerTick, assetIndices),
+      asset, assetAmount: depositAmount,
+    };
+  }
+
   throw new Error(`No init builder for template: ${templateKey}`);
 }
 
@@ -606,6 +631,13 @@ function buildCallsForTemplate(
     return {
       executeCalls: hyperliquidPerpBuilder.buildExecuteCalls(clone, asset, assetAmount),
       settleCalls: hyperliquidPerpBuilder.buildSettleCalls(clone),
+    };
+  }
+
+  if (templateKey === "hyperliquid-grid") {
+    return {
+      executeCalls: hyperliquidGridBuilder.buildExecuteCalls(clone, asset, assetAmount),
+      settleCalls: hyperliquidGridBuilder.buildSettleCalls(clone),
     };
   }
 
@@ -725,7 +757,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("clone")
     .description("Clone a strategy template and initialize it")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp, hyperliquid-grid")
     .requiredOption("--vault <address>", "Vault address")
     // moonwell-supply / wsteth-moonwell
     .option("--amount <n>", "Asset amount to deploy")
@@ -761,6 +793,9 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
     .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
     .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
+    .option("--max-order-size <amount>", "Max single-order size in asset units (Hyperliquid Grid, default: 10000)")
+    .option("--max-orders-per-tick <n>", "Max orders per tick (Hyperliquid Grid, default: 20)")
+    .option("--asset-indices <list>", "Comma-separated perp asset indices (Hyperliquid Grid, default: 0)")
     .action(async (templateKey: string, opts) => {
       const vault = opts.vault as Address;
       if (!isAddress(vault)) {
@@ -823,7 +858,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("init")
     .description("Initialize an already-deployed but uninitialized strategy clone")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp, hyperliquid-grid")
     .requiredOption("--clone <address>", "Clone address to initialize")
     .requiredOption("--vault <address>", "Vault address")
     // moonwell-supply / wsteth-moonwell
@@ -860,6 +895,9 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
     .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
     .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
+    .option("--max-order-size <amount>", "Max single-order size in asset units (Hyperliquid Grid, default: 10000)")
+    .option("--max-orders-per-tick <n>", "Max orders per tick (Hyperliquid Grid, default: 20)")
+    .option("--asset-indices <list>", "Comma-separated perp asset indices (Hyperliquid Grid, default: 0)")
     .action(async (templateKey: string, opts) => {
       const clone = opts.clone as Address;
       const vault = opts.vault as Address;
@@ -932,7 +970,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("propose")
     .description("Clone + init + build calls + submit governance proposal (all-in-one)")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp, hyperliquid-grid")
     .requiredOption("--vault <address>", "Vault address")
     .option("--write-calls <dir>", "Write execute/settle JSON to directory (skip proposal submission)")
     // proposal metadata (required unless --write-calls)
@@ -972,6 +1010,9 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
     .option("--asset-index <number>", "Perp asset index (Hyperliquid Perp, default: 0 for BTC)")
     .option("--max-position <amount>", "Max position size in USD (Hyperliquid Perp, default: 100000)")
     .option("--max-trades-per-day <n>", "Max trades per day (Hyperliquid Perp, default: 50)")
+    .option("--max-order-size <amount>", "Max single-order size in asset units (Hyperliquid Grid, default: 10000)")
+    .option("--max-orders-per-tick <n>", "Max orders per tick (Hyperliquid Grid, default: 20)")
+    .option("--asset-indices <list>", "Comma-separated perp asset indices (Hyperliquid Grid, default: 0)")
     .action(async (templateKey: string, opts) => {
       const vault = opts.vault as Address;
       if (!isAddress(vault)) {

@@ -7,6 +7,7 @@ import {ISyndicateGovernor} from "../src/interfaces/ISyndicateGovernor.sol";
 import {SyndicateVault} from "../src/SyndicateVault.sol";
 import {ISyndicateVault} from "../src/interfaces/ISyndicateVault.sol";
 import {BatchExecutorLib} from "../src/BatchExecutorLib.sol";
+import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MockAgentRegistry} from "./mocks/MockAgentRegistry.sol";
@@ -169,8 +170,11 @@ contract SyndicateGovernorIntegrationTest is Test {
         assertTrue(vault.redemptionsLocked());
         assertEq(usdc.allowance(address(vault), address(targetToken)), 50_000e6);
 
+        // While the proposal is active `maxWithdraw == 0` so OZ's standard
+        // pre-check produces the canonical EIP-4626 revert.
+        assertEq(vault.maxWithdraw(lp1), 0);
         vm.prank(lp1);
-        vm.expectRevert(ISyndicateVault.RedemptionsLocked.selector);
+        vm.expectPartialRevert(ERC4626Upgradeable.ERC4626ExceededMaxWithdraw.selector);
         vault.withdraw(1_000e6, lp1, lp1);
 
         usdc.mint(address(vault), 5_000e6);
