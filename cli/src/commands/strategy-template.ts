@@ -757,7 +757,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("clone")
     .description("Clone a strategy template and initialize it")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp, hyperliquid-grid")
     .requiredOption("--vault <address>", "Vault address")
     // moonwell-supply / wsteth-moonwell
     .option("--amount <n>", "Asset amount to deploy")
@@ -858,7 +858,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("init")
     .description("Initialize an already-deployed but uninitialized strategy clone")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp, hyperliquid-grid")
     .requiredOption("--clone <address>", "Clone address to initialize")
     .requiredOption("--vault <address>", "Vault address")
     // moonwell-supply / wsteth-moonwell
@@ -970,7 +970,7 @@ export function registerStrategyTemplateCommands(strategy: Command): void {
   strategy
     .command("propose")
     .description("Clone + init + build calls + submit governance proposal (all-in-one)")
-    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp")
+    .argument("<template>", "Template: moonwell-supply, aerodrome-lp, venice-inference, wsteth-moonwell, mamo-yield, portfolio, hyperliquid-perp, hyperliquid-grid")
     .requiredOption("--vault <address>", "Vault address")
     .option("--write-calls <dir>", "Write execute/settle JSON to directory (skip proposal submission)")
     // proposal metadata (required unless --write-calls)
