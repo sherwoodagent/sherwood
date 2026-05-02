@@ -44,6 +44,7 @@ contract HyperliquidGridStrategy is BaseStrategy {
     event FundsSwept(uint256 amount);
     event LeverageUpdated(uint32 asset, uint32 leverage);
     event HyperCoreFinalized(uint64 token, FinalizeVariant variant, uint64 createNonce);
+    event MaxOrdersPerTickUpdated(uint32 oldValue, uint32 newValue);
 
     // ── Errors ──
     error InvalidAmount();
@@ -53,6 +54,7 @@ contract HyperliquidGridStrategy is BaseStrategy {
     error TooManyOrders(uint256 actual, uint256 max);
     error OrderTooLarge(uint256 actual, uint256 max);
     error AssetNotWhitelisted(uint32 asset);
+    error MaxOrdersPerTickTooLarge(uint32 actual, uint32 max);
 
     // ── Action types ──
     uint8 constant ACTION_PLACE_GRID = 1;
@@ -61,6 +63,12 @@ contract HyperliquidGridStrategy is BaseStrategy {
 
     // ── Limits ──
     uint32 constant MAX_ASSETS = 32;
+    /// @notice Hard ceiling on `maxOrdersPerTick` to bound the gas of a single
+    ///         `_placeOrders` loop. Each order issues an L1Write precompile
+    ///         call (~50k gas including encoding + emit), so 64 ≈ 3.2M gas
+    ///         worst-case for the loop alone — well under HyperEVM's block
+    ///         gas limit and leaves headroom for cancel-and-place hybrids.
+    uint32 public constant MAX_ORDERS_PER_TICK_CEILING = 64;
 
     // ── Storage (per-clone) ──
     IERC20 public asset;
@@ -112,6 +120,9 @@ contract HyperliquidGridStrategy is BaseStrategy {
         if (leverage_ == 0 || leverage_ > 50) revert InvalidAmount();
         if (maxOrderSize_ == 0) revert InvalidAmount();
         if (maxOrdersPerTick_ == 0) revert InvalidAmount();
+        if (maxOrdersPerTick_ > MAX_ORDERS_PER_TICK_CEILING) {
+            revert MaxOrdersPerTickTooLarge(maxOrdersPerTick_, MAX_ORDERS_PER_TICK_CEILING);
+        }
         if (assetIndices_.length == 0) revert InvalidAmount();
         if (assetIndices_.length > MAX_ASSETS) revert InvalidAmount();
 
@@ -152,6 +163,30 @@ contract HyperliquidGridStrategy is BaseStrategy {
         L1Write.sendFinalizeEvmContract(token, variant, createNonce);
         hyperCoreFinalized = true;
         emit HyperCoreFinalized(token, variant, createNonce);
+    }
+
+    /**
+     * @notice Update `maxOrdersPerTick` after deployment. Lets the proposer
+     *         raise the per-call cap once they're confident in the keeper's
+     *         batching, or lower it as a defensive measure. The keeper's
+     *         off-chain chunker reads this value at startup and adapts —
+     *         older clones that need chunking keep working unchanged
+     *         (closes #272).
+     *
+     *         Bound to `MAX_ORDERS_PER_TICK_CEILING` so a malicious or buggy
+     *         setter call can't push the per-tick gas of `_placeOrders`
+     *         above the block limit. Per-order size cap (`maxOrderSize`) is
+     *         a separate axis and stays unaffected.
+     *
+     * @param newValue New per-tick order cap. Must be in (0, ceiling].
+     */
+    function setMaxOrdersPerTick(uint32 newValue) external onlyProposer {
+        if (newValue == 0) revert InvalidAmount();
+        if (newValue > MAX_ORDERS_PER_TICK_CEILING) {
+            revert MaxOrdersPerTickTooLarge(newValue, MAX_ORDERS_PER_TICK_CEILING);
+        }
+        emit MaxOrdersPerTickUpdated(maxOrdersPerTick, newValue);
+        maxOrdersPerTick = newValue;
     }
 
     function _execute() internal override {

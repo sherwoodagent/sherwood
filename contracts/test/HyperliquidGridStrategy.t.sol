@@ -229,6 +229,74 @@ contract HyperliquidGridStrategyTest is Test {
         assertTrue(strategy.hyperCoreFinalized());
     }
 
+    // ── setMaxOrdersPerTick (#272) ──
+
+    function test_setMaxOrdersPerTick_happyPath() public {
+        assertEq(strategy.maxOrdersPerTick(), MAX_ORDERS);
+        vm.expectEmit(true, true, true, true, address(strategy));
+        emit HyperliquidGridStrategy.MaxOrdersPerTickUpdated(MAX_ORDERS, 50);
+        vm.prank(proposer);
+        strategy.setMaxOrdersPerTick(50);
+        assertEq(strategy.maxOrdersPerTick(), 50);
+    }
+
+    function test_setMaxOrdersPerTick_revertsOnZero() public {
+        vm.prank(proposer);
+        vm.expectRevert(HyperliquidGridStrategy.InvalidAmount.selector);
+        strategy.setMaxOrdersPerTick(0);
+    }
+
+    function test_setMaxOrdersPerTick_revertsAboveCeiling() public {
+        uint32 ceiling = strategy.MAX_ORDERS_PER_TICK_CEILING();
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(HyperliquidGridStrategy.MaxOrdersPerTickTooLarge.selector, ceiling + 1, ceiling)
+        );
+        strategy.setMaxOrdersPerTick(ceiling + 1);
+    }
+
+    function test_setMaxOrdersPerTick_revertsIfNotProposer() public {
+        vm.prank(attacker);
+        vm.expectRevert(BaseStrategy.NotProposer.selector);
+        strategy.setMaxOrdersPerTick(50);
+    }
+
+    function test_initialize_revertsIfMaxOrdersPerTickAboveCeiling() public {
+        address payable badClone = payable(Clones.clone(address(template)));
+        HyperliquidGridStrategy bad = HyperliquidGridStrategy(badClone);
+        uint32 ceiling = bad.MAX_ORDERS_PER_TICK_CEILING();
+        uint32[] memory assets = new uint32[](1);
+        assets[0] = BTC_ASSET;
+        bytes memory initData = abi.encode(address(usdc), DEPOSIT, LEVERAGE, MAX_ORDER_SIZE, ceiling + 1, assets);
+        vm.expectRevert(
+            abi.encodeWithSelector(HyperliquidGridStrategy.MaxOrdersPerTickTooLarge.selector, ceiling + 1, ceiling)
+        );
+        bad.initialize(vault, proposer, initData);
+    }
+
+    /// @notice Gas measurement at the ceiling — backs `MAX_ORDERS_PER_TICK_CEILING`
+    ///         (#272 acceptance criterion #3). MockCoreWriter is cheap, so this
+    ///         is a regression guard rather than a tight budget.
+    function test_placeOrders_atCeiling_fitsGasBudget() public {
+        uint32 ceiling = strategy.MAX_ORDERS_PER_TICK_CEILING();
+        vm.prank(proposer);
+        strategy.setMaxOrdersPerTick(ceiling);
+        _execAndPrep();
+
+        HyperliquidGridStrategy.GridOrder[] memory orders = new HyperliquidGridStrategy.GridOrder[](ceiling);
+        for (uint256 i = 0; i < ceiling; i++) {
+            orders[i] = _gridOrder(BTC_ASSET, true, 76000_000000, 100, uint128(i + 1));
+        }
+        bytes memory data = abi.encode(uint8(1), orders);
+
+        vm.prank(proposer);
+        uint256 gasBefore = gasleft();
+        strategy.updateParams(data);
+        uint256 gasUsed = gasBefore - gasleft();
+        emit log_named_uint("gas used at ceiling", gasUsed);
+        assertLt(gasUsed, 5_000_000);
+    }
+
     function test_execute_skipsAutoFinalize_whenManuallyFinalized() public {
         // Proposer manually finalizes with a non-default variant first.
         vm.prank(proposer);
