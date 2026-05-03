@@ -142,15 +142,16 @@ export default async function TokenPage() {
               <div className="sh-card--spec">
                 <h3 className="sh-card--spec__title">Earn</h3>
                 <p className="sh-card--spec__body font-[family-name:var(--font-plus-jakarta)]">
-                  Guardians collect commission on delegated rewards (capped at 50%) plus pro-rata WOOD bounties
-                  for correct Block votes per epoch.
+                  Two streams: a share of strategy profits (up to 5%) on every successful settlement of an
+                  approved proposal, plus pro-rata WOOD bounties for correct Block votes per epoch. Delegators
+                  get a cut; commission is capped at 50%.
                 </p>
               </div>
               <div className="sh-card--spec">
                 <h3 className="sh-card--spec__title">[SOON] Govern</h3>
                 <p className="sh-card--spec__body font-[family-name:var(--font-plus-jakarta)]">
-                  Vote on protocol parameters and spend the bootstrapping treasury. WOOD is the governance
-                  token, not just the security token.
+                  Vote on protocol parameters — guardian fee, review window, slashing thresholds. WOOD is the
+                  governance token, not just the security token.
                 </p>
               </div>
             </div>

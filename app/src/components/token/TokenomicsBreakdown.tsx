@@ -22,7 +22,7 @@ const SLICES: Slice[] = [
     label: "Team vesting",
     pct: 15,
     color: "rgb(232, 168, 124)",
-    description: "Core contributors. Linear vesting over multiple years.",
+    description: "Core contributors. Subject to a vesting schedule.",
   },
   {
     label: "Presale",
