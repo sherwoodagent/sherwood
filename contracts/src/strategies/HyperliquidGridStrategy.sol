@@ -36,6 +36,8 @@ import {L1Read, Position, SpotBalance, AccountMarginSummary} from "../hyperliqui
 contract HyperliquidGridStrategy is BaseStrategy {
     using SafeERC20 for IERC20;
 
+    address constant SPOT_BALANCE_PRECOMPILE = 0x0000000000000000000000000000000000000801;
+
     // ── Events ──
     event GridOrderPlaced(uint32 asset, bool isBuy, uint64 limitPx, uint64 sz, uint128 cloid);
     event GridOrderCancelled(uint32 asset, uint128 cloid);
@@ -53,6 +55,7 @@ contract HyperliquidGridStrategy is BaseStrategy {
     error TooManyOrders(uint256 actual, uint256 max);
     error OrderTooLarge(uint256 actual, uint256 max);
     error AssetNotWhitelisted(uint32 asset);
+    error HyperCoreSpotCreditFailed(uint64 spotBefore, uint64 spotAfter, uint64 expectedIncrease);
 
     // ── Action types ──
     uint8 constant ACTION_PLACE_GRID = 1;
@@ -173,9 +176,16 @@ contract HyperliquidGridStrategy is BaseStrategy {
             emit HyperCoreFinalized(0, FinalizeVariant.FirstStorageSlot, 0);
         }
 
+        (uint64 spotBefore, bool preSpotOk) = _tryGetUsdcSpotTotal();
+
         _pullFromVault(address(asset), amountIn);
 
         uint64 ntl = uint64(amountIn);
+
+        (uint64 spotAfter, bool postSpotOk) = _tryGetUsdcSpotTotal();
+        if (preSpotOk && postSpotOk && spotAfter < spotBefore + ntl) {
+            revert HyperCoreSpotCreditFailed(spotBefore, spotAfter, ntl);
+        }
 
         for (uint256 i = 0; i < assetIndices.length; i++) {
             L1Write.sendUpdateLeverage(assetIndices[i], true, leverage);
@@ -288,5 +298,12 @@ contract HyperliquidGridStrategy is BaseStrategy {
 
     function getMarginSummary() external view returns (AccountMarginSummary memory) {
         return L1Read.accountMarginSummary(0, address(this));
+    }
+
+    function _tryGetUsdcSpotTotal() internal view returns (uint64 total, bool ok) {
+        (bool success, bytes memory ret) = SPOT_BALANCE_PRECOMPILE.staticcall(abi.encode(address(this), uint64(0)));
+        if (!success || ret.length < 96) return (0, false);
+        (total,,) = abi.decode(ret, (uint64, uint64, uint64));
+        return (total, true);
     }
 }

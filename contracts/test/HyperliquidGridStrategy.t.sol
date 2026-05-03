@@ -8,6 +8,7 @@ import {BaseStrategy} from "../src/strategies/BaseStrategy.sol";
 import {MockCoreWriter} from "./mocks/MockCoreWriter.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {FinalizeVariant} from "../src/hyperliquid/L1Write.sol";
+import {MockSpotBalancePrecompile} from "./mocks/MockSpotBalancePrecompile.sol";
 
 contract HyperliquidGridStrategyTest is Test {
     HyperliquidGridStrategy public template;
@@ -247,6 +248,18 @@ contract HyperliquidGridStrategyTest is Test {
                 "auto-finalize fired despite manual finalize"
             );
         }
+    }
+
+    function test_execute_revertsWhenHyperCoreSpotNotCredited() public {
+        MockSpotBalancePrecompile spot = new MockSpotBalancePrecompile();
+        spot.setSpot(0, 0, 0);
+        vm.etch(0x0000000000000000000000000000000000000801, address(spot).code);
+
+        vm.prank(vault);
+        vm.expectRevert(
+            abi.encodeWithSelector(HyperliquidGridStrategy.HyperCoreSpotCreditFailed.selector, uint64(0), uint64(0), uint64(DEPOSIT))
+        );
+        strategy.execute();
     }
 
     function test_sweepToVault_repeatableForPartialArrivals() public {
