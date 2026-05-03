@@ -9,8 +9,7 @@
 
 import chalk from 'chalk';
 import { appendFile, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 import { GridManager } from './manager.js';
 import { GridPortfolio } from './portfolio.js';
 import { DEFAULT_GRID_CONFIG } from './config.js';
@@ -19,9 +18,8 @@ import { HyperliquidProvider } from '../providers/data/hyperliquid.js';
 import { GridHedgeManager } from './hedge.js';
 import { GridExecutor } from './executor.js';
 import { OnchainGridExecutor } from './onchain-executor.js';
+import { gridStatePath } from './paths.js';
 import type { Address } from 'viem';
-
-const GRID_CYCLES_PATH = join(homedir(), '.sherwood', 'grid', 'cycles.jsonl');
 
 export interface GridLoopConfig {
   /** Starting capital in USD. */
@@ -36,6 +34,8 @@ export interface GridLoopConfig {
   assetIndices?: Record<string, number>;
   /** When set, use on-chain executor (calls strategy contract). */
   strategyAddress?: Address;
+  /** Override directory for persisted state. Defaults to ~/.sherwood/grid. */
+  stateDir?: string;
 }
 
 export class GridLoop {
@@ -49,11 +49,14 @@ export class GridLoop {
   private cycleCount = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
+  private cyclesPath: string;
+
   constructor(cfg: GridLoopConfig) {
     this.cfg = cfg;
     this.gridConfig = { ...DEFAULT_GRID_CONFIG, ...cfg.config };
-    this.manager = new GridManager(this.gridConfig);
-    this.hedge = new GridHedgeManager();
+    this.cyclesPath = gridStatePath('cycles.jsonl', cfg.stateDir);
+    this.manager = new GridManager(this.gridConfig, undefined, undefined, undefined, new GridPortfolio(cfg.stateDir));
+    this.hedge = new GridHedgeManager(cfg.stateDir);
     this.hl = new HyperliquidProvider();
 
     if (cfg.live) {
@@ -64,6 +67,7 @@ export class GridLoop {
         this.executor = new OnchainGridExecutor({
           strategyAddress: cfg.strategyAddress,
           assetIndices: cfg.assetIndices,
+          stateDir: cfg.stateDir,
         });
       } else {
         this.executor = new GridExecutor({ assetIndices: cfg.assetIndices });
@@ -204,8 +208,8 @@ export class GridLoop {
       hedgeTotalRealizedPnl: hedgeResult.totalRealizedPnl,
     };
     try {
-      await mkdir(join(homedir(), '.sherwood', 'grid'), { recursive: true });
-      await appendFile(GRID_CYCLES_PATH, JSON.stringify(cycleEntry) + '\n');
+      await mkdir(dirname(this.cyclesPath), { recursive: true });
+      await appendFile(this.cyclesPath, JSON.stringify(cycleEntry) + '\n');
     } catch { /* non-critical */ }
 
     // Periodic status every ~60 cycles

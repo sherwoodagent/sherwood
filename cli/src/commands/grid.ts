@@ -152,12 +152,14 @@ export function registerGridCommand(program: Command): void {
     .option('--asset-indices <pairs>', 'comma-separated token=index pairs (e.g. bitcoin=3,ethereum=4,solana=5)')
     .option('--strategy <address>', 'on-chain strategy contract address (enables on-chain executor)')
     .option('--token-split <pairs>', 'Comma-separated token=weight pairs (must sum to 1.0). Default: equal-weight.')
+    .option('--state-dir <path>', 'Override directory for portfolio.json / hedge.json / cycles.jsonl / onchain-state.json. Defaults to ~/.sherwood/grid. Use a separate dir to run paper and live grids in parallel.')
     .action(async (opts) => {
       const capital = parseFloat(opts.capital);
       const cycleMs = parseInt(opts.cycle, 10) * 1000;
       const tokens = opts.tokens.split(',').map((t: string) => t.trim());
       const leverage = parseFloat(opts.leverage);
       const levels = parseInt(opts.levels, 10);
+      const stateDir = opts.stateDir as string | undefined;
 
       const live = !!opts.live;
       let assetIndices: Record<string, number> | undefined;
@@ -206,6 +208,7 @@ export function registerGridCommand(program: Command): void {
         live,
         assetIndices,
         strategyAddress,
+        stateDir,
         config: {
           ...DEFAULT_GRID_CONFIG,
           tokens,
@@ -222,8 +225,9 @@ export function registerGridCommand(program: Command): void {
   grid
     .command('status')
     .description('Show current grid portfolio status')
-    .action(async () => {
-      const portfolio = new GridPortfolio();
+    .option('--state-dir <path>', 'Read state from a custom directory (defaults to ~/.sherwood/grid)')
+    .action(async (opts) => {
+      const portfolio = new GridPortfolio(opts.stateDir as string | undefined);
       const state = await portfolio.load();
 
       if (!state) {
@@ -413,8 +417,9 @@ export function registerGridCommand(program: Command): void {
     .command('pause')
     .description('Manually pause the live grid (sets state.paused=true)')
     .option('--reason <text>', 'Reason for the pause (shown in status output)', 'Manually paused by operator')
+    .option('--state-dir <path>', 'Read/write state from a custom directory (defaults to ~/.sherwood/grid)')
     .action(async (opts) => {
-      const portfolio = new GridPortfolio();
+      const portfolio = new GridPortfolio(opts.stateDir as string | undefined);
       const state = await portfolio.load();
       if (!state) {
         console.log(DIM('\n  No grid portfolio found. Nothing to pause.\n'));
@@ -437,8 +442,9 @@ export function registerGridCommand(program: Command): void {
   grid
     .command('resume')
     .description('Resume a paused grid (clears state.paused)')
-    .action(async () => {
-      const portfolio = new GridPortfolio();
+    .option('--state-dir <path>', 'Read/write state from a custom directory (defaults to ~/.sherwood/grid)')
+    .action(async (opts) => {
+      const portfolio = new GridPortfolio(opts.stateDir as string | undefined);
       const state = await portfolio.load();
       if (!state) {
         console.log(DIM('\n  No grid portfolio found. Nothing to resume.\n'));

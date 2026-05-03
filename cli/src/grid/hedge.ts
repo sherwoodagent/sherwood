@@ -20,8 +20,8 @@
  */
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
+import { dirname } from 'node:path';
+import { gridStatePath } from './paths.js';
 import chalk from 'chalk';
 
 /** Fraction of grid long exposure to hedge with a short. */
@@ -32,8 +32,6 @@ const MIN_FILLS_TO_HEDGE = 3;
 
 /** Don't adjust hedge unless size differs by more than this fraction. */
 const ADJUSTMENT_THRESHOLD = 0.10;
-
-const HEDGE_STATE_PATH = join(homedir(), '.sherwood', 'grid', 'hedge.json');
 
 export interface HedgePosition {
   token: string;
@@ -75,11 +73,16 @@ export interface HedgeTickResult {
 
 export class GridHedgeManager {
   private state: HedgeState | null = null;
+  private statePath: string;
+
+  constructor(stateDir?: string) {
+    this.statePath = gridStatePath('hedge.json', stateDir);
+  }
 
   async load(now: number = Date.now()): Promise<HedgeState> {
     if (this.state) return this.state;
     try {
-      const raw = await readFile(HEDGE_STATE_PATH, 'utf-8');
+      const raw = await readFile(this.statePath, 'utf-8');
       this.state = JSON.parse(raw) as HedgeState;
     } catch {
       this.state = {
@@ -103,11 +106,11 @@ export class GridHedgeManager {
 
   async save(): Promise<void> {
     if (!this.state) return;
-    await mkdir(dirname(HEDGE_STATE_PATH), { recursive: true });
-    const tmp = `${HEDGE_STATE_PATH}.tmp.${process.pid}`;
+    await mkdir(dirname(this.statePath), { recursive: true });
+    const tmp = `${this.statePath}.tmp.${process.pid}`;
     await writeFile(tmp, JSON.stringify(this.state, null, 2), 'utf-8');
     const { rename } = await import('node:fs/promises');
-    await rename(tmp, HEDGE_STATE_PATH);
+    await rename(tmp, this.statePath);
   }
 
   /**
