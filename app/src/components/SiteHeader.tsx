@@ -40,6 +40,12 @@ export default function SiteHeader() {
           Roadmap
         </Link>
         <Link
+          href="/token"
+          className="hidden md:inline-flex !bg-transparent !text-white/70 px-4 py-2 text-[11px] uppercase tracking-[0.22em] font-medium no-underline hover:!text-[var(--color-accent)] transition-colors"
+        >
+          $WOOD
+        </Link>
+        <Link
           href="https://docs.sherwood.sh"
           target="_blank"
           className="hidden md:inline-flex !bg-transparent !text-white/70 px-4 py-2 text-[11px] uppercase tracking-[0.22em] font-medium no-underline hover:!text-[var(--color-accent)] transition-colors"
@@ -96,6 +102,13 @@ export default function SiteHeader() {
             className="block px-4 py-3 text-sm font-semibold text-white/80 no-underline hover:text-white hover:bg-white/5 transition-all"
           >
             Roadmap
+          </Link>
+          <Link
+            href="/token"
+            onClick={() => setMenuOpen(false)}
+            className="block px-4 py-3 text-sm font-semibold text-white/80 no-underline hover:text-white hover:bg-white/5 transition-all"
+          >
+            $WOOD
           </Link>
           <Link
             href="https://docs.sherwood.sh"

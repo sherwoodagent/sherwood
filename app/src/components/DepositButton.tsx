@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useAccount, useReadContract } from "wagmi";
-import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { formatUnits, type Address } from "viem";
 import { ERC20_ABI, SYNDICATE_VAULT_ABI, ISTRATEGY_ABI } from "@/lib/contracts";
 import DepositModal from "./DepositModal";
@@ -35,7 +34,6 @@ export default function DepositButton({
   chainId,
 }: DepositButtonProps) {
   const { isConnected, address } = useAccount();
-  const { openConnectModal } = useConnectModal();
   const [showDeposit, setShowDeposit] = useState(false);
 
   // Check depositor approval for whitelist vaults
@@ -105,15 +103,18 @@ export default function DepositButton({
       })
     : "0";
 
-  // Not connected — prompt to connect
+  // Not connected — render disabled button (the wallet-connect CTA lives in
+  // the header so we don't double-up the affordance).
   if (!isConnected) {
     return (
-      <button
-        className="btn-action"
-        onClick={() => openConnectModal?.()}
-      >
-        [ CONNECT WALLET ]
-      </button>
+      <div className="btn-disabled-wrap">
+        <button className="btn-action" disabled style={{ opacity: 0.4, cursor: "not-allowed" }}>
+          [ DEPOSIT ]
+        </button>
+        <div className="btn-disabled-wrap__sub">
+          Connect wallet to deposit
+        </div>
+      </div>
     );
   }
 

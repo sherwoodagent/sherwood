@@ -6,6 +6,7 @@ import { type Address } from "viem";
 import { truncateAddress, CHAIN_BADGES } from "@/lib/contracts";
 import WalletButton from "@/components/WalletButton";
 import ShareButton from "@/components/ShareButton";
+import JoinSyndicateButton from "@/components/JoinSyndicateButton";
 
 export type TabId = "vault" | "proposals" | "agents";
 
@@ -15,6 +16,9 @@ interface SyndicateHeaderProps {
   vault: Address;
   creator: Address;
   creatorName?: string;
+  /** ERC-8004 agentId of the creator agent. When set, the creator name in
+   *  the meta row deep-links to /syndicate/<subdomain>/agents/<agentId>. */
+  creatorAgentId?: string;
   paused: boolean;
   chainId: number;
   activeTab: TabId;
@@ -99,6 +103,7 @@ export default function SyndicateHeader({
   vault,
   creator,
   creatorName,
+  creatorAgentId,
   paused,
   chainId,
   activeTab,
@@ -113,7 +118,7 @@ export default function SyndicateHeader({
           <span className="section-num">
             {"// Syndicate"}
           </span>
-          <h1 className="text-3xl sm:text-5xl font-medium tracking-tight text-white font-[family-name:var(--font-inter)]">
+          <h1 className="text-3xl sm:text-5xl font-medium tracking-tight text-white font-[family-name:var(--font-inter)]" style={{ margin: 0 }}>
             {name}{" "}
             <span
               className={`tag-bracket align-middle ml-4 ${paused ? "" : ""}`}
@@ -123,14 +128,16 @@ export default function SyndicateHeader({
             </span>
           </h1>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.5rem" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "0.5rem",
+          }}
+        >
           <WalletButton />
-          {/* Share button — pre-fills a tweet linking to the syndicate.
-              The dynamic OG image renders TVL + agents inline. */}
-          <ShareButton
-            path={`/syndicate/${subdomain}`}
-            text={`${name} on Sherwood — agent-managed syndicate on ${subdomain}.sherwoodagent.eth`}
-          />
         </div>
       </div>
 
@@ -151,41 +158,85 @@ export default function SyndicateHeader({
         </span>
         <span className="flex items-center gap-1.5" style={{ fontFamily: "var(--font-jetbrains-mono)", fontSize: "11px", letterSpacing: "0.05em" }}>
           <span style={{ opacity: 0.55, textTransform: "uppercase", letterSpacing: "0.18em" }}>Creator</span>
-          <span style={{ color: "rgba(255,255,255,0.85)" }}>{creatorName || truncateAddress(creator)}</span>
+          {creatorAgentId ? (
+            <Link
+              href={`/syndicate/${subdomain}/agents/${creatorAgentId}`}
+              style={{
+                color: "var(--color-accent)",
+                textDecoration: "underline",
+                textDecorationColor: "rgba(46, 230, 166, 0.4)",
+                textUnderlineOffset: "2px",
+              }}
+              className="hover:opacity-80 transition-opacity"
+            >
+              {creatorName || truncateAddress(creator)}
+            </Link>
+          ) : (
+            <span style={{ color: "rgba(255,255,255,0.85)" }}>{creatorName || truncateAddress(creator)}</span>
+          )}
         </span>
       </div>
 
-      {/* Tab Navigation — uses the unified .sh-tabs system. Preserve
-          the legacy header layout (no bottom margin, small top margin)
-          via inline styles so the existing visual rhythm is unchanged. */}
-      <nav
-        className="sh-tabs"
-        style={{ marginTop: "0.5rem", marginBottom: 0 }}
+      {/* Tab Navigation + page-level secondary actions on the same row. The
+          wrapper carries the underline so tabs and actions share a baseline;
+          the inner <nav> drops its own border to avoid a double rule. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "0.5rem 1rem",
+          marginTop: "0.5rem",
+          borderBottom: "1px solid var(--color-border)",
+          marginBottom: "1.5rem",
+        }}
       >
-        <Link
-          href={`/syndicate/${subdomain}`}
-          className="sh-tab"
-          aria-current={activeTab === "vault" ? "page" : undefined}
+        <nav
+          className="sh-tabs"
+          style={{ marginTop: 0, marginBottom: 0, borderBottom: "none" }}
         >
-          Vault
-        </Link>
-        <Link
-          href={`/syndicate/${subdomain}/proposals`}
-          className="sh-tab"
-          aria-current={activeTab === "proposals" ? "page" : undefined}
-        >
-          Proposals
-        </Link>
-        {!hideAgentsTab && (
           <Link
-            href={`/syndicate/${subdomain}/agents`}
+            href={`/syndicate/${subdomain}`}
             className="sh-tab"
-            aria-current={activeTab === "agents" ? "page" : undefined}
+            aria-current={activeTab === "vault" ? "page" : undefined}
           >
-            Agents
+            Vault
           </Link>
-        )}
-      </nav>
+          <Link
+            href={`/syndicate/${subdomain}/proposals`}
+            className="sh-tab"
+            aria-current={activeTab === "proposals" ? "page" : undefined}
+          >
+            Proposals
+          </Link>
+          {!hideAgentsTab && (
+            <Link
+              href={`/syndicate/${subdomain}/agents`}
+              className="sh-tab"
+              aria-current={activeTab === "agents" ? "page" : undefined}
+            >
+              Agents
+            </Link>
+          )}
+        </nav>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            paddingBottom: "0.75rem",
+          }}
+        >
+          <JoinSyndicateButton subdomain={subdomain} />
+          {/* Share button — pre-fills a tweet linking to the syndicate.
+              The dynamic OG image renders TVL + agents inline. */}
+          <ShareButton
+            path={`/syndicate/${subdomain}`}
+            text={`${name} on Sherwood — agent-managed syndicate on ${subdomain}.sherwoodagent.eth`}
+          />
+        </div>
+      </div>
     </div>
   );
 }

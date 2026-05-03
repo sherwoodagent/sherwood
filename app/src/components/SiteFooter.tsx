@@ -7,11 +7,12 @@ interface FooterLink {
 }
 
 const FOOTER_LINKS: Record<string, FooterLink[]> = {
-  // Protocol: [
-  //   { label: "Leaderboard", href: "/leaderboard" },
-  //   { label: "Agent Skill", href: "/skill.md" },
-  //   { label: "Guardian Skill", href: "/skill-guardian.md" },
-  // ],
+  Protocol: [
+    { label: "Agent Skill", href: "/skill.md" },
+    // { label: "Guardian Skill", href: "/skill-guardian.md" },
+    // { label: "Leaderboard", href: "/leaderboard" },
+    { label: "$WOOD", href: "/token" },
+  ],
   Developers: [
     { label: "Documentation", href: "https://docs.sherwood.sh", external: true },
     { label: "GitHub", href: "https://github.com/sherwoodagent/sherwood", external: true },
@@ -55,14 +56,14 @@ export default function SiteFooter() {
           <span className="flex items-center gap-2">
             <span className="w-[6px] h-[6px] rounded-full bg-[var(--color-accent)]" style={{ boxShadow: "0 0 8px var(--color-accent)" }} />
             {/* {"// System Online"} */}
-            {"// Launching soon"}
+            {"// Beta"}
           </span>
-          {/* <span className="text-[rgba(255,255,255,0.55)]">
+          <span className="text-[rgba(255,255,255,0.55)]">
             Base · HyperEVM
-          </span> */}
-          {/* <span className="text-[rgba(255,255,255,0.55)]">
+          </span>
+          <span className="text-[rgba(255,255,255,0.55)]">
             v0.2 · {new Date().getUTCFullYear()}
-          </span> */}
+          </span>
         </div>
       </div>
 
@@ -72,7 +73,7 @@ export default function SiteFooter() {
           <div className="space-y-4">
             <LogoWordmark height={24} />
             <p className="text-sm text-[var(--color-fg-secondary)] leading-relaxed max-w-[260px]">
-              The capital layer for AI agents. {/* Live on Base &amp; HyperEVM. */ }
+              The capital layer for zero human funds. {/* Live on Base &amp; HyperEVM. */ }
             </p>
             <div className="flex gap-3 pt-2">
               <a
@@ -100,7 +101,7 @@ export default function SiteFooter() {
           {Object.entries(FOOTER_LINKS).map(([heading, links], colIdx) => (
             <div key={heading}>
               <h4 className="font-[family-name:var(--font-jetbrains-mono)] text-[10px] uppercase tracking-[0.22em] text-[var(--color-accent)] mb-5 font-medium flex items-baseline gap-2">
-                <span className="opacity-55">{String(colIdx + 1).padStart(2, "0")}</span>
+                {/* <span className="opacity-55">{String(colIdx + 1).padStart(2, "0")}</span> */}
                 <span>{heading}</span>
               </h4>
               <ul className="space-y-3">

@@ -47,6 +47,9 @@ export default async function AgentsPage({
     agentNames[agent.agentId.toString()] = displayName;
   }
   const creatorKey = data.creator.toLowerCase();
+  const creatorAgentId = data.agents
+    .find((a) => a.agentAddress.toLowerCase() === creatorKey)
+    ?.agentId.toString();
   const hasIdentityRegistry = getAddresses(data.chainId).identityRegistry !== "0x0000000000000000000000000000000000000000";
 
   return (
@@ -72,6 +75,7 @@ export default async function AgentsPage({
             vault={data.vault}
             creator={data.creator}
             creatorName={addressNames[creatorKey]}
+            creatorAgentId={creatorAgentId}
             paused={data.paused}
             chainId={data.chainId}
             assetDecimals={data.assetDecimals}

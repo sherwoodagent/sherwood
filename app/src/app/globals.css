@@ -1081,12 +1081,15 @@ select:focus-visible {
   position: relative;
 }
 
+/* Decorative connector line behind the step markers. Inset by the marker
+   half-width on both ends so it lines up with the marker centers and
+   doesn't leave a stub past the last column. */
 .flow-grid::before {
   content: "";
   position: absolute;
   top: 24px;
-  left: 0;
-  right: 0;
+  left: 28px;
+  right: 28px;
   height: 1px;
   background: var(--color-border);
   z-index: -1;
@@ -3330,5 +3333,21 @@ a.sh-tab {
   }
   .exec-preview__head > span:nth-child(4),
   .exec-preview__row > span:last-child { display: none; }
+}
+
+/* ── /token page responsive ───────────────────────────────── */
+@media (max-width: 900px) {
+  .token-hero-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .token-hero-visual {
+    max-width: 380px;
+    margin: 0 auto;
+  }
+  .tokenomics-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    justify-items: center;
+    text-align: left;
+  }
 }
 
