@@ -257,7 +257,9 @@ contract HyperliquidGridStrategyTest is Test {
 
         vm.prank(vault);
         vm.expectRevert(
-            abi.encodeWithSelector(HyperliquidGridStrategy.HyperCoreSpotCreditFailed.selector, uint64(0), uint64(0), uint64(DEPOSIT))
+            abi.encodeWithSelector(
+                HyperliquidGridStrategy.HyperCoreSpotCreditFailed.selector, uint64(0), uint64(0), uint64(DEPOSIT)
+            )
         );
         strategy.execute();
     }
