@@ -59,7 +59,7 @@ These are also available in `cli/src/lib/addresses.ts` (resolved at runtime base
 | SyndicateVaultImpl | `0xB45419FACcd2173D9c8B2Ad845277f56d1e7ECba` |
 | USDC | `0xb88339CB7199b77E23DB6E890353E22632Ba630f` (6 decimals) |
 | HyperliquidPerpStrategy | `0xa2B8Ad8695FdE05bf1DA4aBaef1608045A53Ba4E` |
-| HyperliquidGridStrategy | `0x649f8d24096a5eb17b8C73ee5113825AcA259F00` |
+| HyperliquidGridStrategy | `0x49BFDae8353ba15954924274573D427211CCe41b` |
 
 HyperEVM has no Moonwell, Uniswap, Venice, Aerodrome, ENS, or ERC-8004 — the factory accepts `address(0)` for `ensRegistrar` and `agentRegistry`. Beta-mode deploy uses `MinimalGuardianRegistry` (no WOOD, no review/slashing) — full GuardianRegistry will replace it via owner-only `setGuardianRegistry()` once WOOD ships.
 
