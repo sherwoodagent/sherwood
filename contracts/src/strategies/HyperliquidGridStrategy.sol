@@ -53,6 +53,7 @@ contract HyperliquidGridStrategy is BaseStrategy {
     error TooManyOrders(uint256 actual, uint256 max);
     error OrderTooLarge(uint256 actual, uint256 max);
     error AssetNotWhitelisted(uint32 asset);
+    error HyperCoreSpotCreditFailed(uint64 spotBefore, uint64 spotAfter, uint64 expectedIncrease);
 
     // ── Action types ──
     uint8 constant ACTION_PLACE_GRID = 1;
@@ -173,9 +174,24 @@ contract HyperliquidGridStrategy is BaseStrategy {
             emit HyperCoreFinalized(0, FinalizeVariant.FirstStorageSlot, 0);
         }
 
+        (uint64 spotBefore, bool preSpotOk) = _tryGetUsdcSpotTotal();
+
         _pullFromVault(address(asset), amountIn);
 
         uint64 ntl = uint64(amountIn);
+
+        (uint64 spotAfter, bool postSpotOk) = _tryGetUsdcSpotTotal();
+        // HyperCore tracks USDC at 8 decimals; HyperEVM USDC is 6 decimals
+        // (evmExtraWeiDecimals = -2). A real credit grows HC spot by ntl HC-wei,
+        // which is always >= ntl EVM-wei. This is a one-sided lower-bound
+        // monotonicity check, not an exact reconciliation. Subtraction (after
+        // the >= sanity) avoids uint64 overflow on `spotBefore + ntl`.
+        if (preSpotOk && postSpotOk) {
+            uint64 delta = spotAfter >= spotBefore ? spotAfter - spotBefore : 0;
+            if (delta < ntl) {
+                revert HyperCoreSpotCreditFailed(spotBefore, spotAfter, ntl);
+            }
+        }
 
         for (uint256 i = 0; i < assetIndices.length; i++) {
             L1Write.sendUpdateLeverage(assetIndices[i], true, leverage);
@@ -288,5 +304,19 @@ contract HyperliquidGridStrategy is BaseStrategy {
 
     function getMarginSummary() external view returns (AccountMarginSummary memory) {
         return L1Read.accountMarginSummary(0, address(this));
+    }
+
+    /// @dev Reuses `L1Read`'s precompile address + 15k gas cap (a misbehaving
+    ///      precompile consumes all forwarded gas on revert, so capping prevents
+    ///      griefing). Tolerates short returndata so off-HyperEVM environments
+    ///      (tests with no precompile etched at `0x...0801`) bypass the gate.
+    function _tryGetUsdcSpotTotal() internal view returns (uint64 total, bool ok) {
+        (bool success, bytes memory ret) = L1Read.SPOT_BALANCE_PRECOMPILE_ADDRESS
+        .staticcall{gas: L1Read.SPOT_BALANCE_GAS}(
+            abi.encode(address(this), uint64(0))
+        );
+        if (!success || ret.length < 96) return (0, false);
+        SpotBalance memory bal = abi.decode(ret, (SpotBalance));
+        return (bal.total, true);
     }
 }
