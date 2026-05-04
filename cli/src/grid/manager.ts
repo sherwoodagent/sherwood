@@ -54,9 +54,13 @@ export class GridManager {
     closeFillDetector?: CloseFillDetector,
     portfolio?: GridPortfolio,
     nowProvider?: () => number,
+    stateDir?: string,
   ) {
     this.config = config;
-    this.portfolio = portfolio ?? new GridPortfolio();
+    // If no portfolio passed, build the default one against the resolved
+    // stateDir so a caller that wants per-process isolation gets it without
+    // having to wire a GridPortfolio themselves. Mirrors GridLoop's pattern.
+    this.portfolio = portfolio ?? new GridPortfolio(stateDir);
     this.hl = new HyperliquidProvider();
     this.candleFetcher = candleFetcher ?? ((tokenId, interval, lookbackMs) =>
       this.hl.getCandles(tokenId, interval, lookbackMs));

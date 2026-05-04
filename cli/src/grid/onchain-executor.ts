@@ -9,22 +9,23 @@
 
 import chalk from 'chalk';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 import { encodeAbiParameters, parseUnits, type Address, type Hex } from 'viem';
 import { getPublicClient, writeContractWithRetry } from '../lib/client.js';
 import { hlGetMeta, resolveHLCoin, type HLAssetMeta } from '../lib/hyperliquid-executor.js';
 import { gridCloid } from './cloid.js';
+import { gridStatePath } from './paths.js';
 import { HYPERLIQUID_GRID_STRATEGY_ABI } from './strategy-abi.js';
 import type { GridOrderPlan } from './manager.js';
 
-const ONCHAIN_STATE_PATH = join(homedir(), '.sherwood', 'grid', 'onchain-state.json');
 const UINT64_MAX = 18446744073709551615n;
 
 export interface OnchainGridExecutorConfig {
   strategyAddress: Address;
   /** Hyperliquid asset index per token (e.g. bitcoin → 3). */
   assetIndices: Record<string, number>;
+  /** Override directory for persisted state. Defaults to ~/.sherwood/grid. */
+  stateDir?: string;
 }
 
 interface PersistedState {
@@ -71,9 +72,11 @@ export class OnchainGridExecutor {
   /** On-chain `maxOrdersPerTick`; cached at load(). Used to chunk batches so
    *  the strategy never reverts with TooManyOrders(actual, max). */
   private maxOrdersPerTick: number | null = null;
+  private statePath: string;
 
   constructor(cfg: OnchainGridExecutorConfig) {
     this.cfg = cfg;
+    this.statePath = gridStatePath('onchain-state.json', cfg.stateDir);
   }
 
   /** Read the strategy's per-call order cap and cache it. */
@@ -92,7 +95,7 @@ export class OnchainGridExecutor {
   /** Load persisted state. Call once before the first execute(). */
   async load(): Promise<void> {
     try {
-      const raw = await readFile(ONCHAIN_STATE_PATH, 'utf-8');
+      const raw = await readFile(this.statePath, 'utf-8');
       const state = JSON.parse(raw) as PersistedState;
       for (const [tok, n] of Object.entries(state.nonces)) this.nonces.set(tok, n);
       for (const [tok, cloids] of Object.entries(state.placedCloids)) {
@@ -130,10 +133,10 @@ export class OnchainGridExecutor {
         [...this.placedCloids].map(([tok, cloids]) => [tok, cloids.map((c) => c.toString())]),
       ),
     };
-    await mkdir(dirname(ONCHAIN_STATE_PATH), { recursive: true });
-    const tmp = ONCHAIN_STATE_PATH + '.tmp';
+    await mkdir(dirname(this.statePath), { recursive: true });
+    const tmp = this.statePath + '.tmp';
     await writeFile(tmp, JSON.stringify(state, null, 2));
-    await rename(tmp, ONCHAIN_STATE_PATH);
+    await rename(tmp, this.statePath);
   }
 
   /**

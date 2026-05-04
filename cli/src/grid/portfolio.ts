@@ -6,11 +6,9 @@
  */
 
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
+import { dirname } from 'node:path';
+import { gridStatePath } from './paths.js';
 import type { GridPortfolioState, GridTokenState, GridStats, GridConfig } from './config.js';
-
-const GRID_STATE_PATH = join(homedir(), '.sherwood', 'grid', 'portfolio.json');
 
 function emptyStats(): GridStats {
   return {
@@ -26,11 +24,16 @@ function emptyStats(): GridStats {
 
 export class GridPortfolio {
   private state: GridPortfolioState | null = null;
+  private statePath: string;
+
+  constructor(stateDir?: string) {
+    this.statePath = gridStatePath('portfolio.json', stateDir);
+  }
 
   /** Load grid state from disk. Returns null if no grid initialized yet. */
   async load(): Promise<GridPortfolioState | null> {
     try {
-      const raw = await readFile(GRID_STATE_PATH, 'utf-8');
+      const raw = await readFile(this.statePath, 'utf-8');
       this.state = JSON.parse(raw) as GridPortfolioState;
       return this.state;
     } catch {
@@ -41,10 +44,10 @@ export class GridPortfolio {
   /** Save grid state to disk (atomic write). */
   async save(state: GridPortfolioState): Promise<void> {
     this.state = state;
-    await mkdir(dirname(GRID_STATE_PATH), { recursive: true });
-    const tmp = `${GRID_STATE_PATH}.tmp.${process.pid}`;
+    await mkdir(dirname(this.statePath), { recursive: true });
+    const tmp = `${this.statePath}.tmp.${process.pid}`;
     await writeFile(tmp, JSON.stringify(state, null, 2), 'utf-8');
-    await rename(tmp, GRID_STATE_PATH);
+    await rename(tmp, this.statePath);
   }
 
   /**
