@@ -36,8 +36,6 @@ import {L1Read, Position, SpotBalance, AccountMarginSummary} from "../hyperliqui
 contract HyperliquidGridStrategy is BaseStrategy {
     using SafeERC20 for IERC20;
 
-    address constant SPOT_BALANCE_PRECOMPILE = 0x0000000000000000000000000000000000000801;
-
     // ── Events ──
     event GridOrderPlaced(uint32 asset, bool isBuy, uint64 limitPx, uint64 sz, uint128 cloid);
     event GridOrderCancelled(uint32 asset, uint128 cloid);
@@ -183,8 +181,16 @@ contract HyperliquidGridStrategy is BaseStrategy {
         uint64 ntl = uint64(amountIn);
 
         (uint64 spotAfter, bool postSpotOk) = _tryGetUsdcSpotTotal();
-        if (preSpotOk && postSpotOk && spotAfter < spotBefore + ntl) {
-            revert HyperCoreSpotCreditFailed(spotBefore, spotAfter, ntl);
+        // HyperCore tracks USDC at 8 decimals; HyperEVM USDC is 6 decimals
+        // (evmExtraWeiDecimals = -2). A real credit grows HC spot by ntl HC-wei,
+        // which is always >= ntl EVM-wei. This is a one-sided lower-bound
+        // monotonicity check, not an exact reconciliation. Subtraction (after
+        // the >= sanity) avoids uint64 overflow on `spotBefore + ntl`.
+        if (preSpotOk && postSpotOk) {
+            uint64 delta = spotAfter >= spotBefore ? spotAfter - spotBefore : 0;
+            if (delta < ntl) {
+                revert HyperCoreSpotCreditFailed(spotBefore, spotAfter, ntl);
+            }
         }
 
         for (uint256 i = 0; i < assetIndices.length; i++) {
@@ -300,10 +306,17 @@ contract HyperliquidGridStrategy is BaseStrategy {
         return L1Read.accountMarginSummary(0, address(this));
     }
 
+    /// @dev Reuses `L1Read`'s precompile address + 15k gas cap (a misbehaving
+    ///      precompile consumes all forwarded gas on revert, so capping prevents
+    ///      griefing). Tolerates short returndata so off-HyperEVM environments
+    ///      (tests with no precompile etched at `0x...0801`) bypass the gate.
     function _tryGetUsdcSpotTotal() internal view returns (uint64 total, bool ok) {
-        (bool success, bytes memory ret) = SPOT_BALANCE_PRECOMPILE.staticcall(abi.encode(address(this), uint64(0)));
+        (bool success, bytes memory ret) = L1Read.SPOT_BALANCE_PRECOMPILE_ADDRESS
+        .staticcall{gas: L1Read.SPOT_BALANCE_GAS}(
+            abi.encode(address(this), uint64(0))
+        );
         if (!success || ret.length < 96) return (0, false);
-        (total,,) = abi.decode(ret, (uint64, uint64, uint64));
-        return (total, true);
+        SpotBalance memory bal = abi.decode(ret, (SpotBalance));
+        return (bal.total, true);
     }
 }

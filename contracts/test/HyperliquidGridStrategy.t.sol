@@ -9,6 +9,7 @@ import {MockCoreWriter} from "./mocks/MockCoreWriter.sol";
 import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {FinalizeVariant} from "../src/hyperliquid/L1Write.sol";
 import {MockSpotBalancePrecompile} from "./mocks/MockSpotBalancePrecompile.sol";
+import {MockSpotBalanceCrediting} from "./mocks/MockSpotBalanceCrediting.sol";
 
 contract HyperliquidGridStrategyTest is Test {
     HyperliquidGridStrategy public template;
@@ -248,6 +249,26 @@ contract HyperliquidGridStrategyTest is Test {
                 "auto-finalize fired despite manual finalize"
             );
         }
+    }
+
+    function test_execute_succeedsWhenHyperCoreSpotIsCredited() public {
+        // Etch a stateful mock at the HC spot-balance precompile that mirrors
+        // the strategy's USDC balance into HC spot (scaled 6→8 decimals). Pre-pull
+        // reads 0; post-pull reads DEPOSIT * 100, which exceeds ntl=DEPOSIT — so
+        // the spot-credit gate must NOT revert.
+        MockSpotBalanceCrediting m = new MockSpotBalanceCrediting();
+        vm.etch(0x0000000000000000000000000000000000000801, address(m).code);
+        // Seed the etched contract's slot 0 with the USDC address so `fallback`
+        // can read balanceOf via the live token.
+        vm.store(
+            0x0000000000000000000000000000000000000801, bytes32(uint256(0)), bytes32(uint256(uint160(address(usdc))))
+        );
+
+        uint256 vaultBefore = usdc.balanceOf(vault);
+        vm.prank(vault);
+        strategy.execute();
+        assertEq(usdc.balanceOf(vault), vaultBefore - DEPOSIT);
+        assertEq(usdc.balanceOf(address(strategy)), DEPOSIT);
     }
 
     function test_execute_revertsWhenHyperCoreSpotNotCredited() public {
