@@ -132,6 +132,7 @@ Live contract sizes from `forge build --sizes` (2026-04):
 ### Live NAV via strategy adapter (V2)
 
 - **Adapter binding flow** — Proposer creates a strategy clone, then before execute calls `governor.bindProposalAdapter(proposalId, adapter)`. The governor pushes the address synchronously onto `vault._activeStrategyAdapter` via `setActiveStrategyAdapter`. No governor-side mapping is kept (size-aware redesign — every byte counts at the 24,524-byte governor runtime).
+- **Bind window closes at Approved** — `bindProposalAdapter` is gated to `Draft || Pending` AND `_approvedCount == 0`. Once a co-proposer approves OR the vote ends, binding is permanently impossible — the proposal will execute without live NAV and deposits/withdraws stay locked for its duration. `sherwood strategy propose` auto-binds the freshly-cloned adapter (CLI v0.53.0+, PR #271); `sherwood proposal bind-adapter --id N --adapter 0x…` is the escape hatch for proposals submitted before that change. There is no recovery path for proposals already Approved without an adapter — they must run their course or be cancelled+reproposed.
 - **Implicit clear via lock state** — The vault's `totalAssets` ignores `_activeStrategyAdapter` whenever `!redemptionsLocked()`. After settle, the slot retains the last-bound address but it has zero observable effect. Re-bind on the next proposal overwrites it.
 - **Live NAV math** — `totalAssets() = float + (adapter == 0 || !locked ? 0 : (valid ? value : 0))`. Standard OZ ERC-4626 virtual-shares math is unchanged.
 - **Lock relaxation** — `_deposit` and `_withdraw` revert only when `redemptionsLocked() && !_liveNAVAvailable()`. When live NAV is available, both are unlocked. `requestRedeem` still requires `redemptionsLocked() == true` (queue path) and works regardless of adapter validity.
@@ -180,6 +181,12 @@ Full spec: `docs/superpowers/specs/2026-04-21-guardian-delegation-v1.5-design.md
 - **W-1 escrow on guardian-fee claims.** `_safeRewardTransfer` wraps `IERC20.transfer` in try/catch; on failure (e.g. USDC blacklist) the amount is escrowed in `_unclaimedApproverFees[keccak256(pid, recipient, asset)]`. `flushUnclaimedApproverFee` retries after blacklist lifts. **Key includes `proposalId`** — cross-proposal drain impossible (regression guard from PR #229 review finding class).
 - **WOOD = OFT + ERC20Votes + ERC20Permit.** Multi-inherits all three (`WoodToken.sol`). Preserves LayerZero cross-chain while enabling ERC20Votes delegation for Snapshot-style off-chain governance UX. Timestamp-mode clock (EIP-6372) so checkpoint domain matches registry.
 - **No on-chain parameter timelock.** Removed as part of V1.5 — owner multisig enforces delay externally. See Governor Key Concepts.
+
+## App (Next.js dashboard)
+
+- No `typecheck` script in `app/package.json`. Run `node_modules/.bin/tsc --noEmit` before pushing app changes.
+- `npm run lint` (eslint). Pre-existing warning in `AgentStats.tsx` (unused `formatBps` import) is unrelated noise — ignore unless you touch that file.
+- `npm run dev` boots on `:3000`. Reown WalletConnect 403 in the dev console is a missing project-ID env var, not a regression.
 
 ## CLI
 
@@ -291,6 +298,7 @@ Agents mint their ERC-8004 identity via the Agent0 SDK (`@agent0lab/agent0-ts`).
 - `forge coverage` runs again as of PR #229 (struct-literal refactor in `SyndicateGovernor.propose`). Prior stack-too-deep workaround no longer needed.
 - First invariant harness shipped in PR #229 at `test/invariants/` using `StdInvariant` + a handler contract (guardian WOOD conservation, stake accounting). 4 more priority invariants (#226 INV-2 / -3 / -11 / -15) still outstanding.
 - Pre-mainnet punch list: issues **#225 (bugs)** and **#226 (process/design)**. Canonical consolidated tracker: **`docs/pre-mainnet-punchlist.md`** — every fix PR should reference the ref code (e.g. `fixes V-C1`, `closes G-C4`) and mark the punch list row closed. New findings go into the issues first, then propagate to the tracker.
+- **CLI/contract enum sync**: when changing Solidity's `ProposalState` ordering, also update `cli/src/lib/governor.ts` (`PROPOSAL_STATES` array + `PROPOSAL_STATE` map) AND `cli/src/simulation/phases/10-lifecycle.ts` (parser + `ACTIVE_STATES`). `app/src/lib/governor-data.ts` already mirrors. PR #229 inserted `GuardianReview` at index 2 and the CLI was missed for ~2 months — `proposal execute` rejected valid Approved proposals as "Rejected" until v0.52.1. Treat the enum as a cross-package contract.
 
 ## Key Addresses (Base)
 

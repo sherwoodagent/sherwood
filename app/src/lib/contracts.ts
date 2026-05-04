@@ -491,6 +491,15 @@ export const SYNDICATE_VAULT_ABI = [
     inputs: [],
     outputs: [{ name: "", type: "bool" }],
   },
+  // Live NAV — set by governor.bindProposalAdapter while a strategy
+  // proposal is active. address(0) = no live NAV (queue-only path).
+  {
+    name: "activeStrategyAdapter",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
   {
     name: "managementFeeBps",
     type: "function",

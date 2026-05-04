@@ -366,6 +366,52 @@ export async function executeProposal(proposalId: bigint): Promise<Hex> {
   return receipt.transactionHash;
 }
 
+/**
+ * Bind a strategy clone to its proposal so the vault can read live NAV
+ * via `IStrategy.positionValue()` while the proposal is active. Must be
+ * called BEFORE `executeProposal` — once execute runs the vault is
+ * locked and the bind would fail the proposer-only / pre-execute check
+ * inside the governor. address(0) keeps the legacy queue-only path.
+ */
+export async function bindProposalAdapter(
+  proposalId: bigint,
+  adapter: Address,
+): Promise<Hex> {
+  const hash = await writeContractWithRetry({
+    account: getAccount(),
+    chain: getChain(),
+    address: getGovernorAddress(),
+    abi: SYNDICATE_GOVERNOR_ABI,
+    functionName: "bindProposalAdapter",
+    args: [proposalId, adapter],
+  });
+  const receipt = await waitForReceipt(hash);
+  return receipt.transactionHash;
+}
+
+/**
+ * Walk a proposal's executeCalls and pick the strategy clone — the
+ * target of the call whose selector matches `BaseStrategy.execute()`
+ * (0x61461954). This is the canonical entry point that every Sherwood
+ * strategy template inherits from BaseStrategy, so it's a reliable
+ * marker even across template families (Moonwell / Aerodrome /
+ * Hyperliquid / Mamo / Venice / Portfolio).
+ *
+ * Returns null when no execute() call is present (e.g. proposals that
+ * only do approves and direct ERC-20 transfers without a strategy).
+ */
+export function detectStrategyAdapter(
+  calls: { target: Address; data: Hex; value: bigint }[],
+): Address | null {
+  const STRATEGY_EXECUTE_SELECTOR = "0x61461954";
+  for (const call of calls) {
+    if (call.data.slice(0, 10).toLowerCase() === STRATEGY_EXECUTE_SELECTOR) {
+      return call.target;
+    }
+  }
+  return null;
+}
+
 export async function settleProposal(proposalId: bigint): Promise<Hex> {
   const hash = await writeContractWithRetry({
     account: getAccount(),
