@@ -12,6 +12,14 @@ triggers:
 
 Post a formatted grid performance report to the user. The grid runs as an independent service (`sherwood-grid.service`) on 1-minute cycles.
 
+## State directory
+
+By default the grid writes to `~/.sherwood/grid/`. Operators running multiple
+grids in parallel (e.g. paper + live) pass `--state-dir` to isolate state. If
+this monitor needs to report on a non-default directory, set the
+`GRID_STATE_DIR` env var (e.g. `GRID_STATE_DIR=~/.sherwood/grid-live`); the
+report below resolves all reads from that base.
+
 ## Step 1: Check service health
 
 ```bash
@@ -26,7 +34,9 @@ systemctl --user restart sherwood-grid
 ## Step 2: Get grid status
 
 ```bash
-sherwood grid status
+# If GRID_STATE_DIR is set, forward it to the CLI so the status is for the
+# right process. Otherwise this falls through to the default ~/.sherwood/grid.
+sherwood grid status ${GRID_STATE_DIR:+--state-dir "$GRID_STATE_DIR"}
 ```
 
 This prints a formatted table. Use its output as the base.
@@ -39,7 +49,9 @@ import json, os
 from datetime import datetime
 
 home = os.path.expanduser('~')
-g = json.load(open(os.path.join(home, '.sherwood/grid/portfolio.json')))
+state_dir = os.environ.get('GRID_STATE_DIR') or os.path.join(home, '.sherwood', 'grid')
+state_dir = os.path.expanduser(state_dir)
+g = json.load(open(os.path.join(state_dir, 'portfolio.json')))
 grids = g.get('grids', [])
 init_ts = g.get('initializedAt', 0)
 age_days = max(1, (datetime.now().timestamp() * 1000 - init_ts) / 86400000) if init_ts else 1
@@ -65,10 +77,10 @@ roi_pct = (monthly / total_alloc * 100) if total_alloc > 0 else 0
 leverage = 5
 max_open_multiple = 2.0
 downtrend_block_pct = 0.10
-cycles_path = os.path.join(home, '.sherwood/grid/cycles.jsonl')
+cycles_path = os.path.join(state_dir, 'cycles.jsonl')
 
 # Hedge stats (delta-neutral hedging PnL)
-hedge_path = os.path.join(home, '.sherwood/grid/hedge.json')
+hedge_path = os.path.join(state_dir, 'hedge.json')
 hedge_realized = 0.0
 hedge_today = 0.0
 hedge_count = 0

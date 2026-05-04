@@ -18,7 +18,7 @@ import { HyperliquidProvider } from '../providers/data/hyperliquid.js';
 import { GridHedgeManager } from './hedge.js';
 import { GridExecutor } from './executor.js';
 import { OnchainGridExecutor } from './onchain-executor.js';
-import { gridStatePath } from './paths.js';
+import { gridStateDir, gridStatePath } from './paths.js';
 import type { Address } from 'viem';
 
 export interface GridLoopConfig {
@@ -55,7 +55,15 @@ export class GridLoop {
     this.cfg = cfg;
     this.gridConfig = { ...DEFAULT_GRID_CONFIG, ...cfg.config };
     this.cyclesPath = gridStatePath('cycles.jsonl', cfg.stateDir);
-    this.manager = new GridManager(this.gridConfig, undefined, undefined, undefined, new GridPortfolio(cfg.stateDir));
+    this.manager = new GridManager(
+      this.gridConfig,
+      undefined,
+      undefined,
+      undefined,
+      new GridPortfolio(cfg.stateDir),
+      undefined,
+      cfg.stateDir,
+    );
     this.hedge = new GridHedgeManager(cfg.stateDir);
     this.hl = new HyperliquidProvider();
 
@@ -98,13 +106,15 @@ export class GridLoop {
       await this.executor.load();
     }
 
-    // Startup banner
+    // Startup banner — include resolved state-dir so operators with multiple
+    // grid processes can immediately see which one owns this PID.
     console.error(chalk.cyan(
       `\n  [grid-loop] Started — capital=$${this.cfg.capital.toFixed(0)} ` +
       `cycle=${(this.cfg.cycle / 1000).toFixed(0)}s ` +
       `tokens=[${this.gridConfig.tokens.join(', ')}] ` +
       `leverage=${this.gridConfig.leverage}x ` +
-      `levels=${this.gridConfig.levelsPerSide}/side\n`
+      `levels=${this.gridConfig.levelsPerSide}/side ` +
+      `state-dir=${gridStateDir(this.cfg.stateDir)}\n`
     ));
 
     // Main loop

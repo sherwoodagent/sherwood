@@ -33,6 +33,31 @@ isolated capital, parallel to the directional agent.
 - Grid does not run inside the directional agent loop. It has its own
   binary entry point and its own portfolio file.
 
+### State directory isolation (`--state-dir`)
+
+`grid start | status | pause | resume` all accept `--state-dir <path>` to
+override the runtime state location (default `~/.sherwood/grid/`). Use this
+when running paper and live grids in parallel to avoid `portfolio.json`
+last-write-wins corruption between processes.
+
+```bash
+# Paper benchmark — default ~/.sherwood/grid/
+sherwood grid start --capital 5000 --tokens bitcoin,ethereum,solana
+
+# Live, isolated state at ~/.sherwood/grid-live/
+sherwood grid start --capital 5000 --live --strategy 0x... \
+  --asset-indices BTC,ETH,SOL --state-dir ~/.sherwood/grid-live
+```
+
+Only runtime mutable state moves with `--state-dir`: `portfolio.json`,
+`hedge.json`, `cycles.jsonl`, `onchain-state.json`. Backtest cache and sweep
+results stay under `~/.sherwood/grid/` because they are not per-loop state.
+
+Cron monitors that read these files must honor `GRID_STATE_DIR`; the shipped
+`sherwood-grid-monitor` skill does, but a copy left at
+`~/.hermes/skills/sherwood/sherwood-grid-monitor/SKILL.md` must be `cp`'d
+after pulling new versions.
+
 ## Configuration
 
 Authoritative values live in `cli/src/grid/config.ts:DEFAULT_GRID_CONFIG`.
