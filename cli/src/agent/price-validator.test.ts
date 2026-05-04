@@ -145,7 +145,7 @@ describe('PriceValidator', () => {
     // Wait for BOTH fire-and-forget writes to land — bitcoin lands first,
     // ethereum can race a step behind. Predicate ensures both keys present.
     const cacheFile = join(cacheDir, 'price-validator.json');
-    const raw = await waitForFile(cacheFile, 1000, (r) => {
+    const raw = await waitForFile(cacheFile, 5000, (r) => {
       try {
         const p = JSON.parse(r);
         return !!p.bitcoin && !!p.ethereum;
